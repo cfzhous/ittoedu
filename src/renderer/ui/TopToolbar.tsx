@@ -1,0 +1,327 @@
+import {
+  Archive,
+  Box,
+  ChevronDown,
+  Eye,
+  FileDown,
+  FileInput,
+  FilePlus2,
+  FolderOpen,
+  FileText,
+  Presentation,
+  Pencil,
+  Redo2,
+  History,
+  Save,
+  SaveAll,
+  ShieldCheck,
+  Undo2,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
+import type { RecentProjectEntry } from '../../shared/ipcTypes'
+import type { ProjectHealthSummary } from '../../shared/projectHealth'
+import { useEditorStore } from '../store/editorStore'
+
+interface TopToolbarProps {
+  busy: boolean
+  onNew(): void
+  onOpen(): void
+  recentProjects: RecentProjectEntry[]
+  onOpenRecent(path: string): void
+  onSave(saveAs?: boolean): void
+  onImportComponent(): void
+  healthSummary: ProjectHealthSummary
+  onOpenHealth(): void
+  onPreview(): void
+  onExport(format: ExportFormat): void
+}
+
+export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf'
+
+interface ToolButtonProps {
+  label: string
+  title: string
+  disabled?: boolean
+  accent?: boolean
+  onClick(): void
+  children: React.ReactNode
+}
+
+function ToolButton({
+  label,
+  title,
+  disabled,
+  accent,
+  onClick,
+  children,
+}: ToolButtonProps) {
+  return (
+    <button
+      type="button"
+      className={`tool-button${accent ? ' tool-button--accent' : ''}`}
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+      <span>{label}</span>
+    </button>
+  )
+}
+
+export function TopToolbar({
+  busy,
+  onNew,
+  onOpen,
+  recentProjects,
+  onOpenRecent,
+  onSave,
+  onImportComponent,
+  healthSummary,
+  onOpenHealth,
+  onPreview,
+  onExport,
+}: TopToolbarProps) {
+  const project = useEditorStore((state) => state.project)
+  const dirty = useEditorStore((state) => state.dirty)
+  const history = useEditorStore((state) => state.history)
+  const activeSceneId = useEditorStore((state) => state.activeSceneId)
+  const undo = useEditorStore((state) => state.undo)
+  const redo = useEditorStore((state) => state.redo)
+  const renameProject = useEditorStore((state) => state.renameProject)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(project.title)
+  useEffect(() => setTitleDraft(project.title), [project.title])
+  const commitTitle = () => {
+    const normalized = titleDraft.trim()
+    if (normalized) renameProject(normalized)
+    else setTitleDraft(project.title)
+    setEditingTitle(false)
+  }
+  const sceneIndex = project.scenes.findIndex(
+    (scene) => scene.id === activeSceneId,
+  )
+
+  return (
+    <header className="toolbar" data-testid="top-toolbar">
+      <div className="toolbar__brand" title="Phaser 轻量交互课件编辑器">
+        <span className="toolbar__brand-mark">
+          <Box size={18} strokeWidth={2.2} />
+        </span>
+        <span>课件编辑器</span>
+      </div>
+
+      <div className="toolbar__group">
+        <ToolButton label="新建" title="新建课件（Ctrl+N）" disabled={busy} onClick={onNew}>
+          <FilePlus2 size={18} />
+        </ToolButton>
+        <ToolButton label="打开" title="打开工程（Ctrl+O）" disabled={busy} onClick={onOpen}>
+          <FolderOpen size={18} />
+        </ToolButton>
+        <details className="recent-projects">
+          <summary className="tool-button" title="打开最近工程">
+            <History size={18} />
+            <span>最近</span>
+          </summary>
+          <div className="recent-projects__menu">
+            <div className="recent-projects__title">最近工程</div>
+            {recentProjects.length === 0 ? (
+              <div className="recent-projects__empty">还没有最近工程</div>
+            ) : recentProjects.map((project) => (
+              <button
+                type="button"
+                key={project.path}
+                className="recent-projects__item"
+                title={project.path}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onOpenRecent(project.path)
+                }}
+              >
+                <span>{project.name}</span>
+                <small>{project.path}</small>
+              </button>
+            ))}
+          </div>
+        </details>
+        <ToolButton label="保存" title="保存（Ctrl+S）" disabled={busy} onClick={() => onSave(false)}>
+          <Save size={18} />
+        </ToolButton>
+        <ToolButton label="另存为" title="另存为" disabled={busy} onClick={() => onSave(true)}>
+          <SaveAll size={18} />
+        </ToolButton>
+      </div>
+
+      <div className="toolbar__separator" />
+
+      <div className="toolbar__group">
+        <ToolButton
+          label="撤销"
+          title="撤销（Ctrl+Z）"
+          disabled={busy || history.past.length === 0}
+          onClick={undo}
+        >
+          <Undo2 size={18} />
+        </ToolButton>
+        <ToolButton
+          label="重做"
+          title="重做（Ctrl+Y / Ctrl+Shift+Z）"
+          disabled={busy || history.future.length === 0}
+          onClick={redo}
+        >
+          <Redo2 size={18} />
+        </ToolButton>
+      </div>
+
+      <div className="toolbar__separator" />
+
+      <ToolButton
+        label="导入组件"
+        title="导入可信的 .h5component 组件"
+        disabled={busy}
+        onClick={onImportComponent}
+      >
+        <FileInput size={18} />
+      </ToolButton>
+
+      <div className="toolbar__spacer" />
+
+      <div className="toolbar__project">
+        {editingTitle ? (
+          <input
+            className="toolbar__project-name-input"
+            aria-label="课件名称"
+            value={titleDraft}
+            maxLength={80}
+            autoFocus
+            onChange={(event) => setTitleDraft(event.currentTarget.value)}
+            onBlur={commitTitle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+              if (event.key === 'Escape') {
+                setTitleDraft(project.title)
+                setEditingTitle(false)
+              }
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="toolbar__project-name"
+            title="重命名课件"
+            aria-label="重命名课件"
+            onClick={() => setEditingTitle(true)}
+          >
+            <span>{project.title}{dirty ? ' *' : ''}</span>
+            <Pencil size={11} aria-hidden="true" />
+          </button>
+        )}
+        <span className="toolbar__scene-index">
+          场景 {sceneIndex + 1} / {project.scenes.length}
+        </span>
+      </div>
+
+      <ToolButton
+        label="工程检查"
+        title={healthSummary.total === 0
+          ? '工程检查：未发现问题'
+          : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
+        disabled={busy}
+        onClick={onOpenHealth}
+      >
+        <span className="tool-button__badge-anchor">
+          <ShieldCheck size={18} />
+          {healthSummary.total > 0 && (
+            <small className={healthSummary.error > 0 ? 'is-error' : 'is-warning'}>
+              {healthSummary.total > 99 ? '99+' : healthSummary.total}
+            </small>
+          )}
+        </span>
+      </ToolButton>
+
+      <ToolButton
+        label="整课预览"
+        title="在独立窗口整课预览"
+        disabled={busy}
+        accent
+        onClick={onPreview}
+      >
+        <Eye size={18} />
+      </ToolButton>
+      <details className="export-menu">
+        <summary
+          className="tool-button tool-button--accent export-menu__trigger"
+          data-testid="export-menu-trigger"
+          title="导出课件"
+          aria-label="导出课件"
+          aria-disabled={busy}
+          onClick={(event) => {
+            if (busy) event.preventDefault()
+          }}
+        >
+          <span className="export-menu__trigger-icon">
+            <FileDown size={18} />
+            <ChevronDown size={11} />
+          </span>
+          <span>导出</span>
+        </summary>
+        <div className="export-menu__panel" role="menu" aria-label="选择导出格式">
+          <div className="export-menu__title">选择导出格式</div>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-single-html"
+            className="export-menu__item"
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('single-html')
+            }}
+          >
+            <FileDown size={18} />
+            <span><strong>单 HTML</strong><small>一个文件，适合小中型离线课件</small></span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-web-package"
+            className="export-menu__item"
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('web-package')
+            }}
+          >
+            <Archive size={18} />
+            <span><strong>网页包</strong><small>资源独立存放，推荐大型课件使用</small></span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-pptx"
+            className="export-menu__item"
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('pptx')
+            }}
+          >
+            <Presentation size={18} />
+            <span><strong>PowerPoint（PPTX）</strong><small>文字、图形、图片和组件为独立对象</small></span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-pdf"
+            className="export-menu__item"
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('pdf')
+            }}
+          >
+            <FileText size={18} />
+            <span><strong>PDF</strong><small>静态页面，互动组件将静态化</small></span>
+          </button>
+        </div>
+      </details>
+    </header>
+  )
+}

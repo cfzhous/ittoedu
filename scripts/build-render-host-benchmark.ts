@@ -1,0 +1,747 @@
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { strToU8, zipSync } from 'fflate'
+import { build as viteBuild } from 'vite'
+import { componentManifestSchema } from '../src/shared/componentSchema'
+import type {
+  ComponentManifest,
+  ComponentPackageData,
+} from '../src/shared/componentTypes'
+import { projectDocumentSchema } from '../src/shared/projectSchema'
+import type {
+  BaseNode,
+  ExternalComponentNode,
+  ProjectDocument,
+  ShapeNode,
+  TeacherControllerNode,
+  TextNode,
+} from '../src/shared/projectTypes'
+import type { RuntimeDocument } from '../src/shared/runtimeTypes'
+import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
+import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
+import {
+  createProjectArchive,
+  openProjectArchive,
+} from '../src/renderer/project/projectArchive'
+
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
+const projectRoot = path.resolve(scriptDirectory, '..')
+const rootPackageJsonPath = path.join(projectRoot, 'package.json')
+const installedThreePackageJsonPath = path.join(projectRoot, 'node_modules', 'three', 'package.json')
+const installedThreeLicensePath = path.join(projectRoot, 'node_modules', 'three', 'LICENSE')
+const exampleDirectory = path.join(projectRoot, 'examples', 'render-host-benchmark')
+const runtimeDirectory = path.join(exampleDirectory, 'runtimes')
+const assetDirectory = path.join(exampleDirectory, 'assets')
+const componentRoot = path.join(exampleDirectory, 'components')
+const playerBundlePath = path.join(projectRoot, 'dist-player', 'player.iife.js')
+const threeEntryPath = path.join(runtimeDirectory, 'three-runtime.entry.ts')
+const threeBundlePath = path.join(runtimeDirectory, 'three-runtime.js')
+const projectJsonPath = path.join(exampleDirectory, 'project.json')
+const lessonArchivePath = path.join(exampleDirectory, 'render-host-benchmark.h5lesson')
+const standaloneHtmlPath = path.join(exampleDirectory, 'render-host-benchmark.html')
+const thirdPartyNoticesPath = path.join(exampleDirectory, 'THIRD_PARTY_NOTICES.md')
+const reproducibleTimestamp = new Date('2026-07-23T00:00:00.000Z')
+const timestamp = reproducibleTimestamp.toISOString()
+const MAX_RUNTIME_BYTES = 2 * 1024 * 1024
+
+interface ThreePackageMetadata {
+  version: string
+  licenseText: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+async function loadThreePackageMetadata(): Promise<ThreePackageMetadata> {
+  const [rootPackageText, installedPackageText, licenseText] = await Promise.all([
+    fs.readFile(rootPackageJsonPath, 'utf8'),
+    fs.readFile(installedThreePackageJsonPath, 'utf8'),
+    fs.readFile(installedThreeLicensePath, 'utf8'),
+  ])
+  const rootPackage = JSON.parse(rootPackageText) as unknown
+  const installedPackage = JSON.parse(installedPackageText) as unknown
+  const declaredVersion = isRecord(rootPackage) && isRecord(rootPackage.devDependencies)
+    ? rootPackage.devDependencies.three
+    : undefined
+  const installedVersion = isRecord(installedPackage) ? installedPackage.version : undefined
+  const installedLicense = isRecord(installedPackage) ? installedPackage.license : undefined
+
+  if (typeof declaredVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(declaredVersion)) {
+    throw new Error('package.json 必须用精确版本固定 devDependencies.three')
+  }
+  if (installedVersion !== declaredVersion) {
+    throw new Error(`Three.js 安装版本 ${String(installedVersion)} 与 package.json ${declaredVersion} 不一致`)
+  }
+  if (installedLicense !== 'MIT') {
+    throw new Error(`Three.js 许可证应为 MIT，实际为 ${String(installedLicense)}`)
+  }
+
+  return { version: declaredVersion, licenseText }
+}
+
+function buildThreeThirdPartyNotice({ version, licenseText }: ThreePackageMetadata): string {
+  return `# Third-party notices
+
+The generated file \`runtimes/three-runtime.js\`, \`project.json\`,
+\`render-host-benchmark.h5lesson\`, and \`render-host-benchmark.html\` contain a
+bundled copy of Three.js. Keep this notice with the benchmark source and with
+any redistribution of those generated artifacts.
+
+## Three.js ${version}
+
+- Project: https://threejs.org/
+- Source repository: https://github.com/mrdoob/three.js
+- License: MIT
+
+${licenseText.trim()}\n`
+}
+
+const phaserContent: RuntimeDocument['content'] = {
+  values: {
+    panelTitle: 'Runtime API 2 · Phaser 一次性互动',
+    instruction: '点击右侧轨道改变相位。这类粒子、拖拽与程序动画不需要为了接入编辑器而组件化。',
+    readyStatus: '轨道系统已就绪，等待点击',
+    activatedStatus: '已从{direction}侧施加脉冲',
+    leftLabel: '左',
+    rightLabel: '右',
+    accentColor: '#38bdf8',
+  },
+  metadata: {
+    panelTitle: { label: 'Phaser 面板标题', maxLength: 80 },
+    instruction: { label: 'Phaser 交互说明', multiline: true, maxLength: 220 },
+    readyStatus: { label: 'Phaser 初始状态', maxLength: 80 },
+    activatedStatus: { label: 'Phaser 交互状态模板', maxLength: 80 },
+  },
+}
+
+const threeContent: RuntimeDocument['content'] = {
+  values: {
+    ariaLabel: 'Three.js 真三维地球和月球演示',
+    canvasLabel: '可拖动旋转、可滚轮缩放的三维地球',
+    panelTitle: 'Runtime API 2 · Three.js 真 3D 增强',
+    instruction: '拖动地球改变观察角度，滚轮缩放。Three.js 已被预打包到本运行时，Player 核心不导入它。',
+    resetLabel: '恢复视角',
+    readyStatus: '地球自转中 · 可拖动或缩放',
+    draggingStatus: '正在旋转观察视角',
+    rotatedStatus: '视角已更新',
+    zoomedStatus: '观察距离已更新',
+    resetStatus: '已恢复默认观察视角',
+    suspendedStatus: '三维更新已暂停',
+    contextLostStatus: 'WebGL 上下文已丢失，等待恢复',
+    contextRestoredStatus: 'WebGL 上下文已恢复',
+  },
+  metadata: {
+    ariaLabel: { label: '3D 区域无障碍名称', maxLength: 100 },
+    canvasLabel: { label: '3D Canvas 无障碍名称', maxLength: 120 },
+    panelTitle: { label: 'Three.js 面板标题', maxLength: 80 },
+    instruction: { label: 'Three.js 交互说明', multiline: true, maxLength: 260 },
+    resetLabel: { label: '恢复按钮', maxLength: 30 },
+  },
+}
+
+function baseNode(
+  id: string,
+  name: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Omit<BaseNode, 'type'> {
+  return {
+    id,
+    name,
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    opacity: 1,
+    visible: true,
+    locked: false,
+    playbackInitialVisibility: 'inherit',
+  }
+}
+
+function textNode(
+  id: string,
+  name: string,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  options: {
+    fontSize?: number
+    color?: string
+    bold?: boolean
+    align?: 'left' | 'center' | 'right'
+    backgroundColor?: string
+    backgroundOpacity?: number
+    cornerRadius?: number
+  } = {},
+): TextNode {
+  return {
+    ...baseNode(id, name, x, y, width, height),
+    type: 'text',
+    text,
+    runs: [],
+    style: {
+      fontFamily: 'Microsoft YaHei, PingFang SC, sans-serif',
+      fontSize: options.fontSize ?? 28,
+      color: options.color ?? '#f8fafc',
+      bold: options.bold ?? false,
+      italic: false,
+      underline: false,
+      strike: false,
+      highlightColor: null,
+      align: options.align ?? 'left',
+      verticalAlign: 'middle',
+      writingMode: 'horizontal',
+      lineSpacing: 1.35,
+      letterSpacing: 0,
+      padding: 12,
+      overflow: 'shrink',
+      backgroundColor: options.backgroundColor ?? '#000000',
+      backgroundOpacity: options.backgroundOpacity ?? 0,
+      cornerRadius: options.cornerRadius ?? 0,
+    },
+  }
+}
+
+function shapeNode(
+  id: string,
+  name: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fillColor: string,
+  borderColor: string,
+  cornerRadius = 24,
+): ShapeNode {
+  return {
+    ...baseNode(id, name, x, y, width, height),
+    type: 'shape',
+    shapeType: 'rounded-rectangle',
+    style: {
+      fillColor,
+      fillOpacity: 1,
+      borderColor,
+      borderOpacity: 1,
+      borderWidth: 2,
+      lineStyle: 'solid',
+      cornerRadius,
+      startArrow: 'none',
+      endArrow: 'none',
+    },
+  }
+}
+
+function componentNode(
+  id: string,
+  name: string,
+  packageId: string,
+  version: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  props: Record<string, unknown>,
+): ExternalComponentNode {
+  return {
+    ...baseNode(id, name, x, y, width, height),
+    type: 'external-component',
+    component: { packageId, version },
+    props,
+  }
+}
+
+function controllerNode(): TeacherControllerNode {
+  return {
+    ...baseNode('benchmark_controller', '基准导航控制器', 40, 626, 1200, 72),
+    type: 'teacher-controller',
+    title: '渲染宿主基准',
+    showSceneProgress: true,
+    compact: true,
+    collapsible: false,
+    defaultCollapsed: false,
+    buttons: [
+      { id: 'previous', label: '上一页', visible: true, action: { type: 'scene.previous' } },
+      { id: 'picker', label: '五类基准', visible: true, action: { type: 'scene.open-picker' } },
+      { id: 'replay', label: '重播本页', visible: true, action: { type: 'scene.replay' } },
+      { id: 'next', label: '下一页', visible: true, action: { type: 'scene.next' } },
+    ],
+    style: {
+      backgroundColor: '#020617',
+      backgroundOpacity: 0.94,
+      accentColor: '#38bdf8',
+      textColor: '#f8fafc',
+      cornerRadius: 18,
+    },
+    includeInStaticExports: false,
+  }
+}
+
+function runtimeDocument(
+  source: string,
+  renderMode: RuntimeDocument['renderMode'],
+  content: RuntimeDocument['content'],
+  fallbackAssetId: string,
+): RuntimeDocument {
+  return {
+    runtimeApiVersion: 2,
+    enabled: true,
+    renderMode,
+    source,
+    content,
+    assets: {},
+    staticFallback: {
+      assetId: fallbackAssetId,
+      coverage: 'runtime-layer',
+      layer: 'overlay',
+    },
+  }
+}
+
+function xml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+}
+
+function phaserFallbackSvg(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect x="62" y="122" width="1156" height="432" rx="30" fill="#082f49" stroke="#38bdf8" stroke-width="2"/>
+  <text x="92" y="176" fill="#e0f2fe" font-family="Microsoft YaHei,sans-serif" font-size="24" font-weight="700">${xml(phaserContent.values.panelTitle ?? '')}</text>
+  <ellipse cx="874" cy="338" rx="245" ry="118" fill="none" stroke="#7dd3fc" stroke-width="3" opacity=".65"/>
+  <circle cx="874" cy="338" r="38" fill="#fef08a"/>
+  <circle cx="1080" cy="402" r="25" fill="#38bdf8"/>
+</svg>\n`
+}
+
+function threeFallbackSvg(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs><radialGradient id="earth" cx="34%" cy="28%"><stop stop-color="#93c5fd"/><stop offset=".48" stop-color="#2563eb"/><stop offset="1" stop-color="#082f49"/></radialGradient></defs>
+  <rect x="62" y="122" width="1156" height="432" rx="30" fill="#0f172a" stroke="#818cf8" stroke-width="2"/>
+  <text x="88" y="174" fill="#e0e7ff" font-family="Microsoft YaHei,sans-serif" font-size="24" font-weight="700">${xml(threeContent.values.panelTitle ?? '')}</text>
+  <circle cx="870" cy="344" r="148" fill="url(#earth)" stroke="#bfdbfe" stroke-opacity=".5"/>
+  <ellipse cx="870" cy="344" rx="260" ry="98" fill="none" stroke="#a5b4fc" stroke-width="3" opacity=".55" transform="rotate(-18 870 344)"/>
+  <circle cx="1088" cy="272" r="31" fill="#dbeafe"/>
+</svg>\n`
+}
+
+function validateRuntimeDefinition(source: string, label: string): void {
+  let definition: unknown
+  const api = {
+    define(candidate: unknown) {
+      if (definition !== undefined) throw new Error(`${label} 重复注册`)
+      definition = candidate
+    },
+  }
+  const runtimeWindow = { CoursewareRuntime: api }
+  const runtimeGlobal = { CoursewareRuntime: api }
+  const execute = new Function(
+    'window',
+    'globalThis',
+    'CoursewareRuntime',
+    `"use strict";\n${source}`,
+  ) as (windowValue: typeof runtimeWindow, globalValue: typeof runtimeGlobal, apiValue: typeof api) => void
+  execute(runtimeWindow, runtimeGlobal, api)
+  if (
+    typeof definition !== 'object' ||
+    definition === null ||
+    Reflect.get(definition, 'runtimeApiVersion') !== 2 ||
+    typeof Reflect.get(definition, 'create') !== 'function'
+  ) {
+    throw new Error(`${label} 未注册有效的 Runtime API 2 定义`)
+  }
+}
+
+function validateComponentDefinition(source: string, manifest: ComponentManifest): void {
+  let definition: unknown
+  const runtimeWindow = {
+    CoursewareComponent: {
+      define(candidate: unknown) {
+        if (definition !== undefined) throw new Error('组件 runtime 重复注册')
+        definition = candidate
+      },
+    },
+  }
+  const execute = new Function('window', `"use strict";\n${source}`) as (
+    value: typeof runtimeWindow,
+  ) => void
+  execute(runtimeWindow)
+  if (
+    typeof definition !== 'object' ||
+    definition === null ||
+    Reflect.get(definition, 'id') !== manifest.id ||
+    Reflect.get(definition, 'runtimeApiVersion') !== manifest.runtimeApiVersion ||
+    typeof Reflect.get(definition, 'create') !== 'function'
+  ) {
+    throw new Error(`组件“${manifest.id}”runtime 注册与 manifest 不一致`)
+  }
+}
+
+function assertOfflineBundle(source: string, label: string): void {
+  const bytes = new TextEncoder().encode(source).byteLength
+  if (bytes >= MAX_RUNTIME_BYTES) {
+    throw new Error(`${label} 超过 2 MiB Runtime 上限：${bytes} bytes`)
+  }
+  if (/(^|[;\n\r])\s*import\s*(?:[(\s{*]|["'])/m.test(source)) {
+    throw new Error(`${label} 仍包含 import`)
+  }
+  if (/(^|[;\n\r])\s*export\s+(?:default|const|let|var|function|class|\{|\*)/m.test(source)) {
+    throw new Error(`${label} 仍包含 export`)
+  }
+  if (/\brequire\s*\(/.test(source)) {
+    throw new Error(`${label} 仍包含 require`)
+  }
+}
+
+async function bundleThreeRuntime(): Promise<string> {
+  await viteBuild({
+    configFile: false,
+    logLevel: 'warn',
+    build: {
+      outDir: runtimeDirectory,
+      emptyOutDir: false,
+      copyPublicDir: false,
+      sourcemap: false,
+      minify: 'esbuild',
+      lib: {
+        entry: threeEntryPath,
+        name: 'RenderHostThreeRuntime',
+        formats: ['iife'],
+        fileName: () => 'three-runtime.js',
+      },
+    },
+  })
+  const source = await fs.readFile(threeBundlePath, 'utf8')
+  assertOfflineBundle(source, 'Three.js 场景运行时')
+  validateRuntimeDefinition(source, 'Three.js 场景运行时')
+  return source
+}
+
+interface LoadedComponent {
+  data: ReturnType<typeof importComponentPackage>
+  archive: Uint8Array
+}
+
+async function loadComponent(
+  directoryName: string,
+  archiveFilename: string,
+): Promise<LoadedComponent> {
+  const directory = path.join(componentRoot, directoryName)
+  const manifestText = await fs.readFile(path.join(directory, 'manifest.json'), 'utf8')
+  const manifest = componentManifestSchema.parse(JSON.parse(manifestText) as unknown)
+  const runtimeSource = await fs.readFile(path.join(directory, manifest.entry), 'utf8')
+  validateComponentDefinition(runtimeSource, manifest)
+  const files: Record<string, Uint8Array> = {
+    'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
+    [manifest.entry]: strToU8(runtimeSource),
+  }
+  if (manifest.thumbnail !== undefined) {
+    files[manifest.thumbnail] = await fs.readFile(path.join(directory, manifest.thumbnail))
+  }
+  const archive = zipSync(files, { level: 6, mtime: reproducibleTimestamp })
+  await fs.writeFile(path.join(exampleDirectory, archiveFilename), archive)
+  return {
+    archive,
+    data: importComponentPackage(archive, {
+      expectedId: manifest.id,
+      expectedVersion: manifest.version,
+    }),
+  }
+}
+
+function headerNodes(
+  prefix: string,
+  title: string,
+  subtitle: string,
+  color: string,
+): [TextNode, TextNode] {
+  return [
+    textNode(`${prefix}_title`, '场景标题', title, 68, 34, 1144, 56, {
+      fontSize: 32,
+      bold: true,
+      align: 'center',
+      color,
+    }),
+    textNode(`${prefix}_subtitle`, '场景说明', subtitle, 100, 86, 1080, 36, {
+      fontSize: 16,
+      align: 'center',
+      color: '#cbd5e1',
+    }),
+  ]
+}
+
+async function main(): Promise<void> {
+  await fs.mkdir(assetDirectory, { recursive: true })
+  const [
+    threePackageMetadata,
+    threeRuntimeSource,
+    phaserRuntimeSource,
+    playerBundle,
+    tableComponent,
+    legacyComponent,
+  ] = await Promise.all([
+    loadThreePackageMetadata(),
+    bundleThreeRuntime(),
+    fs.readFile(path.join(runtimeDirectory, 'phaser-runtime.js'), 'utf8'),
+    fs.readFile(playerBundlePath, 'utf8').catch((error: unknown) => {
+      throw new Error('缺少 dist-player/player.iife.js；请先运行 npm run build:player', { cause: error })
+    }),
+    loadComponent('editable-table', 'render-host-editable-table.h5component'),
+    loadComponent('legacy-phaser', 'render-host-legacy-phaser.h5component'),
+  ])
+
+  assertOfflineBundle(phaserRuntimeSource, 'Phaser 场景运行时')
+  validateRuntimeDefinition(phaserRuntimeSource, 'Phaser 场景运行时')
+  if (tableComponent.data.manifest.schemaVersion !== 4 || tableComponent.data.manifest.renderMode !== 'dom') {
+    throw new Error('可编辑表格必须是 V4 DOM 组件')
+  }
+  if (legacyComponent.data.manifest.schemaVersion !== 3) {
+    throw new Error('兼容仪表必须保持 V3 组件协议')
+  }
+
+  const generatedAssets = {
+    asset_phaser_runtime_fallback: {
+      filename: 'phaser-runtime-fallback.svg',
+      source: phaserFallbackSvg(),
+    },
+    asset_three_runtime_fallback: {
+      filename: 'three-runtime-fallback.svg',
+      source: threeFallbackSvg(),
+    },
+  } satisfies Record<string, { filename: string; source: string }>
+
+  const assetFiles: Record<string, Uint8Array> = {}
+  const projectAssets: ProjectDocument['assets'] = {}
+  for (const [assetId, asset] of Object.entries(generatedAssets)) {
+    const bytes = strToU8(asset.source)
+    assetFiles[assetId] = bytes
+    projectAssets[assetId] = {
+      id: assetId,
+      filename: asset.filename,
+      mimeType: 'image/svg+xml',
+      kind: 'image',
+      path: `assets/${asset.filename}`,
+      byteLength: bytes.byteLength,
+      width: 1280,
+      height: 720,
+    }
+    await fs.writeFile(path.join(assetDirectory, asset.filename), bytes)
+  }
+
+  const nativeHeaders = headerNodes(
+    'native',
+    '01 纯原生节点：稳定内容的默认路径',
+    '本页不含自由运行时或组件；文字、图形和几何都可在画布上直接修改。',
+    '#e0f2fe',
+  )
+  const phaserHeaders = headerNodes(
+    'phaser',
+    '02 Runtime API 2：Phaser 承担一次性程序互动',
+    '稳定标题仍是原生节点；轨道、粒子和点击响应由场景 runtime 承担。',
+    '#bae6fd',
+  )
+  const threeHeaders = headerNodes(
+    'three',
+    '03 Runtime API 2：Three.js 按需预打包为 DOM 增强',
+    'Three.js 不进入编辑器核心；只有本页的离线 runtime 承担代码与 GPU 资源。',
+    '#e0e7ff',
+  )
+  const tableHeaders = headerNodes(
+    'table',
+    '04 Component API 4：DOM 表格作为高复用组件',
+    '表格需要结构化编辑和重复使用，因此值得组件化；文案全部位于 props.content。',
+    '#ccfbf1',
+  )
+  const legacyHeaders = headerNodes(
+    'legacy',
+    '05 Component API 3：历史 Phaser 组件保持兼容',
+    '新组件使用 V4，但已有 V3 组件不需立即重写；本页专门回归旧上下文。',
+    '#fef3c7',
+  )
+
+  const projectCandidate: ProjectDocument = {
+    schemaVersion: 7,
+    id: 'project_render_host_benchmark',
+    title: 'Project V7 渲染宿主完整基准',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    canvas: { width: 1280, height: 720 },
+    assets: projectAssets,
+    componentPackages: {
+      [tableComponent.data.key]: tableComponent.data.metadata,
+      [legacyComponent.data.key]: legacyComponent.data.metadata,
+    },
+    globalLayer: [{
+      node: controllerNode(),
+      layer: 'overlay',
+      visibility: { mode: 'all', sceneIds: [] },
+    }],
+    globalInteractions: [],
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+      },
+    },
+    playback: { controls: 'canvas', keyboardNavigation: true },
+    scenes: [
+      {
+        id: 'scene_native_nodes',
+        name: '01 纯原生节点',
+        backgroundColor: '#071a2b',
+        interactions: [],
+        nodes: [
+          ...nativeHeaders,
+          shapeNode('native_card_edit', '可编辑性卡片', 80, 170, 340, 330, '#0c4a6e', '#38bdf8'),
+          shapeNode('native_card_runtime', '业务真相卡片', 470, 170, 340, 330, '#134e4a', '#2dd4bf'),
+          shapeNode('native_card_enhance', '增强层卡片', 860, 170, 340, 330, '#312e81', '#a5b4fc'),
+          textNode('native_edit_text', '可编辑性说明', '稳定内容\n直接编辑\n文字 · 图形 · 排版', 110, 210, 280, 250, {
+            fontSize: 25, bold: true, align: 'center', color: '#e0f2fe',
+          }),
+          textNode('native_truth_text', '业务真相说明', 'Project V7 JSON\n是唯一业务真相\n渲染器只是执行层', 500, 210, 280, 250, {
+            fontSize: 25, bold: true, align: 'center', color: '#ccfbf1',
+          }),
+          textNode('native_enhance_text', '增强层说明', 'Phaser · DOM · Three.js\n按效果选择\n不互相替代', 890, 210, 280, 250, {
+            fontSize: 25, bold: true, align: 'center', color: '#e0e7ff',
+          }),
+        ],
+      },
+      {
+        id: 'scene_runtime_phaser',
+        name: '02 API2 Phaser 运行时',
+        backgroundColor: '#020617',
+        interactions: [],
+        nodes: phaserHeaders,
+        runtime: runtimeDocument(
+          phaserRuntimeSource,
+          'phaser',
+          phaserContent,
+          'asset_phaser_runtime_fallback',
+        ),
+      },
+      {
+        id: 'scene_runtime_three',
+        name: '03 API2 Three.js 运行时',
+        backgroundColor: '#0f172a',
+        interactions: [],
+        nodes: threeHeaders,
+        runtime: runtimeDocument(
+          threeRuntimeSource,
+          'dom',
+          threeContent,
+          'asset_three_runtime_fallback',
+        ),
+      },
+      {
+        id: 'scene_component_v4_dom',
+        name: '04 V4 DOM 表格组件',
+        backgroundColor: '#052e2b',
+        interactions: [],
+        nodes: [
+          ...tableHeaders,
+          componentNode(
+            'table_component_instance',
+            'V4 DOM 可编辑对比表',
+            tableComponent.data.manifest.id,
+            tableComponent.data.manifest.version,
+            70,
+            148,
+            1140,
+            420,
+            {
+              content: {
+                title: '课件渲染路径选型表',
+                caption: '实例文案已覆盖默认值；教师可继续在属性面板修改。',
+              },
+            },
+          ),
+        ],
+      },
+      {
+        id: 'scene_component_v3_legacy',
+        name: '05 V3 Phaser 兼容组件',
+        backgroundColor: '#1e1b4b',
+        interactions: [],
+        nodes: [
+          ...legacyHeaders,
+          componentNode(
+            'legacy_component_instance',
+            'V3 Phaser 兼容仪表',
+            legacyComponent.data.manifest.id,
+            legacyComponent.data.manifest.version,
+            280,
+            156,
+            720,
+            390,
+            { content: { centerLabel: 'V3 OK' } },
+          ),
+        ],
+      },
+    ],
+  }
+
+  const project = projectDocumentSchema.parse(projectCandidate)
+  await fs.writeFile(projectJsonPath, `${JSON.stringify(project, null, 2)}\n`, 'utf8')
+
+  const components: Record<string, ComponentPackageData> = {
+    [tableComponent.data.key]: tableComponent.data,
+    [legacyComponent.data.key]: legacyComponent.data,
+  }
+  const componentFiles = {
+    [tableComponent.data.key]: tableComponent.data.files,
+    [legacyComponent.data.key]: legacyComponent.data.files,
+  }
+  const lessonArchive = createProjectArchive(
+    { project, assetFiles, componentFiles },
+    { mtime: reproducibleTimestamp },
+  )
+  await fs.writeFile(lessonArchivePath, lessonArchive)
+
+  const reopened = openProjectArchive(lessonArchive)
+  if (
+    reopened.project.schemaVersion !== 7 ||
+    reopened.project.scenes.length !== 5 ||
+    reopened.project.scenes[1]?.runtime?.runtimeApiVersion !== 2 ||
+    reopened.project.scenes[2]?.runtime?.source !== threeRuntimeSource ||
+    Object.keys(reopened.project.componentPackages).length !== 2
+  ) {
+    throw new Error('生成后的基准 .h5lesson 重新打开校验失败')
+  }
+
+  const payload = buildExportPayload({ project, assets: assetFiles, components })
+  const html = buildStandaloneHtml(payload, { playerBundle })
+  await Promise.all([
+    fs.writeFile(standaloneHtmlPath, html, 'utf8'),
+    fs.writeFile(
+      thirdPartyNoticesPath,
+      buildThreeThirdPartyNotice(threePackageMetadata),
+      'utf8',
+    ),
+  ])
+
+  console.log(`已生成 Three.js 离线 Runtime：${threeBundlePath}`)
+  console.log(`已生成 Three.js ${threePackageMetadata.version} 第三方通知：${thirdPartyNoticesPath}`)
+  console.log(`已生成 Project V7 JSON：${projectJsonPath}`)
+  console.log(`已生成两个组件包：${exampleDirectory}`)
+  console.log(`已生成渲染宿主基准工程：${lessonArchivePath}`)
+  console.log(`已生成离线单 HTML：${standaloneHtmlPath}`)
+}
+
+main().catch((error: unknown) => {
+  console.error('生成渲染宿主基准失败', error)
+  process.exitCode = 1
+})

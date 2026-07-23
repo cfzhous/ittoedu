@@ -1,0 +1,169 @@
+import { COMPONENT_RUNTIME_API_VERSION } from '../shared/constants'
+import type {
+  ComponentDefinition,
+  ComponentManifest,
+  ComponentRuntimeApiVersion,
+} from '../shared/componentTypes'
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isComponentDefinition(value: unknown): value is ComponentDefinition {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+
+  const candidate = value as Record<string, unknown>
+  const runtimeApiVersion = candidate.runtimeApiVersion
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.length > 0 &&
+    typeof runtimeApiVersion === 'number' &&
+    Number.isInteger(runtimeApiVersion) &&
+    runtimeApiVersion >= 1 &&
+    runtimeApiVersion <= COMPONENT_RUNTIME_API_VERSION &&
+    typeof candidate.create === 'function'
+  )
+}
+
+export class ComponentRegistry {
+  private readonly definitions = new Map<string, ComponentDefinition>()
+  private readonly loadErrors = new Map<string, Error>()
+  private readonly globalApi = {
+    define: (definition: ComponentDefinition): void => {
+      this.defineDuringLoad(definition)
+    },
+  }
+
+  private previousGlobalApi: Window['CoursewareComponent']
+  private expectedId: string | null = null
+  private expectedRuntimeApiVersion: ComponentRuntimeApiVersion | null = null
+  private definitionDuringLoad: ComponentDefinition | null = null
+  private installed = false
+
+  install(): void {
+    if (this.installed) {
+      return
+    }
+
+    this.previousGlobalApi = window.CoursewareComponent
+    window.CoursewareComponent = this.globalApi
+    this.installed = true
+  }
+
+  executeRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinition
+  executeRuntime(componentId: string, runtimeSource: string): ComponentDefinition
+  executeRuntime(
+    manifestOrId: ComponentManifest | string,
+    runtimeSource: string,
+  ): ComponentDefinition {
+    const componentId = typeof manifestOrId === 'string'
+      ? manifestOrId
+      : manifestOrId.id
+    if (!runtimeSource.trim()) {
+      const error = new Error(`组件“${componentId}”的 runtime.js 为空`)
+      this.loadErrors.set(componentId, error)
+      throw error
+    }
+
+    this.install()
+    const previousDefinition = this.definitions.get(componentId)
+    this.expectedId = componentId
+    this.expectedRuntimeApiVersion = typeof manifestOrId === 'string'
+      ? null
+      : manifestOrId.runtimeApiVersion
+    this.definitionDuringLoad = null
+
+    try {
+      const safeSourceName = componentId.replace(/[\r\n]/g, '_')
+      const execute = new Function(
+        'window',
+        `"use strict";\n${runtimeSource}\n//# sourceURL=h5component://${safeSourceName}/runtime.js`,
+      ) as (runtimeWindow: Window) => void
+      execute(window)
+
+      const registered = this.definitionDuringLoad as ComponentDefinition | null
+      if (!registered) {
+        throw new Error(`组件“${componentId}”没有调用 CoursewareComponent.define`)
+      }
+
+      const definition: ComponentDefinition = registered
+      if (
+        this.expectedRuntimeApiVersion !== null &&
+        definition.runtimeApiVersion !== this.expectedRuntimeApiVersion
+      ) {
+        throw new Error(
+          `组件运行时 API 不匹配：manifest 为 ${this.expectedRuntimeApiVersion}，runtime 为 ${definition.runtimeApiVersion}`,
+        )
+      }
+      this.definitions.set(componentId, definition)
+      this.loadErrors.delete(componentId)
+      return definition
+    } catch (cause) {
+      if (previousDefinition) {
+        this.definitions.set(componentId, previousDefinition)
+      } else {
+        this.definitions.delete(componentId)
+      }
+
+      const error = new Error(`组件“${componentId}”注册失败：${errorMessage(cause)}`, {
+        cause,
+      })
+      this.loadErrors.set(componentId, error)
+      throw error
+    } finally {
+      this.expectedId = null
+      this.expectedRuntimeApiVersion = null
+      this.definitionDuringLoad = null
+    }
+  }
+
+  loadRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinition {
+    return this.executeRuntime(manifest, runtimeSource)
+  }
+
+  get(componentId: string): ComponentDefinition | undefined {
+    return this.definitions.get(componentId)
+  }
+
+  getLoadError(componentId: string): Error | undefined {
+    return this.loadErrors.get(componentId)
+  }
+
+  dispose(): void {
+    if (this.installed && window.CoursewareComponent === this.globalApi) {
+      if (this.previousGlobalApi) {
+        window.CoursewareComponent = this.previousGlobalApi
+      } else {
+        delete window.CoursewareComponent
+      }
+    }
+
+    this.installed = false
+    this.expectedId = null
+    this.expectedRuntimeApiVersion = null
+    this.definitionDuringLoad = null
+    this.definitions.clear()
+    this.loadErrors.clear()
+  }
+
+  private defineDuringLoad(definition: ComponentDefinition): void {
+    if (!this.expectedId) {
+      throw new Error('当前没有正在加载的组件')
+    }
+    if (this.definitionDuringLoad) {
+      throw new Error(`组件“${this.expectedId}”重复调用了 define`)
+    }
+    if (!isComponentDefinition(definition)) {
+      throw new Error('组件定义格式无效')
+    }
+    if (definition.id !== this.expectedId) {
+      throw new Error(
+        `组件 ID 不匹配：期望“${this.expectedId}”，实际为“${definition.id}”`,
+      )
+    }
+
+    this.definitionDuringLoad = definition
+  }
+}

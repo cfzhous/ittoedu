@@ -1,0 +1,942 @@
+{
+  "schemaVersion": 7,
+  "id": "project_runtime_v3_complete_example",
+  "title": "Runtime V3 完整互动示例",
+  "createdAt": "2026-07-21T00:00:00.000Z",
+  "updatedAt": "2026-07-21T00:00:00.000Z",
+  "canvas": {
+    "width": 1280,
+    "height": 720
+  },
+  "scenes": [
+    {
+      "id": "scene_intro",
+      "name": "01 认识 V3",
+      "backgroundColor": "#071a2b",
+      "nodes": [
+        {
+          "id": "intro_title",
+          "name": "场景标题",
+          "x": 70,
+          "y": 112,
+          "width": 1120,
+          "height": 72,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "效果第一，编辑器只是轻量编辑容器",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 38,
+            "color": "#e0f2fe",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "hidden"
+        },
+        {
+          "id": "intro_orbit_image",
+          "name": "可替换的原生示意图片",
+          "x": 82,
+          "y": 202,
+          "width": 540,
+          "height": 350,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "image",
+          "assetId": "asset_learning_orbit",
+          "preserveAspectRatio": true,
+          "fit": "contain",
+          "crop": {
+            "left": 0,
+            "top": 0,
+            "right": 0,
+            "bottom": 0
+          },
+          "cropX": 0.5,
+          "cropY": 0.5,
+          "flipX": false,
+          "flipY": false,
+          "cornerRadius": 0,
+          "feather": {
+            "amount": 0,
+            "mode": "rectangle"
+          },
+          "playbackInitialVisibility": "hidden"
+        },
+        {
+          "id": "intro_interaction_card",
+          "name": "场景运行时点击热点",
+          "x": 210,
+          "y": 255,
+          "width": 300,
+          "height": 230,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "shape",
+          "shapeType": "rounded-rectangle",
+          "style": {
+            "fillColor": "#0c4a6e",
+            "fillOpacity": 1,
+            "borderColor": "#7dd3fc",
+            "borderOpacity": 1,
+            "borderWidth": 3,
+            "lineStyle": "solid",
+            "cornerRadius": 34,
+            "startArrow": "none",
+            "endArrow": "none"
+          },
+          "playbackInitialVisibility": "hidden"
+        },
+        {
+          "id": "intro_action_label",
+          "name": "热点内原生文字",
+          "x": 245,
+          "y": 318,
+          "width": 230,
+          "height": 95,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "点击探索 V3",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 29,
+            "color": "#f0f9ff",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "hidden"
+        },
+        {
+          "id": "intro_editable_note",
+          "name": "原生文字说明",
+          "x": 90,
+          "y": 535,
+          "width": 1090,
+          "height": 60,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "这段文字可直接双击编辑；右侧互动文案来自 RuntimeDocument.content.values。",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 18,
+            "color": "#bae6fd",
+            "bold": false,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "hidden"
+        }
+      ],
+      "runtime": {
+        "runtimeApiVersion": 1,
+        "enabled": true,
+        "renderMode": "hybrid",
+        "source": "CoursewareRuntime.define({\n  runtimeApiVersion: 1,\n\n  create: function (ctx) {\n    var card = ctx.nodes.get('interactionCard')\n    if (!card) throw new Error(ctx.content.get('missingBindingError'))\n\n    var panel = document.createElement('section')\n    var instruction = document.createElement('p')\n    var feedback = document.createElement('p')\n    var nextButton = document.createElement('button')\n\n    panel.setAttribute('aria-label', ctx.content.get('panelAriaLabel'))\n    Object.assign(panel.style, {\n      position: 'absolute',\n      left: '760px',\n      top: '170px',\n      width: '430px',\n      minHeight: '250px',\n      padding: '28px',\n      border: '1px solid rgba(125, 211, 252, .65)',\n      borderRadius: '26px',\n      color: '#e0f2fe',\n      background: 'rgba(8, 47, 73, .92)',\n      boxShadow: '0 24px 70px rgba(2, 8, 23, .35)',\n      pointerEvents: 'auto'\n    })\n    Object.assign(instruction.style, {\n      margin: '0 0 20px',\n      fontSize: '23px',\n      fontWeight: '700',\n      lineHeight: '1.55'\n    })\n    Object.assign(feedback.style, {\n      minHeight: '50px',\n      margin: '0 0 22px',\n      color: '#bae6fd',\n      fontSize: '16px',\n      lineHeight: '1.6'\n    })\n    Object.assign(nextButton.style, {\n      display: 'none',\n      width: '100%',\n      minHeight: '48px',\n      border: '1px solid #7dd3fc',\n      borderRadius: '14px',\n      color: '#082f49',\n      background: '#7dd3fc',\n      font: '700 16px Microsoft YaHei, sans-serif',\n      cursor: 'pointer',\n      pointerEvents: 'auto'\n    })\n    instruction.textContent = ctx.content.get('instruction')\n    nextButton.textContent = ctx.content.get('continueLabel')\n    panel.append(instruction, feedback, nextButton)\n    ctx.dom.overlay.append(panel)\n\n    var ring = ctx.phaser.scene.add.graphics()\n    ring.lineStyle(4, 0x38bdf8, 0.8)\n    ring.strokeCircle(360, 350, 150)\n    ctx.phaser.overlay.add(ring)\n\n    var pulse = ctx.phaser.scene.tweens.add({\n      targets: ring,\n      alpha: { from: 0.25, to: 1 },\n      scaleX: { from: 0.92, to: 1.08 },\n      scaleY: { from: 0.92, to: 1.08 },\n      duration: 1100,\n      yoyo: true,\n      repeat: -1,\n      ease: 'Sine.InOut'\n    })\n\n    function showCompleted(messageKey) {\n      feedback.textContent = ctx.content.get(messageKey)\n      nextButton.style.display = 'block'\n    }\n\n    function activate() {\n      var activations = Number(ctx.localState.get('activations') || 0) + 1\n      ctx.localState.set('activations', activations)\n      ctx.courseState.set('introExplored', true)\n      ctx.phaser.scene.tweens.add({\n        targets: card.root,\n        angle: { from: -2, to: 2 },\n        scaleX: { from: 0.98, to: 1.04 },\n        scaleY: { from: 0.98, to: 1.04 },\n        duration: 180,\n        yoyo: true,\n        repeat: 2\n      })\n      showCompleted('successMessage')\n      ctx.emit('intro:complete', { activations: activations })\n    }\n\n    function continueCourse() {\n      ctx.actions.nextScene()\n    }\n\n    card.root.setInteractive({ useHandCursor: true })\n    card.root.on('pointerup', activate)\n    nextButton.addEventListener('click', continueCourse)\n\n    if (ctx.courseState.get('introExplored') === true) {\n      showCompleted('alreadyCompleteMessage')\n    }\n\n    ctx.capture.waitUntil(Promise.resolve())\n\n    return {\n      destroy: function () {\n        card.root.off('pointerup', activate)\n        nextButton.removeEventListener('click', continueCourse)\n        ctx.phaser.scene.tweens.killTweensOf(card.root)\n        pulse.stop()\n        panel.remove()\n      }\n    }\n  }\n})\n",
+        "content": {
+          "values": {
+            "panelAriaLabel": "第一场景互动说明",
+            "missingBindingError": "缺少 interactionCard 节点绑定，无法启动第一场景互动。",
+            "instruction": "点击左侧发光卡片，直接触发写在 scene.runtime 中的一次性互动。",
+            "successMessage": "完成：运行时为原生节点绑定了输入和 Tween，并把跨页事实写入 courseState。",
+            "alreadyCompleteMessage": "该步骤在本轮课程中已经完成；重播本页不会清空 courseState。",
+            "continueLabel": "进入场景互动挑战"
+          },
+          "metadata": {
+            "panelAriaLabel": {
+              "label": "互动面板无障碍名称"
+            },
+            "missingBindingError": {
+              "label": "节点绑定错误提示",
+              "maxLength": 120
+            },
+            "instruction": {
+              "label": "互动说明",
+              "multiline": true,
+              "maxLength": 220
+            },
+            "successMessage": {
+              "label": "完成反馈",
+              "multiline": true,
+              "maxLength": 240
+            },
+            "alreadyCompleteMessage": {
+              "label": "重播后的反馈",
+              "multiline": true,
+              "maxLength": 240
+            },
+            "continueLabel": {
+              "label": "继续按钮",
+              "maxLength": 40
+            }
+          }
+        },
+        "assets": {},
+        "nodeBindings": {
+          "interactionCard": "intro_interaction_card"
+        },
+        "staticFallback": {
+          "assetId": "asset_intro_runtime_fallback",
+          "coverage": "runtime-layer",
+          "layer": "overlay"
+        }
+      },
+      "interactions": [
+        {
+          "id": "intro_scene_entry_choreography",
+          "name": "入页节奏编排",
+          "enabled": true,
+          "trigger": {
+            "type": "scene.enter"
+          },
+          "conditions": [],
+          "actions": [
+            {
+              "id": "intro_title_enter",
+              "start": "after-previous",
+              "delayMs": 0,
+              "action": {
+                "type": "node.enter",
+                "nodeId": "intro_title",
+                "durationMs": 320,
+                "easing": "ease-out",
+                "effect": "fade"
+              }
+            },
+            {
+              "id": "intro_orbit_enter",
+              "start": "with-previous",
+              "delayMs": 80,
+              "action": {
+                "type": "node.enter",
+                "nodeId": "intro_orbit_image",
+                "durationMs": 420,
+                "easing": "ease-out",
+                "effect": "slide",
+                "direction": "right"
+              }
+            },
+            {
+              "id": "intro_card_enter",
+              "start": "after-previous",
+              "delayMs": 60,
+              "action": {
+                "type": "node.enter",
+                "nodeId": "intro_interaction_card",
+                "durationMs": 260,
+                "easing": "ease-out",
+                "effect": "scale"
+              }
+            },
+            {
+              "id": "intro_label_enter",
+              "start": "with-previous",
+              "delayMs": 120,
+              "action": {
+                "type": "node.enter",
+                "nodeId": "intro_action_label",
+                "durationMs": 220,
+                "easing": "ease-out",
+                "effect": "fade"
+              }
+            }
+          ]
+        },
+        {
+          "id": "intro_runtime_completion_exit",
+          "name": "操作完成后退出提示",
+          "enabled": true,
+          "trigger": {
+            "type": "runtime.event",
+            "scope": "scene",
+            "eventName": "intro:complete"
+          },
+          "conditions": [],
+          "actions": [
+            {
+              "id": "intro_label_exit",
+              "start": "after-previous",
+              "delayMs": 0,
+              "action": {
+                "type": "node.exit",
+                "nodeId": "intro_action_label",
+                "durationMs": 180,
+                "easing": "ease-in",
+                "effect": "fade"
+              }
+            }
+          ]
+        },
+        {
+          "id": "intro_after_exit_reveal_note",
+          "name": "退场完成后显示说明",
+          "enabled": true,
+          "trigger": {
+            "type": "animation.completed",
+            "actionId": "intro_label_exit"
+          },
+          "conditions": [],
+          "actions": [
+            {
+              "id": "intro_note_enter",
+              "start": "after-previous",
+              "delayMs": 80,
+              "action": {
+                "type": "node.enter",
+                "nodeId": "intro_editable_note",
+                "durationMs": 360,
+                "easing": "ease-out",
+                "effect": "slide",
+                "direction": "up"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene_challenge",
+      "name": "02 场景互动",
+      "backgroundColor": "#1e1b4b",
+      "nodes": [
+        {
+          "id": "challenge_title",
+          "name": "场景标题",
+          "x": 110,
+          "y": 92,
+          "width": 1060,
+          "height": 66,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "场景运行时：无需强制组件化",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 34,
+            "color": "#ede9fe",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "challenge_note",
+          "name": "教师提示",
+          "x": 250,
+          "y": 555,
+          "width": 780,
+          "height": 48,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "可先点击全局控制条“下一页”观察导航守卫，再完成题目。",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 17,
+            "color": "#ddd6fe",
+            "bold": false,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        }
+      ],
+      "runtime": {
+        "runtimeApiVersion": 1,
+        "enabled": true,
+        "renderMode": "dom",
+        "source": "CoursewareRuntime.define({\n  runtimeApiVersion: 1,\n\n  create: function (ctx) {\n    var panel = document.createElement('section')\n    var prompt = document.createElement('h2')\n    var options = document.createElement('div')\n    var feedback = document.createElement('p')\n    var continueButton = document.createElement('button')\n\n    panel.setAttribute('aria-label', ctx.content.get('panelAriaLabel'))\n    Object.assign(panel.style, {\n      position: 'absolute',\n      left: '155px',\n      top: '150px',\n      width: '970px',\n      minHeight: '390px',\n      padding: '34px 42px',\n      border: '1px solid rgba(196, 181, 253, .7)',\n      borderRadius: '30px',\n      color: '#f5f3ff',\n      background: 'linear-gradient(145deg, rgba(46, 16, 101, .95), rgba(30, 41, 59, .95))',\n      boxShadow: '0 28px 80px rgba(15, 23, 42, .4)',\n      pointerEvents: 'auto'\n    })\n    Object.assign(prompt.style, {\n      margin: '0 0 26px',\n      fontSize: '30px',\n      lineHeight: '1.45',\n      textAlign: 'center'\n    })\n    Object.assign(options.style, {\n      display: 'grid',\n      gridTemplateColumns: 'repeat(3, 1fr)',\n      gap: '18px'\n    })\n    Object.assign(feedback.style, {\n      minHeight: '58px',\n      margin: '26px 0 18px',\n      color: '#ddd6fe',\n      fontSize: '17px',\n      lineHeight: '1.6',\n      textAlign: 'center'\n    })\n    Object.assign(continueButton.style, {\n      display: 'none',\n      width: '260px',\n      minHeight: '48px',\n      margin: '0 auto',\n      border: '1px solid #c4b5fd',\n      borderRadius: '14px',\n      color: '#2e1065',\n      background: '#c4b5fd',\n      font: '700 16px Microsoft YaHei, sans-serif',\n      cursor: 'pointer',\n      pointerEvents: 'auto'\n    })\n\n    prompt.textContent = ctx.content.get('prompt')\n    continueButton.textContent = ctx.content.get('continueLabel')\n    panel.append(prompt, options, feedback, continueButton)\n    ctx.dom.overlay.append(panel)\n\n    var optionDefinitions = [\n      { key: 'optionA', correct: false },\n      { key: 'optionB', correct: true },\n      { key: 'optionC', correct: false }\n    ]\n    var optionButtons = optionDefinitions.map(function (definition) {\n      var button = document.createElement('button')\n      button.textContent = ctx.content.get(definition.key)\n      Object.assign(button.style, {\n        minHeight: '108px',\n        padding: '16px',\n        border: '1px solid rgba(196, 181, 253, .65)',\n        borderRadius: '18px',\n        color: '#f5f3ff',\n        background: 'rgba(76, 29, 149, .72)',\n        font: '700 19px/1.45 Microsoft YaHei, sans-serif',\n        cursor: 'pointer',\n        pointerEvents: 'auto'\n      })\n\n      var select = function () {\n        var attempts = Number(ctx.localState.get('attempts') || 0) + 1\n        ctx.localState.set('attempts', attempts)\n        if (definition.correct) {\n          ctx.courseState.set('challengePassed', true)\n          feedback.textContent = ctx.content.get('correctFeedback')\n          continueButton.style.display = 'block'\n          optionButtons.forEach(function (entry) { entry.button.disabled = true })\n          ctx.emit('challenge:passed', { attempts: attempts })\n          return\n        }\n        feedback.textContent = ctx.content\n          .get('wrongFeedbackTemplate')\n          .replace('{attempts}', String(attempts))\n      }\n\n      button.addEventListener('click', select)\n      options.append(button)\n      return { button: button, select: select }\n    })\n\n    function continueCourse() {\n      ctx.actions.nextScene()\n    }\n    continueButton.addEventListener('click', continueCourse)\n\n    if (ctx.courseState.get('challengePassed') === true) {\n      feedback.textContent = ctx.content.get('alreadyPassedFeedback')\n      continueButton.style.display = 'block'\n      optionButtons.forEach(function (entry) { entry.button.disabled = true })\n    } else {\n      feedback.textContent = ctx.content.get('initialFeedback')\n    }\n\n    ctx.capture.waitUntil(document.fonts ? document.fonts.ready : Promise.resolve())\n\n    return {\n      destroy: function () {\n        optionButtons.forEach(function (entry) {\n          entry.button.removeEventListener('click', entry.select)\n        })\n        continueButton.removeEventListener('click', continueCourse)\n        panel.remove()\n      }\n    }\n  }\n})\n",
+        "content": {
+          "values": {
+            "panelAriaLabel": "第二场景知识挑战",
+            "prompt": "哪一种实现最适合“只在当前场景使用一次、但效果很复杂”的互动？",
+            "optionA": "强制制作成全局组件",
+            "optionB": "直接写入 scene.runtime",
+            "optionC": "降级成静态图片",
+            "initialFeedback": "请选择一个方案。全局控制条“下一页”会经过导航守卫。",
+            "correctFeedback": "正确。一次性场景互动无需为了接入编辑器而组件化。",
+            "wrongFeedbackTemplate": "第 {attempts} 次尝试尚未命中：先判断是否真的需要复用。",
+            "alreadyPassedFeedback": "本轮课程已经通过；重播本页会重建界面，但保留 courseState。",
+            "continueLabel": "进入课程小结"
+          },
+          "metadata": {
+            "panelAriaLabel": {
+              "label": "挑战面板无障碍名称"
+            },
+            "prompt": {
+              "label": "题干",
+              "multiline": true,
+              "maxLength": 240
+            },
+            "optionA": {
+              "label": "选项 A",
+              "maxLength": 80
+            },
+            "optionB": {
+              "label": "选项 B",
+              "maxLength": 80
+            },
+            "optionC": {
+              "label": "选项 C",
+              "maxLength": 80
+            },
+            "initialFeedback": {
+              "label": "初始提示",
+              "multiline": true,
+              "maxLength": 180
+            },
+            "correctFeedback": {
+              "label": "正确反馈",
+              "multiline": true,
+              "maxLength": 180
+            },
+            "wrongFeedbackTemplate": {
+              "label": "错误反馈格式",
+              "description": "支持 {attempts}",
+              "multiline": true,
+              "maxLength": 180
+            },
+            "alreadyPassedFeedback": {
+              "label": "重播后的通过反馈",
+              "multiline": true,
+              "maxLength": 200
+            },
+            "continueLabel": {
+              "label": "继续按钮",
+              "maxLength": 40
+            }
+          }
+        },
+        "assets": {},
+        "staticFallback": {
+          "assetId": "asset_challenge_runtime_fallback",
+          "coverage": "full-scene",
+          "layer": "overlay"
+        }
+      },
+      "interactions": []
+    },
+    {
+      "id": "scene_summary",
+      "name": "03 课程小结",
+      "backgroundColor": "#052e2b",
+      "nodes": [
+        {
+          "id": "summary_title",
+          "name": "总结标题",
+          "x": 140,
+          "y": 112,
+          "width": 1000,
+          "height": 72,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "一个工程，五种承载方式",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 40,
+            "color": "#ccfbf1",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_card_scene_runtime",
+          "name": "场景运行时卡片",
+          "x": 92,
+          "y": 235,
+          "width": 330,
+          "height": 220,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "shape",
+          "shapeType": "rounded-rectangle",
+          "style": {
+            "fillColor": "#134e4a",
+            "fillOpacity": 1,
+            "borderColor": "#5eead4",
+            "borderOpacity": 1,
+            "borderWidth": 3,
+            "lineStyle": "solid",
+            "cornerRadius": 24,
+            "startArrow": "none",
+            "endArrow": "none"
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_card_global_runtime",
+          "name": "全局运行时卡片",
+          "x": 475,
+          "y": 235,
+          "width": 330,
+          "height": 220,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "shape",
+          "shapeType": "rounded-rectangle",
+          "style": {
+            "fillColor": "#164e63",
+            "fillOpacity": 1,
+            "borderColor": "#67e8f9",
+            "borderOpacity": 1,
+            "borderWidth": 3,
+            "lineStyle": "solid",
+            "cornerRadius": 24,
+            "startArrow": "none",
+            "endArrow": "none"
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_card_component",
+          "name": "全局组件卡片",
+          "x": 858,
+          "y": 235,
+          "width": 330,
+          "height": 220,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "shape",
+          "shapeType": "rounded-rectangle",
+          "style": {
+            "fillColor": "#312e81",
+            "fillOpacity": 1,
+            "borderColor": "#a5b4fc",
+            "borderOpacity": 1,
+            "borderWidth": 3,
+            "lineStyle": "solid",
+            "cornerRadius": 24,
+            "startArrow": "none",
+            "endArrow": "none"
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_scene_runtime_text",
+          "name": "场景运行时说明",
+          "x": 118,
+          "y": 262,
+          "width": 278,
+          "height": 164,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "scene.runtime\n一次性场景互动\n效果可以自由发挥",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 22,
+            "color": "#ccfbf1",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_global_runtime_text",
+          "name": "全局运行时说明",
+          "x": 501,
+          "y": 262,
+          "width": 278,
+          "height": 164,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "globalRuntime\n事件、状态与守卫\n普通翻页保持",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 22,
+            "color": "#cffafe",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_component_text",
+          "name": "全局组件说明",
+          "x": 884,
+          "y": 262,
+          "width": 278,
+          "height": 164,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "V3 全局组件\n可复用、可配置\n同一实例跨场景",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 22,
+            "color": "#e0e7ff",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        },
+        {
+          "id": "summary_footer",
+          "name": "总结句",
+          "x": 150,
+          "y": 500,
+          "width": 980,
+          "height": 72,
+          "visible": true,
+          "rotation": 0,
+          "opacity": 1,
+          "locked": false,
+          "type": "text",
+          "text": "所有人工可见文字仍然可编辑；其他互动逻辑不必为了编辑器而降级。",
+          "runs": [],
+          "style": {
+            "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
+            "fontSize": 24,
+            "color": "#99f6e4",
+            "bold": true,
+            "italic": false,
+            "underline": false,
+            "strike": false,
+            "highlightColor": null,
+            "align": "center",
+            "verticalAlign": "middle",
+            "writingMode": "horizontal",
+            "lineSpacing": 1.35,
+            "letterSpacing": 0,
+            "padding": 12,
+            "overflow": "shrink",
+            "backgroundColor": "#000000",
+            "backgroundOpacity": 0,
+            "cornerRadius": 0
+          },
+          "playbackInitialVisibility": "inherit"
+        }
+      ],
+      "interactions": []
+    }
+  ],
+  "assets": {
+    "asset_learning_orbit": {
+      "id": "asset_learning_orbit",
+      "filename": "learning-orbit.svg",
+      "mimeType": "image/svg+xml",
+      "path": "assets/learning-orbit.svg",
+      "byteLength": 929,
+      "width": 520,
+      "height": 420,
+      "kind": "image"
+    },
+    "asset_global_runtime_fallback": {
+      "id": "asset_global_runtime_fallback",
+      "filename": "global-runtime-fallback.svg",
+      "mimeType": "image/svg+xml",
+      "path": "assets/global-runtime-fallback.svg",
+      "byteLength": 655,
+      "width": 1280,
+      "height": 720,
+      "kind": "image"
+    },
+    "asset_intro_runtime_fallback": {
+      "id": "asset_intro_runtime_fallback",
+      "filename": "intro-runtime-fallback.svg",
+      "mimeType": "image/svg+xml",
+      "path": "assets/intro-runtime-fallback.svg",
+      "byteLength": 579,
+      "width": 1280,
+      "height": 720,
+      "kind": "image"
+    },
+    "asset_challenge_runtime_fallback": {
+      "id": "asset_challenge_runtime_fallback",
+      "filename": "challenge-runtime-fallback.svg",
+      "mimeType": "image/svg+xml",
+      "path": "assets/challenge-runtime-fallback.svg",
+      "byteLength": 1900,
+      "width": 1280,
+      "height": 720,
+      "kind": "image"
+    }
+  },
+  "componentPackages": {
+    "com.example.runtime-v3-global-controls@3.0.0": {
+      "packageId": "com.example.runtime-v3-global-controls",
+      "version": "3.0.0",
+      "name": "V3 全局课程控制条",
+      "manifestPath": "components/com.example.runtime-v3-global-controls@3.0.0/manifest.json",
+      "runtimePath": "components/com.example.runtime-v3-global-controls@3.0.0/runtime.js"
+    }
+  },
+  "globalRuntime": {
+    "runtimeApiVersion": 1,
+    "enabled": true,
+    "renderMode": "dom",
+    "source": "CoursewareRuntime.define({\n  runtimeApiVersion: 1,\n\n  create: function (ctx) {\n    var currentSceneId = ''\n    var statusKey = 'courseStarting'\n    var statusValues = {}\n\n    var panel = document.createElement('section')\n    var title = document.createElement('strong')\n    var progress = document.createElement('span')\n    var state = document.createElement('span')\n    var status = document.createElement('span')\n\n    panel.setAttribute('aria-label', ctx.content.get('ariaLabel'))\n    Object.assign(panel.style, {\n      position: 'absolute',\n      left: '24px',\n      top: '22px',\n      width: '620px',\n      minHeight: '82px',\n      display: 'grid',\n      gridTemplateColumns: '180px 1fr',\n      gap: '6px 16px',\n      alignItems: 'center',\n      padding: '12px 18px',\n      border: '1px solid rgba(125, 211, 252, .55)',\n      borderRadius: '18px',\n      color: '#e0f2fe',\n      background: 'linear-gradient(135deg, rgba(8, 47, 73, .94), rgba(15, 23, 42, .9))',\n      boxShadow: '0 18px 40px rgba(2, 8, 23, .28)',\n      pointerEvents: 'none'\n    })\n    Object.assign(title.style, {\n      gridRow: '1 / span 2',\n      color: '#7dd3fc',\n      fontSize: '18px',\n      letterSpacing: '.04em'\n    })\n    Object.assign(progress.style, { fontSize: '14px', fontWeight: '700' })\n    Object.assign(state.style, { color: '#bae6fd', fontSize: '13px' })\n    Object.assign(status.style, {\n      gridColumn: '1 / -1',\n      color: '#cbd5e1',\n      fontSize: '12px'\n    })\n    panel.append(title, progress, state, status)\n    ctx.dom.overlay.append(panel)\n\n    function sceneName(sceneId) {\n      var key = 'sceneName.' + sceneId\n      var all = ctx.content.all()\n      return Object.prototype.hasOwnProperty.call(all, key) ? all[key] : ''\n    }\n\n    function format(template, values) {\n      return Object.entries(values).reduce(function (result, entry) {\n        return result.replaceAll('{' + entry[0] + '}', String(entry[1]))\n      }, template)\n    }\n\n    function visitedScenes() {\n      var value = ctx.courseState.get('visitedSceneIds')\n      return Array.isArray(value) ? value : []\n    }\n\n    function render() {\n      var visited = visitedScenes()\n      var passed = ctx.courseState.get('challengePassed') === true\n      title.textContent = ctx.content.get('hudTitle')\n      progress.textContent = format(ctx.content.get('progressTemplate'), {\n        current: visited.length,\n        total: 3,\n        scene: sceneName(currentSceneId)\n      })\n      state.textContent = format(\n        passed\n          ? ctx.content.get('challengeComplete')\n          : ctx.content.get('challengePending'),\n        { count: Number(ctx.courseState.get('globalControls.uses') || 0) }\n      )\n      status.textContent = format(ctx.content.get('status.' + statusKey), statusValues)\n    }\n\n    function setStatus(key, values) {\n      statusKey = key\n      statusValues = values || {}\n      render()\n    }\n\n    if (!Array.isArray(ctx.courseState.get('visitedSceneIds'))) {\n      ctx.courseState.set('visitedSceneIds', [])\n    }\n\n    var disposers = []\n    disposers.push(ctx.events.on('course:start', function () {\n      setStatus('courseStarted')\n    }))\n    disposers.push(ctx.events.on('course:restart', function () {\n      setStatus('courseRestarted')\n    }))\n    disposers.push(ctx.events.on('scene:enter', function (event) {\n      currentSceneId = event.sceneId\n      var visited = visitedScenes()\n      if (!visited.includes(currentSceneId)) {\n        ctx.courseState.set('visitedSceneIds', visited.concat(currentSceneId))\n      }\n      setStatus('sceneEntered', { scene: sceneName(currentSceneId) })\n    }))\n    disposers.push(ctx.events.on('runtime:event', function (event) {\n      if (event.eventName === 'intro:complete') {\n        setStatus('introCompleted')\n      }\n      if (event.eventName === 'challenge:passed') {\n        setStatus('challengePassed')\n      }\n    }))\n    disposers.push(ctx.events.on('component:event', function (event) {\n      if (event.eventName !== 'control:used') return\n      var action = event.payload && typeof event.payload.action === 'string'\n        ? event.payload.action\n        : ''\n      var all = ctx.content.all()\n      var actionKey = 'action.' + action\n      var actionLabel = Object.prototype.hasOwnProperty.call(all, actionKey)\n        ? all[actionKey]\n        : ''\n      setStatus('componentUsed', { action: actionLabel })\n    }))\n    disposers.push(ctx.events.on('navigation:blocked', function () {\n      setStatus('navigationBlocked')\n    }))\n\n    var removeGuard = ctx.navigation.guard(function (request) {\n      if (\n        request.toSceneId === 'scene_summary' &&\n        ctx.courseState.get('challengePassed') !== true\n      ) {\n        setStatus('navigationBlocked')\n        return false\n      }\n      return true\n    })\n\n    ctx.capture.waitUntil(document.fonts ? document.fonts.ready : Promise.resolve())\n    render()\n\n    return {\n      destroy: function () {\n        removeGuard()\n        disposers.forEach(function (dispose) { dispose() })\n        panel.remove()\n      }\n    }\n  }\n})\n",
+    "content": {
+      "values": {
+        "ariaLabel": "课程全局状态面板",
+        "hudTitle": "Project V7 跨场景状态",
+        "progressTemplate": "已到访 {current}/{total} · {scene}",
+        "challengePending": "挑战状态：等待完成 · 全局组件操作 {count} 次",
+        "challengeComplete": "挑战状态：已经完成 · 全局组件操作 {count} 次",
+        "sceneName.scene_intro": "01 认识 V3",
+        "sceneName.scene_challenge": "02 场景互动",
+        "sceneName.scene_summary": "03 课程小结",
+        "status.courseStarting": "正在创建全局运行时",
+        "status.courseStarted": "课程已启动；全局状态将在普通翻页时保留",
+        "status.courseRestarted": "课程已重开；课程状态已清空并重新创建",
+        "status.sceneEntered": "已进入：{scene}",
+        "status.introCompleted": "场景运行时已完成原生节点绑定互动",
+        "status.challengePassed": "挑战已完成；通往总结页的导航守卫已放行",
+        "status.componentUsed": "全局组件执行：{action}",
+        "status.navigationBlocked": "请先完成第二场景的互动，再进入课程小结",
+        "action.previous": "上一页",
+        "action.replay": "重播本页",
+        "action.next": "下一页",
+        "action.restart": "重开课程"
+      },
+      "metadata": {
+        "ariaLabel": {
+          "label": "全局面板无障碍名称"
+        },
+        "hudTitle": {
+          "label": "全局 HUD 标题",
+          "maxLength": 80
+        },
+        "progressTemplate": {
+          "label": "进度格式",
+          "description": "支持 {current}、{total}、{scene}",
+          "maxLength": 120
+        },
+        "challengePending": {
+          "label": "挑战未完成状态"
+        },
+        "challengeComplete": {
+          "label": "挑战已完成状态"
+        },
+        "status.navigationBlocked": {
+          "label": "导航阻止提示",
+          "multiline": true,
+          "maxLength": 200
+        }
+      }
+    },
+    "assets": {},
+    "staticFallback": {
+      "assetId": "asset_global_runtime_fallback",
+      "coverage": "runtime-layer",
+      "layer": "overlay"
+    }
+  },
+  "globalLayer": [
+    {
+      "node": {
+        "id": "global_controls_instance",
+        "name": "V3 全局课程控制条",
+        "x": 110,
+        "y": 620,
+        "width": 1060,
+        "height": 78,
+        "visible": true,
+        "rotation": 0,
+        "opacity": 1,
+        "locked": false,
+        "type": "external-component",
+        "component": {
+          "packageId": "com.example.runtime-v3-global-controls",
+          "version": "3.0.0"
+        },
+        "props": {
+          "content": {
+            "title": "V3 全局控制台",
+            "status": {
+              "ready": "全局组件已创建；翻页后实例和操作次数都会保留"
+            }
+          },
+          "accent": "#7dd3fc"
+        },
+        "playbackInitialVisibility": "inherit"
+      },
+      "layer": "overlay",
+      "visibility": {
+        "mode": "all",
+        "sceneIds": []
+      }
+    }
+  ],
+  "globalInteractions": [],
+  "media": {
+    "audio": {
+      "defaultMuted": false,
+      "masterVolume": 1,
+      "channelVolumes": {
+        "music": 1,
+        "narration": 1,
+        "sfx": 1,
+        "ui": 1,
+        "video": 1
+      },
+      "sounds": {},
+      "narrationDucking": {
+        "enabled": true,
+        "musicVolume": 0.3,
+        "fadeMs": 250
+      }
+    }
+  },
+  "playback": {
+    "controls": "none",
+    "keyboardNavigation": true
+  }
+}

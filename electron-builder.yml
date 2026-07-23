@@ -1,0 +1,29 @@
+appId: com.alepha.phaser-courseware-editor
+productName: Phaser Courseware Editor
+asar: true
+asarUnpack:
+  - "**/*.node"
+directories:
+  output: release
+files:
+  - dist-electron/**
+  - dist-renderer/**
+  - dist-player/**
+  - resources/icons/**
+  - package.json
+win:
+  icon: resources/icons/icon.ico
+  executableName: PhaserCoursewareEditor
+  target:
+    - target: portable
+      arch:
+        - x64
+    - target: dir
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+portable:
+  artifactName: PhaserCoursewareEditor-Portable-${version}.${ext}
+artifactName: PhaserCoursewareEditor-${version}-${arch}.${ext}
+npmRebuild: false
+publish: null

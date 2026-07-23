@@ -1,0 +1,37 @@
+export const APP_NAME = 'Phaser 课件编辑器'
+export const APP_VERSION = '1.6.0'
+export const CANVAS_WIDTH = 1280 as const
+export const CANVAS_HEIGHT = 720 as const
+export const PROJECT_SCHEMA_VERSION = 7 as const
+export const COMPONENT_SCHEMA_VERSION = 4 as const
+export const COMPONENT_RUNTIME_API_VERSION = 4 as const
+export const MAX_HISTORY_STEPS = 50
+/** Product guidance only; projects remain valid beyond this point. */
+export const RECOMMENDED_PROJECT_SCENES = 200
+/** Defensive corruption/abuse guard, not a normal course-authoring limit. */
+export const MAX_PROJECT_SCENES = 1000
+/** Product guidance only; component-heavy scenes usually stay well below this. */
+export const RECOMMENDED_SCENE_NODES = 250
+/** Defensive corruption/abuse guard, not a normal scene-authoring limit. */
+export const MAX_SCENE_NODES = 1000
+/** Defensive guard for authored presentation states inside one scene. */
+export const MAX_SCENE_PRESENTATION_STATES = 100
+export const MIN_NODE_SIZE = 16
+export const MIN_VISIBLE_NODE_EDGE = 20
+export const SUPPORTED_IMAGE_MIME_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+] as const
+export const SUPPORTED_AUDIO_MIME_TYPES = [
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/wav',
+  'audio/mp4',
+] as const
+export const SUPPORTED_VIDEO_MIME_TYPES = [
+  'video/mp4',
+  'video/webm',
+] as const

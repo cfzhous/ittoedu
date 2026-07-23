@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "runtimeApiVersion": 2,
+  "id": "com.example.sample-counter",
+  "name": "示例计数器",
+  "version": "2.0.0",
+  "description": "用于验证组件导入、拖拽、交互和导出的示例组件",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.png",
+  "defaultSize": {
+    "width": 480,
+    "height": 280
+  },
+  "minSize": {
+    "width": 160,
+    "height": 100
+  },
+  "preserveAspectRatio": true,
+  "assets": {},
+  "defaultProps": {
+    "title": "课堂计数器",
+    "hint": "点击按钮改变数值",
+    "initialValue": 0
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "title",
+        "label": "组件标题",
+        "type": "text",
+        "maxLength": 24
+      },
+      {
+        "key": "hint",
+        "label": "操作提示",
+        "type": "text",
+        "maxLength": 40
+      },
+      {
+        "key": "initialValue",
+        "label": "初始数值",
+        "type": "number",
+        "min": -999,
+        "max": 999,
+        "step": 1
+      }
+    ]
+  },
+  "presets": [
+    {
+      "id": "quiz-score",
+      "label": "答题计分",
+      "description": "从 0 分开始记录答题得分",
+      "props": {
+        "title": "答题计分器",
+        "hint": "答对加分，答错扣分",
+        "initialValue": 0
+      }
+    },
+    {
+      "id": "attendance",
+      "label": "课堂参与",
+      "description": "从当前人数继续计数",
+      "props": {
+        "title": "课堂参与人数",
+        "hint": "每次参与后点击加号",
+        "initialValue": 10
+      }
+    }
+  ]
+}

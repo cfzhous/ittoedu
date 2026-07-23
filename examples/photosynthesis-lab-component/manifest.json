@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "runtimeApiVersion": 1,
+  "id": "com.alepha.photosynthesis-lab",
+  "name": "光合作用互动实验室",
+  "version": "1.0.0",
+  "description": "包含能量路径探索、参数实验和拖拽分类挑战的三模式互动教学组件",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.png",
+  "defaultSize": {
+    "width": 1080,
+    "height": 460
+  },
+  "minSize": {
+    "width": 540,
+    "height": 230
+  },
+  "preserveAspectRatio": true,
+  "assets": {},
+  "defaultProps": {
+    "page": 1
+  }
+}

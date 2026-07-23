@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 3,
+  "runtimeApiVersion": 3,
+  "supportedScopes": [
+    "scene"
+  ],
+  "id": "com.example.render-host-legacy-phaser",
+  "name": "V3 Phaser 兼容仪表",
+  "version": "3.0.0",
+  "description": "用于验证历史顶层 Phaser 组件上下文继续可用",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.svg",
+  "defaultSize": {
+    "width": 720,
+    "height": 390
+  },
+  "minSize": {
+    "width": 360,
+    "height": 220
+  },
+  "preserveAspectRatio": true,
+  "assets": {},
+  "defaultProps": {
+    "content": {
+      "title": "V3 Phaser 组件兼容计",
+      "instruction": "点击仪表盘，验证历史组件输入与更新仍然有效。",
+      "readyStatus": "兼容实例已就绪",
+      "activatedStatusTemplate": "第 {count} 次交互：旧组件 API 仍可用",
+      "centerLabel": "V3"
+    },
+    "accent": "#f59e0b",
+    "background": "#1e1b4b"
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "content.title",
+        "label": "仪表标题",
+        "type": "text",
+        "maxLength": 60
+      },
+      {
+        "key": "content.instruction",
+        "label": "操作说明",
+        "type": "textarea",
+        "maxLength": 160
+      },
+      {
+        "key": "content.centerLabel",
+        "label": "中心标识",
+        "type": "text",
+        "maxLength": 12
+      },
+      {
+        "key": "accent",
+        "label": "强调色",
+        "type": "color"
+      },
+      {
+        "key": "background",
+        "label": "背景色",
+        "type": "color"
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect x="62" y="122" width="1156" height="432" rx="30" fill="#082f49" stroke="#38bdf8" stroke-width="2"/>
+  <text x="92" y="176" fill="#e0f2fe" font-family="Microsoft YaHei,sans-serif" font-size="24" font-weight="700">Runtime API 2 · Phaser 一次性互动</text>
+  <ellipse cx="874" cy="338" rx="245" ry="118" fill="none" stroke="#7dd3fc" stroke-width="3" opacity=".65"/>
+  <circle cx="874" cy="338" r="38" fill="#fef08a"/>
+  <circle cx="1080" cy="402" r="25" fill="#38bdf8"/>
+</svg>
