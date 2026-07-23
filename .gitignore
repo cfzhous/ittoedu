@@ -2,8 +2,7 @@ node_modules/
 dist-electron/
 dist-player/
 dist-renderer/
-release/*
-!release/*.exe
+release/
 artifacts/
 output/
 test-results/
