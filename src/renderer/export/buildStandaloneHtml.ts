@@ -1,6 +1,10 @@
 import type { ExportPayload } from '../../shared/componentTypes'
+import type { PublishedLessonPayload } from '../../shared/publishedLessonTypes'
 import { jsonToBase64 } from './base64'
-import { assertV3ExportDependencies } from './v3ExportSupport'
+import {
+  buildPublishedLessonPayload,
+  isPublishedLessonPayload,
+} from './buildPublishedLesson'
 
 export interface StandaloneHtmlOptions {
   playerBundle: string
@@ -196,24 +200,26 @@ function normalizeOptions(
 }
 
 export function buildStandaloneHtml(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundle: string,
 ): string
 export function buildStandaloneHtml(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   options: StandaloneHtmlOptions,
 ): string
 export function buildStandaloneHtml(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundleOrOptions: string | StandaloneHtmlOptions,
 ): string {
   const { playerBundle, lang } = normalizeOptions(playerBundleOrOptions)
   if (!playerBundle.trim()) {
     throw new Error('Player Runtime 为空，无法生成独立 HTML')
   }
-  assertV3ExportDependencies(payload)
+  const published = isPublishedLessonPayload(payload)
+    ? payload
+    : buildPublishedLessonPayload(payload)
 
-  const encodedPayload = jsonToBase64(payload)
+  const encodedPayload = jsonToBase64(published)
   const payloadAssignment = escapeScriptContents(
     `window.__H5_LESSON_PAYLOAD__=${JSON.stringify(encodedPayload)};`,
   )
@@ -224,12 +230,12 @@ export function buildStandaloneHtml(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; worker-src blob:">
-  <title>${escapeHtmlText(payload.project.title)}</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob: 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src data: blob:; worker-src blob:">
+  <title>${escapeHtmlText(published.title)}</title>
   <style>${PLAYER_STYLES}</style>
 </head>
 <body>
-  <div id="lesson-root" aria-label="${escapeHtmlText(payload.project.title)}"></div>
+  <div id="lesson-root" aria-label="${escapeHtmlText(published.title)}"></div>
   <script>${payloadAssignment}</script>
   <script>${safePlayerBundle}</script>
 </body>

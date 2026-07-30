@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link2, MousePointerClick, Play, Plus, Trash2, Workflow } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  Copy,
+  Link2,
+  MousePointerClick,
+  Play,
+  Plus,
+  Trash2,
+  Workflow,
+} from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { ensureScenePresentation } from '../../shared/presentation'
 import {
@@ -136,17 +146,24 @@ export interface InteractionEditorProps {
   sourceScope?: 'scene' | 'global'
   sourceNodes?: readonly SceneNode[]
   sourceRules?: readonly InteractionRule[]
+  selectedNodeId?: string | null
   activeStateId: string | null
   scenes: ReadonlyArray<
     Pick<SceneDocument, 'id' | 'name' | 'presentation'>
   >
   sounds: Readonly<Record<string, SoundDefinition>>
+  ruleWarnings?: Readonly<Record<string, readonly string[]>>
+  onOpenClickRules?(): void
+  onPrepareMotionTargets?(nodeIds: string[]): void
+  onRunPreview?(): void
   onAddRule(rule: InteractionRule): void
   onUpdateRule(
     ruleId: string,
     patch: Partial<Omit<InteractionRule, 'id'>>,
   ): void
   onDeleteRule(ruleId: string): void
+  onDuplicateRule?(ruleId: string): void
+  onMoveRule?(ruleId: string, direction: -1 | 1): void
 }
 
 function sceneScope(rule: InteractionRule): string {
@@ -330,6 +347,269 @@ function defaultAutomationTrigger(
 
 function automationTriggerLabel(type: AutomationTriggerType): string {
   return AUTOMATION_TRIGGER_OPTIONS.find((option) => option.value === type)?.label ?? type
+}
+
+type RuleListFilter = 'all' | 'selected-node' | 'enabled' | 'disabled' | 'warnings'
+type RuleTemplateId =
+  | 'scene-enter-sequence'
+  | 'audio-ended-next'
+  | 'video-ended-next'
+  | 'component-event-state'
+  | 'animation-ended-next'
+
+interface RuleDescriptionContext {
+  nodes: ReadonlyMap<string, string>
+  states: ReadonlyMap<string, string>
+  scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
+  sounds: ReadonlyMap<string, string>
+  animationSteps: ReadonlyMap<string, string>
+}
+
+const RULE_TEMPLATE_OPTIONS: Array<{
+  value: RuleTemplateId
+  label: string
+  description: string
+  needs: 'nodes' | 'sounds' | 'videos' | 'components-and-states' | 'animations'
+}> = [
+  {
+    value: 'scene-enter-sequence',
+    label: '进入场景后，元素依次出现',
+    description: '让当前画面前 6 个元素按顺序淡入，可在创建后继续增删动作。',
+    needs: 'nodes',
+  },
+  {
+    value: 'audio-ended-next',
+    label: '声音结束后，进入下一场景',
+    description: '适合旁白或讲解音频播放完成后自动继续。',
+    needs: 'sounds',
+  },
+  {
+    value: 'video-ended-next',
+    label: '视频结束后，进入下一场景',
+    description: '循环视频不会自然触发结束事件，创建后请检查冲突提示。',
+    needs: 'videos',
+  },
+  {
+    value: 'component-event-state',
+    label: '组件完成后，切换状态',
+    description: '监听组件 complete 事件，并切换到当前场景的另一个状态。',
+    needs: 'components-and-states',
+  },
+  {
+    value: 'animation-ended-next',
+    label: '动画完成后，进入下一场景',
+    description: '监听一个现有入场或退场动作正常完成。',
+    needs: 'animations',
+  },
+]
+
+function namedReference(
+  values: ReadonlyMap<string, string>,
+  id: string,
+  fallback: string,
+): string {
+  return values.get(id) ?? `${fallback}（${id || '未设置'}）`
+}
+
+function describeTrigger(
+  trigger: InteractionTrigger,
+  context: RuleDescriptionContext,
+): string {
+  switch (trigger.type) {
+    case 'node.click':
+      return `单击“${namedReference(context.nodes, trigger.nodeId, '缺失元素')}”`
+    case 'scene.enter':
+      return '进入当前场景'
+    case 'presentation.enter':
+      return `进入状态“${namedReference(context.states, trigger.stateId, '缺失状态')}”`
+    case 'node.activated':
+      return `元素“${namedReference(context.nodes, trigger.nodeId, '缺失元素')}”在稳定画面中被激活`
+    case 'animation.completed':
+      return `动画“${namedReference(
+        context.animationSteps,
+        trigger.actionId,
+        '缺失动作',
+      )}”完成`
+    case 'component.event':
+      return `组件“${namedReference(context.nodes, trigger.nodeId, '缺失组件')}”发出 ${trigger.eventName || '未命名'} 事件`
+    case 'runtime.event':
+      return `${trigger.scope === 'global' ? '全局' : '当前场景'}运行时发出 ${trigger.eventName || '未命名'} 事件`
+    case 'audio.ended':
+      return `声音“${namedReference(context.sounds, trigger.soundId, '缺失声音')}”播放结束`
+    case 'video.started':
+      return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”开始播放`
+    case 'video.paused':
+      return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”暂停`
+    case 'video.ended':
+      return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”播放结束`
+    case 'video.time':
+      return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”播放到 ${trigger.seconds} 秒`
+  }
+}
+
+function describeConditions(
+  rule: InteractionRule,
+  context: RuleDescriptionContext,
+): string {
+  if (rule.conditions.length === 0) return '无需附加条件'
+  return rule.conditions.map((condition) => {
+    if (condition.type === 'scene.in') {
+      return `当前场景是 ${condition.sceneIds.map((sceneId) => {
+        const scene = context.scenes.find((item) => item.id === sceneId)
+        return `“${scene?.name ?? `缺失场景（${sceneId}）`}”`
+      }).join(' 或 ')}`
+    }
+    return `当前状态是 ${condition.stateIds.map((stateId) => (
+      `“${namedReference(context.states, stateId, '缺失状态')}”`
+    )).join(' 或 ')}`
+  }).join('，并且 ')
+}
+
+function describeAudioTarget(
+  target: AudioActionTarget,
+  context: RuleDescriptionContext,
+): string {
+  if (target.kind === 'all') return '全部声音'
+  if (target.kind === 'channel') {
+    return `${AUDIO_CHANNELS.find(([channel]) => channel === target.channel)?.[1] ?? target.channel}声道`
+  }
+  return `声音“${namedReference(context.sounds, target.soundId, '缺失声音')}”`
+}
+
+function describeAction(
+  action: InteractionAction,
+  context: RuleDescriptionContext,
+): string {
+  switch (action.type) {
+    case 'node.enter': {
+      const target = namedReference(context.nodes, action.nodeId, '缺失元素')
+      const effect = action.effect === 'slide'
+        ? `从${MOTION_DIRECTIONS.find(({ value }) => value === action.direction)?.label ?? action.direction}滑入`
+        : action.effect === 'fade'
+          ? '淡入'
+          : action.effect === 'scale'
+            ? '缩放出现'
+            : '立即出现'
+      return `让“${target}”${effect}${action.effect === 'none' ? '' : `（${action.durationMs} 毫秒）`}`
+    }
+    case 'node.exit': {
+      const target = namedReference(context.nodes, action.nodeId, '缺失元素')
+      const effect = action.effect === 'slide'
+        ? `向${MOTION_DIRECTIONS.find(({ value }) => value === action.direction)?.label ?? action.direction}滑出`
+        : action.effect === 'fade'
+          ? '淡出'
+          : action.effect === 'scale'
+            ? '缩放退出'
+            : '立即隐藏'
+      return `让“${target}”${effect}${action.effect === 'none' ? '' : `（${action.durationMs} 毫秒）`}`
+    }
+    case 'presentation.set':
+      return `切换到状态“${namedReference(context.states, action.stateId, '缺失状态')}”`
+    case 'scene.go': {
+      const targetScene = context.scenes.find((scene) => scene.id === action.sceneId)
+      const targetState = action.targetStateId
+        ? targetScene?.presentation?.states.find((state) => state.id === action.targetStateId)
+        : undefined
+      return `跳转到场景“${targetScene?.name ?? `缺失场景（${action.sceneId}）`}”${
+        action.targetStateId
+          ? `的状态“${targetState?.name ?? `缺失状态（${action.targetStateId}）`}”`
+          : ''
+      }`
+    }
+    case 'scene.next':
+      return '进入下一场景'
+    case 'scene.previous':
+      return '返回上一场景'
+    case 'scene.replay':
+      return '重播当前场景'
+    case 'course.restart':
+      return '重新开始课程'
+    case 'audio.play':
+      return `播放声音“${namedReference(context.sounds, action.soundId, '缺失声音')}”`
+    case 'audio.pause':
+      return `暂停${describeAudioTarget(action.target, context)}`
+    case 'audio.resume':
+      return `继续${describeAudioTarget(action.target, context)}`
+    case 'audio.stop':
+      return `停止${describeAudioTarget(action.target, context)}`
+    case 'audio.toggle-mute':
+      return `切换${describeAudioTarget(action.target, context)}的静音状态`
+    case 'video.play':
+      return `播放视频“${namedReference(context.nodes, action.nodeId, '缺失视频')}”`
+    case 'video.pause':
+      return `暂停视频“${namedReference(context.nodes, action.nodeId, '缺失视频')}”`
+    case 'video.restart':
+      return `重播视频“${namedReference(context.nodes, action.nodeId, '缺失视频')}”`
+    case 'video.stop':
+      return `停止视频“${namedReference(context.nodes, action.nodeId, '缺失视频')}”`
+    case 'video.toggle':
+      return `切换视频“${namedReference(context.nodes, action.nodeId, '缺失视频')}”的播放状态`
+    case 'video.seek':
+      return `把视频“${namedReference(context.nodes, action.nodeId, '缺失视频')}”跳转到 ${action.seconds} 秒`
+  }
+}
+
+function actionSequenceLead(
+  step: InteractionActionStep,
+  index: number,
+): string {
+  const delay = step.delayMs > 0 ? `延迟 ${step.delayMs} 毫秒` : ''
+  if (index === 0) return delay ? `${delay}后` : '立即'
+  if (step.start === 'with-previous') {
+    return delay ? `与上一步同时计时，${delay}后开始` : '与上一步同时开始'
+  }
+  return delay ? `等待上一组完成，再${delay}后开始` : '等待上一组完成'
+}
+
+function describeActionSequence(
+  actions: readonly InteractionActionStep[],
+  context: RuleDescriptionContext,
+): string {
+  return actions.map((step, index) => (
+    `${actionSequenceLead(step, index)}：${describeAction(step.action, context)}`
+  )).join('；')
+}
+
+function ruleReferencesNode(
+  rule: InteractionRule,
+  nodeId: string,
+  allRules: readonly InteractionRule[],
+): boolean {
+  if ('nodeId' in rule.trigger && rule.trigger.nodeId === nodeId) return true
+  if (rule.actions.some((step) => (
+    'nodeId' in step.action && step.action.nodeId === nodeId
+  ))) return true
+  if (rule.trigger.type !== 'animation.completed') return false
+  const completedActionId = rule.trigger.actionId
+  const sourceStep = allRules
+    .flatMap((item) => item.actions)
+    .find((step) => step.id === completedActionId)
+  return Boolean(
+    sourceStep &&
+    'nodeId' in sourceStep.action &&
+    sourceStep.action.nodeId === nodeId,
+  )
+}
+
+function ruleTemplateUnavailable(
+  option: (typeof RULE_TEMPLATE_OPTIONS)[number],
+  counts: {
+    nodes: number
+    sounds: number
+    videos: number
+    components: number
+    states: number
+    animations: number
+  },
+): boolean {
+  switch (option.needs) {
+    case 'nodes': return counts.nodes === 0
+    case 'sounds': return counts.sounds === 0
+    case 'videos': return counts.videos === 0
+    case 'components-and-states':
+      return counts.components === 0 || counts.states < 2
+    case 'animations': return counts.animations === 0
+  }
 }
 
 function missingOption(
@@ -1109,7 +1389,7 @@ function ActionEditor({
         className="secondary-button secondary-button--danger"
         disabled={rule.actions.length <= 1 || referencedByCompletion}
         title={referencedByCompletion
-          ? '该动作正被“动画完成”自动化引用，请先更改触发器。'
+          ? '该动作正被“动画完成”规则引用，请先更改触发器。'
           : undefined}
         aria-label={`删除动作 ${actionIndex + 1}`}
         onClick={onRemove}
@@ -1213,7 +1493,7 @@ export function InteractionEditor({
       </h3>
       <p className="property-hint">
         {isVideoNode
-          ? '视频表面点击默认只用于播放控制。状态、声音和场景变化请使用右侧“自动化”中的视频开始、暂停、结束或时间点触发。'
+          ? '视频表面点击默认只用于播放控制。状态、声音和场景变化请在专业模式的“互动与动画”中使用视频开始、暂停、结束或时间点触发。'
           : `为“${selectedNode.name}”配置单击后按顺序执行的动作。`}
       </p>
 
@@ -1252,7 +1532,7 @@ export function InteractionEditor({
       {isVideoNode && rules.length > 0 ? (
         <p className="property-hint" role={videoOwnsClick ? 'alert' : 'status'}>
           {videoOwnsClick
-            ? '该视频包含旧版点击规则，但播放点击或画布控件正在占用视频表面，规则不会接收点击。请删除规则并改用场景自动化或独立热点。'
+            ? '该视频包含旧版点击规则，但播放点击或画布控件正在占用视频表面，规则不会接收点击。请删除规则并改用视频事件规则或独立热点。'
             : '以下是旧工程保留的视频点击规则。视频关闭播放点击和画布控件时仍可兼容执行，但新工程不再创建此类规则。'}
         </p>
       ) : null}
@@ -1375,7 +1655,7 @@ export function InteractionEditor({
                 aria-label={`删除单击规则 ${ruleIndex + 1}`}
                 disabled={rule.actions.some((step) => completionActionIds.has(step.id))}
                 title={rule.actions.some((step) => completionActionIds.has(step.id))
-                  ? '该规则的动画正被“动画完成”自动化引用，请先更改触发器。'
+                  ? '该规则的动画正被“动画完成”规则引用，请先更改触发器。'
                   : undefined}
                 onClick={() => onDeleteRule(rule.id)}
               >
@@ -1399,12 +1679,19 @@ export function SceneAutomationEditor({
   sourceScope = 'scene',
   sourceNodes,
   sourceRules,
+  selectedNodeId = null,
   activeStateId,
   scenes,
   sounds,
+  ruleWarnings,
+  onOpenClickRules,
+  onPrepareMotionTargets,
+  onRunPreview,
   onAddRule,
   onUpdateRule,
   onDeleteRule,
+  onDuplicateRule,
+  onMoveRule,
 }: SceneAutomationEditorProps) {
   const availableNodes = sourceNodes ?? scene.nodes
   const allRules = sourceRules ?? scene.interactions
@@ -1449,9 +1736,25 @@ export function SceneAutomationEditor({
   const rules = allRules.filter(isAutomationRule)
   const suggestedStateId = states.find((state) => state.id !== activeStateId)?.id ??
     states[0]?.id ?? ''
+  const visibleMotionNodes = useMemo(
+    () => availableNodes.filter((node) => node.visible).slice(0, 6),
+    [availableNodes],
+  )
+  const descriptionContext = useMemo<RuleDescriptionContext>(() => ({
+    nodes: new Map(availableNodes.map((node) => [node.id, node.name])),
+    states: new Map(states.map((state) => [state.id, state.name])),
+    scenes,
+    sounds: new Map(soundList.map((sound) => [sound.id, sound.name])),
+    animationSteps: new Map(animationSteps.map((step) => [step.id, step.label])),
+  }), [animationSteps, availableNodes, scenes, soundList, states])
   const [newTriggerType, setNewTriggerType] = useState<AutomationTriggerType>(
     'scene.enter',
   )
+  const [selectedTemplateId, setSelectedTemplateId] = useState<RuleTemplateId>(
+    'scene-enter-sequence',
+  )
+  const [ruleFilter, setRuleFilter] = useState<RuleListFilter>('all')
+  const [ruleQuery, setRuleQuery] = useState('')
   const triggerTargets = {
     stateId: states[0]?.id,
     soundId: soundList[0]?.id,
@@ -1475,9 +1778,100 @@ export function SceneAutomationEditor({
     nodes: availableNodes.length,
     animations: animationSteps.length,
   }
+  const templateCounts = {
+    nodes: visibleMotionNodes.length,
+    sounds: soundList.length,
+    videos: videoNodes.length,
+    components: componentNodes.length,
+    states: states.length,
+    animations: animationSteps.length,
+  }
   const selectedTriggerOption = AUTOMATION_TRIGGER_OPTIONS.find(
     (option) => option.value === newTriggerType,
   )!
+  const selectedTemplateOption = RULE_TEMPLATE_OPTIONS.find(
+    (option) => option.value === selectedTemplateId,
+  )!
+  const ruleWarningsById = useMemo(() => new Map(rules.map((rule) => {
+    const warnings = [...(ruleWarnings?.[rule.id] ?? [])]
+    const navigationIndex = rule.actions.findIndex(isTerminalActionStep)
+    if (navigationIndex >= 0 && navigationIndex < rule.actions.length - 1) {
+      warnings.push('场景跳转、重播或重开会结束当前规则，必须放在最后一个独立动作组。')
+    }
+    for (const step of rule.actions) {
+      if (!isNodeMotionAction(step.action) || step.action.type !== 'node.enter') continue
+      const targetNodeId = step.action.nodeId
+      const node = availableNodes.find((item) => item.id === targetNodeId)
+      if (node && node.playbackInitialVisibility !== 'hidden') {
+        warnings.push(
+          `元素“${node.name}”尚未设置为播放前隐藏，入场动作触发前可能已经可见。`,
+        )
+      }
+    }
+    if (rule.trigger.type === 'animation.completed') {
+      const completedActionId = rule.trigger.actionId
+      if (rule.actions.some((step) => step.id === completedActionId)) {
+        warnings.push('该规则正在等待自身动画完成，会形成无法启动的循环。')
+      }
+    }
+    return [rule.id, [...new Set(warnings)]] as const
+  })), [availableNodes, ruleWarnings, rules])
+  const normalizedQuery = ruleQuery.trim().toLocaleLowerCase('zh-CN')
+  const filteredRules = rules.filter((rule) => {
+    const warnings = ruleWarningsById.get(rule.id) ?? []
+    if (ruleFilter === 'selected-node') {
+      if (!selectedNodeId || !ruleReferencesNode(rule, selectedNodeId, allRules)) {
+        return false
+      }
+    } else if (ruleFilter === 'enabled' && !rule.enabled) {
+      return false
+    } else if (ruleFilter === 'disabled' && rule.enabled) {
+      return false
+    } else if (ruleFilter === 'warnings' && warnings.length === 0) {
+      return false
+    }
+    if (!normalizedQuery) return true
+    const searchable = [
+      rule.name,
+      describeTrigger(rule.trigger, descriptionContext),
+      describeConditions(rule, descriptionContext),
+      describeActionSequence(rule.actions, descriptionContext),
+    ].join(' ').toLocaleLowerCase('zh-CN')
+    return searchable.includes(normalizedQuery)
+  })
+
+  useEffect(() => {
+    if (ruleFilter === 'selected-node' && !selectedNodeId) setRuleFilter('all')
+  }, [ruleFilter, selectedNodeId])
+
+  useEffect(() => {
+    if (!ruleTemplateUnavailable(selectedTemplateOption, templateCounts)) return
+    const fallback = RULE_TEMPLATE_OPTIONS.find(
+      (option) => !ruleTemplateUnavailable(option, templateCounts),
+    )
+    if (fallback) setSelectedTemplateId(fallback.value)
+  }, [
+    selectedTemplateOption,
+    templateCounts.animations,
+    templateCounts.components,
+    templateCounts.nodes,
+    templateCounts.sounds,
+    templateCounts.states,
+    templateCounts.videos,
+  ])
+
+  const defaultConditions = (): InteractionRule['conditions'] => (
+    activeStateId
+      ? [
+          ...(sourceScope === 'global'
+            ? [{ type: 'scene.in' as const, sceneIds: [scene.id] }]
+            : []),
+          { type: 'presentation.in', stateIds: [activeStateId] },
+        ]
+      : sourceScope === 'global'
+        ? [{ type: 'scene.in', sceneIds: [scene.id] }]
+        : []
+  )
 
   const addAutomationRule = () => {
     if (automationTriggerUnavailable(selectedTriggerOption, triggerCounts)) return
@@ -1486,80 +1880,314 @@ export function SceneAutomationEditor({
       : defaultAction('scene.next', actionTargets)
     onAddRule({
       id: `interaction_${nanoid()}`,
-      name: `${automationTriggerLabel(newTriggerType)}自动化`,
+      name: `${automationTriggerLabel(newTriggerType)}规则`,
       enabled: true,
       trigger: defaultAutomationTrigger(newTriggerType, triggerTargets),
-      conditions: activeStateId
-        ? [
-            ...(sourceScope === 'global'
-              ? [{ type: 'scene.in' as const, sceneIds: [scene.id] }]
-              : []),
-            { type: 'presentation.in', stateIds: [activeStateId] },
-          ]
-        : sourceScope === 'global'
-          ? [{ type: 'scene.in', sceneIds: [scene.id] }]
-          : [],
+      conditions: defaultConditions(),
       actions: [createActionStep(action)],
     })
   }
 
+  const addTemplateRule = () => {
+    if (ruleTemplateUnavailable(selectedTemplateOption, templateCounts)) return
+    const common = {
+      id: `interaction_${nanoid()}`,
+      enabled: true,
+      conditions: defaultConditions(),
+    }
+    let nextRule: InteractionRule
+    switch (selectedTemplateId) {
+      case 'scene-enter-sequence': {
+        const nodeIds = visibleMotionNodes.map((node) => node.id)
+        onPrepareMotionTargets?.(nodeIds)
+        nextRule = {
+          ...common,
+          name: '进入场景后依次出现',
+          trigger: { type: 'scene.enter' },
+          actions: nodeIds.map((nodeId, index) => createActionStep({
+            type: 'node.enter',
+            nodeId,
+            effect: 'fade',
+            durationMs: 240,
+            easing: 'ease-out',
+          }, 'after-previous')).map((step, index) => ({
+            ...step,
+            delayMs: index === 0 ? 0 : 80,
+          })),
+        }
+        break
+      }
+      case 'audio-ended-next':
+        nextRule = {
+          ...common,
+          name: '声音结束后进入下一场景',
+          trigger: { type: 'audio.ended', soundId: soundList[0]!.id },
+          actions: [createActionStep({ type: 'scene.next' })],
+        }
+        break
+      case 'video-ended-next':
+        nextRule = {
+          ...common,
+          name: '视频结束后进入下一场景',
+          trigger: { type: 'video.ended', nodeId: videoNodes[0]!.id },
+          actions: [createActionStep({ type: 'scene.next' })],
+        }
+        break
+      case 'component-event-state':
+        nextRule = {
+          ...common,
+          name: '组件完成后切换状态',
+          trigger: {
+            type: 'component.event',
+            nodeId: componentNodes[0]!.id,
+            eventName: 'complete',
+          },
+          actions: [createActionStep({
+            type: 'presentation.set',
+            stateId: suggestedStateId,
+            transition: { duration: 240 },
+          })],
+        }
+        break
+      case 'animation-ended-next':
+        nextRule = {
+          ...common,
+          name: '动画完成后进入下一场景',
+          trigger: {
+            type: 'animation.completed',
+            actionId: animationSteps[0]!.id,
+          },
+          actions: [createActionStep({ type: 'scene.next' })],
+        }
+        break
+    }
+    onAddRule(nextRule)
+  }
+
   return (
-    <section className="property-section" aria-labelledby={`${sourceScope}-automation-title`}>
-      <h3 className="property-title" id={`${sourceScope}-automation-title`}>
-        <Workflow size={14} />{sourceScope === 'global' ? '全局自动化' : '场景自动化'}
-      </h3>
+    <section
+      className="property-section interaction-workbench"
+      aria-labelledby={`${sourceScope}-automation-title`}
+    >
+      <div className="interaction-workbench__heading">
+        <h3 className="property-title" id={`${sourceScope}-automation-title`}>
+          <Workflow size={14} />{sourceScope === 'global' ? '全局规则' : '场景规则'}
+        </h3>
+        {onRunPreview ? (
+          <button
+            type="button"
+            className="secondary-button interaction-workbench__preview"
+            onClick={onRunPreview}
+          >
+            <Play size={13} />当前位置试运行
+          </button>
+        ) : null}
+      </div>
       <p className="property-hint">
         {sourceScope === 'global'
-          ? '全局元素只创建一次；可按场景限制规则，并监听全局组件或运行时事件。'
-          : '无需点击元素；当场景、状态、声音、视频、组件或运行时事件发生时执行动作。'}
+          ? '全局规则可跨场景工作，也可限制只在指定场景生效。'
+          : '用于进入场景、音视频变化或其他非点击事件；普通元素点击仍在“属性”中设置。'}
       </p>
-      <div className="form-field">
-        <label htmlFor={`automation-${scene.id}-new-trigger`}>新增自动化触发方式</label>
-        <select
-          id={`automation-${scene.id}-new-trigger`}
-          className="form-input"
-          value={newTriggerType}
-          onChange={(event) => setNewTriggerType(
-            event.currentTarget.value as AutomationTriggerType,
-          )}
-        >
-          {AUTOMATION_TRIGGER_OPTIONS.map((option) => (
-            <option
-              key={option.value}
-              value={option.value}
-              disabled={automationTriggerUnavailable(option, triggerCounts)}
-            >
-              {option.label}
-            </option>
-          ))}
-        </select>
+      <div className="rule-mechanism" aria-label="规则由触发、条件和动作组成">
+        <span><strong>1 触发</strong><small>何时发生</small></span>
+        <i aria-hidden="true">→</i>
+        <span><strong>2 条件</strong><small>何时生效</small></span>
+        <i aria-hidden="true">→</i>
+        <span><strong>3 动作</strong><small>执行什么</small></span>
       </div>
-      <button
-        type="button"
-        className="secondary-button"
-        style={{ width: '100%', marginBottom: 12 }}
-        disabled={automationTriggerUnavailable(selectedTriggerOption, triggerCounts)}
-        onClick={addAutomationRule}
-      >
-        <Plus size={14} />添加自动化规则
-      </button>
+
+      <div className="interaction-template-panel" aria-labelledby="rule-template-title">
+        <div>
+          <h4 id="rule-template-title">从常用模板开始</h4>
+          <p>先生成可运行的规则，再按需要调整触发、条件和动作。</p>
+        </div>
+        <div className="form-field">
+          <label htmlFor={`automation-${scene.id}-template`}>常用规则模板</label>
+          <select
+            id={`automation-${scene.id}-template`}
+            className="form-input"
+            value={selectedTemplateId}
+            onChange={(event) => setSelectedTemplateId(
+              event.currentTarget.value as RuleTemplateId,
+            )}
+          >
+            {RULE_TEMPLATE_OPTIONS.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                disabled={ruleTemplateUnavailable(option, templateCounts)}
+              >
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="interaction-template-panel__description">
+          {selectedTemplateOption.description}
+        </p>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={ruleTemplateUnavailable(selectedTemplateOption, templateCounts)}
+          onClick={addTemplateRule}
+        >
+          <Plus size={14} />使用模板
+        </button>
+        {selectedNodeId && onOpenClickRules ? (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onOpenClickRules}
+          >
+            <MousePointerClick size={14} />设置选中元素的点击动作
+          </button>
+        ) : null}
+      </div>
+
+      <div className="interaction-custom-rule">
+        <h4>从触发时机创建</h4>
+        <div className="form-field">
+          <label htmlFor={`automation-${scene.id}-new-trigger`}>新规则的触发时机</label>
+          <select
+            id={`automation-${scene.id}-new-trigger`}
+            className="form-input"
+            value={newTriggerType}
+            onChange={(event) => setNewTriggerType(
+              event.currentTarget.value as AutomationTriggerType,
+            )}
+          >
+            {AUTOMATION_TRIGGER_OPTIONS.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                disabled={automationTriggerUnavailable(option, triggerCounts)}
+              >
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={automationTriggerUnavailable(selectedTriggerOption, triggerCounts)}
+          onClick={addAutomationRule}
+        >
+          <Plus size={14} />添加规则
+        </button>
+      </div>
+
+      <div className="interaction-rule-list-heading">
+        <div>
+          <h4>规则列表</h4>
+          <p>{rules.length} 条非点击规则；点击规则只在“属性”中维护。</p>
+        </div>
+        <span>{filteredRules.length} 条可见</span>
+      </div>
+      <div className="interaction-rule-filters">
+        <div className="form-field">
+          <label htmlFor={`automation-${scene.id}-query`}>搜索规则</label>
+          <input
+            id={`automation-${scene.id}-query`}
+            className="form-input"
+            type="search"
+            placeholder="名称、触发、条件或动作"
+            value={ruleQuery}
+            onChange={(event) => setRuleQuery(event.currentTarget.value)}
+          />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`automation-${scene.id}-filter`}>规则筛选</label>
+          <select
+            id={`automation-${scene.id}-filter`}
+            className="form-input"
+            value={ruleFilter}
+            onChange={(event) => setRuleFilter(
+              event.currentTarget.value as RuleListFilter,
+            )}
+          >
+            <option value="all">全部规则</option>
+            <option value="selected-node" disabled={!selectedNodeId}>
+              仅看选中元素相关
+            </option>
+            <option value="enabled">仅看已启用</option>
+            <option value="disabled">仅看已停用</option>
+            <option value="warnings">仅看有冲突</option>
+          </select>
+        </div>
+      </div>
 
       {rules.length === 0 ? (
         <p className="property-hint" role="status">
-          {sourceScope === 'global' ? '尚未配置全局自动化规则。' : '当前场景尚未配置自动化规则。'}
+          {sourceScope === 'global' ? '尚未配置全局规则。' : '当前场景尚未配置专业规则。'}
         </p>
       ) : null}
 
-      {rules.map((rule, ruleIndex) => {
+      {rules.length > 0 && filteredRules.length === 0 ? (
+        <p className="property-hint" role="status">
+          当前筛选下没有规则，请清除搜索词或切换筛选条件。
+        </p>
+      ) : null}
+
+      {filteredRules.length > 1 ? (
+        <nav className="interaction-rule-index" aria-label="规则快速定位">
+          {filteredRules.map((rule) => (
+            <button
+              key={rule.id}
+              type="button"
+              onClick={() => {
+                document.getElementById(`automation-rule-${rule.id}`)
+                  ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+              }}
+            >
+              <strong>{rule.name || '未命名规则'}</strong>
+              <small>{describeTrigger(rule.trigger, descriptionContext)}</small>
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
+      {filteredRules.map((rule) => {
+        const ruleIndex = rules.findIndex((item) => item.id === rule.id)
         const scope = stateScope(rule)
         const activeSceneScope = sceneScope(rule)
+        const warnings = ruleWarningsById.get(rule.id) ?? []
         return (
           <fieldset
             key={rule.id}
-            aria-label={`自动化规则 ${ruleIndex + 1}`}
-            style={{ border: '1px solid var(--border-color, #cbd5e1)', borderRadius: 10, padding: 10, margin: '0 0 12px' }}
+            id={`automation-rule-${rule.id}`}
+            className={`interaction-rule-card${
+              rule.enabled ? '' : ' interaction-rule-card--disabled'
+            }${warnings.length > 0 ? ' interaction-rule-card--warning' : ''}`}
+            aria-label={`规则 ${ruleIndex + 1}`}
           >
-            <legend>{rule.name || `自动化规则 ${ruleIndex + 1}`}</legend>
+            <legend>{rule.name || `规则 ${ruleIndex + 1}`}</legend>
+            <div
+              className="interaction-rule-summary"
+              data-testid={`rule-summary-${rule.id}`}
+            >
+              <div><strong>当</strong><span>{describeTrigger(rule.trigger, descriptionContext)}</span></div>
+              <div><strong>如果</strong><span>{describeConditions(rule, descriptionContext)}</span></div>
+              <div><strong>就</strong><span>{describeActionSequence(rule.actions, descriptionContext)}</span></div>
+            </div>
+            {warnings.length > 0 ? (
+              <div className="interaction-rule-warnings" role="alert">
+                <strong>需要检查</strong>
+                {warnings.map((warning) => <p key={warning}>{warning}</p>)}
+              </div>
+            ) : null}
+            <div className="form-field">
+              <label htmlFor={`automation-${rule.id}-name`}>规则名称</label>
+              <input
+                id={`automation-${rule.id}-name`}
+                className="form-input"
+                maxLength={120}
+                value={rule.name ?? ''}
+                onChange={(event) => onUpdateRule(rule.id, {
+                  name: event.currentTarget.value,
+                })}
+              />
+            </div>
             <div className="toggle-row">
               <label htmlFor={`automation-${rule.id}-enabled`}>启用规则</label>
               <input
@@ -1572,116 +2200,160 @@ export function SceneAutomationEditor({
               />
             </div>
 
-            <AutomationTriggerEditor
-              rule={rule}
-              states={states}
-              sounds={soundList}
-              videos={videoNodes}
-              components={componentNodes}
-              nodes={availableNodes}
-              animationSteps={animationSteps}
-              onChange={(trigger) => onUpdateRule(rule.id, { trigger })}
-            />
+            <details className="interaction-rule-details" open>
+              <summary>详细编辑：触发、条件与动作</summary>
+              <AutomationTriggerEditor
+                rule={rule}
+                states={states}
+                sounds={soundList}
+                videos={videoNodes}
+                components={componentNodes}
+                nodes={availableNodes}
+                animationSteps={animationSteps}
+                onChange={(trigger) => onUpdateRule(rule.id, { trigger })}
+              />
 
-            {sourceScope === 'global' ? (
+              {sourceScope === 'global' ? (
+                <div className="form-field">
+                  <label htmlFor={`automation-${rule.id}-scene-scope`}>生效场景</label>
+                  <select
+                    id={`automation-${rule.id}-scene-scope`}
+                    className="form-input"
+                    value={activeSceneScope}
+                    onChange={(event) => onUpdateRule(rule.id, {
+                      conditions: setRuleSceneScope(rule, event.currentTarget.value),
+                    })}
+                  >
+                    <option value={ALL_SCENES}>所有场景</option>
+                    {activeSceneScope === MULTIPLE_SCENES ? (
+                      <option value={MULTIPLE_SCENES} disabled>多个场景（请重新选择）</option>
+                    ) : null}
+                    {scenes.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
               <div className="form-field">
-                <label htmlFor={`automation-${rule.id}-scene-scope`}>生效场景</label>
+                <label htmlFor={`automation-${rule.id}-scope`}>作用范围</label>
                 <select
-                  id={`automation-${rule.id}-scene-scope`}
+                  id={`automation-${rule.id}-scope`}
                   className="form-input"
-                  value={activeSceneScope}
+                  value={scope}
                   onChange={(event) => onUpdateRule(rule.id, {
-                    conditions: setRuleSceneScope(rule, event.currentTarget.value),
+                    conditions: setRuleStateScope(rule, event.currentTarget.value),
                   })}
                 >
-                  <option value={ALL_SCENES}>所有场景</option>
-                  {activeSceneScope === MULTIPLE_SCENES ? (
-                    <option value={MULTIPLE_SCENES} disabled>多个场景（请重新选择）</option>
+                  <option value={ALL_STATES}>所有状态</option>
+                  {scope === MULTIPLE_STATES ? (
+                    <option value={MULTIPLE_STATES} disabled>多个状态（请重新选择）</option>
                   ) : null}
-                  {scenes.map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
+                  {states.map((state) => (
+                    <option key={state.id} value={state.id}>{state.name}</option>
                   ))}
                 </select>
               </div>
-            ) : null}
 
-            <div className="form-field">
-              <label htmlFor={`automation-${rule.id}-scope`}>作用范围</label>
-              <select
-                id={`automation-${rule.id}-scope`}
-                className="form-input"
-                value={scope}
-                onChange={(event) => onUpdateRule(rule.id, {
-                  conditions: setRuleStateScope(rule, event.currentTarget.value),
-                })}
-              >
-                <option value={ALL_STATES}>所有状态</option>
-                {scope === MULTIPLE_STATES ? (
-                  <option value={MULTIPLE_STATES} disabled>多个状态（请重新选择）</option>
-                ) : null}
-                {states.map((state) => (
-                  <option key={state.id} value={state.id}>{state.name}</option>
+              <ol className="interaction-action-sequence" aria-label="动作执行顺序">
+                {rule.actions.map((step, actionIndex) => (
+                  <li key={step.id}>
+                    <span>{actionSequenceLead(step, actionIndex)}</span>
+                    <p>{describeAction(step.action, descriptionContext)}</p>
+                  </li>
                 ))}
-              </select>
-            </div>
+              </ol>
 
-            {rule.actions.map((step, actionIndex) => (
-              <ActionEditor
-                key={step.id}
-                rule={rule}
-                step={step}
-                actionIndex={actionIndex}
-                states={states}
-                scenes={scenes}
-                sounds={soundList}
-                videos={videoNodes}
-                nodes={availableNodes}
-                referencedByCompletion={completionActionIds.has(step.id)}
-                onChange={(nextStep) => onUpdateRule(rule.id, {
-                  actions: rule.actions.map((item, index) => (
-                    index === actionIndex ? nextStep : item
-                  )),
-                })}
-                onRemove={() => onUpdateRule(rule.id, {
-                  actions: rule.actions.filter((_, index) => index !== actionIndex),
-                })}
-              />
-            ))}
+              {rule.actions.map((step, actionIndex) => (
+                <ActionEditor
+                  key={step.id}
+                  rule={rule}
+                  step={step}
+                  actionIndex={actionIndex}
+                  states={states}
+                  scenes={scenes}
+                  sounds={soundList}
+                  videos={videoNodes}
+                  nodes={availableNodes}
+                  referencedByCompletion={completionActionIds.has(step.id)}
+                  onChange={(nextStep) => onUpdateRule(rule.id, {
+                    actions: rule.actions.map((item, index) => (
+                      index === actionIndex ? nextStep : item
+                    )),
+                  })}
+                  onRemove={() => onUpdateRule(rule.id, {
+                    actions: rule.actions.filter((_, index) => index !== actionIndex),
+                  })}
+                />
+              ))}
 
-            <div className="button-row">
-              <button
-                type="button"
-                className="secondary-button"
-                aria-label={`为自动化规则 ${ruleIndex + 1} 添加动作`}
-                onClick={() => {
-                  const nextStep = createActionStep(
-                    defaultAction('presentation.set', actionTargets),
-                  )
-                  const terminalIndex = rule.actions.findIndex(isTerminalActionStep)
-                  const actions = [...rule.actions]
-                  actions.splice(
-                    terminalIndex >= 0 ? terminalIndex : actions.length,
-                    0,
-                    nextStep,
-                  )
-                  onUpdateRule(rule.id, { actions })
-                }}
-              >
-                <Plus size={13} />添加动作
-              </button>
-              <button
-                type="button"
-                className="secondary-button secondary-button--danger"
-                aria-label={`删除自动化规则 ${ruleIndex + 1}`}
-                disabled={rule.actions.some((step) => completionActionIds.has(step.id))}
-                title={rule.actions.some((step) => completionActionIds.has(step.id))
-                  ? '该规则的动画正被“动画完成”自动化引用，请先更改触发器。'
-                  : undefined}
-                onClick={() => onDeleteRule(rule.id)}
-              >
-                <Trash2 size={13} />删除规则
-              </button>
-            </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  aria-label={`为规则 ${ruleIndex + 1} 添加动作`}
+                  onClick={() => {
+                    const nextStep = createActionStep(
+                      defaultAction('presentation.set', actionTargets),
+                    )
+                    const terminalIndex = rule.actions.findIndex(isTerminalActionStep)
+                    const actions = [...rule.actions]
+                    actions.splice(
+                      terminalIndex >= 0 ? terminalIndex : actions.length,
+                      0,
+                      nextStep,
+                    )
+                    onUpdateRule(rule.id, { actions })
+                  }}
+                >
+                  <Plus size={13} />添加动作
+                </button>
+                {onDuplicateRule ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    aria-label={`复制规则 ${ruleIndex + 1}`}
+                    onClick={() => onDuplicateRule(rule.id)}
+                  >
+                    <Copy size={13} />复制规则
+                  </button>
+                ) : null}
+                {onMoveRule ? (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      aria-label={`上移规则 ${ruleIndex + 1}`}
+                      disabled={ruleIndex <= 0}
+                      onClick={() => onMoveRule(rule.id, -1)}
+                    >
+                      <ArrowUp size={13} />上移
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      aria-label={`下移规则 ${ruleIndex + 1}`}
+                      disabled={ruleIndex >= rules.length - 1}
+                      onClick={() => onMoveRule(rule.id, 1)}
+                    >
+                      <ArrowDown size={13} />下移
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="secondary-button secondary-button--danger"
+                  aria-label={`删除规则 ${ruleIndex + 1}`}
+                  disabled={rule.actions.some((step) => completionActionIds.has(step.id))}
+                  title={rule.actions.some((step) => completionActionIds.has(step.id))
+                    ? '该规则的动画正被“动画完成”规则引用，请先更改触发器。'
+                    : undefined}
+                  onClick={() => onDeleteRule(rule.id)}
+                >
+                  <Trash2 size={13} />删除规则
+                </button>
+              </div>
+            </details>
           </fieldset>
         )
       })}

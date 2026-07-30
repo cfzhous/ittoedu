@@ -177,6 +177,8 @@ const embeddedComponentPackageMetaSchema = z.object({
   manifestPath: z.string().min(1),
   runtimePath: z.string().min(1),
   thumbnailPath: z.string().min(1).optional(),
+  editableCopy: z.boolean().optional(),
+  sourcePackageId: z.string().min(1).optional(),
 })
 
 export const projectDocumentV1Schema = z.object({
@@ -238,7 +240,10 @@ const textNodeV5Schema = baseNodeSchema.extend({
     highlightColor: colorSchema.nullable(),
     align: z.enum(['left', 'center', 'right']),
     verticalAlign: z.enum(['top', 'middle', 'bottom']),
-    writingMode: z.enum(['horizontal', 'vertical']),
+    writingMode: z.preprocess(
+      (value) => value === 'vertical' ? 'vertical-rl' : value,
+      z.enum(['horizontal', 'vertical-rl', 'vertical-lr']),
+    ),
     lineSpacing: finiteNumber.min(0).max(200),
     letterSpacing: finiteNumber.min(-20).max(100),
     padding: finiteNumber.min(0).max(200),
@@ -539,7 +544,19 @@ const sceneNodeOverrideSchema = z.record(z.string(), z.unknown()).superRefine(
       })
     }
   },
-)
+).transform((override) => {
+  const style = override.style
+  if (!isPlainRecord(style) || style.writingMode !== 'vertical') {
+    return override
+  }
+  return {
+    ...override,
+    style: {
+      ...style,
+      writingMode: 'vertical-rl',
+    },
+  }
+})
 
 export const scenePresentationStateSchema = z.object({
   id: z.string().min(1),

@@ -1,17 +1,26 @@
 import {
   applyPatches,
+  current,
   enablePatches,
+  isDraft,
   produce,
   produceWithPatches,
 } from 'immer'
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
-import type { ComponentPackageData } from '../../shared/componentTypes'
+import type {
+  ComponentManifest,
+  ComponentPackageData,
+} from '../../shared/componentTypes'
+import { componentManifestSchema } from '../../shared/componentSchema'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import {
   isNodeMotionAction,
   isVideoInteractionAction,
   type InteractionRule,
+  type MotionDirection,
+  type MotionEffect,
+  type NodeMotionAction,
 } from '../../shared/interactionTypes'
 import { resolveComponentPresetProps } from '../../shared/componentProps'
 import type {
@@ -80,6 +89,10 @@ import {
   type ComponentPackageHistoryChange,
   type HistoryState,
 } from './history'
+import {
+  parseComponentPackageFiles,
+  validateComponentRuntimeSource,
+} from '../components/importComponentPackage'
 
 enablePatches()
 
@@ -98,17 +111,46 @@ function clampAudioVolume(value: number, fallback: number): number {
 export type SidebarTab =
   | 'elements'
   | 'layers'
-  | 'media'
   | 'properties'
   | 'automation'
+  | 'developer'
+export type EditorMode = 'simple' | 'professional'
 export type EditingScope = 'scene' | 'global'
 export type CanvasMode = 'edit' | 'run'
 export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
 export type TextEditSource = 'canvas' | 'properties'
 
+export interface SimpleEntranceAnimationConfig {
+  effect: Exclude<MotionEffect, 'none'>
+  direction?: MotionDirection
+  durationMs: number
+  delayMs: number
+}
+
+const EDITOR_MODE_STORAGE_KEY = 'courseware-editor:mode'
+
+function loadEditorMode(): EditorMode {
+  try {
+    return globalThis.localStorage?.getItem(EDITOR_MODE_STORAGE_KEY) === 'professional'
+      ? 'professional'
+      : 'simple'
+  } catch {
+    return 'simple'
+  }
+}
+
+function persistEditorMode(mode: EditorMode): void {
+  try {
+    globalThis.localStorage?.setItem(EDITOR_MODE_STORAGE_KEY, mode)
+  } catch {
+    // UI preference persistence is best-effort and never affects project data.
+  }
+}
+
 interface TextEditSnapshot {
   text: string
   runs: TextRun[]
+  width: number
   height: number
 }
 
@@ -146,6 +188,7 @@ export interface EditorState {
   history: HistoryState
   assetFiles: Record<string, Uint8Array>
   componentPackages: Record<string, ComponentPackageData>
+  editorMode: EditorMode
   activeTab: SidebarTab
   editingTextNodeId: string | null
   textEditSession: TextEditSession | null
@@ -162,6 +205,7 @@ export interface EditorState {
   markSaved(path: string, project?: ProjectDocument): void
   setEditingScope(scope: EditingScope): void
   setCanvasMode(mode: CanvasMode): void
+  setEditorMode(mode: EditorMode): void
   setActiveTab(tab: SidebarTab): void
   setStatus(message: string | null): void
   setError(message: string | null): void
@@ -173,6 +217,7 @@ export interface EditorState {
     text: string,
     runs: TextRun[],
     height?: number,
+    width?: number,
   ): void
   commitTextEdit(): void
   cancelTextEdit(): void
@@ -187,11 +232,13 @@ export interface EditorState {
   ): void
   updateSceneRuntime(
     sceneId: string,
-    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>>,
+    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>>,
   ): void
   updateGlobalRuntime(
-    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>>,
+    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>>,
   ): void
+  setSceneRuntime(sceneId: string, runtime: RuntimeDocument | undefined): void
+  setGlobalRuntime(runtime: RuntimeDocument | undefined): void
   setActiveScene(sceneId: string): void
   setActivePresentationState(stateId: string | null): void
   addPresentationState(name?: string): void
@@ -222,15 +269,32 @@ export interface EditorState {
   addInteractionRule(sceneId: string, rule: InteractionRule): void
   updateInteractionRule(sceneId: string, ruleId: string, rule: InteractionRule): void
   deleteInteractionRule(sceneId: string, ruleId: string): void
+  duplicateInteractionRule(sceneId: string, ruleId: string): string | null
+  moveInteractionRule(
+    sceneId: string,
+    ruleId: string,
+    direction: -1 | 1,
+  ): void
   addGlobalInteractionRule(rule: InteractionRule): void
   updateGlobalInteractionRule(ruleId: string, rule: InteractionRule): void
   deleteGlobalInteractionRule(ruleId: string): void
+  duplicateGlobalInteractionRule(ruleId: string): string | null
+  moveGlobalInteractionRule(ruleId: string, direction: -1 | 1): void
+  setSimpleEntranceAnimation(
+    nodeId: string,
+    config: SimpleEntranceAnimationConfig | null,
+  ): void
   updatePlayback(patch: Partial<ProjectDocument['playback']>): void
   ensureTeacherController(): void
   addExternalComponentNode(packageId: string, x?: number, y?: number, presetId?: string): void
   importComponentPackage(packageData: ComponentPackageData): void
   deleteComponentPackage(packageId: string): boolean
   replaceComponentPackage(packageId: string, packageData: ComponentPackageData): void
+  createEditableComponentCopy(packageId: string, nodeId?: string): string | null
+  updateEditableComponentPackage(
+    packageId: string,
+    patch: Partial<Pick<ComponentPackageData, 'manifest' | 'runtimeSource'>>,
+  ): void
   deleteNode(nodeId: string): void
   deleteSelectedNodes(): void
   duplicateNode(nodeId: string): void
@@ -383,11 +447,14 @@ function normalizedVisibility(
 }
 
 function editableRuntimePatch(
-  patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>>,
-): Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>> {
-  const next: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content'>> = {}
+  patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>>,
+): Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>> {
+  const next: Partial<
+    Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>
+  > = {}
   if (patch.enabled !== undefined) next.enabled = patch.enabled
   if (patch.renderMode !== undefined) next.renderMode = patch.renderMode
+  if (patch.source !== undefined) next.source = patch.source
   if (patch.content !== undefined) {
     next.content = structuredClone(patch.content) as EditableTextContent
   }
@@ -411,6 +478,7 @@ function textNodeForSession(
 function sameTextSnapshot(node: TextNode, snapshot: TextEditSnapshot): boolean {
   return (
     node.text === snapshot.text &&
+    node.width === snapshot.width &&
     node.height === snapshot.height &&
     JSON.stringify(node.runs) === JSON.stringify(snapshot.runs)
   )
@@ -432,6 +500,7 @@ function projectWithTextSnapshot(
         ...effectiveNode,
         text: snapshot.text,
         runs: structuredClone(snapshot.runs),
+        width: snapshot.width,
         height: snapshot.height,
       }
     : undefined
@@ -450,6 +519,7 @@ function projectWithTextSnapshot(
       if (node?.type !== 'text') return
       node.text = snapshot.text
       node.runs = structuredClone(snapshot.runs)
+      node.width = snapshot.width
       node.height = snapshot.height
       return
     }
@@ -468,6 +538,7 @@ function projectWithTextSnapshot(
     if (node?.type !== 'text') return
     node.text = snapshot.text
     node.runs = structuredClone(snapshot.runs)
+    node.width = snapshot.width
     node.height = snapshot.height
   })
 }
@@ -495,6 +566,7 @@ function commitTextEditSessionState(state: EditorState): EditorState {
   const finalSnapshot: TextEditSnapshot = {
     text: node.text,
     runs: structuredClone(node.runs),
+    width: node.width,
     height: node.height,
   }
   const [, patches, inversePatches] = changed
@@ -514,6 +586,7 @@ function commitTextEditSessionState(state: EditorState): EditorState {
           if (source?.type !== 'text' || target?.type !== 'text') return
           target.text = source.text
           target.runs = structuredClone(source.runs)
+          target.width = source.width
           target.height = source.height
           return
         }
@@ -542,6 +615,7 @@ function commitTextEditSessionState(state: EditorState): EditorState {
         if (source?.type !== 'text' || target?.type !== 'text') return
         target.text = source.text
         target.runs = structuredClone(source.runs)
+        target.width = source.width
         target.height = source.height
       })
     : [state.project, [], []]
@@ -643,6 +717,51 @@ function rewriteInteractionRuleForNodeCopy(
   return copy
 }
 
+function duplicateInteractionRuleForAuthoring(
+  rule: InteractionRule,
+): InteractionRule {
+  const copy = structuredClone(rule)
+  const actionIdMap = new Map(
+    copy.actions.map((step) => [step.id, `action_${nanoid()}`]),
+  )
+  copy.id = `interaction_${nanoid()}`
+  copy.name = `${copy.name || '未命名规则'} · 副本`.slice(0, 80)
+  if (
+    copy.trigger.type === 'animation.completed' &&
+    actionIdMap.has(copy.trigger.actionId)
+  ) {
+    copy.trigger.actionId = actionIdMap.get(copy.trigger.actionId)!
+  }
+  copy.actions = copy.actions.map((step) => ({
+    ...step,
+    id: actionIdMap.get(step.id)!,
+  }))
+  return copy
+}
+
+function moveInteractionRuleWithinKind(
+  rules: InteractionRule[],
+  ruleId: string,
+  direction: -1 | 1,
+): boolean {
+  const index = rules.findIndex((rule) => rule.id === ruleId)
+  if (index < 0) return false
+  const clickRule = rules[index]!.trigger.type === 'node.click'
+  let target = index + direction
+  while (
+    target >= 0 &&
+    target < rules.length &&
+    (rules[target]!.trigger.type === 'node.click') !== clickRule
+  ) {
+    target += direction
+  }
+  if (target < 0 || target >= rules.length) return false
+  const [rule] = rules.splice(index, 1)
+  if (!rule) return false
+  rules.splice(target, 0, rule)
+  return true
+}
+
 /**
  * Completion triggers are references, not free-form event names. Structural
  * edits may remove their source motion action, so prune dependants to a fixed
@@ -665,6 +784,148 @@ function withoutDanglingAnimationCompletionRules(
     if (next.length === retained.length) return next
     retained = next
   }
+}
+
+function simpleEntranceRuleMatchesState(
+  rule: InteractionRule,
+  nodeId: string,
+  stateId: string | null,
+): boolean {
+  if (
+    !rule.id.startsWith('simple_entrance_') ||
+    rule.trigger.type !== 'node.activated' ||
+    rule.trigger.nodeId !== nodeId ||
+    rule.actions.length !== 1
+  ) {
+    return false
+  }
+  const [step] = rule.actions
+  if (
+    !step ||
+    step.start !== 'after-previous' ||
+    !isNodeMotionAction(step.action) ||
+    step.action.type !== 'node.enter' ||
+    step.action.nodeId !== nodeId
+  ) {
+    return false
+  }
+  if (rule.conditions.some((condition) => condition.type !== 'presentation.in')) {
+    return false
+  }
+  const presentationConditions = rule.conditions.filter(
+    (condition) => condition.type === 'presentation.in',
+  )
+  if (stateId === null) return presentationConditions.length === 0
+  return presentationConditions.length === 1 &&
+    presentationConditions[0]!.stateIds.length === 1 &&
+    presentationConditions[0]!.stateIds[0] === stateId
+}
+
+export function findSimpleEntranceAnimationRule(
+  rules: readonly InteractionRule[],
+  nodeId: string,
+  stateId: string | null,
+): InteractionRule | undefined {
+  return rules.find((rule) => simpleEntranceRuleMatchesState(
+    rule,
+    nodeId,
+    stateId,
+  ))
+}
+
+export function hasAdvancedEntranceAnimation(
+  rules: readonly InteractionRule[],
+  nodeId: string,
+  stateId: string | null,
+): boolean {
+  return rules.some((rule) => (
+    rule.actions.some((step) => (
+      isNodeMotionAction(step.action) &&
+      step.action.type === 'node.enter' &&
+      step.action.nodeId === nodeId
+    )) &&
+    (
+      stateId === null ||
+      !rule.conditions.some((condition) => condition.type === 'presentation.in') ||
+      rule.conditions.some((condition) => (
+        condition.type === 'presentation.in' &&
+        condition.stateIds.includes(stateId)
+      ))
+    ) &&
+    !simpleEntranceRuleMatchesState(rule, nodeId, stateId)
+  ))
+}
+
+function entranceRuleAppliesToState(
+  rule: InteractionRule,
+  nodeId: string,
+  stateId: string | null,
+): boolean {
+  if (!rule.actions.some((step) => (
+    isNodeMotionAction(step.action) &&
+    step.action.type === 'node.enter' &&
+    step.action.nodeId === nodeId
+  ))) {
+    return false
+  }
+  const presentationConditions = rule.conditions.filter(
+    (condition) => condition.type === 'presentation.in',
+  )
+  if (stateId === null) return presentationConditions.length === 0
+  return presentationConditions.length === 0 ||
+    presentationConditions.some((condition) => condition.stateIds.includes(stateId))
+}
+
+function simpleEntranceAction(
+  nodeId: string,
+  config: SimpleEntranceAnimationConfig,
+): NodeMotionAction {
+  const common = {
+    type: 'node.enter' as const,
+    nodeId,
+    durationMs: Math.min(10_000, Math.max(0, config.durationMs)),
+    easing: 'ease-out' as const,
+  }
+  return config.effect === 'slide'
+    ? {
+        ...common,
+        effect: 'slide',
+        direction: config.direction ?? 'left',
+      }
+    : {
+        ...common,
+        effect: config.effect,
+      }
+}
+
+function setSceneNodePlaybackInitialVisibility(
+  scene: SceneDocument,
+  stateId: string | null,
+  nodeId: string,
+  playbackInitialVisibility: SceneNode['playbackInitialVisibility'],
+): void {
+  const baseNode = scene.nodes.find((node) => node.id === nodeId)
+  if (!baseNode) return
+  if (stateId === null) {
+    baseNode.playbackInitialVisibility = playbackInitialVisibility
+    return
+  }
+  const sceneSnapshot = isDraft(scene) ? current(scene) : scene
+  const baseNodeSnapshot = sceneSnapshot.nodes.find((node) => node.id === nodeId)
+  const effectiveNode = materializeScene(sceneSnapshot, stateId).nodes.find(
+    (node) => node.id === nodeId,
+  )
+  if (!baseNodeSnapshot || !effectiveNode) return
+  const nextNode = {
+    ...effectiveNode,
+    playbackInitialVisibility,
+  } as SceneNode
+  setPresentationNodeOverride(
+    scene,
+    stateId,
+    nodeId,
+    deriveSceneNodeOverride(baseNodeSnapshot, nextNode),
+  )
 }
 
 function patchSceneNode(node: SceneNode, patch: DeepPartial<SceneNode>): SceneNode {
@@ -808,7 +1069,13 @@ function normalizeNewNodeGeometry(
   )
 }
 
-function componentMeta(data: ComponentPackageData): EmbeddedComponentPackageMeta {
+function componentMeta(
+  data: ComponentPackageData,
+  authoring?: Pick<
+    EmbeddedComponentPackageMeta,
+    'editableCopy' | 'sourcePackageId'
+  >,
+): EmbeddedComponentPackageMeta {
   const base = `components/${data.manifest.id}@${data.manifest.version}`
   return {
     packageId: data.manifest.id,
@@ -819,6 +1086,147 @@ function componentMeta(data: ComponentPackageData): EmbeddedComponentPackageMeta
     thumbnailPath: data.manifest.thumbnail
       ? `${base}/${data.manifest.thumbnail}`
       : undefined,
+    ...(authoring?.editableCopy ? { editableCopy: true } : {}),
+    ...(authoring?.sourcePackageId
+      ? { sourcePackageId: authoring.sourcePackageId }
+      : {}),
+  }
+}
+
+export function editableComponentPackageId(
+  sourceId: string,
+  suffix: string,
+): string {
+  return `${sourceId}.editable.${suffix.toLowerCase().replace(/[^a-z0-9]/g, 'x')}`
+}
+
+function rewriteComponentDefinitionId(
+  source: string,
+  previousId: string,
+  nextId: string,
+): string {
+  const rewritten = source.replaceAll(previousId, nextId)
+  if (rewritten === source) {
+    throw new UserFacingError(
+      '无法创建可编辑副本',
+      '组件运行时中没有找到可安全替换的组件 ID。',
+      '该组件可能使用了动态 ID；请由组件作者提供允许编辑的源码版本。',
+    )
+  }
+  return rewritten
+}
+
+function componentFilesWithAuthoredCode(
+  packageData: ComponentPackageData,
+  manifest: ComponentManifest,
+  runtimeSource: string,
+): Record<string, Uint8Array> {
+  const files = Object.fromEntries(
+    Object.entries(packageData.files).map(([path, bytes]) => [
+      path,
+      Uint8Array.from(bytes),
+    ]),
+  )
+  const encoder = new TextEncoder()
+  files['manifest.json'] = encoder.encode(JSON.stringify(manifest, null, 2))
+  files[manifest.entry] = encoder.encode(runtimeSource)
+  return files
+}
+
+function assertEditableComponentPackage(
+  packageId: string,
+  packageData: ComponentPackageData | undefined,
+  packageMeta: EmbeddedComponentPackageMeta | undefined,
+): asserts packageData is ComponentPackageData {
+  if (!packageData || packageMeta?.editableCopy !== true) {
+    throw new UserFacingError(
+      '组件代码不可修改',
+      '第三方组件包默认只读。',
+      '请先创建工程内可编辑副本，再修改其 Manifest 或 Runtime。',
+    )
+  }
+}
+
+function validateEditableComponentPackage(
+  packageData: ComponentPackageData,
+  project: ProjectDocument,
+  additionalScopes: ReadonlyArray<'scene' | 'global'> = [],
+): void {
+  const parsed = componentManifestSchema.safeParse(packageData.manifest)
+  if (!parsed.success) {
+    throw new UserFacingError(
+      '组件 Manifest 校验失败',
+      parsed.error.issues[0]?.message ?? 'Manifest 无效。',
+      '请修正字段后重试，当前工程未发生变化。',
+    )
+  }
+  validateComponentRuntimeSource(packageData.runtimeSource)
+  const id = packageData.manifest.id
+  if (
+    !packageData.runtimeSource.includes(JSON.stringify(id)) &&
+    !packageData.runtimeSource.includes(`'${id}'`) &&
+    !packageData.runtimeSource.includes(`\`${id}\``)
+  ) {
+    throw new UserFacingError(
+      '组件 Runtime 校验失败',
+      `运行时源码没有登记可编辑副本 ID“${id}”。`,
+      '请确保 CoursewareComponent.define 的 id 与 Manifest 完全一致。',
+    )
+  }
+  if (
+    !new RegExp(
+      `["']?runtimeApiVersion["']?\\s*:\\s*${packageData.manifest.runtimeApiVersion}\\b`,
+    ).test(packageData.runtimeSource)
+  ) {
+    throw new UserFacingError(
+      '组件 Runtime 校验失败',
+      `运行时源码没有静态登记 API ${packageData.manifest.runtimeApiVersion}。`,
+      '请确保 CoursewareComponent.define 的 runtimeApiVersion 与 Manifest 完全一致。',
+    )
+  }
+
+  // Reuse the same archive/path/entry/thumbnail/asset validation as import.
+  const reparsed = parseComponentPackageFiles(packageData.files, {
+    expectedId: id,
+    expectedVersion: packageData.manifest.version,
+  })
+  if (reparsed.runtimeSource !== packageData.runtimeSource) {
+    throw new UserFacingError(
+      '组件 Runtime 校验失败',
+      '组件入口文件与当前代码框内容不一致。',
+      '请重新应用 Runtime 后再修改 Manifest。',
+    )
+  }
+
+  const requiredScopes = new Set<'scene' | 'global'>(additionalScopes)
+  for (const scene of project.scenes) {
+    if (
+      scene.nodes.some(
+        (node) =>
+          node.type === 'external-component' &&
+          node.component.packageId === id,
+      )
+    ) {
+      requiredScopes.add('scene')
+    }
+  }
+  if (
+    project.globalLayer.some(
+      (item) =>
+        item.node.type === 'external-component' &&
+        item.node.component.packageId === id,
+    )
+  ) {
+    requiredScopes.add('global')
+  }
+  for (const scope of requiredScopes) {
+    if (!componentSupportsScope(packageData.manifest, scope)) {
+      throw new UserFacingError(
+        '组件作用域校验失败',
+        `当前组件仍有${scope === 'scene' ? '场景' : '全局'}实例，但 Manifest 已不支持该作用域。`,
+        '请保留现有实例所需作用域，或先删除/替换这些实例。',
+      )
+    }
   }
 }
 
@@ -954,6 +1362,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     history: emptyHistory(),
     assetFiles: {},
     componentPackages: {},
+    editorMode: loadEditorMode(),
     activeTab: 'elements',
     editingTextNodeId: null,
     textEditSession: null,
@@ -1065,6 +1474,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     },
 
+    setEditorMode(editorMode) {
+      persistEditorMode(editorMode)
+      set((state) => ({
+        ...commitTextEditSessionState(state),
+        editorMode,
+        activeTab: editorMode === 'simple' &&
+          (state.activeTab === 'automation' || state.activeTab === 'developer')
+          ? 'properties'
+          : state.activeTab,
+        statusMessage: editorMode === 'simple'
+          ? '已切换到简洁模式'
+          : '已切换到专业模式',
+      }))
+    },
+
     setActiveTab(activeTab) {
       set((state) => ({
         ...commitTextEditSessionState(state),
@@ -1120,6 +1544,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
             original: {
               text: node.text,
               runs: structuredClone(node.runs),
+              width: node.width,
               height: node.height,
             },
             dirtyBefore: prepared.dirty,
@@ -1127,7 +1552,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
       })
     },
-    updateTextEditDraft(nodeId, text, runs, height) {
+    updateTextEditDraft(nodeId, text, runs, height, width) {
       set((state) => {
         const session = state.textEditSession
         if (!session || session.nodeId !== nodeId) return state
@@ -1136,8 +1561,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const nextHeight = height === undefined
           ? current.height
           : Math.max(MIN_NODE_SIZE, height)
+        const nextWidth = width === undefined
+          ? current.width
+          : Math.max(MIN_NODE_SIZE, width)
         if (
           current.text === text &&
+          current.width === nextWidth &&
           current.height === nextHeight &&
           JSON.stringify(current.runs) === JSON.stringify(runs)
         ) {
@@ -1146,6 +1575,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const project = projectWithTextSnapshot(state.project, session, {
           text,
           runs,
+          width: nextWidth,
           height: nextHeight,
         })
         if (project === state.project) return state
@@ -1387,6 +1817,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commit((draft) => {
         if (!draft.globalRuntime) return
         Object.assign(draft.globalRuntime, safePatch)
+      })
+    },
+
+    setSceneRuntime(sceneId, runtime) {
+      commit((draft) => {
+        const scene = draft.scenes.find((item) => item.id === sceneId)
+        if (!scene) return
+        if (runtime) scene.runtime = structuredClone(runtime)
+        else delete scene.runtime
+      })
+      set({
+        statusMessage: runtime ? '已创建场景运行时模板' : '已移除场景运行时',
+      })
+    },
+
+    setGlobalRuntime(runtime) {
+      commit((draft) => {
+        if (runtime) draft.globalRuntime = structuredClone(runtime)
+        else delete draft.globalRuntime
+      })
+      set({
+        statusMessage: runtime ? '已创建全局运行时模板' : '已移除全局运行时',
       })
     },
 
@@ -1750,7 +2202,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }),
         assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
         dirty: true,
-        activeTab: 'media',
+        activeTab: 'elements',
         statusMessage: `已导入素材“${asset.filename}”`,
       }))
     },
@@ -1788,7 +2240,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }),
         assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
         dirty: true,
-        activeTab: 'media',
+        activeTab: 'elements',
         statusMessage: `已导入声音“${definition.name}”`,
       }))
       return soundId
@@ -1955,6 +2407,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ statusMessage: '交互映射已删除' })
     },
 
+    duplicateInteractionRule(sceneId, ruleId) {
+      const source = get().project.scenes
+        .find((scene) => scene.id === sceneId)
+        ?.interactions.find((rule) => rule.id === ruleId)
+      if (!source) return null
+      const copy = duplicateInteractionRuleForAuthoring(source)
+      commit((draft) => {
+        const scene = draft.scenes.find((item) => item.id === sceneId)
+        const index = scene?.interactions.findIndex((rule) => rule.id === ruleId) ?? -1
+        if (!scene || index < 0) return
+        scene.interactions.splice(index + 1, 0, structuredClone(copy))
+      })
+      set({ statusMessage: '规则副本已创建' })
+      return copy.id
+    },
+
+    moveInteractionRule(sceneId, ruleId, direction) {
+      commit((draft) => {
+        const rules = draft.scenes.find((scene) => scene.id === sceneId)
+          ?.interactions
+        if (rules) moveInteractionRuleWithinKind(rules, ruleId, direction)
+      })
+      set({ statusMessage: direction < 0 ? '规则已上移' : '规则已下移' })
+    },
+
     addGlobalInteractionRule(rule) {
       commit((draft) => {
         if (draft.globalInteractions.some((item) => item.id === rule.id)) return
@@ -1982,6 +2459,135 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
       })
       set({ statusMessage: '全局交互映射已删除' })
+    },
+
+    duplicateGlobalInteractionRule(ruleId) {
+      const source = get().project.globalInteractions.find(
+        (rule) => rule.id === ruleId,
+      )
+      if (!source) return null
+      const copy = duplicateInteractionRuleForAuthoring(source)
+      commit((draft) => {
+        const index = draft.globalInteractions.findIndex(
+          (rule) => rule.id === ruleId,
+        )
+        if (index >= 0) {
+          draft.globalInteractions.splice(index + 1, 0, structuredClone(copy))
+        }
+      })
+      set({ statusMessage: '全局规则副本已创建' })
+      return copy.id
+    },
+
+    moveGlobalInteractionRule(ruleId, direction) {
+      commit((draft) => {
+        moveInteractionRuleWithinKind(
+          draft.globalInteractions,
+          ruleId,
+          direction,
+        )
+      })
+      set({ statusMessage: direction < 0 ? '全局规则已上移' : '全局规则已下移' })
+    },
+
+    setSimpleEntranceAnimation(nodeId, config) {
+      const state = get()
+      if (state.editingScope !== 'scene') {
+        set({
+          errorMessage: '全局元素的动画作用域较复杂，请在专业模式的规则面板中配置。',
+          statusMessage: null,
+        })
+        return
+      }
+      const scene = currentScene(state)
+      if (!scene) return
+      const stateId = state.activePresentationStateId
+      const existingRule = findSimpleEntranceAnimationRule(
+        scene.interactions,
+        nodeId,
+        stateId,
+      )
+      if (
+        config &&
+        hasAdvancedEntranceAnimation(scene.interactions, nodeId, stateId)
+      ) {
+        set({
+          errorMessage: '该元素已有专业动画规则。请切换到专业模式编辑，避免重复播放。',
+          statusMessage: null,
+        })
+        return
+      }
+      const effectiveNode = editingNodes(state).find((node) => node.id === nodeId)
+      if (!effectiveNode || (!config && !existingRule)) return
+
+      commit((draft) => {
+        const draftScene = draft.scenes.find((item) => item.id === scene.id)
+        if (!draftScene) return
+        const rules = draftScene.interactions
+        const ruleIndex = existingRule
+          ? rules.findIndex((rule) => rule.id === existingRule.id)
+          : -1
+
+        if (config) {
+          const action = simpleEntranceAction(nodeId, config)
+          if (ruleIndex >= 0) {
+            const current = rules[ruleIndex]!
+            rules[ruleIndex] = {
+              ...current,
+              name: `${effectiveNode.name} · 出现动画`.slice(0, 80),
+              enabled: true,
+              actions: [{
+                ...current.actions[0]!,
+                delayMs: Math.min(60_000, Math.max(0, config.delayMs)),
+                action,
+              }],
+            }
+          } else {
+            rules.push({
+              id: `simple_entrance_${nanoid()}`,
+              name: `${effectiveNode.name} · 出现动画`.slice(0, 80),
+              enabled: true,
+              trigger: { type: 'node.activated', nodeId },
+              conditions: stateId === null
+                ? []
+                : [{ type: 'presentation.in', stateIds: [stateId] }],
+              actions: [{
+                id: `action_${nanoid()}`,
+                start: 'after-previous',
+                delayMs: Math.min(60_000, Math.max(0, config.delayMs)),
+                action,
+              }],
+            })
+          }
+          setSceneNodePlaybackInitialVisibility(
+            draftScene as SceneDocument,
+            stateId,
+            nodeId,
+            'hidden',
+          )
+          return
+        }
+
+        draftScene.interactions = withoutDanglingAnimationCompletionRules(
+          rules.filter((_, index) => index !== ruleIndex),
+        )
+        const stillHasEntrance = draftScene.interactions.some((rule) =>
+          entranceRuleAppliesToState(rule, nodeId, stateId),
+        )
+        if (!stillHasEntrance) {
+          setSceneNodePlaybackInitialVisibility(
+            draftScene as SceneDocument,
+            stateId,
+            nodeId,
+            'inherit',
+          )
+        }
+      }, nodeId)
+      set({
+        statusMessage: config
+          ? `已为“${effectiveNode.name}”设置出现动画`
+          : `已移除“${effectiveNode.name}”的出现动画`,
+      })
     },
 
     updatePlayback(patch) {
@@ -2184,6 +2790,161 @@ export const useEditorStore = create<EditorState>((set, get) => {
         activeTab: 'elements',
         errorMessage: null,
         statusMessage: `组件“${packageData.manifest.name}”已替换为 ${plan.replacementVersion}，${plan.affectedInstances.length} 个实例已同步`,
+      })
+    },
+
+    createEditableComponentCopy(packageId, nodeId) {
+      const state = get()
+      const source = state.componentPackages[packageId]
+      if (!source) {
+        set({
+          errorMessage: `工程中不存在组件包“${packageId}”。`,
+          statusMessage: null,
+        })
+        return null
+      }
+      if (
+        nodeId &&
+        state.editingScope === 'scene' &&
+        state.activePresentationStateId !== null
+      ) {
+        set({
+          errorMessage:
+            '命名状态只能覆盖组件公开属性，不能改变组件包身份。请切换到“基础”后再创建可编辑副本。',
+          statusMessage: null,
+        })
+        return null
+      }
+      const selected = nodeId
+        ? editingNodes(state).find((node) => node.id === nodeId)
+        : undefined
+      if (
+        nodeId &&
+        (
+          selected?.type !== 'external-component' ||
+          selected.component.packageId !== packageId
+        )
+      ) {
+        throw new UserFacingError(
+          '无法切换组件副本',
+          '所选实例与待复制组件不一致。',
+          '请重新选择组件实例后再试。',
+        )
+      }
+      const suffix = nanoid(6)
+      const safeSuffix = suffix.toLowerCase().replace(/[^a-z0-9]/g, 'x')
+      const nextId = editableComponentPackageId(packageId, suffix)
+      const nextVersion = `0.1.0-edit.${safeSuffix}`
+      const manifest = {
+        ...structuredClone(source.manifest),
+        id: nextId,
+        name: `${source.manifest.name}（可编辑副本）`,
+        version: nextVersion,
+        description: `由工程内“${source.manifest.name}”创建的可编辑副本。`,
+      } as ComponentManifest
+      const runtimeSource = rewriteComponentDefinitionId(
+        source.runtimeSource,
+        source.manifest.id,
+        nextId,
+      )
+      const packageData: ComponentPackageData = {
+        ...source,
+        manifest,
+        runtimeSource,
+        files: componentFilesWithAuthoredCode(source, manifest, runtimeSource),
+      }
+      validateEditableComponentPackage(
+        packageData,
+        state.project,
+        selected
+          ? [state.editingScope === 'global' ? 'global' : 'scene']
+          : [],
+      )
+      const sourceMeta = Object.values(state.project.componentPackages).find(
+        (meta) =>
+          meta.packageId === packageId &&
+          meta.version === source.manifest.version,
+      )
+
+      commit((draft) => {
+        draft.componentPackages[nextId] = componentMeta(packageData, {
+          editableCopy: true,
+          sourcePackageId: sourceMeta?.sourcePackageId ?? packageId,
+        })
+        if (!selected || selected.type !== 'external-component') return
+        if (state.editingScope === 'global') {
+          const item = draft.globalLayer.find(
+            (entry) => entry.node.id === selected.id,
+          )
+          if (item?.node.type === 'external-component') {
+            item.node.component = { packageId: nextId, version: nextVersion }
+          }
+          return
+        }
+        const scene = draft.scenes.find(
+          (item) => item.id === state.activeSceneId,
+        )
+        if (!scene) return
+        const node = scene.nodes.find((item) => item.id === selected.id)
+        if (node?.type === 'external-component') {
+          node.component = { packageId: nextId, version: nextVersion }
+        }
+      }, nodeId, { packageId: nextId, next: packageData })
+      set({
+        activeTab: 'developer',
+        errorMessage: null,
+        statusMessage: `已创建“${manifest.name}”，原组件包保持不变`,
+      })
+      return nextId
+    },
+
+    updateEditableComponentPackage(packageId, patch) {
+      const state = get()
+      const currentPackage = state.componentPackages[packageId]
+      const currentMeta = Object.values(state.project.componentPackages).find(
+        (meta) =>
+          meta.packageId === packageId &&
+          meta.version === currentPackage?.manifest.version,
+      )
+      assertEditableComponentPackage(packageId, currentPackage, currentMeta)
+      const manifest = patch.manifest
+        ? structuredClone(patch.manifest)
+        : structuredClone(currentPackage.manifest)
+      if (
+        manifest.id !== currentPackage.manifest.id ||
+        manifest.version !== currentPackage.manifest.version
+      ) {
+        throw new UserFacingError(
+          '组件代码不可修改',
+          '可编辑副本的 ID 和版本不能在代码框内改写。',
+          '如需新的身份，请从当前组件再次创建副本。',
+        )
+      }
+      const runtimeSource = patch.runtimeSource ?? currentPackage.runtimeSource
+      const nextPackage: ComponentPackageData = {
+        ...currentPackage,
+        manifest,
+        runtimeSource,
+        files: componentFilesWithAuthoredCode(
+          currentPackage,
+          manifest,
+          runtimeSource,
+        ),
+      }
+      validateEditableComponentPackage(nextPackage, state.project)
+      commit((draft) => {
+        for (const [key, meta] of Object.entries(draft.componentPackages)) {
+          if (meta.packageId === packageId) delete draft.componentPackages[key]
+        }
+        draft.componentPackages[packageId] = componentMeta(nextPackage, {
+          editableCopy: true,
+          sourcePackageId: currentMeta?.sourcePackageId,
+        })
+      }, undefined, { packageId, next: nextPackage })
+      set({
+        activeTab: 'developer',
+        errorMessage: null,
+        statusMessage: `组件“${nextPackage.manifest.name}”代码已更新`,
       })
     },
 

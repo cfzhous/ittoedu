@@ -11,7 +11,7 @@
 
 新组件必须使用 V4。Project V7 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。Project V7 中，可枚举的场景节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions`；全局规则通过 `scene.in` 限定生效场景。一次性复杂场景互动或一次性跨场景规则不必做成组件，可分别使用 `scene.runtime` 和 `globalRuntime`。组件只用于高复用、需参数化、需版本化或便于教师反复配置的能力。V1–V6 Project 只作为迁移输入，新保存统一写 V7。
 
-编辑器选中节点时通过“属性/交互”维护 `node.click`；右侧常驻“自动化”Tab 维护状态/场景进入、节点激活、动画完成、音视频生命周期/时间点、`component.event` 和带 `scene/global` 来源的 `runtime.event`。步骤可用 `after-previous` / `with-previous` 编排顺序与并行，并设局部延迟。组件若只需发出一个可枚举事件，应使用 V4 `ctx.emit()`，再由自动化编排元素动画、状态、声音、视频或导航。
+组件导入、组件包管理和完整交互编排位于专业模式。编辑器选中节点时通过“属性/交互”维护 `node.click`；右侧“互动与动画”维护状态/场景进入、节点激活、动画完成、音视频生命周期/时间点、`component.event` 和带 `scene/global` 来源的 `runtime.event`。步骤可用 `after-previous` / `with-previous` 编排顺序与并行，并设局部延迟。组件若只需发出一个可枚举事件，应使用 V4 `ctx.emit()`，再由规则编排元素动画、状态、声音、视频或导航。
 
 组件不应重复实现编辑器已有的一等能力：常规视频使用 `VideoNode`，课程声音使用 `media.audio` 声音库与声道，默认教师控制平台使用 `globalLayer` 中的 `TeacherControllerNode`。内置控制器的默认 `scene.open-picker` 按钮展开全部场景，选择后只进入目标初始状态；固定 `scene.go` 是高级按钮动作。只有策划要求独特视觉、复用封装或内置节点无法表达的行为时，才把媒体播放器或控制平台制作成 V4 组件。
 
@@ -143,6 +143,54 @@ V3/V4 对 `content` 使用递归合并。修改一个深层字符串不会丢失
 
 图片属性存的是工程 `AssetMeta.id`，运行时通过 `ctx.projectAssetUrl(assetId)` 读取。组件自带且不需替换的图片通过 manifest `assets` 和 `ctx.assetUrl(assetKey)` 读取。
 
+### 4.1 显式开放画布文字编辑
+
+属性栏始终是公开文字的基础编辑入口。若组件还希望教师在编辑画布中双击文字直接修改，必须显式登记命中区域；宿主不会扫描画面文字或按 DOM 文本猜测 Props。
+
+DOM 组件在真实文字元素上标记点分 Props 路径：
+
+```html
+<h2
+  data-courseware-edit-key="content.title"
+  data-courseware-edit-label="标题"
+>
+  标题
+</h2>
+<p
+  data-courseware-edit-key="content.prompt"
+  data-courseware-edit-label="题干"
+  data-courseware-edit-multiline="true"
+>
+  题干
+</p>
+```
+
+Phaser 或 hybrid 组件通过可选编辑桥登记组件本地设计坐标中的矩形：
+
+```js
+var removeTitleRegion = ctx.editor?.registerTextRegion({
+  key: 'content.title',
+  label: '标题',
+  multiline: false,
+  maxLength: 80,
+  getBounds: function () {
+    return { x: 24, y: 18, width: 272, height: 42 }
+  }
+})
+```
+
+规则：
+
+- `ctx.editor` 是仅 `mode: 'edit'` 可能存在的可选兼容扩展；兼容上下文类型 V1–V4 都要判空，Player 的 preview/capture 不提供该桥；
+- 返回函数用于提前注销区域；组件销毁时宿主也会清理仍登记的区域；
+- `getBounds()` 可随组件内部运动返回最新位置，但必须是有限数值、正宽高和组件本地坐标；
+- `key` 必须能解析为字符串，并对应 `editor.properties` 中的 `text` / `textarea` 或宿主递归发现的 `props.content` 文字；V1 通常没有公开文字字段，因此即使收到兼容桥也仍按整体组件处理；
+- DOM 的 `data-courseware-edit-label` 与 `data-courseware-edit-multiline` 可覆盖浮层标签和单/多行表现，最大长度仍以公开属性定义为准；
+- 状态覆盖、撤销/重做和保存由宿主负责。组件只需在 `updateProps()` 中立即刷新画面；
+- 未登记区域继续整体选择，旧组件无须迁移。
+
+编辑浮层是纯文本入口，不替代组件自己的富文本数据结构。完整示例可参考 `examples/render-host-benchmark/components/editable-table/`（DOM）和 `examples/sample-counter-component/`（Phaser）。
+
 ## 5. 页面、变体和预设
 
 V4 保留 V2/V3 的 `editor.pages`、`variants` 和 `presets`：
@@ -208,6 +256,15 @@ interface ComponentCreateContextBase {
   mode: 'edit' | 'preview' | 'capture'
   props: Record<string, unknown>
   editorState: Readonly<{ pageId?: string; variantId?: string }>
+  editor?: {
+    registerTextRegion(region: {
+      key: string
+      label?: string
+      multiline?: boolean
+      maxLength?: number
+      getBounds(): { x: number; y: number; width: number; height: number }
+    }): () => void
+  }
 
   actions: Readonly<{
     goToScene(sceneId: string, targetStateId?: string): boolean
@@ -256,6 +313,7 @@ interface ComponentCreateContextHybrid extends ComponentCreateContextBase {
 - DOM 对象加入 `ctx.dom.root`，Phaser 可见对象加入 `ctx.phaser.root`；
 - `dom` 模式不存在 `ctx.phaser`，`phaser` 模式不存在 `ctx.dom`，只有 `hybrid` 同时提供两者；
 - `mode === 'edit'` 时内部交互不得改变学习状态或跳转；`capture` 只产生确定静态画面，不推进学生业务；
+- `editor` 仅由编辑画布按需提供，必须判空；它只登记画布文字命中区，不是编辑器 DOM 或工程 Store 的访问入口；
 - `props` 已合并默认值和实例值；
 - `actions` 在预览和互动网页导出中工作，在编辑画布中返回 `false`；捕获模式不得主动导航或推进状态；
 - V4 的 `scope` 始终存在；Player 还提供生命周期作用域的可选 `events`、课程级 `courseState` 和场景 `presentation`，这些可选值仍需按类型判空；
@@ -395,11 +453,13 @@ function loadProjectImage(assetId) {
 
 组件在“编辑状态”画布中使用 `mode: 'edit'`，可以显示稳定编辑预览；在中央“当前位置试运行”、顶部“整课预览”和网页导出中使用 `mode: 'preview'`；静态捕获使用 `mode: 'capture'`，不得推进学生业务，只生成确定画面。当前位置试运行从当前场景/状态启动（基础场景回退当前场景初始状态），整课预览从第一场景初始状态启动。场景命名状态切换时不会重新执行 `create()`，而是在同一实例上调用 `resize()` / `updateProps()`，因此状态覆盖中的组件参数必须能即时反映。
 
-外部组件节点与原生节点一样，可作为 Project V7 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由自动化触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
+单 HTML 和网页包导出会把组件默认参数展平到实际实例 props，只发布运行必需的组件 ID、版本、API/渲染能力、编码执行逻辑和组件素材；组件包的 `manifest.json`、`editor.properties/pages`、变体、预设、说明、缩略图和独立原始 `runtime.js` 不进入发布物。执行逻辑在浏览器端仍可恢复和分析，这只是 [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 的轻量发布裁剪，不是代码加密或 DRM。
+
+外部组件节点与原生节点一样，可作为 Project V7 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
 
 内部点击、拖拽、动画状态推进和宿主动作只在 `preview` 生效。组件不得访问编辑器 DOM，也不得假定属性栏结构。
 
-V3/V4 保证所有 `props.content` 文字可在属性栏编辑；组件内部稳定文字区域的画布原位编辑不是公共组件 API 的必备能力。
+V3/V4 保证所有 `props.content` 文字可在属性栏编辑；画布原位编辑是可选兼容扩展，组件必须通过 DOM `data-courseware-edit-key` 或 `ctx.editor.registerTextRegion()` 显式登记。未登记不影响属性栏、预览、导出或旧组件兼容。
 
 PDF/PPTX 不执行组件互动或声音。可视组件应提供可理解的稳定编辑预览和静态结果；视频型定制组件需要明确海报/占位方案。内置 `TeacherControllerNode` 默认不进入静态导出，而自定义组件是否应出现在静态成品中由组件视觉和导出捕获结果决定。
 
@@ -407,9 +467,13 @@ DOM 静态捕获支持常规背景、边框、文字、图片、表单值和 Can
 
 ## 13. 组件包管理与故障隔离
 
-Editor 1.6.0 在“元素”面板把组件包作为工程一等资源管理：显示包 ID、版本、场景实例数和全局实例数。仍有任一实例引用时禁止删除；只有引用数为 0 时可安全删除。
+Editor 1.6.0 在专业模式“元素”面板把组件包作为工程一等资源管理：显示包 ID、版本、场景实例数和全局实例数。仍有任一实例引用时禁止删除；只有引用数为 0 时可安全删除。
 
 “选择新包替换”只接受 manifest ID 相同的新包。替换前会校验新包的 `supportedScopes` 是否覆盖所有现有场景/全局实例；校验、解包或迁移失败时原工程保持不变，成功后所有实例版本统一更新。不同 ID 的组件不能借替换入口隐式迁移。
+
+专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Project V7 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
+
+“只读”只阻止直接覆盖原包，不阻止查看或复制已经交付的代码，也不替代许可证约束；创建副本前应确认组件授权允许修改和二次分发。可编辑副本是工程作者态能力，不是源码保密措施。`.h5lesson` 保存完整组件包；单 HTML/网页包虽会裁掉 manifest、编辑器字段和独立原始 `runtime.js`，浏览器仍需取得可恢复的执行逻辑。不要在组件或工程中存放密钥，并且不要把 PublishedLesson 裁剪描述为加密、不可逆向或 DRM。
 
 组件创建、属性更新、尺寸/可见性/暂停更新、捕获准备和销毁必须可隔离失败。单个实例异常会进入本地诊断日志并保留其他页面/组件运行；静态导出也只回退该实例，不能清空此前成功快照或阻断后续实例。作者排障时先运行“工程检查”确认包和引用，再导出不含课件素材内容的诊断报告。
 
@@ -439,6 +503,7 @@ API 3 兼容示例位于 [`examples/runtime-v3-complete/components/global-contro
 - [ ] manifest 与 runtime 的 ID 和 API 版本一致，入口同步只注册一次。
 - [ ] 所有人工可见文字均位于有效 `props.content`，所有状态和页面均已覆盖。
 - [ ] 显式文字字段只补充标签/说明，未依赖它决定可编辑性。
+- [ ] 如开放画布文字编辑，DOM key 或 `ctx.editor?.registerTextRegion()` 与公开字符串路径一致，区域会更新/注销，且 preview/capture 在没有 `ctx.editor` 时正常运行。
 - [ ] 图片、数字、颜色和模式按真实维护需求公开。
 - [ ] `updateProps()`、`setEditorState()`、`resize()`、`setVisible()`、`suspend/resume()`、`prepareCapture()` 和 `destroy()` 行为正确。
 - [ ] DOM/Phaser 对象只使用声明能力；没有依赖跨 DOM/Canvas 平面的逐对象交错，也没有把修改 `renderMode` 当作自动代码转换。
@@ -447,11 +512,13 @@ API 3 兼容示例位于 [`examples/runtime-v3-complete/components/global-contro
 - [ ] 场景/全局生命周期、隐藏输入、重播和重开已验证。
 - [ ] 外层 `node.enter` / `node.exit` 与组件内部动画责任不重叠；业务触发、顺序/并行/延迟、完成事件与静态稳定帧正确。
 - [ ] 组件包使用统计正确；同 ID 替换、作用域不兼容回滚、引用中禁止删除和无引用安全删除已验证。
+- [ ] 需要代码修改时创建新 ID/版本的工程内可编辑副本，未直接覆盖第三方包；副本变更可撤销并通过 manifest/runtime 校验。
 - [ ] 未重复实现可由 `VideoNode`、声音库/声道、`TeacherControllerNode` 或声明式交互完成的一等能力；自建媒体能响应静音并完整清理。
 - [ ] 必需 `scope` 使用正确；`events/courseState/presentation` 均做可选检查；事件订阅、课程状态和场景状态切换语义已验证。
 - [ ] 需要跨场景指定状态时使用 `goToScene(sceneId, targetStateId)`，并验证状态失效回退与导航守卫重定向。
 - [ ] 组件事件可被全局运行时接收，复杂导航规则未塞进组件私有全局变量。
 - [ ] 单 HTML 与网页包离线运行，PDF/PPTX 静态化结果已检查。
+- [ ] 发布物未携带作者态 manifest/编辑器字段或重复 `runtime.js`，同时已明确执行逻辑可恢复、不构成源码保密或 DRM。
 - [ ] 捕获按实例产生确定帧；单实例失败只生成该实例占位，成功快照不会被后续失败清空，批量 Three/WebGL 组件不会同时创建捕获宿主。
 - [ ] Three.js 如有使用，仅打包在组件内；GLB、loader、纹理和解码器离线；RAF、WebGL 与 GPU 资源可暂停、可捕获、可销毁。
 - [ ] ZIP 路径安全、大小写一致，组件包不超过 50 MB。

@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RecentProjectEntry } from '@/shared/ipcTypes'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { utf8ByteLength } from '@/renderer/export/exportSize'
 import { ExportSizeWarningDialog } from '@/renderer/ui/ExportSizeWarningDialog'
@@ -8,22 +9,29 @@ import { TopToolbar, type ExportFormat } from '@/renderer/ui/TopToolbar'
 afterEach(cleanup)
 
 beforeEach(() => {
+  localStorage.clear()
   useEditorStore.getState().createNewProject()
+  useEditorStore.setState({ editorMode: 'simple' })
 })
 
 function renderToolbar(
   onExport: (format: ExportFormat) => void,
   busy = false,
   onOpenHealth = vi.fn(),
+  options: {
+    onSave?: (saveAs?: boolean) => void
+    recentProjects?: RecentProjectEntry[]
+    onOpenRecent?: (path: string) => void
+  } = {},
 ) {
   render(
     <TopToolbar
       busy={busy}
       onNew={() => undefined}
       onOpen={() => undefined}
-      recentProjects={[]}
-      onOpenRecent={() => undefined}
-      onSave={() => undefined}
+      recentProjects={options.recentProjects ?? []}
+      onOpenRecent={options.onOpenRecent ?? (() => undefined)}
+      onSave={options.onSave ?? (() => undefined)}
       onImportComponent={() => undefined}
       healthSummary={{ error: 0, warning: 0, info: 0, total: 0, canExport: true }}
       onOpenHealth={onOpenHealth}
@@ -46,11 +54,67 @@ describe('unified export menu', () => {
     expect(useEditorStore.getState().project.title).toBe('未命名课件')
   })
 
-  it('opens project health from the toolbar', () => {
+  it('moves Save As, project health, and recent projects into More in simple mode', () => {
     const onOpenHealth = vi.fn()
-    renderToolbar(vi.fn(), false, onOpenHealth)
-    fireEvent.click(screen.getByRole('button', { name: '工程检查：未发现问题' }))
+    const onSave = vi.fn()
+    const onOpenRecent = vi.fn()
+    renderToolbar(vi.fn(), false, onOpenHealth, {
+      onSave,
+      onOpenRecent,
+      recentProjects: [{
+        path: 'C:\\lessons\\rain.h5lesson',
+        name: '雨中的苏轼',
+        lastOpenedAt: 1,
+      }],
+    })
+
+    expect(screen.queryByRole('button', { name: '另存为' })).not.toBeInTheDocument()
+    expect(screen.queryByTitle('打开最近工程')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', {
+      name: '工程检查：未发现问题',
+    })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTitle('更多工程操作'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /另存为/ }))
+    expect(onSave).toHaveBeenCalledWith(true)
+
+    fireEvent.click(screen.getByTitle('更多工程操作'))
+    fireEvent.click(screen.getByRole('menuitem', {
+      name: '工程检查：未发现问题',
+    }))
     expect(onOpenHealth).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByTitle('更多工程操作'))
+    fireEvent.click(screen.getByRole('button', { name: /雨中的苏轼/ }))
+    expect(onOpenRecent).toHaveBeenCalledWith('C:\\lessons\\rain.h5lesson')
+  })
+
+  it('keeps advanced project controls directly visible in professional mode', () => {
+    act(() => useEditorStore.getState().setEditorMode('professional'))
+    renderToolbar(vi.fn())
+
+    expect(screen.queryByTitle('更多工程操作')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '另存为' })).toBeInTheDocument()
+    expect(screen.getByTitle('打开最近工程')).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: '工程检查：未发现问题',
+    })).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: '导入可信的 .h5component 组件',
+    })).toBeInTheDocument()
+  })
+
+  it('changes editor density without replacing or mutating the Project document', () => {
+    const projectBefore = useEditorStore.getState().project
+    renderToolbar(vi.fn())
+
+    fireEvent.click(screen.getByRole('button', { name: '专业' }))
+    expect(useEditorStore.getState().editorMode).toBe('professional')
+    expect(useEditorStore.getState().project).toBe(projectBefore)
+
+    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
+    expect(useEditorStore.getState().editorMode).toBe('simple')
+    expect(useEditorStore.getState().project).toBe(projectBefore)
   })
 
   it('offers all four formats from one export control', () => {

@@ -220,7 +220,7 @@ export function NodesTab() {
         <div className="empty-state">
           {editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
           <br />
-          从“元素”面板添加{editingScope === 'global' ? '全局内容' : '内容'}
+          从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
         </div>
       ) : (
         <>

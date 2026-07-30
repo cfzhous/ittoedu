@@ -43,6 +43,27 @@
         })
         .setOrigin(0)
 
+      var disposeTitleEditor = ctx.editor
+        ? ctx.editor.registerTextRegion({
+            key: 'title',
+            label: '组件标题',
+            maxLength: 24,
+            getBounds: function () {
+              return { x: 24, y: 14, width: Math.max(80, currentWidth - 48), height: 38 }
+            }
+          })
+        : function () {}
+      var disposeHintEditor = ctx.editor
+        ? ctx.editor.registerTextRegion({
+            key: 'hint',
+            label: '操作提示',
+            maxLength: 40,
+            getBounds: function () {
+              return { x: 24, y: 52, width: Math.max(80, currentWidth - 48), height: 30 }
+            }
+          })
+        : function () {}
+
       var valueText = ctx.scene.add
         .text(currentWidth / 2, currentHeight / 2 - 6, String(value), {
           fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
@@ -163,6 +184,8 @@
         },
 
         destroy: function () {
+          disposeTitleEditor()
+          disposeHintEditor()
           minusButton.background.off('pointerdown', onMinus)
           resetButton.background.off('pointerdown', resetValue)
           plusButton.background.off('pointerdown', onPlus)

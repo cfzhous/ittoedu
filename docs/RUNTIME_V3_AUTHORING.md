@@ -4,7 +4,7 @@
 
 新工程必须写 `schemaVersion: 7`。V1–V6 仅是加载迁移输入；其中 V6 节点 `animation` 会自动迁移为事件驱动的 `node.activated → node.enter` 规则，新保存统一写 V7。
 
-Project V7 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包，也不由编辑器界面生成源码。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
+Project V7 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
 
 编辑器的“编辑状态”画布不执行自由运行时，只物化基础或命名状态；中央“当前位置试运行”在 Blob sandbox iframe 中执行与导出相同的真实 Player，并直接从当前场景和当前命名状态启动（基础场景使用当前场景初始状态）。预览文档、工程素材和组件素材使用临时 Blob URL；实例替换、关闭、重试或失败时统一撤销。状态条与 Player 双向同步，已被新实例替换的旧消息会因会话不匹配而被忽略；载入或启动失败会显示原因和重试入口。顶部“整课预览”则在独立窗口中从第一场景初始状态开始。
 
@@ -19,7 +19,7 @@ Project V7 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换�
 
 只用一次且逻辑复杂的互动可以直接写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；需要多处复用、独立发布或供非程序人员配置的互动区域再制作 V4 组件。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
 
-编辑器中，选中节点后的“属性/交互”只维护该节点点击规则；右侧常驻“自动化”Tab 维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件。每个 Project V7 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由自动化编排可编辑的结果。
+编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史，试运行仍在隔离 Player 中执行。每个 Project V7 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航。运行时应优先只负责复杂判定并 `ctx.emit()`，再由规则编排可编辑的结果。
 
 ## 2. `RuntimeDocument`
 
@@ -497,4 +497,4 @@ interface RuntimeInstanceLifecycle {
 - [ ] 工程检查没有阻断导出的错误；需要排障时已导出诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。
 
-API 1 兼容参考见 [`examples/runtime-v3-complete/`](../examples/runtime-v3-complete/README.md)。API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。后者的自动化压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求；前者保留旧协议夹具。两者都不替代真实课件的命名呈现状态设计。
+API 1 兼容参考见 [`examples/runtime-v3-complete/`](../examples/runtime-v3-complete/README.md)。API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。后者的规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求；前者保留旧协议夹具。两者都不替代真实课件的命名呈现状态设计。

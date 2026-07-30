@@ -1,21 +1,21 @@
 import type { ExportPayload } from '../shared/componentTypes'
+import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
 import { PlayerApp, type PlayerAppOptions } from './PlayerApp'
 import {
-  assertExportPayload,
   decodeExportPayload,
   loadExportPayloadFromUrl,
+  normalizePlayerPayload,
 } from './payload'
 
 export function startPlayer(
-  payloadOrEncoded: ExportPayload | string,
+  payloadOrEncoded: ExportPayload | PublishedLessonPayload | string,
   root: HTMLElement | string = 'lesson-root',
   options: PlayerAppOptions = {},
 ): PlayerApp {
   const payload =
     typeof payloadOrEncoded === 'string'
       ? decodeExportPayload(payloadOrEncoded)
-      : payloadOrEncoded
-  assertExportPayload(payload)
+      : normalizePlayerPayload(payloadOrEncoded)
 
   const rootElement =
     typeof root === 'string' ? document.getElementById(root) : root
@@ -50,7 +50,9 @@ function postEditorBridgeMessage(message: Record<string, unknown>): void {
   )
 }
 
-function startAndExposePlayer(payload: ExportPayload | string): PlayerApp | null {
+function startAndExposePlayer(
+  payload: ExportPayload | PublishedLessonPayload | string,
+): PlayerApp | null {
   try {
     const player = startPlayer(
       payload,
@@ -250,7 +252,7 @@ function destroyExposedPlayer(event: PageTransitionEvent): void {
 
 async function bootstrapPlayerFromUrl(
   payloadUrl: string,
-  fallbackPayload?: ExportPayload,
+  fallbackPayload?: ExportPayload | PublishedLessonPayload,
 ): Promise<PlayerApp | null> {
   try {
     const payload = await loadExportPayloadFromUrl(payloadUrl)

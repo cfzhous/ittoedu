@@ -7,6 +7,7 @@ import type {
 } from '../../shared/projectTypes'
 import type { EditorScene } from './EditorScene'
 import { onElementAnimationPreviewRequested } from './elementAnimationPreviewBus'
+import type { ComponentCanvasTextTarget } from './adapters/ExternalComponentNodeAdapter'
 
 export interface NodeMoveEndEvent {
   nodeId: string
@@ -65,6 +66,8 @@ export class EditorPhaserBridge {
   private readonly rotateHandlers = new Set<Handler<NodeRotateEndEvent>>()
   private readonly transformsHandlers = new Set<Handler<NodesTransformEndEvent>>()
   private readonly doubleClickHandlers = new Set<Handler<string>>()
+  private readonly componentTextDoubleClickHandlers =
+    new Set<Handler<ComponentCanvasTextTarget>>()
   private readonly stopAnimationPreviewListener: () => void
 
   constructor() {
@@ -180,6 +183,12 @@ export class EditorPhaserBridge {
     this.doubleClickHandlers.add(handler)
     return () => this.doubleClickHandlers.delete(handler)
   }
+  onComponentTextDoubleClick(
+    handler: Handler<ComponentCanvasTextTarget>,
+  ): () => void {
+    this.componentTextDoubleClickHandlers.add(handler)
+    return () => this.componentTextDoubleClickHandlers.delete(handler)
+  }
 
   emitSelected(nodeId: string | null, additive = false): void {
     this.selectedHandlers.forEach((handler) => handler({ nodeIds: nodeId ? [nodeId] : [], additive }))
@@ -204,6 +213,9 @@ export class EditorPhaserBridge {
   }
   emitTextDoubleClick(nodeId: string): void {
     this.doubleClickHandlers.forEach((handler) => handler(nodeId))
+  }
+  emitComponentTextDoubleClick(event: ComponentCanvasTextTarget): void {
+    this.componentTextDoubleClickHandlers.forEach((handler) => handler(event))
   }
 
   detach(scene: EditorScene): void {

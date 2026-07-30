@@ -231,6 +231,83 @@ describe('编辑器 ComponentRegistry', () => {
     registry.dispose()
   })
 
+  it('只在编辑宿主中暴露显式文字区域登记，并在实例销毁时清理', async () => {
+    const id = 'com.example.inline-text'
+    let context: ComponentCreateContext | undefined
+    let disposeFromComponent: (() => void) | undefined
+    vi.spyOn(document.head, 'append').mockImplementation((...nodes) => {
+      const script = nodes[0]
+      if (!(script instanceof HTMLScriptElement)) return
+      queueMicrotask(() => {
+        window.CoursewareComponent?.define({
+          id,
+          runtimeApiVersion: 2,
+          create(received) {
+            context = received
+            disposeFromComponent = received.editor?.registerTextRegion({
+              key: 'content.title',
+              label: '标题',
+              getBounds: () => ({ x: 12, y: 18, width: 160, height: 40 }),
+            })
+            return { destroy() {} }
+          },
+        })
+        script.onload?.call(script, new Event('load'))
+      })
+    })
+    const data: ComponentPackageData = {
+      manifest: {
+        schemaVersion: 2,
+        runtimeApiVersion: 2,
+        id,
+        name: '画布文字组件',
+        version: '2.0.0',
+        entry: 'runtime.js',
+        defaultSize: { width: 320, height: 180 },
+        minSize: { width: 16, height: 16 },
+        preserveAspectRatio: false,
+        assets: {},
+        defaultProps: { content: { title: '默认标题' } },
+        editor: {
+          properties: [
+            { key: 'content.title', label: '标题', type: 'text' },
+          ],
+        },
+      },
+      runtimeSource: 'runtime:inline-text',
+      files: {},
+    }
+    const registered = vi.fn(() => vi.fn())
+    const registry = new ComponentRegistry()
+    await registry.loadPackages({ [id]: data })
+    const lifecycle = registry.createInstance(
+      data,
+      {
+        ...componentNode(id),
+        component: { packageId: id, version: '2.0.0' },
+        props: { content: { title: '实例标题' } },
+      },
+      {} as Phaser.Scene,
+      {} as Phaser.GameObjects.Container,
+      'edit',
+      {},
+      'scene',
+      undefined,
+      undefined,
+      registered,
+    )
+
+    expect(context?.editor).toBeDefined()
+    expect(registered).toHaveBeenCalledWith(expect.objectContaining({
+      key: 'content.title',
+      label: '标题',
+    }))
+    disposeFromComponent?.()
+    expect(registered.mock.results[0]?.value).toHaveBeenCalledOnce()
+    lifecycle.destroy()
+    registry.dispose()
+  })
+
   it('隔离单个实例的更新和销毁错误，并向编辑画布报告阶段', async () => {
     const id = 'com.example.unstable'
     const updateProps = vi.fn()

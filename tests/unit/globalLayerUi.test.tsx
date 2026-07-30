@@ -65,6 +65,7 @@ function runtime(label: string, value: string): RuntimeDocument {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
+  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => cleanup())
@@ -97,6 +98,8 @@ describe('Project V5 global-layer editor UI', () => {
 
     expect(screen.getByTestId('add-text')).toBeInTheDocument()
     expect(screen.getByTestId('global-elements-notice')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('add-text'))
+    fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
     expect(
       screen.getByTestId(`component-${globalPackage.manifest.id}`),
     ).toBeInTheDocument()
@@ -104,7 +107,6 @@ describe('Project V5 global-layer editor UI', () => {
       screen.queryByTestId(`component-${scenePackage.manifest.id}`),
     ).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId('add-text'))
     fireEvent.click(
       screen.getByTestId(`component-${globalPackage.manifest.id}`),
     )

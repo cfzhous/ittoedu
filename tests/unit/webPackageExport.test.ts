@@ -5,12 +5,18 @@ import type {
   ExportPayload,
 } from '../../src/shared/componentTypes'
 import type { ProjectDocument } from '../../src/shared/projectTypes'
+import type { PublishedLessonPayload } from '../../src/shared/publishedLessonTypes'
 import { bytesToDataUrl } from '../../src/renderer/export/base64'
+import { decodePublishedCode } from '../../src/player/publishedLesson'
 import {
   buildWebPackage,
   buildWebPackageFiles,
 } from '../../src/renderer/export/buildWebPackage'
-import { createShapeNode } from '../../src/renderer/project/createProject'
+import {
+  createExternalComponentNode,
+  createImageNode,
+  createShapeNode,
+} from '../../src/renderer/project/createProject'
 import { createProjectV5Fields } from '../helpers/projectV5'
 
 const assetId = '../../asset:hero'
@@ -55,7 +61,16 @@ const project: ProjectDocument = {
       name: '场景 1',
       backgroundColor: '#ffffff',
       backgroundAssetId: null,
-      nodes: [motionWebNode],
+      nodes: [
+        motionWebNode,
+        createImageNode({
+          id: 'hero-image',
+          assetId,
+          width: 320,
+          height: 180,
+        }),
+        createExternalComponentNode(componentManifest, 480, 240),
+      ],
       interactions: [{
         id: 'motion-rule',
         name: '场景进入后显示',
@@ -129,12 +144,15 @@ function makePayload(): ExportPayload {
   }
 }
 
-function decodeJson<T>(bytes: Uint8Array): T {
-  return JSON.parse(strFromU8(bytes)) as T
+function decodeCourseData(bytes: Uint8Array): PublishedLessonPayload {
+  const source = strFromU8(bytes)
+  const match = source.match(/^window\.__H5_LESSON_PAYLOAD__=(.*);\s*$/s)
+  expect(match?.[1]).toBeDefined()
+  return JSON.parse(match?.[1] ?? 'null') as PublishedLessonPayload
 }
 
 describe('buildWebPackage', () => {
-  it('生成可离线解压的结构，并把工程和组件素材写成独立文件', () => {
+  it('生成可离线解压的结构，只把运行素材写成独立文件', () => {
     const payload = makePayload()
     const originalDataUrl = payload.assets[assetId]!.dataUrl
     const zipBytes = buildWebPackage(
@@ -148,32 +166,26 @@ describe('buildWebPackage', () => {
     expect(paths).toEqual(
       expect.arrayContaining([
         'index.html',
-        'course.json',
         'course-data.js',
         'player/player.iife.js',
         'player/player.css',
-        'assets/000-index.png',
+        'assets/000.png',
+        'component-assets/000/000.svg',
       ]),
     )
 
     const componentAssetPath = paths.find((entry) =>
-      entry.startsWith('components/') && entry.endsWith('/assets/000-course.svg'),
-    )
-    const componentRuntimePath = paths.find((entry) =>
-      entry.startsWith('components/') && entry.endsWith('/runtime.js'),
-    )
-    const componentManifestPath = paths.find((entry) =>
-      entry.startsWith('components/') && entry.endsWith('/manifest.json'),
+      entry.startsWith('component-assets/') && entry.endsWith('/000.svg'),
     )
     expect(componentAssetPath).toBeDefined()
-    expect(componentRuntimePath).toBeDefined()
-    expect(componentManifestPath).toBeDefined()
+    expect(paths.some((entry) => entry.endsWith('/runtime.js'))).toBe(false)
+    expect(paths.some((entry) => entry.endsWith('/manifest.json'))).toBe(false)
+    expect(paths).not.toContain('course.json')
 
-    expect([...files['assets/000-index.png']!]).toEqual([...imageBytes])
+    expect([...files['assets/000.png']!]).toEqual([...imageBytes])
     expect(strFromU8(files[componentAssetPath!]!)).toBe(
       '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
     )
-    expect(strFromU8(files[componentRuntimePath!]!)).toBe(runtimeSource)
     expect(strFromU8(files['player/player.iife.js']!)).toContain(
       '__WEB_PLAYER_STARTED__',
     )
@@ -181,38 +193,38 @@ describe('buildWebPackage', () => {
     expect(payload.assets[assetId]!.dataUrl).toBe(originalDataUrl)
   })
 
-  it('course.json 只保存相对 URL，不再内嵌大 Data URL', () => {
+  it('唯一发布数据只保存相对 URL，不再内嵌大 Data URL', () => {
     const payload = makePayload()
     const files = buildWebPackageFiles(payload, 'window.__PLAYER__=true;')
-    const courseText = strFromU8(files['course.json']!)
-    const fallbackText = strFromU8(files['course-data.js']!)
-    const course = decodeJson<ExportPayload>(files['course.json']!)
+    const courseText = strFromU8(files['course-data.js']!)
+    const course = decodeCourseData(files['course-data.js']!)
 
     expect(courseText).not.toMatch(/data:[^,]*;base64,/i)
-    expect(fallbackText).not.toMatch(/data:[^,]*;base64,/i)
     expect(courseText.length).toBeLessThan(payload.assets[assetId]!.dataUrl.length / 10)
     expect(course.assets[assetId]).toEqual({
       mimeType: 'image/png',
-      dataUrl: './assets/000-index.png',
+      url: './assets/000.png',
     })
-    expect(course.project.scenes[0]!.nodes[0]!.playbackInitialVisibility)
+    expect(course.scenes[0]!.nodes[0]!.playbackInitialVisibility)
       .toBe('hidden')
-    expect(course.project.scenes[0]!.interactions)
+    expect(course.scenes[0]!.interactions)
       .toEqual(project.scenes[0]!.interactions)
 
-    const packagedComponent = course.components[componentKey]!
-    expect(packagedComponent.runtimeSource).toBe(runtimeSource)
-    expect(packagedComponent.assets.icon?.dataUrl).toMatch(
-      /^\.\/components\/[^/]+\/assets\/000-course\.svg$/,
+    const packagedComponent = course.components[
+      `${componentManifest.id}@${componentManifest.version}`
+    ]!
+    expect(decodePublishedCode(packagedComponent.code)).toBe(runtimeSource)
+    expect(packagedComponent.assets.icon?.url).toMatch(
+      /^\.\/component-assets\/[^/]+\/000\.svg$/,
     )
-    expect(packagedComponent.manifest.entry).toBe('runtime.js')
-    expect(packagedComponent.manifest.thumbnail).toBeUndefined()
-    expect(packagedComponent.manifest.assets.icon).toBe('assets/000-course.svg')
+    expect(courseText).not.toContain(runtimeSource)
+    expect(courseText).not.toContain('"runtimeSource"')
+    expect(courseText).not.toContain('"manifest"')
   })
 
   it('生成的所有 ZIP 与素材 URL 路径均不可穿越包根目录', () => {
     const files = buildWebPackageFiles(makePayload(), 'window.__PLAYER__=true;')
-    const course = decodeJson<ExportPayload>(files['course.json']!)
+    const course = decodeCourseData(files['course-data.js']!)
 
     for (const archivePath of Object.keys(files)) {
       expect(archivePath).not.toMatch(/^(?:[A-Za-z]:|\/|\\)/)
@@ -222,9 +234,9 @@ describe('buildWebPackage', () => {
     }
 
     const urls = [
-      ...Object.values(course.assets).map((asset) => asset.dataUrl),
+      ...Object.values(course.assets).map((asset) => asset.url),
       ...Object.values(course.components).flatMap((component) =>
-        Object.values(component.assets).map((asset) => asset.dataUrl),
+        Object.values(component.assets).map((asset) => asset.url),
       ),
     ]
     for (const url of urls) {
@@ -233,17 +245,19 @@ describe('buildWebPackage', () => {
     }
   })
 
-  it('index 仅引用包内资源，并声明 course.json 与双击离线回退脚本', () => {
+  it('index 仅引用包内资源，并由单一数据脚本支持双击离线播放', () => {
     const files = buildWebPackageFiles(makePayload(), 'window.__PLAYER__=true;')
     const html = strFromU8(files['index.html']!)
 
-    expect(html).toContain('name="courseware-payload" content="./course.json"')
+    expect(html).not.toContain('name="courseware-payload"')
     expect(html).toContain('src="./course-data.js"')
     expect(html).toContain('src="./player/player.iife.js"')
     expect(html).toContain('href="./player/player.css"')
     expect(html).not.toMatch(/https?:\/\//i)
     expect(html).not.toContain('<title>网页包 </title>')
     expect(html).toContain('&lt;/title&gt;&lt;script&gt;bad()&lt;/script&gt;')
+    expect(html).toContain("connect-src 'self'")
+    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*)/i)
   })
 
   it('拒绝空播放器和非 Data URL 素材', () => {

@@ -56,7 +56,10 @@ interface LaunchedEditor {
   externalRequests: string[]
 }
 
-async function launchEditor(options: { preserveRecoveryPrompt?: boolean } = {}): Promise<LaunchedEditor> {
+async function launchEditor(options: {
+  preserveRecoveryPrompt?: boolean
+  mode?: 'simple' | 'professional'
+} = {}): Promise<LaunchedEditor> {
   const app = await electron.launch({
     args: ['.', `--user-data-dir=${e2eUserDataPath}`],
     cwd: root,
@@ -79,6 +82,12 @@ async function launchEditor(options: { preserveRecoveryPrompt?: boolean } = {}):
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+  const modeButton = page.getByRole('button', {
+    name: options.mode === 'simple' ? '简洁' : '专业',
+  })
+  if (await modeButton.getAttribute('aria-pressed') !== 'true') {
+    await modeButton.click()
+  }
   if (!options.preserveRecoveryPrompt) {
     const recoveryDialog = page.getByRole('alertdialog', {
       name: '发现未完成的本地恢复副本',
@@ -212,11 +221,13 @@ async function averagePixelDifference(
 
 async function addText(page: Page) {
   await page.getByRole('tab', { name: '元素' }).click()
+  await page.getByRole('tab', { name: '常用' }).click()
   await page.getByTestId('add-text').click()
 }
 
 async function addRectangle(page: Page) {
   await page.getByRole('tab', { name: '元素' }).click()
+  await page.getByRole('tab', { name: '常用' }).click()
   await page.getByTestId('add-rectangle').click()
 }
 
@@ -243,6 +254,45 @@ async function dragElementToCanvas(
       y: canvasBounds.y - workspaceBounds.y + logicalPoint.y,
     },
   })
+  const propertiesTab = page.getByRole('tab', { name: '属性' })
+  if (await propertiesTab.getAttribute('aria-selected') !== 'true') {
+    // Chromium/Electron can occasionally finish the pointer gesture without
+    // delivering the HTML5 drop event. Replay the same browser-native drag
+    // payload only when the store did not acknowledge the first drop.
+    await page.evaluate(
+      ({ sourceTestId, clientX, clientY }) => {
+        const source = document.querySelector<HTMLElement>(
+          `[data-testid="${sourceTestId}"]`,
+        )
+        const target = document.querySelector<HTMLElement>(
+          'main[aria-label="课件画布"]',
+        )
+        if (!source || !target) throw new Error('拖放源或课件画布不可见')
+        const dataTransfer = new DataTransfer()
+        const dispatch = (
+          element: HTMLElement,
+          type: 'dragstart' | 'dragover' | 'drop' | 'dragend',
+        ) => element.dispatchEvent(new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          clientX,
+          clientY,
+          dataTransfer,
+        }))
+        dispatch(source, 'dragstart')
+        dispatch(target, 'dragover')
+        dispatch(target, 'drop')
+        dispatch(source, 'dragend')
+      },
+      {
+        sourceTestId: testId,
+        clientX: canvasBounds.x + logicalPoint.x,
+        clientY: canvasBounds.y + logicalPoint.y,
+      },
+    )
+  }
+  await expect(propertiesTab).toHaveAttribute('aria-selected', 'true')
 }
 
 function commonNodeField(page: Page, label: 'X' | 'Y' | '宽' | '高') {
@@ -331,12 +381,110 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
     rmSync(webPackageDirectory, { recursive: true, force: true })
   })
 
+  test('里程碑闭环：简洁模式完成文字、透明度、左起竖排与出现动画试运行', async () => {
+    const { app, page, pageErrors, consoleErrors } = await launchEditor({
+      mode: 'simple',
+    })
+    try {
+      await expect(page.getByRole('tab', { name: '元素' })).toBeVisible()
+      await expect(page.getByRole('tab', { name: '互动与动画' })).toHaveCount(0)
+      await expect(page.getByRole('tab', { name: '开发' })).toHaveCount(0)
+      await page.getByRole('tab', { name: '媒体' }).click()
+      await expect(page.getByTestId('media-tab')).toBeVisible()
+      await expect(page.getByTestId('add-image')).toHaveCount(0)
+      await expect(page.getByTestId('add-video')).toHaveCount(0)
+      await expect(page.getByTestId('import-audio')).toHaveCount(0)
+      await expect(page.getByRole('button', { name: '导入声音' })).toHaveCount(0)
+      await expect(page.getByRole('button', { name: '导入视频' })).toHaveCount(0)
+
+      await addText(page)
+      await page.getByRole('tab', { name: '属性' }).click()
+      const transparency = page.getByLabel('透明度 %', { exact: true })
+      await transparency.fill('50')
+      await transparency.press('Enter')
+      await expect(transparency).toHaveValue('50')
+
+      await page.getByRole('button', { name: '展开字体列表' }).click()
+      await expect(page.getByRole('option', {
+        name: /微软雅黑，Microsoft YaHei，/,
+      })).toBeVisible()
+      await page.getByRole('button', { name: '收起字体列表' }).click()
+
+      await page.getByLabel('文字方向').selectOption('vertical-lr')
+      const height = commonNodeField(page, '高')
+      await expect(height).toBeEnabled()
+      await height.fill('260')
+      await height.press('Enter')
+      await expect(height).toHaveValue('260')
+
+      const simpleMotion = page.getByTestId('simple-entrance-animation')
+      await simpleMotion.getByRole('button', { name: '淡入' }).click()
+      await expect(
+        simpleMotion.getByRole('button', { name: '淡入' }),
+      ).toHaveAttribute('aria-pressed', 'true')
+      await simpleMotion.getByRole('button', { name: '预览' }).click()
+
+      await page.getByRole('button', {
+        name: '当前位置试运行',
+        exact: true,
+      }).click()
+      await expect(
+        page.frameLocator('iframe[title="当前位置试运行"]')
+          .locator('.lesson-canvas-host canvas'),
+      ).toBeVisible({ timeout: 15_000 })
+      expect(pageErrors).toEqual([])
+      expect(consoleErrors).toEqual([])
+    } finally {
+      await closeEditor(app)
+    }
+  })
+
+  test('里程碑闭环：专业模式创建、复制、排序规则并修改受控运行时', async () => {
+    const { app, page, pageErrors, consoleErrors } = await launchEditor()
+    try {
+      await addText(page)
+      await page.getByRole('tab', { name: '互动与动画' }).click()
+      await page.getByRole('button', { name: '使用模板' }).click()
+      await expect(page.getByRole('group', { name: '规则 1' })).toBeVisible()
+      await page.getByRole('button', { name: '复制规则 1' }).click()
+      await expect(page.getByRole('group', { name: '规则 2' })).toBeVisible()
+      await page.getByRole('button', { name: '上移规则 2' }).click()
+
+      await page.getByRole('tab', { name: '开发' }).click()
+      await expect(page.getByText('工程开发工作台')).toBeVisible()
+      await expect(page.getByRole('tab', { name: /^运行时/ })).toBeVisible()
+      await expect(page.getByRole('tab', { name: /^对象 JSON/ })).toBeVisible()
+      await expect(page.getByRole('tab', { name: /^规则 JSON/ })).toBeVisible()
+      await expect(page.getByRole('tab', { name: /^组件代码/ })).toBeVisible()
+      expect(await page.locator('.right-sidebar--developer').evaluate(
+        (element) => element.getBoundingClientRect().width,
+      )).toBeGreaterThanOrEqual(450)
+      await page.getByRole('button', { name: '创建运行时模板' }).click()
+      const runtimeSource = page.getByRole('textbox', {
+        name: '场景运行时源码',
+      })
+      await expect(runtimeSource).toHaveValue(/CoursewareRuntime\.define/)
+      await expect(runtimeSource).toHaveAttribute('wrap', 'off')
+      const runtimeEditor = runtimeSource.locator('xpath=ancestor::section[1]')
+      await runtimeEditor.getByRole('button', { name: '校验并应用' }).click()
+      await expect(runtimeEditor.getByText(
+        '校验通过，修改已写入工程历史。',
+        { exact: true },
+      )).toBeVisible()
+      expect(pageErrors).toEqual([])
+      expect(consoleErrors).toEqual([])
+    } finally {
+      await closeEditor(app)
+    }
+  })
+
   test('当前位置试运行：Blob 沙箱中的真实 Player 可启动', async () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
-      await page.getByRole('tab', { name: '自动化' }).click()
+      await page.getByRole('button', { name: '专业' }).click()
+      await page.getByRole('tab', { name: '互动与动画' }).click()
       await expect(
-        page.getByRole('heading', { name: '场景自动化' }),
+        page.getByRole('heading', { name: '互动与动画' }),
       ).toBeVisible()
       await page.getByTestId('add-scene').click()
       await expect(
@@ -513,15 +661,14 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       await page.getByRole('button', { name: '展开字体列表' }).click()
       await expect(page.getByRole('listbox', { name: '常用字体' })).toBeVisible()
       await expect(page.getByRole('option', {
-        name: 'Microsoft YaHei',
-        exact: true,
+        name: /微软雅黑，Microsoft YaHei，/,
       })).toBeVisible()
       await expect(fontInput).not.toHaveValue('')
       await page.screenshot({
         path: join(visualOutputDirectory, 'font-family-dropdown.png'),
         fullPage: true,
       })
-      await page.getByRole('option', { name: 'KaiTi' }).click()
+      await page.getByRole('option', { name: /楷体，KaiTi，/ }).click()
       await expect(fontInput).toHaveValue('KaiTi')
       expect(
         await page.getByTestId('font-family-preview').evaluate(
@@ -626,7 +773,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
     const { app, page, pageErrors } = await launchEditor()
     try {
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
-      await dragElementToCanvas(page, 'add-rectangle', { x: 320, y: 220 })
+      await addRectangle(page)
       await addText(page)
       await page.getByRole('tab', { name: '图层' }).click()
       await expect(page.locator('.node-item')).toHaveCount(2)
@@ -675,6 +822,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       })
       await page.getByRole('button', { name: '导入可信的 .h5component 组件' }).click()
       await page.getByRole('button', { name: '选择组件包' }).click()
+      await page.getByRole('tab', { name: '互动组件' }).click()
       const componentCard = page.getByTestId('component-com.example.sample-counter')
       await componentCard.waitFor()
       await componentCard.click()
@@ -877,6 +1025,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '元素' }).click()
       await expect(page.getByTestId('global-elements-notice')).toBeVisible()
+      await page.getByRole('tab', { name: '互动组件' }).click()
       await page.getByTestId('component-com.example.global-nav').click()
 
       await page.getByRole('tab', { name: '属性' }).click()
@@ -1108,11 +1257,11 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       const packageArchive = unzipSync(new Uint8Array(readFileSync(webPackagePath)))
       expect(Object.keys(packageArchive)).toEqual(expect.arrayContaining([
         'index.html',
-        'course.json',
         'course-data.js',
         'player/player.iife.js',
         'player/player.css',
       ]))
+      expect(Object.keys(packageArchive)).not.toContain('course.json')
       for (const [archivePath, bytes] of Object.entries(packageArchive)) {
         const targetPath = join(webPackageDirectory, ...archivePath.split('/'))
         mkdirSync(dirname(targetPath), { recursive: true })
@@ -1311,6 +1460,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       ]
       for (const [index, item] of additions.entries()) {
         await page.getByRole('tab', { name: '元素' }).click()
+        await page.getByRole('tab', { name: '常用' }).click()
         await dragElementToCanvas(page, item.testId, { x: item.x, y: item.y })
         // A drop rebuilds the Phaser/editor node bridge. Wait for its visible
         // layer entry before starting the next drag instead of racing that sync.
@@ -1367,16 +1517,21 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
         imageOpen: firstImagePath,
         componentOpen: sampleComponentPath,
       })
+      await page.getByRole('tab', { name: '元素' }).click()
+      await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-shape-arrow-right').click()
       await addText(page)
       await page.getByRole('tab', { name: '元素' }).click()
+      await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-image').click()
       await page.waitForTimeout(300)
       await page.getByTestId('add-scene').click()
       await page.getByRole('tab', { name: '元素' }).click()
+      await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-shape-brace-pair-horizontal').click()
       await page.getByRole('button', { name: '导入可信的 .h5component 组件' }).click()
       await page.getByRole('button', { name: '选择组件包' }).click()
+      await page.getByRole('tab', { name: '互动组件' }).click()
       await page.getByTestId('component-com.example.sample-counter').click()
       await page.waitForTimeout(300)
 

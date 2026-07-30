@@ -284,7 +284,11 @@ export function TextEditOverlay({
           top: metrics.top,
           width: metrics.width,
           minHeight: metrics.height,
-          maxHeight: node.style.overflow === 'auto-height' ? undefined : metrics.height,
+          maxHeight:
+            node.style.overflow === 'auto-height' &&
+            node.style.writingMode === 'horizontal'
+              ? undefined
+              : metrics.height,
           padding: node.style.padding * (metrics.width / node.width),
           fontFamily: node.style.fontFamily,
           fontSize: metrics.fontSize,
@@ -295,7 +299,12 @@ export function TextEditOverlay({
           letterSpacing: node.style.letterSpacing * (metrics.width / node.width),
           color: node.style.color,
           textAlign: node.style.align,
-          writingMode: node.style.writingMode === 'vertical' ? 'vertical-rl' : 'horizontal-tb',
+          writingMode: node.style.writingMode === 'horizontal'
+            ? 'horizontal-tb'
+            : node.style.writingMode,
+          textOrientation: node.style.writingMode === 'horizontal'
+            ? undefined
+            : 'upright',
           transform: `rotate(${node.rotation}deg)`,
           transformOrigin: 'center center',
         }}

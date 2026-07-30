@@ -4,11 +4,13 @@ import type {
   ExportPayload,
 } from '../../src/shared/componentTypes'
 import type { ProjectDocument } from '../../src/shared/projectTypes'
+import type { PublishedLessonPayload } from '../../src/shared/publishedLessonTypes'
 import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { buildPptx } from '../../src/renderer/export/buildPptx'
 import { buildExportPayload } from '../../src/renderer/export/buildExportPayload'
 import { buildStandaloneHtml } from '../../src/renderer/export/buildStandaloneHtml'
+import { decodePublishedCode } from '../../src/player/publishedLesson'
 import {
   pptxColor,
   pptxFontFace,
@@ -159,13 +161,13 @@ const componentPackage: ComponentPackageData = {
   },
 }
 
-function decodePayloadFromHtml(html: string): ExportPayload {
+function decodePayloadFromHtml(html: string): PublishedLessonPayload {
   const match = html.match(/window\.__H5_LESSON_PAYLOAD__=("[A-Za-z0-9+/=]+");/)
   expect(match?.[1]).toBeDefined()
   const encoded = JSON.parse(match?.[1] ?? '""') as string
   const binary = atob(encoded)
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-  return JSON.parse(new TextDecoder().decode(bytes)) as ExportPayload
+  return JSON.parse(new TextDecoder().decode(bytes)) as PublishedLessonPayload
 }
 
 describe('buildExportPayload', () => {
@@ -237,16 +239,22 @@ describe('buildStandaloneHtml', () => {
     expect(html).not.toContain('<title>离线课件 </title>')
     expect(html).toContain('&lt;/title&gt;&lt;script&gt;bad()&lt;/script&gt;')
     expect(html).toContain("<\\/script>")
+    expect(html).toContain('connect-src data: blob:')
+    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*|'self')/i)
 
     const decoded = decodePayloadFromHtml(html)
-    expect(decoded.project.title).toBe(project.title)
-    expect(decoded.project.scenes[0]!.nodes[0]!.playbackInitialVisibility)
+    expect(decoded.format).toBe('h5lesson-published')
+    expect(decoded.formatVersion).toBe(1)
+    expect(decoded.title).toBe(project.title)
+    expect(decoded.scenes[0]!.nodes[0]!.playbackInitialVisibility)
       .toBe('hidden')
-    expect(decoded.project.scenes[0]!.interactions)
+    expect(decoded.scenes[0]!.interactions)
       .toEqual(project.scenes[0]!.interactions)
-    expect(decoded.assets['asset-1']?.dataUrl).toMatch(/^data:image\/png;base64,/)
+    expect(decoded.assets['asset-1']?.url).toMatch(/^data:image\/png;base64,/)
     expect(
-      decoded.components['com.example.counter@1.0.0']?.runtimeSource,
+      decodePublishedCode(
+        decoded.components['com.example.counter@1.0.0']!.code,
+      ),
     ).toBe(runtimeSource)
   })
 

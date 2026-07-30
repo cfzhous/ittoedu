@@ -11,11 +11,19 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type {
+  ExternalComponentNode,
   RuntimeAssetMap,
   SceneDocument,
+  SceneNode,
   TextNode,
 } from '../../shared/projectTypes'
+import {
+  getComponentPropValue,
+  mergeComponentProps,
+  setComponentPropValue,
+} from '../../shared/componentProps'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
+import type { ComponentCanvasTextTarget } from '../phaser/adapters/ExternalComponentNodeAdapter'
 import {
   selectActiveScene,
   selectEditingNodes,
@@ -23,6 +31,7 @@ import {
   useEditorStore,
 } from '../store/editorStore'
 import { TextEditOverlay } from './TextEditOverlay'
+import { ComponentTextEditOverlay } from './ComponentTextEditOverlay'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
@@ -61,6 +70,25 @@ function nodesEqual(
   next: SceneDocument['nodes'][number],
 ) {
   return JSON.stringify(previous) === JSON.stringify(next)
+}
+
+function withDirectionAwareTextAutoSize(
+  node: SceneNode | undefined,
+  patch: Partial<Pick<SceneNode, 'x' | 'y' | 'width' | 'height' | 'rotation'>>,
+): typeof patch {
+  if (node?.type !== 'text' || node.style.overflow !== 'auto-height') {
+    return patch
+  }
+  const candidate = {
+    ...node,
+    ...patch,
+  }
+  const rendered = renderTextNodeCanvas(candidate, candidate.width)
+  return {
+    ...patch,
+    width: rendered.width,
+    height: rendered.height,
+  }
 }
 
 const RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS = 12_000
@@ -103,6 +131,8 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFeedback, setPreviewFeedback] = useState<RuntimePreviewFeedback>(null)
   const [previewRetryRevision, setPreviewRetryRevision] = useState(0)
+  const [componentTextTarget, setComponentTextTarget] =
+    useState<ComponentCanvasTextTarget | null>(null)
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 })
   const [panning, setPanning] = useState(false)
   const spacePressedRef = useRef(false)
@@ -439,6 +469,29 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         : undefined,
     [document.nodes, editingTextNodeId],
   )
+  const componentEditingNode = useMemo(
+    () => componentTextTarget
+      ? document.nodes.find(
+          (node): node is ExternalComponentNode => (
+            node.id === componentTextTarget.nodeId &&
+            node.type === 'external-component'
+          ),
+        )
+      : undefined,
+    [componentTextTarget, document.nodes],
+  )
+  const componentEditingValue = useMemo(() => {
+    if (!componentEditingNode) return ''
+    const component = componentPackages[
+      componentEditingNode.component.packageId
+    ]
+    if (!component) return ''
+    const value = getComponentPropValue(
+      mergeComponentProps(component.manifest, componentEditingNode.props),
+      componentTextTarget?.key ?? '',
+    )
+    return typeof value === 'string' ? value : ''
+  }, [componentEditingNode, componentPackages, componentTextTarget?.key])
 
   useEffect(() => {
     const next: RuntimeAssetMap = {}
@@ -489,20 +542,47 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
           nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
         ),
       ),
-      handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) =>
-        useEditorStore.getState().updateNode(nodeId, { x, y, width, height }),
-      ),
+      handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) => {
+        const store = useEditorStore.getState()
+        const node = selectEditingNodes(store).find(
+          (item) => item.id === nodeId,
+        )
+        store.updateNode(
+          nodeId,
+          withDirectionAwareTextAutoSize(
+            node,
+            { x, y, width, height },
+          ),
+        )
+      }),
       handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) =>
         useEditorStore.getState().updateNode(nodeId, { rotation }),
       ),
-      handle.bridge.onNodesTransformEnd(({ nodes }) =>
-        useEditorStore.getState().updateNodes(
-          nodes.map(({ nodeId, ...patch }) => ({ nodeId, patch })),
-        ),
-      ),
+      handle.bridge.onNodesTransformEnd(({ nodes }) => {
+        const store = useEditorStore.getState()
+        const currentById = new Map(
+          selectEditingNodes(store).map((node) => [node.id, node]),
+        )
+        store.updateNodes(
+          nodes.map(({ nodeId, ...patch }) => ({
+            nodeId,
+            patch: withDirectionAwareTextAutoSize(
+              currentById.get(nodeId),
+              patch,
+            ),
+          })),
+        )
+      }),
       handle.bridge.onTextDoubleClick((nodeId) => {
+        setComponentTextTarget(null)
         useEditorStore.getState().selectNode(nodeId)
         useEditorStore.getState().beginTextEdit(nodeId, 'canvas')
+      }),
+      handle.bridge.onComponentTextDoubleClick((target) => {
+        const store = useEditorStore.getState()
+        store.commitTextEdit()
+        store.selectNode(target.nodeId)
+        setComponentTextTarget(target)
       }),
     ]
 
@@ -568,6 +648,15 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
       gameRef.current?.bridge.applyNode(selectedNode)
     }
   }, [editingTextNodeId, selectedNode])
+
+  useEffect(() => {
+    if (
+      canvasMode !== 'edit' ||
+      (componentTextTarget && !componentEditingNode)
+    ) {
+      setComponentTextTarget(null)
+    }
+  }, [canvasMode, componentEditingNode, componentTextTarget])
 
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault()
@@ -789,21 +878,33 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
           canvas={canvas}
           onPreview={(text, runs) => {
             const draftNode = { ...editingNode, text, runs }
-            const height = editingNode.style.overflow === 'auto-height'
-              ? renderTextNodeCanvas(draftNode).height
-              : editingNode.height
+            const rendered = editingNode.style.overflow === 'auto-height'
+              ? renderTextNodeCanvas(draftNode)
+              : null
             useEditorStore
               .getState()
-              .updateTextEditDraft(editingNode.id, text, runs, height)
+              .updateTextEditDraft(
+                editingNode.id,
+                text,
+                runs,
+                rendered?.height ?? editingNode.height,
+                rendered?.width ?? editingNode.width,
+              )
             gameRef.current?.bridge.previewText(editingNode.id, text, runs)
           }}
           onCommit={(text, runs) => {
             const store = useEditorStore.getState()
             const draftNode = { ...editingNode, text, runs }
-            const height = editingNode.style.overflow === 'auto-height'
-              ? renderTextNodeCanvas(draftNode).height
-              : editingNode.height
-            store.updateTextEditDraft(editingNode.id, text, runs, height)
+            const rendered = editingNode.style.overflow === 'auto-height'
+              ? renderTextNodeCanvas(draftNode)
+              : null
+            store.updateTextEditDraft(
+              editingNode.id,
+              text,
+              runs,
+              rendered?.height ?? editingNode.height,
+              rendered?.width ?? editingNode.width,
+            )
             store.commitTextEdit()
 
             // Synchronize the committed Store node into Phaser before making
@@ -828,6 +929,40 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
             }
             gameRef.current?.bridge.setTextEditing(null)
           }}
+        />
+      )}
+      {canvasMode === 'edit' &&
+        componentTextTarget &&
+        componentEditingNode &&
+        canvas &&
+        workspaceRef.current && (
+        <ComponentTextEditOverlay
+          key={`${componentTextTarget.nodeId}:${componentTextTarget.key}`}
+          node={componentEditingNode}
+          target={componentTextTarget}
+          value={componentEditingValue}
+          workspace={workspaceRef.current}
+          canvas={canvas}
+          onCommit={(value) => {
+            const store = useEditorStore.getState()
+            const current = selectEditingNodes(store).find(
+              (node): node is ExternalComponentNode => (
+                node.id === componentTextTarget.nodeId &&
+                node.type === 'external-component'
+              ),
+            )
+            if (current) {
+              store.updateNode(current.id, {
+                props: setComponentPropValue(
+                  current.props,
+                  componentTextTarget.key,
+                  value,
+                ),
+              })
+            }
+            setComponentTextTarget(null)
+          }}
+          onCancel={() => setComponentTextTarget(null)}
         />
       )}
     </main>

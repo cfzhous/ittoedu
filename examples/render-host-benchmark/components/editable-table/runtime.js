@@ -59,16 +59,25 @@
       heading.className = 'head'
       var headingText = document.createElement('div')
       var title = document.createElement('h2')
+      title.dataset.coursewareEditKey = 'content.title'
+      title.dataset.coursewareEditLabel = '表格标题'
       var description = document.createElement('p')
+      description.dataset.coursewareEditKey = 'content.caption'
+      description.dataset.coursewareEditLabel = '表格说明'
+      description.dataset.coursewareEditMultiline = 'true'
       headingText.append(title, description)
       var actions = document.createElement('div')
       actions.className = 'actions'
       var sortButton = document.createElement('button')
       sortButton.type = 'button'
       sortButton.dataset.action = 'sort'
+      sortButton.dataset.coursewareEditKey = 'content.sortLabel'
+      sortButton.dataset.coursewareEditLabel = '排序按钮'
       var resetButton = document.createElement('button')
       resetButton.type = 'button'
       resetButton.dataset.action = 'reset'
+      resetButton.dataset.coursewareEditKey = 'content.resetLabel'
+      resetButton.dataset.coursewareEditLabel = '重置按钮'
       actions.append(sortButton, resetButton)
       heading.append(headingText, actions)
 

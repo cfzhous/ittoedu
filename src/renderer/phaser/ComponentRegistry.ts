@@ -4,6 +4,7 @@ import type {
   CourseStateStore,
 } from '../../shared/runtimeTypes'
 import type {
+  ComponentEditableTextRegion,
   ComponentHostActions,
   ComponentDefinition,
   ComponentPackageData,
@@ -183,6 +184,7 @@ export class ComponentRegistry {
     scope: 'scene' | 'global' = 'scene',
     onLifecycleError?: (failure: ComponentLifecycleFailure) => void,
     domRoot?: HTMLElement,
+    onTextRegionRegistered?: (region: ComponentEditableTextRegion) => () => void,
   ): GuardedComponentInstanceLifecycle {
     const definition = this.definitions.get(data.manifest.id)
     if (!definition) {
@@ -205,6 +207,7 @@ export class ComponentRegistry {
       ok: false
       error: Error
     }>> = []
+    const textRegionDisposers = new Set<() => void>()
     const previewEvents: CourseEventBus = {
       on: () => () => undefined,
       off: () => undefined,
@@ -239,6 +242,24 @@ export class ComponentRegistry {
       mode,
       props,
       editorState: resolveComponentEditorState(data.manifest, props),
+      ...(mode === 'edit'
+        ? {
+            editor: {
+              registerTextRegion(region: ComponentEditableTextRegion): () => void {
+                const disposeHostRegion = onTextRegionRegistered?.(region) ?? (() => undefined)
+                let active = true
+                const dispose = (): void => {
+                  if (!active) return
+                  active = false
+                  textRegionDisposers.delete(dispose)
+                  disposeHostRegion()
+                }
+                textRegionDisposers.add(dispose)
+                return dispose
+              },
+            },
+          }
+        : {}),
       actions: EDITOR_HOST_ACTIONS,
       scope,
       events: previewEvents,
@@ -360,6 +381,7 @@ export class ComponentRegistry {
         try {
           lifecycle.destroy()
         } finally {
+          for (const dispose of [...textRegionDisposers]) dispose()
           capturePromises.length = 0
           previewEvents.dispose()
           previewCourseState.clear()

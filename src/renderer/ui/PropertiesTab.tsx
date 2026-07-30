@@ -72,8 +72,15 @@ import type {
   RuntimeRenderMode,
 } from '../../shared/runtimeTypes'
 import { isStrokeOnlyShapeType, SHAPE_TYPES } from '../../shared/projectTypes'
-import { renderTextNodeCanvas } from '../../shared/textLayout'
+import {
+  isVerticalWritingMode,
+  renderTextNodeCanvas,
+} from '../../shared/textLayout'
 import { remapTextRuns } from '../../shared/textRuns'
+import {
+  opacityToTransparencyPercent,
+  transparencyPercentToOpacity,
+} from '../../shared/opacity'
 import { collectProjectDiagnostics } from '../../shared/projectDiagnostics'
 import {
   selectActiveScene,
@@ -86,6 +93,7 @@ import { ColorInput } from './ColorInput'
 import { ComponentPropertiesEditor } from './ComponentPropertiesEditor'
 import { RuntimeContentEditor } from './RuntimeContentEditor'
 import { InteractionEditor } from './InteractionEditor'
+import { SimpleEntranceAnimationEditor } from './SimpleEntranceAnimationEditor'
 
 interface BufferedInputProps {
   label: string
@@ -289,33 +297,66 @@ function TextContentTextarea({ label, value, onBegin, onChange, onCommit, onCanc
   )
 }
 
-export const COMMON_FONT_FAMILIES = [
-  'Microsoft YaHei',
-  'Microsoft YaHei UI',
-  'DengXian',
-  'SimSun',
-  'SimHei',
-  'KaiTi',
-  'FangSong',
-  'PingFang SC',
-  'Hiragino Sans GB',
-  'Noto Sans SC',
-  'Noto Serif SC',
-  'Source Han Sans SC',
-  'Source Han Serif SC',
-  'Inter',
-  'Arial',
-  'Helvetica',
-  'Verdana',
-  'Tahoma',
-  'Trebuchet MS',
-  'Georgia',
-  'Times New Roman',
-  'Courier New',
-  'sans-serif',
-  'serif',
-  'monospace',
+export const FONT_FAMILY_OPTIONS = [
+  { label: '微软雅黑', family: 'Microsoft YaHei' },
+  { label: '微软雅黑 UI', family: 'Microsoft YaHei UI' },
+  { label: '微软正黑体', family: 'Microsoft JhengHei' },
+  { label: '等线', family: 'DengXian' },
+  { label: '宋体', family: 'SimSun' },
+  { label: '黑体', family: 'SimHei' },
+  { label: '楷体', family: 'KaiTi' },
+  { label: '仿宋', family: 'FangSong' },
+  { label: '华文黑体', family: 'STHeiti' },
+  { label: '华文宋体', family: 'STSong' },
+  { label: '华文楷体', family: 'STKaiti' },
+  { label: '华文仿宋', family: 'STFangsong' },
+  { label: '苹方', family: 'PingFang SC' },
+  { label: '冬青黑体', family: 'Hiragino Sans GB' },
+  { label: '思源黑体', family: 'Source Han Sans SC' },
+  { label: '思源宋体', family: 'Source Han Serif SC' },
+  { label: 'Noto 无衬线中文', family: 'Noto Sans SC' },
+  { label: 'Noto 衬线中文', family: 'Noto Serif SC' },
+  { label: 'Noto CJK 黑体', family: 'Noto Sans CJK SC' },
+  { label: 'Noto CJK 宋体', family: 'Noto Serif CJK SC' },
+  { label: 'Inter', family: 'Inter' },
+  { label: 'Arial', family: 'Arial' },
+  { label: 'Helvetica', family: 'Helvetica' },
+  { label: 'Verdana', family: 'Verdana' },
+  { label: 'Tahoma', family: 'Tahoma' },
+  { label: 'Trebuchet MS', family: 'Trebuchet MS' },
+  { label: 'Georgia', family: 'Georgia' },
+  { label: 'Times New Roman', family: 'Times New Roman' },
+  { label: 'Courier New', family: 'Courier New' },
+  { label: '无衬线通用字体', family: 'sans-serif' },
+  { label: '衬线通用字体', family: 'serif' },
+  { label: '等宽通用字体', family: 'monospace' },
 ] as const
+
+export const COMMON_FONT_FAMILIES = FONT_FAMILY_OPTIONS.map(
+  (option) => option.family,
+)
+
+type FontAvailability = 'available' | 'unavailable' | 'unknown'
+
+export function detectFontAvailability(fontFamily: string): FontAvailability {
+  if (['sans-serif', 'serif', 'monospace'].includes(fontFamily)) {
+    return 'available'
+  }
+  if (typeof document === 'undefined' || !document.fonts?.check) {
+    return 'unknown'
+  }
+  const escapedFamily = fontFamily.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
+  try {
+    return document.fonts.check(
+      `16px "${escapedFamily}"`,
+      '中文字体预览 Aa 123',
+    )
+      ? 'available'
+      : 'unavailable'
+  } catch {
+    return 'unknown'
+  }
+}
 
 function FontFamilyPicker({ value, onCommit }: {
   value: string
@@ -331,13 +372,22 @@ function FontFamilyPicker({ value, onCommit }: {
     if (!focusedRef.current) setDraft(value)
   }, [value])
 
-  const availableFonts = COMMON_FONT_FAMILIES.some((font) => font === value)
-    ? [...COMMON_FONT_FAMILIES]
-    : [value, ...COMMON_FONT_FAMILIES].filter(Boolean)
+  const currentOption = FONT_FAMILY_OPTIONS.find(
+    (option) => option.family === value,
+  )
+  const availableFonts = currentOption
+    ? [...FONT_FAMILY_OPTIONS]
+    : [
+        ...(value
+          ? [{ label: '自定义字体', family: value } as const]
+          : []),
+        ...FONT_FAMILY_OPTIONS,
+      ]
   const normalizedQuery = draft.trim().toLocaleLowerCase()
   const visibleFonts = queryDirty && normalizedQuery
     ? availableFonts.filter((font) => (
-      font.toLocaleLowerCase().includes(normalizedQuery)
+      font.family.toLocaleLowerCase().includes(normalizedQuery) ||
+      font.label.toLocaleLowerCase().includes(normalizedQuery)
     ))
     : availableFonts
 
@@ -352,7 +402,9 @@ function FontFamilyPicker({ value, onCommit }: {
   }
 
   const openAllFonts = () => {
-    const selectedIndex = availableFonts.findIndex((font) => font === draft)
+    const selectedIndex = availableFonts.findIndex(
+      (font) => font.family === draft,
+    )
     setQueryDirty(false)
     setActiveIndex(Math.max(0, selectedIndex))
     setOpen(true)
@@ -429,7 +481,7 @@ function FontFamilyPicker({ value, onCommit }: {
             } else if (event.key === 'Enter') {
               event.preventDefault()
               const activeFont = open ? visibleFonts[activeIndex] : undefined
-              if (activeFont) selectFont(activeFont)
+              if (activeFont) selectFont(activeFont.family)
               else {
                 commit()
                 setOpen(false)
@@ -465,25 +517,44 @@ function FontFamilyPicker({ value, onCommit }: {
             role="listbox"
             aria-label="常用字体"
           >
-            {visibleFonts.length > 0 ? visibleFonts.map((font, index) => (
+            {visibleFonts.length > 0 ? visibleFonts.map((font, index) => {
+              const availability = detectFontAvailability(font.family)
+              const availabilityLabel = availability === 'available'
+                ? '可用'
+                : availability === 'unavailable'
+                  ? '未安装'
+                  : '未检测'
+              return (
               <button
                 id={`courseware-font-option-${index}`}
                 type="button"
                 role="option"
-                aria-selected={font === draft}
+                aria-selected={font.family === draft}
+                aria-label={`${font.label}，${font.family}，${availabilityLabel}`}
                 className={
                   `font-family-option${index === activeIndex ? ' is-active' : ''}`
                 }
-                key={font}
+                key={font.family}
                 onPointerDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => selectFont(font)}
-                style={{ fontFamily: font }}
+                onClick={() => selectFont(font.family)}
+                style={{ fontFamily: font.family }}
               >
-                <span>{font}</span>
-                {font === draft ? <Check size={14} aria-hidden="true" /> : null}
+                <span className="font-family-option__identity">
+                  <strong>{font.label}</strong>
+                  <small>{font.family}</small>
+                </span>
+                <span
+                  className={`font-family-option__status font-family-option__status--${availability}`}
+                >
+                  {availabilityLabel}
+                </span>
+                {font.family === draft
+                  ? <Check size={14} aria-hidden="true" />
+                  : null}
               </button>
-            )) : (
+              )
+            }) : (
               <div className="font-family-empty">
                 按 Enter 使用“{draft.trim()}”
               </div>
@@ -498,7 +569,9 @@ function FontFamilyPicker({ value, onCommit }: {
       >
         中文字体预览 Aa 123
       </div>
-      <small className="font-family-help">可从常用字体中搜索，也可输入自定义字体或回退字体串。</small>
+      <small className="font-family-help">
+        列表同时显示中文名、CSS 字体名和本机可用状态；仍可输入自定义字体或回退字体串。
+      </small>
     </div>
   )
 }
@@ -507,38 +580,94 @@ function CommonNodeProperties({ node, update }: {
   node: SceneNode
   update(patch: DeepPartial<SceneNode>): void
 }) {
+  const editorMode = useEditorStore((state) => state.editorMode)
+  const autoSizedText = node.type === 'text' &&
+    node.style.overflow === 'auto-height'
+  const verticalAutoSizedText = autoSizedText &&
+    isVerticalWritingMode(node.style.writingMode)
   return (
     <section className="property-section">
       <h3 className="property-title"><SlidersHorizontal size={14} />通用</h3>
       <BufferedInput label="名称" value={node.name} onCommit={(name) => update({ name })} />
-      <div className="coordinate-grid">
+      {editorMode === 'professional' && <div className="coordinate-grid">
         <BufferedInput label="X" type="number" step={0.1} value={Number(node.x.toFixed(1))} onCommit={(x) => update({ x: Number(x) })} />
         <BufferedInput label="Y" type="number" step={0.1} value={Number(node.y.toFixed(1))} onCommit={(y) => update({ y: Number(y) })} />
-        <BufferedInput label="宽" type="number" min={16} step={0.1} value={Number(node.width.toFixed(1))} onCommit={(width) => update({ width: Number(width) })} />
+      </div>}
+      <div className="coordinate-grid">
+        <BufferedInput
+          label="宽"
+          type="number"
+          min={16}
+          step={0.1}
+          value={Number(node.width.toFixed(1))}
+          disabled={verticalAutoSizedText}
+          title={verticalAutoSizedText
+            ? '当前由竖排文字内容自动计算宽度'
+            : undefined}
+          onCommit={(width) => update({ width: Number(width) })}
+        />
         <BufferedInput
           label="高"
           type="number"
           min={16}
           step={0.1}
           value={Number(node.height.toFixed(1))}
-          disabled={node.type === 'text' && node.style.overflow === 'auto-height'}
-          title={node.type === 'text' && node.style.overflow === 'auto-height' ? '当前由文字内容自动计算高度' : undefined}
+          disabled={autoSizedText && !verticalAutoSizedText}
+          title={autoSizedText && !verticalAutoSizedText
+            ? '当前由横排文字内容自动计算高度'
+            : undefined}
           onCommit={(height) => update({ height: Number(height) })}
         />
       </div>
-      {node.type === 'text' && node.style.overflow === 'auto-height' && (
-        <p className="property-hint">当前高度由文字内容、字号和排版方向自动计算。</p>
+      {autoSizedText && (
+        <p className="property-hint">
+          {verticalAutoSizedText
+            ? '竖排时宽度自动适应内容；高度可直接输入或拖动画布上下边缘调整。'
+            : '横排时高度自动适应内容；宽度可直接输入或拖动画布左右边缘调整。'}
+        </p>
       )}
-      <div className="coordinate-grid">
+      {editorMode === 'professional' ? <div className="coordinate-grid">
         <BufferedInput label="旋转角度" type="number" min={-36000} max={36000} step={1} value={Number(node.rotation.toFixed(1))} onCommit={(rotation) => update({ rotation: Number(rotation) })} />
-        <BufferedInput label="透明度 %" type="number" min={0} max={100} step={1} value={Math.round(node.opacity * 100)} onCommit={(opacity) => update({ opacity: Number(opacity) / 100 })} />
-      </div>
+        <BufferedInput
+          label="透明度 %"
+          type="number"
+          min={0}
+          max={100}
+          step={1}
+          value={opacityToTransparencyPercent(node.opacity)}
+          onCommit={(transparency) => update({
+            opacity: transparencyPercentToOpacity(Number(transparency)),
+          })}
+        />
+      </div> : (
+        <>
+          <BufferedInput
+            label="透明度 %"
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={opacityToTransparencyPercent(node.opacity)}
+            onCommit={(transparency) => update({
+              opacity: transparencyPercentToOpacity(Number(transparency)),
+            })}
+          />
+          <details className="simple-advanced-properties">
+            <summary>更多布局设置</summary>
+            <div className="coordinate-grid">
+              <BufferedInput label="X" type="number" step={0.1} value={Number(node.x.toFixed(1))} onCommit={(x) => update({ x: Number(x) })} />
+              <BufferedInput label="Y" type="number" step={0.1} value={Number(node.y.toFixed(1))} onCommit={(y) => update({ y: Number(y) })} />
+              <BufferedInput label="旋转角度" type="number" min={-36000} max={36000} step={1} value={Number(node.rotation.toFixed(1))} onCommit={(rotation) => update({ rotation: Number(rotation) })} />
+            </div>
+          </details>
+        </>
+      )}
       <ToggleRow label="显示图层" checked={node.visible} onChange={(visible) => update({ visible })} />
       <button type="button" className="secondary-button" style={{ width: '100%' }} onClick={() => update({ locked: !node.locked })}>
         {node.locked ? <Unlock size={14} /> : <Lock size={14} />}
         {node.locked ? '解锁图层' : '锁定图层'}
       </button>
-      <div className="form-field" style={{ marginTop: 12 }}>
+      {editorMode === 'professional' && <div className="form-field" style={{ marginTop: 12 }}>
         <label>互动播放初始状态</label>
         <SelectField<SceneNode['playbackInitialVisibility']>
           label="播放开始时"
@@ -552,9 +681,9 @@ function CommonNodeProperties({ node, update }: {
           })}
         />
         <p className="property-hint">
-          “等待入场”只影响互动 Player；编辑画布、缩略图和 PDF/PPTX 仍显示作者设定的稳定画面。何时出现或退出请在“交互/自动化”的动作步骤中配置。
+          “等待入场”只影响互动 Player；编辑画布、缩略图和 PDF/PPTX 仍显示作者设定的稳定画面。何时出现或退出请在规则的动作步骤中配置。
         </p>
-      </div>
+      </div>}
     </section>
   )
 }
@@ -575,16 +704,22 @@ function TextProperties({ node, update }: {
       state.beginTextEdit(node.id, 'properties')
       state = useEditorStore.getState()
     }
-    const current = selectActiveScene(state).nodes.find(
+    const current = selectEditingNodes(state).find(
       (item) => item.id === node.id,
     )
     if (current?.type !== 'text') return
     const runs = remapTextRuns(current.text, text, current.runs)
     const draftNode = { ...current, text, runs }
-    const height = current.style.overflow === 'auto-height'
-      ? renderTextNodeCanvas(draftNode, draftNode.width).height
-      : current.height
-    state.updateTextEditDraft(current.id, text, runs, height)
+    const rendered = current.style.overflow === 'auto-height'
+      ? renderTextNodeCanvas(draftNode, draftNode.width)
+      : null
+    state.updateTextEditDraft(
+      current.id,
+      text,
+      runs,
+      rendered?.height ?? current.height,
+      rendered?.width ?? current.width,
+    )
   }
   return (
     <section className="property-section">
@@ -646,10 +781,42 @@ function TextProperties({ node, update }: {
         </div>
       </div>
       <SelectField<VerticalAlign> label="垂直对齐" value={style.verticalAlign} options={[{ value: 'top', label: '顶部' }, { value: 'middle', label: '居中' }, { value: 'bottom', label: '底部' }]} onChange={(verticalAlign) => update({ style: { verticalAlign } })} />
-      <SelectField<WritingMode> label="文字方向" value={style.writingMode} options={[{ value: 'horizontal', label: '横排' }, { value: 'vertical', label: '竖排（从右向左）' }]} onChange={(writingMode) => update({ style: { writingMode } })} />
-      <SelectField<TextOverflowMode> label="溢出策略" value={style.overflow} options={[{ value: 'auto-height', label: '自动增高' }, { value: 'fixed', label: '固定尺寸并裁切' }, { value: 'shrink', label: '自动缩小字体' }]} onChange={(overflow) => update({ style: { overflow } })} />
+      <SelectField<WritingMode>
+        label="文字方向"
+        value={style.writingMode}
+        options={[
+          { value: 'horizontal', label: '横排' },
+          { value: 'vertical-rl', label: '竖排（列从右向左）' },
+          { value: 'vertical-lr', label: '竖排（列从左向右）' },
+        ]}
+        onChange={(writingMode) => update({ style: { writingMode } })}
+      />
+      <SelectField<TextOverflowMode>
+        label="溢出策略"
+        value={style.overflow}
+        options={[
+          {
+            value: 'auto-height',
+            label: isVerticalWritingMode(style.writingMode)
+              ? '自动增宽'
+              : '自动增高',
+          },
+          { value: 'fixed', label: '固定尺寸并裁切' },
+          { value: 'shrink', label: '自动缩小字体' },
+        ]}
+        onChange={(overflow) => update({ style: { overflow } })}
+      />
       <ColorInput id="text-background" label="文本框背景" value={style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
-      <RangeField label="背景透明度" value={style.backgroundOpacity * 100} min={0} max={100} suffix="%" onChange={(value) => update({ style: { backgroundOpacity: value / 100 } })} />
+      <RangeField
+        label="背景透明度"
+        value={opacityToTransparencyPercent(style.backgroundOpacity)}
+        min={0}
+        max={100}
+        suffix="%"
+        onChange={(value) => update({
+          style: { backgroundOpacity: transparencyPercentToOpacity(value) },
+        })}
+      />
       <RangeField label="文本框圆角" value={style.cornerRadius} min={0} max={Math.min(node.width, node.height) / 2} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
     </section>
   )
@@ -744,13 +911,15 @@ function VideoProperties({
       {diagnostics.map((message) => (
         <p key={message} className="property-hint" role="alert">{message}</p>
       ))}
-      <button
-        type="button"
-        className="secondary-button"
-        onClick={onOpenAutomation}
-      >
-        <Workflow size={14} />配置视频自动化
-      </button>
+      {onOpenAutomation && (
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={onOpenAutomation}
+        >
+          <Workflow size={14} />配置视频规则
+        </button>
+      )}
       <p className="property-hint">编辑画布只显示视频封面；真实播放请使用“当前位置试运行”或“整课预览”。PDF/PPTX 会静态化为封面。</p>
     </section>
   )
@@ -816,7 +985,16 @@ function TeacherControllerProperties({ node, scenes, update }: {
         onChange={(defaultCollapsed) => update({ defaultCollapsed })}
       />
       <ColorInput id="controller-background" label="背景色" value={node.style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
-      <RangeField label="背景不透明度" value={node.style.backgroundOpacity * 100} min={0} max={100} suffix="%" onChange={(value) => update({ style: { backgroundOpacity: value / 100 } })} />
+      <RangeField
+        label="背景透明度"
+        value={opacityToTransparencyPercent(node.style.backgroundOpacity)}
+        min={0}
+        max={100}
+        suffix="%"
+        onChange={(value) => update({
+          style: { backgroundOpacity: transparencyPercentToOpacity(value) },
+        })}
+      />
       <ColorInput id="controller-accent" label="强调色" value={node.style.accentColor} onChange={(accentColor) => update({ style: { accentColor } })} />
       <ColorInput id="controller-text" label="文字色" value={node.style.textColor} onChange={(textColor) => update({ style: { textColor } })} />
       <RangeField label="圆角" value={node.style.cornerRadius} min={0} max={40} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
@@ -959,10 +1137,28 @@ function ShapeProperties({ node, update }: { node: ShapeNode; update(patch: Deep
       <SelectField<ShapeType> label="图形类型" value={node.shapeType} options={SHAPE_TYPES.map((value) => ({ value, label: SHAPE_LABELS[value] }))} onChange={(shapeType) => update({ shapeType })} />
       {!strokeOnly && <>
         <ColorInput id="shape-fill" label="填充色" value={style.fillColor} onChange={(fillColor) => update({ style: { fillColor } })} />
-        <RangeField label="填充不透明度" value={style.fillOpacity * 100} min={0} max={100} suffix="%" onChange={(value) => update({ style: { fillOpacity: value / 100 } })} />
+        <RangeField
+          label="填充透明度"
+          value={opacityToTransparencyPercent(style.fillOpacity)}
+          min={0}
+          max={100}
+          suffix="%"
+          onChange={(value) => update({
+            style: { fillOpacity: transparencyPercentToOpacity(value) },
+          })}
+        />
       </>}
       <ColorInput id="shape-border" label={strokeOnly ? '线条颜色' : '边框颜色'} value={style.borderColor} onChange={(borderColor) => update({ style: { borderColor } })} />
-      <RangeField label={strokeOnly ? '线条不透明度' : '边框不透明度'} value={style.borderOpacity * 100} min={0} max={100} suffix="%" onChange={(value) => update({ style: { borderOpacity: value / 100 } })} />
+      <RangeField
+        label={strokeOnly ? '线条透明度' : '边框透明度'}
+        value={opacityToTransparencyPercent(style.borderOpacity)}
+        min={0}
+        max={100}
+        suffix="%"
+        onChange={(value) => update({
+          style: { borderOpacity: transparencyPercentToOpacity(value) },
+        })}
+      />
       <BufferedInput label={strokeOnly ? '线条宽度' : '边框宽度'} type="number" min={0} max={100} value={style.borderWidth} onCommit={(borderWidth) => update({ style: { borderWidth: Number(borderWidth) } })} />
       <SelectField<ShapeLineStyle> label="线型" value={style.lineStyle} options={[{ value: 'solid', label: '实线' }, { value: 'dashed', label: '虚线' }, { value: 'dotted', label: '点线' }]} onChange={(lineStyle) => update({ style: { lineStyle } })} />
       {(node.shapeType === 'rounded-rectangle' || node.shapeType === 'rectangle') && <RangeField label="圆角" value={style.cornerRadius} min={0} max={Math.min(node.width, node.height) / 2} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius }, shapeType: cornerRadius > 0 ? 'rounded-rectangle' : 'rectangle' })} />}
@@ -1273,6 +1469,7 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
 export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const editorMode = useEditorStore((state) => state.editorMode)
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
@@ -1299,6 +1496,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const deleteGlobalInteractionRule = useEditorStore((state) => state.deleteGlobalInteractionRule)
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
+  const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const clearNodePresentationOverride = useEditorStore(
     (state) => state.clearNodePresentationOverride,
@@ -1357,11 +1555,13 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
                 <p className="property-hint">这是旧工程兼容模式。改用画布内控制器后，成品 HTML 的画布外底栏将彻底移除。</p>
               )}
             </section>
-            <RuntimeInspector
-              scope="global"
-              runtime={project.globalRuntime}
-              onChange={updateGlobalRuntime}
-            />
+            {editorMode === 'professional' && (
+              <RuntimeInspector
+                scope="global"
+                runtime={project.globalRuntime}
+                onChange={updateGlobalRuntime}
+              />
+            )}
           </>
         ) : (
           <>
@@ -1379,26 +1579,45 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
               <BufferedInput label="场景名称" value={scene.name} onCommit={(name) => updateScene(scene.id, { name })} />
               <ColorInput id="scene-background" label="背景色" value={effectiveScene.backgroundColor} onChange={(backgroundColor) => updateScene(scene.id, { backgroundColor })} />
             </section>
-            <section className="property-section">
-              <h3 className="property-title"><Workflow size={14} />场景自动化</h3>
-              <p className="property-hint">
-                当前场景有 {scene.interactions.filter(
-                  (rule) => rule.trigger.type !== 'node.click',
-                ).length} 条自动化规则。进入右侧“自动化”可随时查看视频、声音、状态、组件和运行时触发关系。
-              </p>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setActiveTab('automation')}
-              >
-                <Workflow size={14} />打开场景自动化
-              </button>
-            </section>
-            <RuntimeInspector
-              scope="scene"
-              runtime={scene.runtime}
-              onChange={(patch) => updateSceneRuntime(scene.id, patch)}
-            />
+            {editorMode === 'professional' ? (
+              <>
+                <section className="property-section">
+                  <h3 className="property-title"><Workflow size={14} />场景规则</h3>
+                  <p className="property-hint">
+                    当前场景有 {scene.interactions.length} 条规则。规则按“何时发生 → 是否满足条件 → 做什么”组织。
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => setActiveTab('automation')}
+                  >
+                    <Workflow size={14} />打开规则面板
+                  </button>
+                </section>
+                <RuntimeInspector
+                  scope="scene"
+                  runtime={scene.runtime}
+                  onChange={(patch) => updateSceneRuntime(scene.id, patch)}
+                />
+              </>
+            ) : scene.interactions.length > 0 ? (
+              <section className="property-section simple-rule-summary">
+                <h3 className="property-title"><Workflow size={14} />专业互动</h3>
+                <p className="property-hint">
+                  此场景已有 {scene.interactions.length} 条专业规则，播放时会继续生效。
+                </p>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    setEditorMode('professional')
+                    setActiveTab('automation')
+                  }}
+                >
+                  切换专业模式查看
+                </button>
+              </section>
+            ) : null}
           </>
         )}
       </div>
@@ -1413,8 +1632,12 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         style: { ...node.style, ...textPatch.style },
       } as TextNode
       if (nextNode.style.overflow === 'auto-height') {
-        const height = renderTextNodeCanvas(nextNode, nextNode.width).height
-        updateNode(node.id, { ...patch, height } as DeepPartial<SceneNode>)
+        const rendered = renderTextNodeCanvas(nextNode, nextNode.width)
+        updateNode(node.id, {
+          ...patch,
+          width: rendered.width,
+          height: rendered.height,
+        } as DeepPartial<SceneNode>)
         return
       }
     }
@@ -1449,6 +1672,13 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         </section>
       )}
       <CommonNodeProperties node={node} update={update} />
+      {editingScope === 'scene' && editorMode === 'simple' && (
+        <SimpleEntranceAnimationEditor
+          scene={scene}
+          node={node}
+          activeStateId={activePresentationStateId}
+        />
+      )}
       {editingScope === 'global' && (
         <GlobalLayerSettings nodeId={node.id} />
       )}
@@ -1465,10 +1695,14 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
               diagnostic.nodeId === node.id
             ))
             .map((diagnostic) => diagnostic.message)}
-          onOpenAutomation={() => setActiveTab('automation')}
+          onOpenAutomation={editorMode === 'professional'
+            ? () => setActiveTab('automation')
+            : undefined}
         />
       )}
-      {editingScope === 'global' && node.type !== 'teacher-controller' && (
+      {editorMode === 'professional' &&
+        editingScope === 'global' &&
+        node.type !== 'teacher-controller' && (
         <InteractionEditor
           scene={scene}
           selectedNode={node}
@@ -1515,7 +1749,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           )}
         </>
       )}
-      {editingScope === 'scene' && (
+      {editorMode === 'professional' && editingScope === 'scene' && (
         <InteractionEditor
           scene={scene}
           selectedNode={node}

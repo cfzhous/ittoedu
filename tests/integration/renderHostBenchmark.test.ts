@@ -317,7 +317,8 @@ describe('render host benchmark fixture', () => {
       fs.readFile(path.join(projectRoot, 'node_modules', 'three', 'LICENSE'), 'utf8'),
     ])
     expect(html).toContain('window.__H5_LESSON_PAYLOAD__=')
-    expect(html).toContain("connect-src 'none'")
+    expect(html).toContain('connect-src data: blob:')
+    expect(html).not.toMatch(/connect-src[^;]*(?:https?:|\*|'self')/i)
     expect(html).not.toMatch(/<script[^>]+src=/i)
     expect(noticeStat.isFile()).toBe(true)
     expect(installedPackage).toMatchObject({ version: declaredThreeVersion, license: 'MIT' })

@@ -39,6 +39,7 @@ function videoNode(id: string, name: string): VideoNode {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
+  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => {
@@ -50,8 +51,11 @@ describe('scene presentation state UI', () => {
   it('keeps scene automation in a dedicated tab and adds through the store', () => {
     render(<AutomationTab />)
 
-    expect(screen.getByRole('heading', { name: '场景自动化' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '添加自动化规则' }))
+    expect(screen.getByRole('heading', { name: '场景规则' })).toBeInTheDocument()
+    expect(screen.getByLabelText('规则由触发、条件和动作组成')).toHaveTextContent(
+      '何时发生',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '添加规则' }))
 
     const scene = selectActiveScene(useEditorStore.getState())
     expect(scene.interactions).toHaveLength(1)

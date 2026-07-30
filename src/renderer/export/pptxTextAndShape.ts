@@ -100,16 +100,49 @@ export function addPptxTextNode(
   node: TextNode,
   scale: CanvasScale,
 ): void {
+  if (node.style.writingMode === 'vertical-lr') {
+    // OOXML's East Asian vertical text flow is right-to-left. Preserve the
+    // authored left-to-right column order as a deterministic image instead of
+    // silently reversing it in PowerPoint.
+    const rendered = renderTextNodeCanvas(node, node.width)
+    slide.addImage({
+      data: rendered.canvas.toDataURL('image/png'),
+      x: node.x * scale.x,
+      y: node.y * scale.y,
+      w: rendered.width * scale.x,
+      h: rendered.height * scale.y,
+      rotate: pptxRotation(node.rotation),
+      transparency: pptxTransparency(node.opacity),
+      objectName: pptxObjectName(node),
+    })
+    return
+  }
+  const verticalRendered = node.style.writingMode === 'vertical-rl'
+    ? renderTextNodeCanvas(node, node.width)
+    : null
+  const effectiveNode = verticalRendered
+    ? {
+        ...node,
+        width: verticalRendered.width,
+        height: verticalRendered.height,
+      }
+    : node
   const renderedFontSize = node.style.overflow === 'shrink'
-    ? renderTextNodeCanvas(node, node.width).fontSize
+    ? verticalRendered?.fontSize ??
+      renderTextNodeCanvas(node, node.width).fontSize
     : node.style.fontSize
   const backgroundAlpha = node.opacity * node.style.backgroundOpacity
-  const cornerRatio = Math.min(node.width, node.height) > 0
-    ? clamp(node.style.cornerRadius / Math.min(node.width, node.height), 0, 1)
+  const cornerRatio = Math.min(effectiveNode.width, effectiveNode.height) > 0
+    ? clamp(
+        node.style.cornerRadius /
+          Math.min(effectiveNode.width, effectiveNode.height),
+        0,
+        1,
+      )
     : 0
 
   slide.addText(pptxTextRuns(node, renderedFontSize), {
-    ...pptxNodePosition(node, scale),
+    ...pptxNodePosition(effectiveNode, scale),
     objectName: pptxObjectName(node),
     shape: node.style.cornerRadius > 0 ? 'roundRect' : 'rect',
     rectRadius: cornerRatio,
@@ -117,7 +150,7 @@ export function addPptxTextNode(
     margin: node.style.padding * PIXELS_TO_POINTS,
     align: node.style.align,
     valign: node.style.verticalAlign,
-    vert: node.style.writingMode === 'vertical' ? 'eaVert' : 'horz',
+    vert: node.style.writingMode === 'vertical-rl' ? 'eaVert' : 'horz',
     lineSpacing: (
       renderedFontSize * 1.22
       + node.style.lineSpacing

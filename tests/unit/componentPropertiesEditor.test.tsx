@@ -242,6 +242,7 @@ describe('ComponentPropertiesEditor', () => {
 describe('ElementsTab component presets', () => {
   it('shows presets as independent add choices and applies their props', () => {
     useEditorStore.getState().createNewProject()
+    useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().importComponentPackage({
       manifest,
       runtimeSource: 'window.CoursewareComponent.define({})',
@@ -251,6 +252,7 @@ describe('ElementsTab component presets', () => {
     HTMLCanvasElement.prototype.getContext = () => null
     try {
       render(<ElementsTab onAddImage={() => undefined} />)
+      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
       fireEvent.click(
         screen.getByTestId(`component-${manifest.id}-preset-ready`),
       )
@@ -271,6 +273,7 @@ describe('ElementsTab component presets', () => {
 
   it('keeps V3 presets available for scene component instances', () => {
     useEditorStore.getState().createNewProject()
+    useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().importComponentPackage({
       manifest: v3Manifest,
       runtimeSource: 'window.CoursewareComponent.define({})',
@@ -280,6 +283,7 @@ describe('ElementsTab component presets', () => {
     HTMLCanvasElement.prototype.getContext = () => null
     try {
       render(<ElementsTab onAddImage={() => undefined} />)
+      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
       fireEvent.click(
         screen.getByTestId(`component-${v3Manifest.id}-preset-ready`),
       )

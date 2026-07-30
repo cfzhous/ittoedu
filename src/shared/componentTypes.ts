@@ -171,7 +171,36 @@ export interface ComponentEditorState {
   variantId?: string
 }
 
-/** V1-V3 compatibility context. Its renderer fields intentionally stay unchanged. */
+export interface ComponentEditableTextBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ComponentEditableTextRegion {
+  /** Dot-separated path inside node.props, for example `content.title`. */
+  key: string
+  /** Optional author-facing label shown by the canvas editor. */
+  label?: string
+  multiline?: boolean
+  maxLength?: number
+  /**
+   * Bounds in the component's authored local coordinate system.
+   * A getter lets Phaser components keep the hit target aligned with motion.
+   */
+  getBounds(): ComponentEditableTextBounds
+}
+
+export interface ComponentEditorHost {
+  /**
+   * Registers an explicit canvas text-edit hit target. The returned disposer
+   * may be called before component destruction when a region is no longer used.
+   */
+  registerTextRegion(region: ComponentEditableTextRegion): () => void
+}
+
+/** V1-V3 compatibility context. Existing renderer fields stay unchanged; the edit-only host is additive. */
 export interface ComponentCreateContext {
   Phaser: typeof Phaser
   scene: Phaser.Scene
@@ -182,6 +211,8 @@ export interface ComponentCreateContext {
   mode: 'edit' | 'preview'
   props: Record<string, unknown>
   editorState: Readonly<ComponentEditorState>
+  /** Editor-only optional bridge; absent in preview/capture players. */
+  editor?: ComponentEditorHost
   actions: Readonly<ComponentHostActions>
   /** Present in the V3 player; optional keeps V1/V2 component code compatible. */
   scope?: ComponentScope
@@ -205,6 +236,8 @@ interface ComponentCreateContextV4Base {
   mode: 'edit' | 'preview' | 'capture'
   props: Record<string, unknown>
   editorState: Readonly<ComponentEditorState>
+  /** Editor-only optional bridge; absent in preview/capture players. */
+  editor?: ComponentEditorHost
   actions: Readonly<ComponentHostActions>
   scope: ComponentScope
   /** Lifecycle-scoped in the player: subscriptions are removed on destroy. */

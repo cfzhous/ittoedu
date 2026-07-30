@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createShapeNode, createTextNode } from '@/renderer/project/createProject'
 import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
-import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import {
+  detectFontAvailability,
+  PropertiesTab,
+} from '@/renderer/ui/PropertiesTab'
 import { buildInitialRichTextHtml, TextEditOverlay } from '@/renderer/ui/TextEditOverlay'
 
 afterEach(() => {
@@ -13,6 +16,7 @@ afterEach(() => {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
+  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 describe('shape editing UI', () => {
@@ -31,9 +35,9 @@ describe('shape editing UI', () => {
     render(<PropertiesTab onReplaceImage={() => undefined} />)
 
     expect(screen.queryByText('填充色')).not.toBeInTheDocument()
-    expect(screen.queryByText('填充不透明度')).not.toBeInTheDocument()
+    expect(screen.queryByText('填充透明度')).not.toBeInTheDocument()
     expect(screen.getByText('线条颜色')).toBeInTheDocument()
-    expect(screen.getByText('线条不透明度')).toBeInTheDocument()
+    expect(screen.getByText('线条透明度')).toBeInTheDocument()
     expect(screen.getByText('线条宽度')).toBeInTheDocument()
   })
 
@@ -41,7 +45,7 @@ describe('shape editing UI', () => {
     const store = useEditorStore.getState()
     store.addShapeNode('rectangle')
     render(<PropertiesTab onReplaceImage={() => undefined} />)
-    const slider = screen.getByRole('slider', { name: '填充不透明度' })
+    const slider = screen.getByRole('slider', { name: '填充透明度' })
     const historyBefore = useEditorStore.getState().history.past.length
 
     fireEvent.change(slider, { target: { value: '65' } })
@@ -52,8 +56,68 @@ describe('shape editing UI', () => {
     const shape = selectActiveScene(useEditorStore.getState()).nodes[0]!
     expect(shape.type).toBe('shape')
     if (shape.type !== 'shape') throw new Error('Expected a shape node')
-    expect(shape.style.fillOpacity).toBe(0.35)
+    expect(shape.style.fillOpacity).toBe(0.65)
     expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+  })
+})
+
+describe('basic text property semantics', () => {
+  it('shows transparency rather than stored opacity for nodes and backgrounds', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const textId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
+    store.updateNode(textId, { style: { overflow: 'fixed' } })
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    const nodeTransparency = screen.getByRole('spinbutton', {
+      name: '透明度 %',
+    })
+    expect(nodeTransparency).toHaveValue(0)
+    fireEvent.change(nodeTransparency, { target: { value: '100' } })
+    fireEvent.blur(nodeTransparency)
+
+    const backgroundTransparency = screen.getByRole('slider', {
+      name: '背景透明度',
+    })
+    expect(backgroundTransparency).toHaveValue('100')
+    fireEvent.change(backgroundTransparency, { target: { value: '0' } })
+    fireEvent.pointerUp(backgroundTransparency)
+
+    const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
+    expect(node.type).toBe('text')
+    if (node.type !== 'text') throw new Error('Expected a text node')
+    expect(node.opacity).toBe(0)
+    expect(node.style.backgroundOpacity).toBe(1)
+  })
+
+  it('offers both vertical directions and keeps vertical height editable', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
+    store.updateNode(node.id, {
+      style: {
+        writingMode: 'vertical-lr',
+        overflow: 'auto-height',
+      },
+    })
+
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+
+    expect(screen.getByRole('combobox', { name: '文字方向' })).toHaveValue(
+      'vertical-lr',
+    )
+    expect(screen.getByRole('option', {
+      name: '竖排（列从右向左）',
+    })).toBeInTheDocument()
+    expect(screen.getByRole('option', {
+      name: '竖排（列从左向右）',
+    })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '自动增宽' }))
+      .toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: '宽' })).toBeDisabled()
+    expect(screen.getByRole('spinbutton', { name: '高' })).toBeEnabled()
+    expect(screen.getByText(/高度可直接输入或拖动画布上下边缘调整/))
+      .toBeInTheDocument()
   })
 })
 
@@ -83,34 +147,54 @@ describe('event-driven motion authoring entry point', () => {
 })
 
 describe('elements panel', () => {
-  it('places the common text and image entries before the shape library', () => {
+  it('keeps all quick entries under Common and Media focused on management', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
       () => null as never,
     )
 
-    render(<ElementsTab onAddImage={() => undefined} />)
+    render(
+      <ElementsTab
+        onAddImage={() => undefined}
+        onAddVideo={() => undefined}
+        onImportAudio={() => undefined}
+        onImportVideo={() => undefined}
+      />,
+    )
 
     const panel = screen.getByTestId('elements-tab')
-    const orderedTestIds = Array.from(
+    const commonTestIds = Array.from(
       panel.querySelectorAll<HTMLElement>('[data-testid]'),
       (element) => element.dataset.testid,
     )
-    const textIndex = orderedTestIds.indexOf('add-text')
-    const imageIndex = orderedTestIds.indexOf('add-image')
-    const firstShapeIndex = orderedTestIds.indexOf('add-rectangle')
-
-    expect(screen.getByText('内置元素')).toBeInTheDocument()
+    expect(screen.getByText('快速添加')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '文本' })).toHaveAttribute(
       'data-testid',
       'add-text',
     )
-    expect(screen.getByRole('button', { name: '图片' })).toHaveAttribute(
-      'data-testid',
-      'add-image',
-    )
-    expect(textIndex).toBeGreaterThanOrEqual(0)
-    expect(imageIndex).toBeGreaterThan(textIndex)
-    expect(firstShapeIndex).toBeGreaterThan(imageIndex)
+    expect(commonTestIds.indexOf('add-text')).toBeGreaterThanOrEqual(0)
+    expect(commonTestIds.indexOf('add-image'))
+      .toBeGreaterThan(commonTestIds.indexOf('add-text'))
+    expect(commonTestIds.indexOf('add-video'))
+      .toBeGreaterThan(commonTestIds.indexOf('add-image'))
+    expect(commonTestIds.indexOf('import-audio'))
+      .toBeGreaterThan(commonTestIds.indexOf('add-video'))
+    expect(commonTestIds.indexOf('add-rectangle'))
+      .toBeGreaterThan(commonTestIds.indexOf('import-audio'))
+
+    fireEvent.click(screen.getByRole('tab', { name: '媒体' }))
+
+    expect(screen.getByTestId('media-tab')).toBeInTheDocument()
+    expect(screen.queryByTestId('add-text')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('add-image')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('add-video')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('import-audio')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导入声音' }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导入视频' }))
+      .not.toBeInTheDocument()
+    expect(screen.getByText('声音库')).toBeInTheDocument()
+    expect(screen.getByText('视频素材')).toBeInTheDocument()
+    expect(screen.getByText('图片素材')).toBeInTheDocument()
   })
 })
 
@@ -282,6 +366,27 @@ describe('rich text editing UI', () => {
 })
 
 describe('font family picker', () => {
+  it('reports system-font availability through document.fonts', () => {
+    const originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: {
+        check: vi.fn((font: string) => font.includes('KaiTi')),
+      },
+    })
+    try {
+      expect(detectFontAvailability('KaiTi')).toBe('available')
+      expect(detectFontAvailability('Arial')).toBe('unavailable')
+      expect(detectFontAvailability('sans-serif')).toBe('available')
+    } finally {
+      if (originalFonts) {
+        Object.defineProperty(document, 'fonts', originalFonts)
+      } else {
+        Reflect.deleteProperty(document, 'fonts')
+      }
+    }
+  })
+
   it('opens the full list without clearing, filters while typing, and accepts custom values', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
@@ -301,13 +406,21 @@ describe('font family picker', () => {
 
     fireEvent.focus(fontInput)
     expect(screen.getByRole('listbox', { name: '常用字体' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Microsoft YaHei' })).toBeInTheDocument()
+    expect(screen.getByRole('option', {
+      name: /微软雅黑，Microsoft YaHei，/,
+    })).toBeInTheDocument()
     expect(fontInput).toHaveValue('Custom Legacy Font, sans-serif')
 
     fireEvent.change(fontInput, { target: { value: 'Kai' } })
-    expect(screen.getByRole('option', { name: 'KaiTi' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'Arial' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('option', { name: 'KaiTi' }))
+    expect(screen.getByRole('option', {
+      name: /楷体，KaiTi，/,
+    })).toBeInTheDocument()
+    expect(screen.queryByRole('option', {
+      name: /Arial，Arial，/,
+    })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('option', {
+      name: /楷体，KaiTi，/,
+    }))
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       style: { fontFamily: 'KaiTi' },
     })

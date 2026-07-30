@@ -11,6 +11,9 @@ vi.mock('phaser', () => ({
   Geom: {
     Rectangle: class Rectangle {},
   },
+  Math: {
+    DegToRad: (value: number) => value * Math.PI / 180,
+  },
 }))
 
 vi.mock('../../src/shared/phaserDomComponentHost', () => ({
@@ -133,7 +136,10 @@ function packageData(renderMode: 'phaser' | 'dom' | 'hybrid'): ComponentPackageD
       minSize: { width: 16, height: 16 },
       preserveAspectRatio: false,
       assets: {},
-      defaultProps: {},
+      defaultProps: { title: '默认标题' },
+      editor: {
+        properties: [{ key: 'title', label: '标题', type: 'text' }],
+      },
       supportedScopes: ['scene'],
       renderMode,
     },
@@ -212,7 +218,8 @@ describe('ExternalComponentNodeAdapter Component API 4 DOM host', () => {
         height: 180,
       }),
     )
-    expect(registry.createInstance.mock.calls[0]?.at(-1)).toBe(domRoot)
+    expect(registry.createInstance.mock.calls[0]?.at(-2)).toBe(domRoot)
+    expect(registry.createInstance.mock.calls[0]?.at(-1)).toBeTypeOf('function')
     expect(lifecycle.setVisible).toHaveBeenCalledWith(true)
     expect(mount.resize).toHaveBeenCalledWith(320, 180)
 
@@ -253,7 +260,111 @@ describe('ExternalComponentNodeAdapter Component API 4 DOM host', () => {
     )
 
     expect(domHostMocks.create).not.toHaveBeenCalled()
-    expect(registry.createInstance.mock.calls[0]?.at(-1)).toBeUndefined()
+    expect(registry.createInstance.mock.calls[0]?.at(-2)).toBeUndefined()
+    expect(registry.createInstance.mock.calls[0]?.at(-1)).toBeTypeOf('function')
+    adapter.destroy()
+  })
+
+  it('只命中 DOM 组件显式标记且已在 schema 公开的文字区域', () => {
+    const domRoot = document.createElement('div')
+    const editable = document.createElement('span')
+    editable.dataset.coursewareEditKey = 'title'
+    editable.dataset.coursewareEditLabel = '组件标题'
+    domRoot.append(editable)
+    vi.spyOn(domRoot, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 180,
+      width: 320,
+      height: 180,
+      toJSON: () => ({}),
+    } as DOMRect)
+    vi.spyOn(editable, 'getBoundingClientRect').mockReturnValue({
+      x: 20,
+      y: 30,
+      left: 20,
+      top: 30,
+      right: 140,
+      bottom: 74,
+      width: 120,
+      height: 44,
+      toJSON: () => ({}),
+    } as DOMRect)
+    const mount = {
+      root: domRoot,
+      host: document.createElement('div'),
+      gameObject: gameObject(),
+      resize: vi.fn(),
+      setInteractive: vi.fn(),
+      setSelected: vi.fn(),
+      sync: vi.fn(),
+      destroy: vi.fn(),
+    }
+    domHostMocks.create.mockReturnValue(mount)
+    const lifecycle = {
+      destroy: vi.fn(),
+      getFailure: vi.fn(() => null),
+      isFailed: vi.fn(() => false),
+    }
+    const component = packageData('dom')
+    const adapter = new ExternalComponentNodeAdapter(
+      setupScene(),
+      componentNode(component.manifest.id),
+      component,
+      { createInstance: vi.fn(() => lifecycle) } as never,
+      {},
+    )
+
+    expect(adapter.findEditableTextAt(10 + 60, 20 + 50)).toMatchObject({
+      nodeId: 'component-node',
+      key: 'title',
+      label: '组件标题',
+      bounds: { x: 20, y: 30, width: 120, height: 44 },
+    })
+    expect(adapter.findEditableTextAt(10 + 260, 20 + 120)).toBeNull()
+    adapter.destroy()
+  })
+
+  it('命中 Phaser 组件通过 editor bridge 登记的文字区域', () => {
+    const lifecycle = {
+      destroy: vi.fn(),
+      getFailure: vi.fn(() => null),
+      isFailed: vi.fn(() => false),
+    }
+    const registry = {
+      createInstance: vi.fn((...args: unknown[]) => {
+        const register = args.at(-1) as (
+          region: {
+            key: string
+            label: string
+            getBounds(): { x: number; y: number; width: number; height: number }
+          },
+        ) => () => void
+        register({
+          key: 'title',
+          label: 'Phaser 标题',
+          getBounds: () => ({ x: 40, y: 50, width: 180, height: 48 }),
+        })
+        return lifecycle
+      }),
+    }
+    const component = packageData('phaser')
+    const adapter = new ExternalComponentNodeAdapter(
+      setupScene(),
+      componentNode(component.manifest.id),
+      component,
+      registry as never,
+      {},
+    )
+
+    expect(adapter.findEditableTextAt(10 + 100, 20 + 70)).toMatchObject({
+      key: 'title',
+      label: 'Phaser 标题',
+      bounds: { x: 40, y: 50, width: 180, height: 48 },
+    })
     adapter.destroy()
   })
 

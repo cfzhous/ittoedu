@@ -220,6 +220,8 @@ function renderEditor({
   onAddRule = vi.fn(),
   onUpdateRule = vi.fn(),
   onDeleteRule = vi.fn(),
+  onDuplicateRule = vi.fn(),
+  onMoveRule = vi.fn(),
 } = {}) {
   render(
     <InteractionEditor
@@ -231,6 +233,8 @@ function renderEditor({
       onAddRule={onAddRule}
       onUpdateRule={onUpdateRule}
       onDeleteRule={onDeleteRule}
+      onDuplicateRule={onDuplicateRule}
+      onMoveRule={onMoveRule}
     />,
   )
   return { onAddRule, onUpdateRule, onDeleteRule }
@@ -239,22 +243,45 @@ function renderEditor({
 function renderAutomationEditor({
   scene = makeScene([]),
   activeStateId = 'question' as string | null,
+  selectedNodeId = null as string | null,
+  ruleWarnings = {} as Record<string, string[]>,
+  onOpenClickRules = vi.fn(),
+  onPrepareMotionTargets = vi.fn(),
+  onRunPreview = vi.fn(),
   onAddRule = vi.fn(),
   onUpdateRule = vi.fn(),
   onDeleteRule = vi.fn(),
+  onDuplicateRule = vi.fn(),
+  onMoveRule = vi.fn(),
 } = {}) {
   render(
     <SceneAutomationEditor
       scene={scene}
       activeStateId={activeStateId}
+      selectedNodeId={selectedNodeId}
       scenes={projectScenes}
       sounds={sounds}
+      ruleWarnings={ruleWarnings}
+      onOpenClickRules={onOpenClickRules}
+      onPrepareMotionTargets={onPrepareMotionTargets}
+      onRunPreview={onRunPreview}
       onAddRule={onAddRule}
       onUpdateRule={onUpdateRule}
       onDeleteRule={onDeleteRule}
+      onDuplicateRule={onDuplicateRule}
+      onMoveRule={onMoveRule}
     />,
   )
-  return { onAddRule, onUpdateRule, onDeleteRule }
+  return {
+    onAddRule,
+    onUpdateRule,
+    onDeleteRule,
+    onDuplicateRule,
+    onMoveRule,
+    onOpenClickRules,
+    onPrepareMotionTargets,
+    onRunPreview,
+  }
 }
 
 describe('InteractionEditor', () => {
@@ -544,6 +571,196 @@ describe('InteractionEditor', () => {
 })
 
 describe('SceneAutomationEditor', () => {
+  it('exposes undoable rule copy and ordering controls', () => {
+    const first = automationRule('first-rule', { type: 'scene.enter' })
+    const second = automationRule('second-rule', {
+      type: 'video.ended',
+      nodeId: video.id,
+    })
+    const { onDuplicateRule, onMoveRule } = renderAutomationEditor({
+      scene: makeScene([first, second]),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '复制规则 1' }))
+    expect(onDuplicateRule).toHaveBeenCalledWith('first-rule')
+
+    expect(screen.getByRole('button', { name: '上移规则 1' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '下移规则 1' }))
+    expect(onMoveRule).toHaveBeenCalledWith('first-rule', 1)
+
+    fireEvent.click(screen.getByRole('button', { name: '上移规则 2' }))
+    expect(onMoveRule).toHaveBeenCalledWith('second-rule', -1)
+    expect(screen.getByRole('button', { name: '下移规则 2' })).toBeDisabled()
+  })
+
+  it('explains a rule as 当、如果、就 and makes parallel timing readable', () => {
+    const rule = automationRule(
+      'readable-sequence',
+      { type: 'scene.enter' },
+      [
+        { type: 'audio.play', soundId: 'click' },
+        {
+          type: 'node.enter',
+          nodeId: button.id,
+          effect: 'fade',
+          durationMs: 320,
+          easing: 'ease-out',
+        },
+        { type: 'scene.next' },
+      ],
+      [{ type: 'presentation.in', stateIds: ['question'] }],
+    )
+    rule.actions[1] = {
+      ...rule.actions[1]!,
+      start: 'with-previous',
+      delayMs: 120,
+    }
+    renderAutomationEditor({ scene: makeScene([rule]) })
+
+    const summary = screen.getByTestId('rule-summary-readable-sequence')
+    expect(summary).toHaveTextContent('当进入当前场景')
+    expect(summary).toHaveTextContent('如果当前状态是 “题目”')
+    expect(summary).toHaveTextContent('与上一步同时计时，延迟 120 毫秒后开始')
+    expect(summary).toHaveTextContent('等待上一组完成：进入下一场景')
+
+    const sequence = screen.getByRole('list', { name: '动作执行顺序' })
+    expect(within(sequence).getAllByRole('listitem')).toHaveLength(3)
+    expect(within(sequence).getAllByRole('listitem')[1]).toHaveTextContent(
+      '与上一步同时计时，延迟 120 毫秒后开始',
+    )
+  })
+
+  it('filters and searches rules related to the selected element', () => {
+    const related = automationRule(
+      'selected-node-rule',
+      { type: 'node.activated', nodeId: button.id },
+      [{
+        type: 'node.exit',
+        nodeId: button.id,
+        effect: 'fade',
+        durationMs: 240,
+        easing: 'ease-in',
+      }],
+    )
+    const unrelated = automationRule(
+      'video-rule',
+      { type: 'video.ended', nodeId: video.id },
+    )
+    renderAutomationEditor({
+      scene: makeScene([related, unrelated]),
+      selectedNodeId: button.id,
+    })
+
+    fireEvent.change(screen.getByLabelText('规则筛选'), {
+      target: { value: 'selected-node' },
+    })
+    expect(screen.getByRole('group', { name: '规则 1' })).toHaveTextContent(
+      'selected-node-rule',
+    )
+    expect(screen.queryByRole('group', { name: '规则 2' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('规则筛选'), {
+      target: { value: 'all' },
+    })
+    fireEvent.change(screen.getByLabelText('搜索规则'), {
+      target: { value: '视频' },
+    })
+    expect(screen.queryByRole('group', { name: '规则 1' })).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '规则 2' })).toHaveTextContent(
+      'video-rule',
+    )
+  })
+
+  it('creates a sequential entrance template and prepares playback visibility', () => {
+    const { onAddRule, onPrepareMotionTargets } = renderAutomationEditor({
+      selectedNodeId: button.id,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
+
+    expect(onPrepareMotionTargets).toHaveBeenCalledWith([
+      button.id,
+      video.id,
+      component.id,
+    ])
+    expect(onAddRule).toHaveBeenCalledWith({
+      id: expect.stringMatching(/^interaction_/),
+      name: '进入场景后依次出现',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{ type: 'presentation.in', stateIds: ['question'] }],
+      actions: [
+        expect.objectContaining({
+          id: expect.stringMatching(/^action_/),
+          start: 'after-previous',
+          delayMs: 0,
+          action: expect.objectContaining({
+            type: 'node.enter',
+            nodeId: button.id,
+            effect: 'fade',
+          }),
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^action_/),
+          start: 'after-previous',
+          delayMs: 80,
+          action: expect.objectContaining({
+            type: 'node.enter',
+            nodeId: video.id,
+          }),
+        }),
+        expect.objectContaining({
+          id: expect.stringMatching(/^action_/),
+          start: 'after-previous',
+          delayMs: 80,
+          action: expect.objectContaining({
+            type: 'node.enter',
+            nodeId: component.id,
+          }),
+        }),
+      ],
+    })
+  })
+
+  it('routes selected-element clicks to properties and starts current-position preview', () => {
+    const { onOpenClickRules, onRunPreview } = renderAutomationEditor({
+      selectedNodeId: button.id,
+    })
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '设置选中元素的点击动作',
+    }))
+    expect(onOpenClickRules).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: '当前位置试运行' }))
+    expect(onRunPreview).toHaveBeenCalledOnce()
+  })
+
+  it('shows rule-level conflict hints and can filter to warnings', () => {
+    const safe = automationRule('safe-rule', { type: 'scene.enter' })
+    const warning = automationRule('warning-rule', {
+      type: 'video.ended',
+      nodeId: video.id,
+    })
+    renderAutomationEditor({
+      scene: makeScene([safe, warning]),
+      ruleWarnings: {
+        'warning-rule': ['循环视频不会自然触发播放结束。'],
+      },
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '循环视频不会自然触发播放结束',
+    )
+    fireEvent.change(screen.getByLabelText('规则筛选'), {
+      target: { value: 'warnings' },
+    })
+    expect(screen.queryByRole('group', { name: '规则 1' })).not.toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '规则 2' })).toHaveTextContent(
+      'warning-rule',
+    )
+  })
+
   it('authors exit motion from an animation-completed trigger and exposes preview controls', () => {
     const sourceRule = clickRule('source-motion', [{
       type: 'node.enter',
@@ -568,7 +785,7 @@ describe('SceneAutomationEditor', () => {
     )
     renderAutomationEditor({ scene: makeScene([sourceRule, completionRule]) })
 
-    const group = screen.getByRole('group', { name: '自动化规则 1' })
+    const group = screen.getByRole('group', { name: '规则 1' })
     expect(within(group).getByLabelText('触发方式'))
       .toHaveValue('animation.completed')
     expect(within(group).getByLabelText('监听动画动作'))
@@ -608,8 +825,8 @@ describe('SceneAutomationEditor', () => {
       />,
     )
 
-    expect(screen.getByText('全局自动化')).toBeInTheDocument()
-    const group = screen.getByRole('group', { name: '自动化规则 1' })
+    expect(screen.getByText('全局规则')).toBeInTheDocument()
+    const group = screen.getByRole('group', { name: '规则 1' })
     expect(within(group).getByLabelText('生效场景')).toHaveValue('scene_one')
     fireEvent.change(within(group).getByLabelText('生效场景'), {
       target: { value: 'scene_two' },
@@ -618,7 +835,7 @@ describe('SceneAutomationEditor', () => {
       conditions: [{ type: 'scene.in', sceneIds: ['scene_two'] }],
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '添加自动化规则' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加规则' }))
     expect(onAddRule).toHaveBeenCalledWith(expect.objectContaining({
       conditions: [
         { type: 'scene.in', sceneIds: ['scene_one'] },
@@ -634,15 +851,15 @@ describe('SceneAutomationEditor', () => {
     ])
     const { onAddRule } = renderAutomationEditor({ scene })
 
-    expect(screen.getByRole('group', { name: '自动化规则 1' })).toHaveTextContent(
+    expect(screen.getByRole('group', { name: '规则 1' })).toHaveTextContent(
       'existing-automation',
     )
     expect(screen.queryByText('click-only')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: '添加自动化规则' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加规则' }))
     expect(onAddRule).toHaveBeenCalledWith({
       id: expect.stringMatching(/^interaction_/),
-      name: '进入场景自动化',
+      name: '进入场景规则',
       enabled: true,
       trigger: { type: 'scene.enter' },
       conditions: [{ type: 'presentation.in', stateIds: ['question'] }],
@@ -694,7 +911,7 @@ describe('SceneAutomationEditor', () => {
       }),
     ])
     const { onUpdateRule } = renderAutomationEditor({ scene })
-    const groups = screen.getAllByRole('group', { name: /自动化规则 \d+/ })
+    const groups = screen.getAllByRole('group', { name: /规则 \d+/ })
 
     fireEvent.change(within(groups[0]!).getByLabelText('进入状态'), {
       target: { value: 'feedback' },
@@ -766,7 +983,7 @@ describe('SceneAutomationEditor', () => {
       [{ type: 'presentation.in', stateIds: ['question'] }],
     )
     const { onUpdateRule } = renderAutomationEditor({ scene: makeScene([rule]) })
-    const group = screen.getByRole('group', { name: '自动化规则 1' })
+    const group = screen.getByRole('group', { name: '规则 1' })
 
     fireEvent.change(within(group).getByLabelText('作用范围'), {
       target: { value: '__all_states__' },

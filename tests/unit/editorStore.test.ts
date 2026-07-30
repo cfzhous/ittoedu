@@ -271,6 +271,68 @@ describe('scene operations', () => {
   })
 })
 
+describe('interaction rule authoring order', () => {
+  it('duplicates with fresh ids, reorders within rule kind, and undoes both', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const sceneId = activeScene().id
+    const nodeId = activeScene().nodes[0]!.id
+    const makeRule = (
+      id: string,
+      trigger: { type: 'scene.enter' } | { type: 'node.click'; nodeId: string },
+    ) => ({
+      id,
+      name: id,
+      enabled: true,
+      trigger,
+      conditions: [],
+      actions: [{
+        id: `${id}-action`,
+        start: 'after-previous' as const,
+        delayMs: 0,
+        action: { type: 'scene.next' as const },
+      }],
+    })
+    store.addInteractionRule(sceneId, makeRule('first', { type: 'scene.enter' }))
+    store.addInteractionRule(sceneId, makeRule('click', {
+      type: 'node.click',
+      nodeId,
+    }))
+    store.addInteractionRule(sceneId, makeRule('second', { type: 'scene.enter' }))
+
+    const copyId = store.duplicateInteractionRule(sceneId, 'first')!
+    let rules = activeScene().interactions
+    expect(rules.map((rule) => rule.id)).toEqual([
+      'first',
+      copyId,
+      'click',
+      'second',
+    ])
+    expect(rules[1]!.actions[0]!.id).not.toBe('first-action')
+
+    store.moveInteractionRule(sceneId, 'second', -1)
+    expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
+      'first',
+      'second',
+      copyId,
+      'click',
+    ])
+    store.undo()
+    expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
+      'first',
+      copyId,
+      'click',
+      'second',
+    ])
+    store.undo()
+    expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
+      'first',
+      'click',
+      'second',
+    ])
+  })
+})
+
 describe('animation completion dependency cleanup', () => {
   it('cascades through second-order completion rules when the source rule is deleted', () => {
     const store = useEditorStore.getState()
@@ -496,6 +558,40 @@ describe('node operations', () => {
     expect(activeScene().nodes[0]).toMatchObject({ text: '双击编辑文字' })
     store.redo()
     expect(activeScene().nodes[0]).toMatchObject({ text: '中文文本\n第二行' })
+  })
+
+  it('keeps auto-width changes inside the same vertical text transaction', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const nodeId = activeScene().nodes[0]!.id
+    store.updateNode(nodeId, {
+      style: { writingMode: 'vertical-lr', overflow: 'auto-height' },
+    })
+    const originalWidth = activeScene().nodes[0]!.width
+    const historyBeforeCommit = useEditorStore.getState().history.past.length
+
+    store.beginTextEdit(nodeId, 'canvas')
+    store.updateTextEditDraft(nodeId, '竖排内容', [], 180, 96)
+    store.updateTextEditDraft(nodeId, '竖排内容增加', [], 180, 128)
+
+    expect(activeScene().nodes[0]).toMatchObject({
+      text: '竖排内容增加',
+      width: 128,
+      height: 180,
+    })
+    expect(useEditorStore.getState().history.past).toHaveLength(
+      historyBeforeCommit,
+    )
+
+    store.commitTextEdit()
+    expect(useEditorStore.getState().history.past).toHaveLength(
+      historyBeforeCommit + 1,
+    )
+    store.undo()
+    expect(activeScene().nodes[0]).toMatchObject({
+      text: '双击编辑文字',
+      width: originalWidth,
+    })
   })
 
   it('cancels a text transaction without adding history or leaving the project dirty', () => {

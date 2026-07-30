@@ -385,17 +385,24 @@ export class EditorScene extends Phaser.Scene {
     )
     target.on(
       Phaser.Input.Events.GAMEOBJECT_POINTER_UP,
-      () => {
+      (pointer: Phaser.Input.Pointer) => {
         const now = performance.now()
         if (
-          adapter.getNode().type === 'text' &&
           this.lastClick.nodeId === adapter.nodeId &&
           now - this.lastClick.time < 380
         ) {
-          // Enter DOM editing only after the second pointer sequence has
-          // finished. Mounting/focusing the overlay during pointerdown lets
-          // the browser's default canvas focus immediately blur it again.
-          this.bridge.emitTextDoubleClick(adapter.nodeId)
+          if (adapter.getNode().type === 'text') {
+            // Enter DOM editing only after the second pointer sequence has
+            // finished. Mounting/focusing the overlay during pointerdown lets
+            // the browser's default canvas focus immediately blur it again.
+            this.bridge.emitTextDoubleClick(adapter.nodeId)
+          } else if (adapter instanceof ExternalComponentNodeAdapter) {
+            const target = adapter.findEditableTextAt(
+              pointer.worldX,
+              pointer.worldY,
+            )
+            if (target) this.bridge.emitComponentTextDoubleClick(target)
+          }
         }
         this.lastClick = { nodeId: adapter.nodeId, time: now }
       },

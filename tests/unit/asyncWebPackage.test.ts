@@ -1,11 +1,14 @@
 import { strFromU8, unzipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createProject } from '@/renderer/project/createProject'
+import {
+  createProject,
+  createVideoNode,
+} from '@/renderer/project/createProject'
 import {
   buildWebPackageFilesFromProject,
   buildWebPackageFromProjectAsync,
 } from '@/renderer/export/buildWebPackage'
-import type { ExportPayload } from '@/shared/componentTypes'
+import type { PublishedLessonPayload } from '@/shared/publishedLessonTypes'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -23,11 +26,30 @@ function makeSources(byteLength: number) {
     byteLength,
     duration: 20,
   }
+  project.scenes[0]!.nodes.push(createVideoNode({
+    id: 'lesson-video',
+    assetId: 'video',
+  }))
+  project.assets.unused = {
+    id: 'unused',
+    filename: '作者素材-未使用.png',
+    mimeType: 'image/png',
+    kind: 'image',
+    path: 'assets/unused.png',
+    byteLength: 64,
+  }
   return {
     project,
     assetFiles: { video },
     components: {},
   }
+}
+
+function decodeCourseData(bytes: Uint8Array): PublishedLessonPayload {
+  const source = strFromU8(bytes)
+  const match = source.match(/^window\.__H5_LESSON_PAYLOAD__=(.*);\s*$/s)
+  if (!match?.[1]) throw new Error('course-data.js 格式无效')
+  return JSON.parse(match[1]) as PublishedLessonPayload
 }
 
 describe('asynchronous web package', () => {
@@ -38,12 +60,15 @@ describe('asynchronous web package', () => {
       sources,
       'window.__PLAYER__=true;',
     )
-    const payload = JSON.parse(strFromU8(files['course.json']!)) as ExportPayload
-    const assetPath = payload.assets.video?.dataUrl.replace(/^\.\//, '')
+    const payload = decodeCourseData(files['course-data.js']!)
+    const assetPath = payload.assets.video?.url.replace(/^\.\//, '')
 
     expect(atobSpy).not.toHaveBeenCalled()
-    expect(payload.assets.video?.dataUrl).toMatch(/^\.\/assets\//)
+    expect(payload.assets.video?.url).toMatch(/^\.\/assets\//)
     expect(files[assetPath!]).toBe(sources.assetFiles.video)
+    expect(payload.assets).not.toHaveProperty('unused')
+    expect(Object.keys(files).filter((path) => path.startsWith('assets/')))
+      .toEqual([assetPath])
   })
 
   it('大素材 ZIP 压缩在后台运行', async () => {
@@ -66,8 +91,8 @@ describe('asynchronous web package', () => {
     expect(events[0]).toBe('timer')
 
     const files = unzipSync(bytes)
-    const payload = JSON.parse(strFromU8(files['course.json']!)) as ExportPayload
-    const assetPath = payload.assets.video!.dataUrl.replace(/^\.\//, '')
+    const payload = decodeCourseData(files['course-data.js']!)
+    const assetPath = payload.assets.video!.url.replace(/^\.\//, '')
     expect(files[assetPath]?.byteLength).toBe(8 * 1024 * 1024)
   }, 30_000)
 })

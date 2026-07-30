@@ -247,6 +247,61 @@ function migratedMotionHarness(node: SceneNode) {
   return { director, handle, root, tweens }
 }
 
+describe('Project V7 text direction compatibility', () => {
+  it('normalizes legacy vertical text to vertical-rl and accepts both new directions', () => {
+    const legacy = structuredClone(
+      createProject({ includeDefaultController: false }),
+    ) as ReturnType<typeof createProject>
+    const baseVertical = createTextNode({ id: 'base_vertical' })
+    const stateVertical = createTextNode({ id: 'state_vertical' })
+    Reflect.set(baseVertical.style, 'writingMode', 'vertical')
+    legacy.scenes[0]!.nodes = [baseVertical, stateVertical]
+    legacy.scenes[0]!.presentation = {
+      initialStateId: 'state_one',
+      states: [{
+        id: 'state_one',
+        name: '状态一',
+        nodeOverrides: {
+          state_vertical: {
+            style: { writingMode: 'vertical' },
+          } as never,
+        },
+      }],
+    }
+
+    const migrated = migrateProjectDocument(legacy)
+    const migratedBase = migrated.scenes[0]!.nodes.find(
+      (node) => node.id === 'base_vertical',
+    )
+    expect(migratedBase?.type).toBe('text')
+    if (migratedBase?.type !== 'text') throw new Error('Expected text node')
+    expect(migratedBase.style.writingMode).toBe('vertical-rl')
+    expect(
+      materializeScene(migrated.scenes[0]!, 'state_one').nodes.find(
+        (node) => node.id === 'state_vertical',
+      ),
+    ).toMatchObject({
+      style: { writingMode: 'vertical-rl' },
+    })
+    expect(
+      migrated.scenes[0]!.presentation?.states[0]!
+        .nodeOverrides.state_vertical,
+    ).toMatchObject({
+      style: { writingMode: 'vertical-rl' },
+    })
+
+    const modern = createProject({ includeDefaultController: false })
+    modern.scenes[0]!.nodes = [
+      createTextNode({ style: { writingMode: 'vertical-lr' } }),
+    ]
+    expect(
+      projectDocumentSchema.parse(modern).scenes[0]!.nodes[0],
+    ).toMatchObject({
+      style: { writingMode: 'vertical-lr' },
+    })
+  })
+})
+
 describe('Project V7 interaction protocol', () => {
   it('accepts event-driven motion steps and completion triggers', () => {
     expect(interactionRuleSchema.parse(stepRule())).toEqual(stepRule())

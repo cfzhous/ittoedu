@@ -133,18 +133,25 @@ export async function renderSceneCanvas(
 
     const drawNode = async (node: SceneNode, componentLabel = '互动组件') => {
       if (!node.visible) return
+      const renderedText = node.type === 'text'
+        ? renderTextNodeCanvas(node, node.width, resolution)
+        : null
+      const visualWidth = renderedText?.width ?? node.width
+      const visualHeight = renderedText?.height ?? node.height
       context.save()
-      context.translate(node.x + node.width / 2, node.y + node.height / 2)
+      context.translate(
+        node.x + visualWidth / 2,
+        node.y + visualHeight / 2,
+      )
       context.rotate((node.rotation * Math.PI) / 180)
       context.globalAlpha = node.opacity
       if (node.type === 'text') {
-        const rendered = renderTextNodeCanvas(node, node.width, resolution)
         context.drawImage(
-          rendered.canvas,
-          -node.width / 2,
-          -rendered.height / 2,
-          node.width,
-          rendered.height,
+          renderedText!.canvas,
+          -renderedText!.width / 2,
+          -renderedText!.height / 2,
+          renderedText!.width,
+          renderedText!.height,
         )
       } else if (node.type === 'shape') {
         context.translate(-node.width / 2, -node.height / 2)

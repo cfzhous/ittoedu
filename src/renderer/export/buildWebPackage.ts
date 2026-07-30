@@ -1,12 +1,17 @@
 import { strToU8, zip, zipSync } from 'fflate'
 import type {
-  ComponentManifest,
   ComponentPackageData,
   ExportPayload,
 } from '../../shared/componentTypes'
 import type { ProjectDocument } from '../../shared/projectTypes'
+import type { PublishedLessonPayload } from '../../shared/publishedLessonTypes'
 import { componentPackageKey } from '../project/archivePath'
-import { assertV3ExportDependencies } from './v3ExportSupport'
+import {
+  buildPublishedLessonPayload,
+  collectPublishedComponentKeys,
+  collectPublishedProjectAssetIds,
+  isPublishedLessonPayload,
+} from './buildPublishedLesson'
 
 export interface WebPackageOptions {
   playerBundle: string
@@ -219,21 +224,6 @@ function normalizeOptions(
   }
 }
 
-function safeSegment(value: string, fallback: string): string {
-  const normalized = value
-    .normalize('NFKD')
-    .replace(/[^\x20-\x7e]/g, '_')
-    .replace(/[^A-Za-z0-9._-]+/g, '_')
-    .replace(/^\.+/, '')
-    .replace(/[. ]+$/g, '')
-    .replace(/_+/g, '_')
-    .slice(0, 80)
-
-  return normalized && normalized !== '.' && normalized !== '..'
-    ? normalized
-    : fallback
-}
-
 function basename(value: string): string {
   return value.split(/[\\/]/).pop() ?? value
 }
@@ -255,17 +245,6 @@ function mimeTypeForPath(path: string): string {
   return Object.entries(EXTENSIONS_BY_MIME_TYPE).find(
     ([, candidate]) => candidate === extension,
   )?.[0] ?? 'application/octet-stream'
-}
-
-function safeAssetFilename(
-  sourceName: string,
-  fallbackStem: string,
-  mimeType: string,
-): string {
-  const sourceBaseName = basename(sourceName)
-  const sourceStem = sourceBaseName.replace(/\.[^.]*$/, '')
-  const stem = safeSegment(sourceStem, fallbackStem)
-  return `${stem}.${extensionFor(mimeType, sourceBaseName)}`
 }
 
 function decodeBase64(value: string, description: string): Uint8Array {
@@ -369,44 +348,18 @@ function paddedIndex(index: number): string {
   return String(index).padStart(3, '0')
 }
 
-function findProjectAssetName(payload: ExportPayload, assetId: string): string {
-  const direct = Object.prototype.hasOwnProperty.call(
-    payload.project.assets,
-    assetId,
-  )
-    ? payload.project.assets[assetId]
-    : undefined
-  if (direct) return direct.filename
-
-  return (
-    Object.values(payload.project.assets).find((asset) => asset.id === assetId)
-      ?.filename ?? assetId
-  )
-}
-
-function componentDirectory(
-  manifest: ComponentManifest,
-  componentIndex: number,
-): string {
-  const fallback = `component-${paddedIndex(componentIndex)}`
-  const id = safeSegment(manifest.id, fallback)
-  const version = safeSegment(manifest.version, 'version')
-  return `components/${paddedIndex(componentIndex)}-${id}-${version}`
-}
-
-function buildIndexHtml(payload: ExportPayload, lang: string): string {
+function buildIndexHtml(payload: PublishedLessonPayload, lang: string): string {
   return `<!doctype html>
 <html lang="${escapeHtmlText(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta name="courseware-payload" content="./course.json">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src blob:">
-  <title>${escapeHtmlText(payload.project.title)}</title>
+  <title>${escapeHtmlText(payload.title)}</title>
   <link rel="stylesheet" href="./player/player.css">
 </head>
 <body>
-  <div id="lesson-root" aria-label="${escapeHtmlText(payload.project.title)}"></div>
+  <div id="lesson-root" aria-label="${escapeHtmlText(payload.title)}"></div>
   <script defer src="./course-data.js"></script>
   <script defer src="./player/player.iife.js"></script>
 </body>
@@ -416,16 +369,19 @@ function buildIndexHtml(payload: ExportPayload, lang: string): string {
 
 function finishWebPackageFiles(
   files: Record<string, Uint8Array>,
-  packagedPayload: ExportPayload,
+  packagedPayload: PublishedLessonPayload,
   playerBundle: string,
   lang: string,
 ): Record<string, Uint8Array> {
-  const courseJson = JSON.stringify(packagedPayload, null, 2)
-  const localFallback =
-    `window.__H5_LESSON_PAYLOAD_FALLBACK__=${JSON.stringify(packagedPayload)};\n`
+  const serialized = JSON.stringify(packagedPayload)
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+  const courseData = `window.__H5_LESSON_PAYLOAD__=${serialized};\n`
 
-  addFile(files, 'course.json', strToU8(courseJson))
-  addFile(files, 'course-data.js', strToU8(localFallback))
+  // Keep one canonical payload. A JS data file works both over HTTP and when
+  // teachers double-click index.html via file://, where fetch(course.json) is
+  // commonly blocked by browser origin rules.
+  addFile(files, 'course-data.js', strToU8(courseData))
   addFile(files, 'player/player.iife.js', strToU8(playerBundle))
   addFile(files, 'player/player.css', strToU8(PLAYER_STYLES))
   addFile(files, 'index.html', strToU8(buildIndexHtml(packagedPayload, lang)))
@@ -433,98 +389,69 @@ function finishWebPackageFiles(
 }
 
 export function buildWebPackageFiles(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundle: string,
 ): Record<string, Uint8Array>
 export function buildWebPackageFiles(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   options: WebPackageOptions,
 ): Record<string, Uint8Array>
 export function buildWebPackageFiles(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundleOrOptions: string | WebPackageOptions,
 ): Record<string, Uint8Array> {
   const { playerBundle, lang } = normalizeOptions(playerBundleOrOptions)
   if (!playerBundle.trim()) {
     throw new Error('Player Runtime 为空，无法生成网页包')
   }
-  assertV3ExportDependencies(payload)
-
   const files = Object.create(null) as Record<string, Uint8Array>
-  const packagedPayload: ExportPayload = {
-    project: cloneJson(payload.project),
-    assets: Object.create(null) as ExportPayload['assets'],
-    components: Object.create(null) as ExportPayload['components'],
-  }
+  const packagedPayload = cloneJson(
+    isPublishedLessonPayload(payload)
+      ? payload
+      : buildPublishedLessonPayload(payload),
+  )
 
   let assetIndex = 0
-  for (const [assetId, asset] of Object.entries(payload.assets)) {
+  for (const [assetId, asset] of Object.entries(packagedPayload.assets)) {
     const prefix = paddedIndex(assetIndex)
-    const filename = `${prefix}-${safeAssetFilename(
-      findProjectAssetName(payload, assetId),
-      `asset-${prefix}`,
-      asset.mimeType,
-    )}`
+    const filename = `${prefix}.${extensionFor(asset.mimeType, assetId)}`
     const archivePath = `assets/${filename}`
     addFile(
       files,
       archivePath,
-      dataUrlToBytes(asset.dataUrl, `工程素材“${assetId}”`),
+      dataUrlToBytes(asset.url, `工程素材“${assetId}”`),
     )
     packagedPayload.assets[assetId] = {
       mimeType: asset.mimeType,
-      dataUrl: `./${archivePath}`,
+      url: `./${archivePath}`,
     }
     assetIndex += 1
   }
 
   let componentIndex = 0
-  for (const [componentKey, component] of Object.entries(payload.components)) {
-    const directory = componentDirectory(component.manifest, componentIndex)
-    const manifest = cloneJson(component.manifest)
-    manifest.entry = 'runtime.js'
-    delete manifest.thumbnail
-    const packagedAssets = Object.create(null) as ExportPayload['components'][string]['assets']
+  for (const [componentKey, component] of Object.entries(packagedPayload.components)) {
+    const directory = `component-assets/${paddedIndex(componentIndex)}`
 
     let componentAssetIndex = 0
     for (const [assetKey, asset] of Object.entries(component.assets)) {
       const prefix = paddedIndex(componentAssetIndex)
-      const sourcePath = Object.prototype.hasOwnProperty.call(
-        component.manifest.assets,
-        assetKey,
-      )
-        ? component.manifest.assets[assetKey] ?? assetKey
-        : assetKey
-      const filename = `${prefix}-${safeAssetFilename(
-        sourcePath,
-        `asset-${prefix}`,
-        asset.mimeType,
-      )}`
-      const relativeAssetPath = `assets/${filename}`
-      const archivePath = `${directory}/${relativeAssetPath}`
+      const filename = `${prefix}.${extensionFor(asset.mimeType, assetKey)}`
+      const archivePath = `${directory}/${filename}`
       addFile(
         files,
         archivePath,
         dataUrlToBytes(
-          asset.dataUrl,
-          `组件“${component.manifest.name}”的素材“${assetKey}”`,
+          asset.url,
+          `组件“${component.name}”的素材“${assetKey}”`,
         ),
       )
-      manifest.assets[assetKey] = relativeAssetPath
-      packagedAssets[assetKey] = {
+      component.assets[assetKey] = {
         mimeType: asset.mimeType,
-        dataUrl: `./${archivePath}`,
+        url: `./${archivePath}`,
       }
       componentAssetIndex += 1
     }
-
-    addFile(files, `${directory}/runtime.js`, strToU8(component.runtimeSource))
-    addFile(files, `${directory}/manifest.json`, strToU8(JSON.stringify(manifest, null, 2)))
-    packagedPayload.components[componentKey] = {
-      manifest,
-      runtimeSource: component.runtimeSource,
-      assets: packagedAssets,
-    }
+    packagedPayload.components[componentKey] = component
     componentIndex += 1
   }
 
@@ -547,6 +474,15 @@ function findSourceComponent(
   )
 }
 
+function findProjectAssetEntry(
+  project: ProjectDocument,
+  assetId: string,
+): readonly [string, ProjectDocument['assets'][string]] | undefined {
+  const direct = project.assets[assetId]
+  if (direct) return [assetId, direct]
+  return Object.entries(project.assets).find(([, meta]) => meta.id === assetId)
+}
+
 /** Builds package files directly from editor bytes, without a Base64 round-trip. */
 export function buildWebPackageFilesFromProject(
   sources: WebPackageProjectSources,
@@ -557,102 +493,141 @@ export function buildWebPackageFilesFromProject(
     throw new Error('Player Runtime 为空，无法生成网页包')
   }
   const files = Object.create(null) as Record<string, Uint8Array>
-  const packagedPayload: ExportPayload = {
+  const transientPayload: ExportPayload = {
     project: cloneJson(sources.project),
     assets: Object.create(null) as ExportPayload['assets'],
     components: Object.create(null) as ExportPayload['components'],
   }
 
-  let assetIndex = 0
-  for (const [recordKey, meta] of Object.entries(sources.project.assets)) {
-    const bytes = sources.assetFiles[recordKey] ?? sources.assetFiles[meta.id]
+  for (const usedKey of collectPublishedComponentKeys(transientPayload)) {
+    const separator = usedKey.lastIndexOf('@')
+    const packageId = usedKey.slice(0, separator)
+    const version = usedKey.slice(separator + 1)
+    const projectEntry = Object.entries(
+      sources.project.componentPackages,
+    ).find(([, meta]) =>
+      meta.packageId === packageId && meta.version === version,
+    )
+    const recordKey = projectEntry?.[0] ?? usedKey
+    const meta = projectEntry?.[1]
+    const component = findSourceComponent(
+      sources.components,
+      recordKey,
+      packageId,
+      version,
+    )
+    const componentName = meta?.name ?? usedKey
+    if (!component) throw new Error(`组件“${componentName}”缺少包内容，无法导出`)
+    if (
+      component.manifest.id !== packageId ||
+      component.manifest.version !== version
+    ) {
+      throw new Error(`组件“${componentName}”的 ID 或版本与工程记录不一致`)
+    }
+    const packagedAssets: ExportPayload['components'][string]['assets'] = {}
+    for (const [assetKey, assetPath] of Object.entries(component.manifest.assets)) {
+      const bytes = component.files[assetPath]
+      if (!bytes) {
+        throw new Error(`组件“${componentName}”缺少素材“${assetPath}”`)
+      }
+      const mimeType = mimeTypeForPath(assetPath)
+      packagedAssets[assetKey] = {
+        mimeType,
+        dataUrl: `data:${mimeType};base64,`,
+      }
+    }
+    transientPayload.components[usedKey] = {
+      manifest: cloneJson(component.manifest),
+      runtimeSource: component.runtimeSource,
+      assets: packagedAssets,
+    }
+  }
+
+  const usedProjectAssets = collectPublishedProjectAssetIds(transientPayload)
+  for (const assetId of usedProjectAssets) {
+    const entry = findProjectAssetEntry(sources.project, assetId)
+    if (!entry) throw new Error(`发布内容引用的工程素材“${assetId}”不存在`)
+    const [recordKey, meta] = entry
+    const bytes =
+      sources.assetFiles[assetId] ??
+      sources.assetFiles[recordKey] ??
+      sources.assetFiles[meta.id]
     if (!bytes) throw new Error(`素材“${meta.filename}”缺少二进制数据，无法导出`)
     if (bytes.byteLength !== meta.byteLength) {
       throw new Error(`素材“${meta.filename}”的字节数与工程记录不一致`)
     }
-    const prefix = paddedIndex(assetIndex)
-    const filename = `${prefix}-${safeAssetFilename(
-      meta.filename,
-      `asset-${prefix}`,
-      meta.mimeType,
-    )}`
-    const archivePath = `assets/${filename}`
-    addFile(files, archivePath, bytes)
-    packagedPayload.assets[meta.id] = {
+    transientPayload.assets[assetId] = {
       mimeType: meta.mimeType,
-      dataUrl: `./${archivePath}`,
+      dataUrl: `data:${meta.mimeType};base64,`,
+    }
+  }
+
+  const packagedPayload = buildPublishedLessonPayload(transientPayload)
+  let assetIndex = 0
+  for (const [assetId, asset] of Object.entries(packagedPayload.assets)) {
+    const entry = findProjectAssetEntry(sources.project, assetId)
+    const meta = entry?.[1]
+    const bytes = entry
+      ? sources.assetFiles[assetId] ??
+        sources.assetFiles[entry[0]] ??
+        sources.assetFiles[entry[1].id]
+      : undefined
+    if (!meta || !bytes) {
+      throw new Error(`素材“${assetId}”缺少二进制数据，无法导出`)
+    }
+    const prefix = paddedIndex(assetIndex)
+    const archivePath = `assets/${prefix}.${extensionFor(asset.mimeType, meta.filename)}`
+    addFile(files, archivePath, bytes)
+    packagedPayload.assets[assetId] = {
+      mimeType: asset.mimeType,
+      url: `./${archivePath}`,
     }
     assetIndex += 1
   }
 
   let componentIndex = 0
-  for (const [recordKey, meta] of Object.entries(sources.project.componentPackages)) {
-    const component = findSourceComponent(
-      sources.components,
-      recordKey,
-      meta.packageId,
-      meta.version,
+  for (const component of Object.values(packagedPayload.components)) {
+    const source = Object.values(sources.components).find(
+      (candidate) =>
+        candidate.manifest.id === component.id &&
+        candidate.manifest.version === component.version,
     )
-    if (!component) throw new Error(`组件“${meta.name}”缺少包内容，无法导出`)
-    if (
-      component.manifest.id !== meta.packageId ||
-      component.manifest.version !== meta.version
-    ) {
-      throw new Error(`组件“${meta.name}”的 ID 或版本与工程记录不一致`)
+    if (!source) {
+      throw new Error(`组件“${component.name}”缺少包内容，无法导出`)
     }
-    const directory = componentDirectory(component.manifest, componentIndex)
-    const manifest = cloneJson(component.manifest)
-    manifest.entry = 'runtime.js'
-    delete manifest.thumbnail
-    const packagedAssets: ExportPayload['components'][string]['assets'] = Object.create(null) as
-      ExportPayload['components'][string]['assets']
-
     let componentAssetIndex = 0
-    for (const [assetKey, assetPath] of Object.entries(component.manifest.assets)) {
-      const bytes = component.files[assetPath]
-      if (!bytes) throw new Error(`组件“${meta.name}”缺少素材“${assetPath}”`)
+    for (const [assetKey, asset] of Object.entries(component.assets)) {
+      const sourcePath = source.manifest.assets[assetKey]
+      const bytes = sourcePath ? source.files[sourcePath] : undefined
+      if (!sourcePath || !bytes) {
+        throw new Error(`组件“${component.name}”缺少素材“${assetKey}”`)
+      }
       const prefix = paddedIndex(componentAssetIndex)
-      const mimeType = mimeTypeForPath(assetPath)
-      const filename = `${prefix}-${safeAssetFilename(
-        assetPath,
-        `asset-${prefix}`,
-        mimeType,
-      )}`
-      const relativeAssetPath = `assets/${filename}`
-      const archivePath = `${directory}/${relativeAssetPath}`
+      const archivePath =
+        `component-assets/${paddedIndex(componentIndex)}/${prefix}.` +
+        extensionFor(asset.mimeType, sourcePath)
       addFile(files, archivePath, bytes)
-      manifest.assets[assetKey] = relativeAssetPath
-      packagedAssets[assetKey] = {
-        mimeType,
-        dataUrl: `./${archivePath}`,
+      component.assets[assetKey] = {
+        mimeType: asset.mimeType,
+        url: `./${archivePath}`,
       }
       componentAssetIndex += 1
     }
-
-    addFile(files, `${directory}/runtime.js`, strToU8(component.runtimeSource))
-    addFile(files, `${directory}/manifest.json`, strToU8(JSON.stringify(manifest, null, 2)))
-    packagedPayload.components[recordKey] = {
-      manifest,
-      runtimeSource: component.runtimeSource,
-      assets: packagedAssets,
-    }
     componentIndex += 1
   }
-
-  assertV3ExportDependencies(packagedPayload)
   return finishWebPackageFiles(files, packagedPayload, playerBundle, lang)
 }
 
 export function buildWebPackage(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundle: string,
 ): Uint8Array
 export function buildWebPackage(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   options: WebPackageOptions,
 ): Uint8Array
 export function buildWebPackage(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundleOrOptions: string | WebPackageOptions,
 ): Uint8Array {
   return zipSync(buildWebPackageFiles(payload, playerBundleOrOptions as WebPackageOptions), {
@@ -661,15 +636,15 @@ export function buildWebPackage(
 }
 
 export function buildWebPackageAsync(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundle: string,
 ): Promise<Uint8Array>
 export function buildWebPackageAsync(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   options: WebPackageOptions,
 ): Promise<Uint8Array>
 export function buildWebPackageAsync(
-  payload: ExportPayload,
+  payload: ExportPayload | PublishedLessonPayload,
   playerBundleOrOptions: string | WebPackageOptions,
 ): Promise<Uint8Array> {
   const files = buildWebPackageFiles(

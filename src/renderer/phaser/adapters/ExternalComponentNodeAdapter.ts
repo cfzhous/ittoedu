@@ -1,12 +1,19 @@
 import * as Phaser from 'phaser'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
-import type { ComponentPackageData } from '../../../shared/componentTypes'
+import type {
+  ComponentEditableTextBounds,
+  ComponentEditableTextRegion,
+  ComponentPackageData,
+  ComponentTextProperty,
+} from '../../../shared/componentTypes'
 import type {
   ComponentLifecycleFailure,
   GuardedComponentInstanceLifecycle,
 } from '../../../shared/componentLifecycleGuard'
 import {
+  getComponentPropValue,
   mergeComponentProps,
+  resolveComponentEditorProperties,
   resolveComponentEditorState,
 } from '../../../shared/componentProps'
 import type {
@@ -22,6 +29,28 @@ import type {
 import type { ComponentRegistry } from '../ComponentRegistry'
 import { BaseNodeAdapter } from './NodeAdapter'
 
+export interface ComponentCanvasTextTarget {
+  nodeId: string
+  key: string
+  label?: string
+  multiline?: boolean
+  maxLength?: number
+  bounds: ComponentEditableTextBounds
+}
+
+function pointInside(
+  x: number,
+  y: number,
+  bounds: ComponentEditableTextBounds,
+): boolean {
+  return (
+    x >= bounds.x &&
+    y >= bounds.y &&
+    x <= bounds.x + bounds.width &&
+    y <= bounds.y + bounds.height
+  )
+}
+
 export class ExternalComponentNodeAdapter extends BaseNodeAdapter<ExternalComponentNode> {
   private readonly contentRoot: Phaser.GameObjects.Container
   private lifecycle: GuardedComponentInstanceLifecycle | null = null
@@ -29,6 +58,7 @@ export class ExternalComponentNodeAdapter extends BaseNodeAdapter<ExternalCompon
   private readonly errorText: Phaser.GameObjects.Text
   private readonly component: ComponentPackageData | undefined
   private domMount: PhaserDomComponentMount | null = null
+  private readonly textRegions = new Set<ComponentEditableTextRegion>()
 
   constructor(
     scene: Phaser.Scene,
@@ -77,6 +107,10 @@ export class ExternalComponentNodeAdapter extends BaseNodeAdapter<ExternalCompon
         scope,
         (failure) => this.handleLifecycleFailure(failure),
         this.domMount?.root,
+        (region) => {
+          this.textRegions.add(region)
+          return () => this.textRegions.delete(region)
+        },
       )
       this.lifecycle.setVisible?.(node.visible)
       this.redraw()
@@ -148,6 +182,107 @@ export class ExternalComponentNodeAdapter extends BaseNodeAdapter<ExternalCompon
 
   override setSelected(selected: boolean): void {
     this.domMount?.setSelected(selected)
+  }
+
+  /**
+   * Finds only text fields explicitly exposed by the component schema. DOM
+   * components opt in with data-courseware-edit-key; Phaser components use
+   * ctx.editor.registerTextRegion(). Nothing is inferred from visible text.
+   */
+  findEditableTextAt(
+    worldX: number,
+    worldY: number,
+  ): ComponentCanvasTextTarget | null {
+    if (!this.component || this.component.manifest.schemaVersion === 1) return null
+
+    const angle = -Phaser.Math.DegToRad(this.node.rotation)
+    const dx = worldX - (this.node.x + this.width / 2)
+    const dy = worldY - (this.node.y + this.height / 2)
+    const localX = dx * Math.cos(angle) - dy * Math.sin(angle) + this.width / 2
+    const localY = dx * Math.sin(angle) + dy * Math.cos(angle) + this.height / 2
+    const fields = new Map<string, ComponentTextProperty>(
+      resolveComponentEditorProperties(
+        this.component.manifest,
+        this.node.props,
+      )
+        .filter((field): field is ComponentTextProperty => (
+          field.type === 'text' || field.type === 'textarea'
+        ))
+        .map((field) => [field.key, field]),
+    )
+    const effectiveProps = mergeComponentProps(
+      this.component.manifest,
+      this.node.props,
+    )
+    const allowed = (key: string): boolean => (
+      fields.has(key) &&
+      typeof getComponentPropValue(effectiveProps, key) === 'string'
+    )
+
+    const domRoot = this.domMount?.root
+    if (domRoot) {
+      const rootRect = domRoot.getBoundingClientRect()
+      if (rootRect.width > 0 && rootRect.height > 0) {
+        const candidates = [
+          ...domRoot.querySelectorAll<HTMLElement>('[data-courseware-edit-key]'),
+        ]
+        for (let index = candidates.length - 1; index >= 0; index -= 1) {
+          const element = candidates[index]!
+          const key = element.dataset.coursewareEditKey?.trim()
+          if (!key || !allowed(key)) continue
+          const rect = element.getBoundingClientRect()
+          const bounds = {
+            x: ((rect.left - rootRect.left) / rootRect.width) * this.width,
+            y: ((rect.top - rootRect.top) / rootRect.height) * this.height,
+            width: (rect.width / rootRect.width) * this.width,
+            height: (rect.height / rootRect.height) * this.height,
+          }
+          if (!pointInside(localX, localY, bounds)) continue
+          const field = fields.get(key)!
+          return {
+            nodeId: this.node.id,
+            key,
+            label: element.dataset.coursewareEditLabel || field.label,
+            multiline: element.dataset.coursewareEditMultiline === 'true' ||
+              field.type === 'textarea',
+            maxLength: field.maxLength,
+            bounds,
+          }
+        }
+      }
+    }
+
+    for (const region of [...this.textRegions].reverse()) {
+      if (!allowed(region.key)) continue
+      let bounds: ComponentEditableTextBounds
+      try {
+        bounds = region.getBounds()
+      } catch (error) {
+        console.warn('组件可编辑文字区域读取失败', error)
+        continue
+      }
+      if (
+        !Number.isFinite(bounds.x) ||
+        !Number.isFinite(bounds.y) ||
+        !Number.isFinite(bounds.width) ||
+        !Number.isFinite(bounds.height) ||
+        bounds.width <= 0 ||
+        bounds.height <= 0 ||
+        !pointInside(localX, localY, bounds)
+      ) {
+        continue
+      }
+      const field = fields.get(region.key)!
+      return {
+        nodeId: this.node.id,
+        key: region.key,
+        label: region.label || field.label,
+        multiline: region.multiline ?? field.type === 'textarea',
+        maxLength: region.maxLength ?? field.maxLength,
+        bounds,
+      }
+    }
+    return null
   }
 
   override destroy(): void {

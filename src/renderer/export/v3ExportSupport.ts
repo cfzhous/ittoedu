@@ -122,24 +122,44 @@ function assertComponentDependency(
  * was produced by buildExportPayload(). Validate every V3 dependency at the
  * boundary to prevent a successful-looking export that drops runtime content.
  */
-export function assertV3ExportDependencies(payload: ExportPayload): void {
-  for (const [assetId, meta] of Object.entries(payload.project.assets)) {
-    if (!hasOwn(payload.assets, assetId) && !hasOwn(payload.assets, meta.id)) {
-      throw new Error(`工程素材“${meta.filename}”未完整打入导出内容`)
-    }
-  }
+export interface V3ExportDependencyOptions {
+  /**
+   * Authoring/static exports still require a complete project snapshot.
+   * PublishedLesson compiles a runtime-only closure and validates only assets
+   * and component packages reachable from published content.
+   */
+  requireAllProjectResources?: boolean
+  /** Disabled runtimes are authoring data and are omitted from PublishedLesson. */
+  includeDisabledRuntimes?: boolean
+}
 
-  for (const component of Object.values(payload.project.componentPackages)) {
-    if (
-      !findPackagedComponent(
-        payload,
-        component.packageId,
-        component.version,
-      )
-    ) {
-      throw new Error(
-        `组件包“${componentKey(component.packageId, component.version)}”未完整打入导出内容`,
-      )
+export function assertV3ExportDependencies(
+  payload: ExportPayload,
+  options: V3ExportDependencyOptions = {},
+): void {
+  const requireAllProjectResources =
+    options.requireAllProjectResources ?? true
+  const includeDisabledRuntimes = options.includeDisabledRuntimes ?? true
+
+  if (requireAllProjectResources) {
+    for (const [assetId, meta] of Object.entries(payload.project.assets)) {
+      if (!hasOwn(payload.assets, assetId) && !hasOwn(payload.assets, meta.id)) {
+        throw new Error(`工程素材“${meta.filename}”未完整打入导出内容`)
+      }
+    }
+
+    for (const component of Object.values(payload.project.componentPackages)) {
+      if (
+        !findPackagedComponent(
+          payload,
+          component.packageId,
+          component.version,
+        )
+      ) {
+        throw new Error(
+          `组件包“${componentKey(component.packageId, component.version)}”未完整打入导出内容`,
+        )
+      }
     }
   }
 
@@ -149,7 +169,9 @@ export function assertV3ExportDependencies(payload: ExportPayload): void {
   )
   assertRuntimeDependencies(
     payload,
-    payload.project.globalRuntime,
+    payload.project.globalRuntime?.enabled || includeDisabledRuntimes
+      ? payload.project.globalRuntime
+      : undefined,
     '全局层',
     globalNodeIds,
     '全局层节点',
@@ -175,7 +197,9 @@ export function assertV3ExportDependencies(payload: ExportPayload): void {
   for (const scene of payload.project.scenes) {
     assertRuntimeDependencies(
       payload,
-      scene.runtime,
+      scene.runtime?.enabled || includeDisabledRuntimes
+        ? scene.runtime
+        : undefined,
       `场景“${scene.name}”`,
       new Set(scene.nodes.map((node) => node.id)),
       '本场景节点',

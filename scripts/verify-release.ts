@@ -451,6 +451,7 @@ async function verifyPortableStartup(): Promise<void> {
 async function verifyUnpackedWorkflows(): Promise<void> {
   const componentRun = await launchPackagedEditor(unpackedExecutable)
   try {
+    await componentRun.page.getByRole('button', { name: '专业' }).click()
     await componentRun.application.evaluate(
       ({ dialog }, componentPath) => {
         dialog.showOpenDialog = async () => ({
@@ -466,11 +467,13 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     await componentRun.page
       .getByRole('button', { name: '选择组件包' })
       .click()
+    await componentRun.page.getByRole('tab', { name: '元素' }).click()
+    await componentRun.page.getByRole('tab', { name: '互动组件' }).click()
     await componentRun.page
       .locator('[data-testid="component-com.example.sample-counter"]')
       .waitFor({ timeout: 20_000 })
 
-    await componentRun.page.getByRole('tab', { name: '元素' }).click()
+    await componentRun.page.getByRole('tab', { name: '常用' }).click()
     await componentRun.page.getByTestId('add-text').click()
     await componentRun.page.getByRole('tab', { name: '属性' }).click()
     const fontInput = componentRun.page.getByRole('combobox', { name: '字体' })
@@ -484,8 +487,7 @@ async function verifyUnpackedWorkflows(): Promise<void> {
       .waitFor({ timeout: 10_000 })
     assert(
       await componentRun.page.getByRole('option', {
-        name: 'Microsoft YaHei',
-        exact: true,
+        name: /微软雅黑，Microsoft YaHei，/,
       }).count() === 1,
       '目录版字体框未在保留默认值时展开完整字体列表',
     )
@@ -869,7 +871,8 @@ async function main(): Promise<void> {
     '渲染宿主基准缺少 V3 Phaser 兼容组件',
   )
   assert(
-    benchmarkHtml.includes("connect-src 'none'") &&
+    benchmarkHtml.includes('connect-src data: blob:') &&
+      !/connect-src[^;]*(?:https?:|\*|'self')/i.test(benchmarkHtml) &&
       !/<script[^>]+src=/i.test(benchmarkHtml),
     '渲染宿主基准单 HTML 不是自包含离线成品',
   )

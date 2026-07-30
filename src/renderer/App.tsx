@@ -160,6 +160,8 @@ export default function App() {
   const selectedNode = useEditorStore(selectSelectedNode)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const editorMode = useEditorStore((state) => state.editorMode)
+  const activeTab = useEditorStore((state) => state.activeTab)
   const editingNodes = useEditorStore(selectEditingNodes)
   const activeScene = useEditorStore(selectActiveScene)
   const errorMessage = useEditorStore((state) => state.errorMessage)
@@ -663,7 +665,13 @@ export default function App() {
         onPreview={handlePreview}
         onExport={handleExport}
       />
-      <div className="app-main">
+      <div
+        className={`app-main${
+          editorMode === 'professional' && activeTab === 'developer'
+            ? ' app-main--developer'
+            : ''
+        }`}
+      >
         <ScenePanel />
         <div className="editor-center">
           <Workspace

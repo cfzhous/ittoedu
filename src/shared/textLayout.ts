@@ -1,7 +1,8 @@
-import type { TextNode, TextRunStyle } from './projectTypes'
+import type { TextNode, TextRunStyle, WritingMode } from './projectTypes'
 
 export interface RenderedTextCanvas {
   canvas: HTMLCanvasElement
+  width: number
   height: number
   fontSize: number
 }
@@ -16,6 +17,16 @@ interface CharacterBox {
 interface TextLine {
   characters: CharacterBox[]
   width: number
+}
+
+interface TextColumn {
+  characters: CharacterBox[]
+}
+
+export function isVerticalWritingMode(
+  writingMode: WritingMode,
+): writingMode is 'vertical-rl' | 'vertical-lr' {
+  return writingMode !== 'horizontal'
 }
 
 const DEFAULT_RUN_STYLE: Required<TextRunStyle> = {
@@ -102,13 +113,50 @@ function requiredHorizontalHeight(node: TextNode, fontSize: number, lineCount: n
   return node.style.padding * 2 + Math.max(1, lineCount) * lineHeight - node.style.lineSpacing
 }
 
-function requiredVerticalHeight(node: TextNode, fontSize: number): number {
-  const longestColumn = Math.max(
-    1,
-    ...node.text.split('\n').map((column) => Array.from(column).length),
-  )
+function layoutVertical(
+  context: CanvasRenderingContext2D,
+  node: TextNode,
+  fontSize: number,
+  availableHeight: number,
+): TextColumn[] {
   const lineHeight = fontSize * 1.22 + node.style.lineSpacing
-  return node.style.padding * 2 + longestColumn * lineHeight - node.style.lineSpacing
+  const rows = Math.max(1, Math.floor(availableHeight / lineHeight))
+  const columns: TextColumn[] = [{ characters: [] }]
+  let row = 0
+  Array.from(node.text).forEach((value, index) => {
+    if (value === '\n') {
+      columns.push({ characters: [] })
+      row = 0
+      return
+    }
+    if (row >= rows) {
+      columns.push({ characters: [] })
+      row = 0
+    }
+    const style = runStyle(node, index)
+    context.font = font(node, fontSize, style)
+    columns.at(-1)!.characters.push({
+      value,
+      index,
+      width: context.measureText(value).width,
+      style,
+    })
+    row += 1
+  })
+  return columns
+}
+
+function verticalColumnWidth(node: TextNode, fontSize: number): number {
+  return Math.max(1, fontSize + node.style.letterSpacing)
+}
+
+function requiredVerticalWidth(
+  node: TextNode,
+  fontSize: number,
+  columnCount: number,
+): number {
+  const columnWidth = verticalColumnWidth(node, fontSize)
+  return node.style.padding * 2 + Math.max(1, columnCount) * columnWidth
 }
 
 function drawCharacter(
@@ -153,10 +201,14 @@ function fitFontSize(
 ): number {
   if (node.style.overflow !== 'shrink') return node.style.fontSize
   for (let size = node.style.fontSize; size >= 8; size -= 1) {
-    if (node.style.writingMode === 'vertical') {
-      const rows = Math.max(1, Math.floor(availableHeight / (size * 1.22 + node.style.lineSpacing)))
-      const columns = Math.ceil(Math.max(1, Array.from(node.text).length) / rows)
-      if (columns * (size + node.style.letterSpacing) <= availableWidth) return size
+    if (isVerticalWritingMode(node.style.writingMode)) {
+      const columns = layoutVertical(context, node, size, availableHeight)
+      if (
+        requiredVerticalWidth(node, size, columns.length)
+          <= availableWidth + node.style.padding * 2
+      ) {
+        return size
+      }
     } else {
       const lines = layoutHorizontal(context, node, size, availableWidth)
       if (requiredHorizontalHeight(node, size, lines.length) <= node.height) return size
@@ -178,26 +230,41 @@ export function renderTextNodeCanvas(
   const availableHeight = Math.max(1, node.height - padding * 2)
   const fontSize = fitFontSize(measure, node, availableWidth, availableHeight)
 
+  let outputWidth = width
   let outputHeight = node.height
   let lines: TextLine[] = []
+  let columns: TextColumn[] = []
   if (node.style.writingMode === 'horizontal') {
     lines = layoutHorizontal(measure, node, fontSize, availableWidth)
     if (node.style.overflow === 'auto-height') {
       outputHeight = Math.max(16, requiredHorizontalHeight(node, fontSize, lines.length))
     }
-  } else if (node.style.overflow === 'auto-height') {
-    outputHeight = Math.max(16, requiredVerticalHeight(node, fontSize))
+  } else {
+    columns = layoutVertical(measure, node, fontSize, availableHeight)
+    if (node.style.overflow === 'auto-height') {
+      outputWidth = Math.max(
+        16,
+        requiredVerticalWidth(node, fontSize, columns.length),
+      )
+    }
   }
 
   const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.ceil(width * resolution))
+  canvas.width = Math.max(1, Math.ceil(outputWidth * resolution))
   canvas.height = Math.max(1, Math.ceil(outputHeight * resolution))
   const context = canvas.getContext('2d')
   if (!context) throw new Error('无法创建文字绘制画布')
   context.scale(resolution, resolution)
   context.imageSmoothingEnabled = true
   if (node.style.backgroundOpacity > 0) {
-    roundedRectPath(context, 0, 0, width, outputHeight, node.style.cornerRadius)
+    roundedRectPath(
+      context,
+      0,
+      0,
+      outputWidth,
+      outputHeight,
+      node.style.cornerRadius,
+    )
     context.globalAlpha = node.style.backgroundOpacity
     context.fillStyle = node.style.backgroundColor
     context.fill()
@@ -205,35 +272,46 @@ export function renderTextNodeCanvas(
   }
 
   context.save()
-  roundedRectPath(context, 0, 0, width, outputHeight, node.style.cornerRadius)
+  roundedRectPath(
+    context,
+    0,
+    0,
+    outputWidth,
+    outputHeight,
+    node.style.cornerRadius,
+  )
   context.clip()
 
-  if (node.style.writingMode === 'vertical') {
+  if (isVerticalWritingMode(node.style.writingMode)) {
     const lineHeight = fontSize * 1.22 + node.style.lineSpacing
-    const columnWidth = fontSize + node.style.letterSpacing
-    const rows = Math.max(1, Math.floor((outputHeight - padding * 2) / lineHeight))
-    const characters = Array.from(node.text)
-    let column = 0
-    let row = 0
-    for (let index = 0; index < characters.length; index += 1) {
-      const value = characters[index]
-      if (value === '\n') {
-        column += 1
-        row = 0
-        continue
-      }
-      if (row >= rows) {
-        column += 1
-        row = 0
-      }
-      const style = runStyle(node, index)
-      context.font = font(node, fontSize, style)
-      const measured = context.measureText(value).width
-      const x = width - padding - (column + 1) * columnWidth + (columnWidth - measured) / 2
-      const y = padding + row * lineHeight + fontSize
-      drawCharacter(context, node, { value, index, width: measured, style }, fontSize, x, y, lineHeight)
-      row += 1
-    }
+    const columnWidth = verticalColumnWidth(node, fontSize)
+    columns.forEach((column, columnIndex) => {
+      const contentHeight = Math.max(
+        0,
+        column.characters.length * lineHeight - node.style.lineSpacing,
+      )
+      const verticalOffset = node.style.verticalAlign === 'middle'
+        ? Math.max(0, (outputHeight - padding * 2 - contentHeight) / 2)
+        : node.style.verticalAlign === 'bottom'
+          ? Math.max(0, outputHeight - padding * 2 - contentHeight)
+          : 0
+      column.characters.forEach((character, rowIndex) => {
+        const columnLeft = node.style.writingMode === 'vertical-lr'
+          ? padding + columnIndex * columnWidth
+          : outputWidth - padding - (columnIndex + 1) * columnWidth
+        const x = columnLeft + (columnWidth - character.width) / 2
+        const y = padding + verticalOffset + rowIndex * lineHeight + fontSize
+        drawCharacter(
+          context,
+          node,
+          character,
+          fontSize,
+          x,
+          y,
+          lineHeight,
+        )
+      })
+    })
   } else {
     const lineHeight = fontSize * 1.22 + node.style.lineSpacing
     const contentHeight = lines.length * lineHeight - node.style.lineSpacing
@@ -257,5 +335,5 @@ export function renderTextNodeCanvas(
     })
   }
   context.restore()
-  return { canvas, height: outputHeight, fontSize }
+  return { canvas, width: outputWidth, height: outputHeight, fontSize }
 }

@@ -1,11 +1,12 @@
 import { chromium, expect, test } from '@playwright/test'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ExportPayload } from '../../src/shared/componentTypes'
 import type { SceneNode } from '../../src/shared/projectTypes'
 import { buildStandaloneHtml } from '../../src/renderer/export/buildStandaloneHtml'
+import { buildWebPackageFiles } from '../../src/renderer/export/buildWebPackage'
 import { createProjectV5Fields } from '../helpers/projectV5'
 
 const projectRoot = resolve(__dirname, '..', '..')
@@ -25,6 +26,7 @@ function baseNode(id: string, name: string, x: number, y: number, width: number,
     opacity: 1,
     visible: true,
     locked: false,
+    playbackInitialVisibility: 'inherit' as const,
   }
 }
 
@@ -238,6 +240,53 @@ function createPayload(): ExportPayload {
   }
 }
 
+const assetFetchRuntimeSource = `
+CoursewareRuntime.define({
+  runtimeApiVersion: 2,
+  create(ctx) {
+    const output = document.createElement('output');
+    output.dataset.testid = 'same-origin-asset';
+    ctx.dom.overlay.append(output);
+    const load = fetch(ctx.assets.url('probe'))
+      .then((response) => {
+        if (!response.ok) throw new Error('offline asset failed');
+        return response.text();
+      })
+      .then((text) => { output.textContent = text; });
+    ctx.capture.waitUntil(load);
+    return { destroy() { output.remove(); } };
+  }
+});
+`
+
+function createAssetFetchPayload(): ExportPayload {
+  const payload = createPayload()
+  const probeText = 'offline-ok'
+  payload.project.assets['same-origin-probe'] = {
+    id: 'same-origin-probe',
+    filename: 'same-origin-probe.txt',
+    mimeType: 'text/plain',
+    kind: 'image',
+    path: 'assets/same-origin-probe.txt',
+    byteLength: probeText.length,
+  }
+  payload.assets['same-origin-probe'] = {
+    mimeType: 'text/plain',
+    dataUrl: 'data:text/plain;base64,b2ZmbGluZS1vaw==',
+  }
+  payload.project.globalRuntime = {
+    runtimeApiVersion: 2,
+    enabled: true,
+    renderMode: 'dom',
+    source: assetFetchRuntimeSource,
+    content: { values: {} },
+    assets: {
+      probe: { assetId: 'same-origin-probe' },
+    },
+  }
+  return payload
+}
+
 async function clickLogicalPoint(
   page: import('@playwright/test').Page,
   x: number,
@@ -318,6 +367,125 @@ test('V3 场景运行时、全局运行时和全局组件跨场景协作', async
     expect(await page.evaluate(() => (window as any).__v3GlobalRuntimeCreateCount)).toBe(2)
     expect(await page.evaluate(() => (window as any).__v3CourseVisit)).toBe(1)
     expect(await page.evaluate(() => (window as any).__v3ComponentBoot)).toBe(1)
+    expect(pageErrors).toEqual([])
+  } finally {
+    await browser.close()
+  }
+})
+
+test('PublishedLesson 单 HTML 允许内联 data/blob 素材加载且不开放网络连接', async () => {
+  mkdirSync(outputDirectory, { recursive: true })
+  const playerBundle = readFileSync(
+    join(projectRoot, 'dist-player', 'player.iife.js'),
+    'utf8',
+  )
+  const standalonePath = join(outputDirectory, 'standalone-asset-fetch.html')
+  writeFileSync(
+    standalonePath,
+    buildStandaloneHtml(createAssetFetchPayload(), { playerBundle }),
+  )
+
+  const browser = await chromium.launch()
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const pageErrors: string[] = []
+  const networkRequests: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('request', (request) => {
+    if (/^https?:/i.test(request.url())) networkRequests.push(request.url())
+  })
+  try {
+    await page.goto(pathToFileURL(standalonePath).toString())
+    await expect(page.getByTestId('same-origin-asset')).toHaveText('offline-ok')
+    expect(networkRequests).toEqual([])
+    expect(pageErrors).toEqual([])
+  } finally {
+    await browser.close()
+  }
+})
+
+test('PublishedLesson 网页包可通过 file 协议完整运行且仅有一份发布数据', async () => {
+  const playerBundle = readFileSync(
+    join(projectRoot, 'dist-player', 'player.iife.js'),
+    'utf8',
+  )
+  const webDirectory = join(outputDirectory, 'web-package')
+  const files = buildWebPackageFiles(createPayload(), { playerBundle })
+  expect(Object.keys(files).filter((path) => /course.*\.(?:json|js)$/i.test(path)))
+    .toEqual(['course-data.js'])
+  expect(Object.keys(files).some((path) => path.endsWith('/runtime.js')))
+    .toBe(false)
+  for (const [archivePath, bytes] of Object.entries(files)) {
+    const target = join(webDirectory, ...archivePath.split('/'))
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, bytes)
+  }
+
+  const browser = await chromium.launch()
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const pageErrors: string[] = []
+  const externalRequests: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('request', (request) => {
+    if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
+  })
+  try {
+    await page.goto(pathToFileURL(join(webDirectory, 'index.html')).toString())
+    await expect(page.locator('.lesson-page-indicator')).toHaveText('1 / 2')
+    await expect(page.getByTestId('global-current-scene')).toHaveText('scene-one')
+    await clickLogicalPoint(page, 220, 160)
+    await expect(page.locator('.lesson-page-indicator')).toHaveText('2 / 2')
+    await expect(page.getByTestId('global-current-scene')).toHaveText('scene-two')
+    expect(pageErrors).toEqual([])
+    expect(externalRequests).toEqual([])
+  } finally {
+    await browser.close()
+  }
+})
+
+test('PublishedLesson 网页包允许同源运行素材加载且不开放跨源连接', async () => {
+  const playerBundle = readFileSync(
+    join(projectRoot, 'dist-player', 'player.iife.js'),
+    'utf8',
+  )
+  const files = buildWebPackageFiles(createAssetFetchPayload(), {
+    playerBundle,
+  })
+  const origin = 'http://courseware.test'
+
+  const browser = await chromium.launch()
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const pageErrors: string[] = []
+  const requests: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('request', (request) => requests.push(request.url()))
+  await page.route(`${origin}/**`, async (route) => {
+    const url = new URL(route.request().url())
+    const archivePath = decodeURIComponent(url.pathname.replace(/^\/+/, '')) ||
+      'index.html'
+    const bytes = files[archivePath]
+    if (!bytes) {
+      await route.fulfill({ status: 404, body: 'not found' })
+      return
+    }
+    const contentType = archivePath.endsWith('.html')
+      ? 'text/html'
+      : archivePath.endsWith('.css')
+        ? 'text/css'
+        : archivePath.endsWith('.js')
+          ? 'text/javascript'
+          : 'text/plain'
+    await route.fulfill({
+      status: 200,
+      contentType,
+      body: Buffer.from(bytes),
+    })
+  })
+  try {
+    await page.goto(`${origin}/index.html`)
+    await expect(page.getByTestId('same-origin-asset')).toHaveText('offline-ok')
+    expect(requests.length).toBeGreaterThan(0)
+    expect(requests.every((requestUrl) => requestUrl.startsWith(`${origin}/`)))
+      .toBe(true)
     expect(pageErrors).toEqual([])
   } finally {
     await browser.close()

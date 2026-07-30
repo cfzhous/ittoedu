@@ -439,9 +439,10 @@ export class NodeMotionDirector {
       return { x: 0, y: 0, alpha: 1, scaleX: 1, scaleY: 1 }
     }
     const root = handle.root
+    const renderedWidth = root.width > 0 ? root.width : node.width
     const renderedHeight = root.height > 0 ? root.height : node.height
     return {
-      x: node.x + node.width / 2,
+      x: node.x + renderedWidth / 2,
       y: node.y + renderedHeight / 2,
       alpha: node.opacity,
       scaleX: root.scaleX,

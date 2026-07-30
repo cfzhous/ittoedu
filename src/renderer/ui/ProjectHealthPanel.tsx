@@ -51,6 +51,9 @@ export function ProjectHealthPanel({
     if (route.sceneId) store.setActiveScene(route.sceneId)
     if (route.stateId !== undefined) store.setActivePresentationState(route.stateId)
     if (route.nodeId) store.selectNode(route.nodeId)
+    if (route.tab === 'automation' || diagnostic.scope === 'component-package') {
+      store.setEditorMode('professional')
+    }
     store.setActiveTab(route.tab)
     store.setStatus(`已定位：${diagnostic.message}`)
     onClose()

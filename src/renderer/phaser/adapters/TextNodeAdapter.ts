@@ -24,13 +24,19 @@ export class TextNodeAdapter extends BaseNodeAdapter<TextNode> {
   protected redraw(): void {
     if (!this.textObject) return
     const topLeft = this.getBounds()
-    const rendered = renderTextNodeCanvas(this.node, this.width)
+    const rendered = renderTextNodeCanvas(
+      { ...this.node, width: this.width, height: this.height },
+      this.width,
+    )
+    this.width = rendered.width
     this.height = rendered.height
     const nextKey = `text-render-${this.nodeId}-${++this.textureRevision}`
     this.scene.textures.addCanvas(nextKey, rendered.canvas)
     const previousKey = this.generatedTextureKey
     this.generatedTextureKey = nextKey
-    this.textObject.setTexture(nextKey).setDisplaySize(this.width, this.height)
+    this.textObject
+      .setTexture(nextKey)
+      .setDisplaySize(rendered.width, rendered.height)
     if (previousKey && this.scene.textures.exists(previousKey)) {
       this.scene.textures.remove(previousKey)
     }

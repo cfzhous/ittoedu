@@ -1,6 +1,6 @@
 export type TextAlign = 'left' | 'center' | 'right'
 export type VerticalAlign = 'top' | 'middle' | 'bottom'
-export type WritingMode = 'horizontal' | 'vertical'
+export type WritingMode = 'horizontal' | 'vertical-rl' | 'vertical-lr'
 export type TextOverflowMode = 'auto-height' | 'fixed' | 'shrink'
 export type ImageFit = 'contain' | 'cover' | 'stretch'
 export type AssetKind = 'image' | 'audio' | 'video'
@@ -377,6 +377,9 @@ export interface EmbeddedComponentPackageMeta {
   manifestPath: string
   runtimePath: string
   thumbnailPath?: string
+  /** Explicit authoring provenance; imported third-party packages default to read-only. */
+  editableCopy?: boolean
+  sourcePackageId?: string
 }
 
 export type DeepPartial<T> = T extends object

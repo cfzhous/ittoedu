@@ -47,7 +47,7 @@ describe('resolveProjectHealthRoute', () => {
     const project = createProject()
     expect(resolveProjectHealthRoute(project, diagnostic({ scope: 'asset' }))).toEqual({
       scope: 'scene',
-      tab: 'media',
+      tab: 'elements',
     })
     expect(resolveProjectHealthRoute(project, diagnostic({
       scope: 'component-package',

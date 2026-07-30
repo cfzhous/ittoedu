@@ -41,6 +41,7 @@ function componentPackage(
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
+  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => cleanup())
@@ -177,6 +178,7 @@ describe('ElementsTab component package manager', () => {
           onReplaceComponent={onReplaceComponent}
         />,
       )
+      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
 
       const manager = screen.getByTestId(`component-package-${PACKAGE_ID}`)
       expect(manager).toHaveTextContent(`${PACKAGE_ID} · v1.0.0`)
@@ -199,6 +201,7 @@ describe('ElementsTab component package manager', () => {
     HTMLCanvasElement.prototype.getContext = () => null
     try {
       render(<ElementsTab onAddImage={vi.fn()} onReplaceComponent={vi.fn()} />)
+      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
       const deleteButton = screen.getByTestId(
         `delete-component-package-${PACKAGE_ID}`,
       )

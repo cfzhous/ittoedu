@@ -6,6 +6,7 @@ import type {
   ExportPayload,
 } from '../../src/shared/componentTypes'
 import type { ProjectDocument } from '../../src/shared/projectTypes'
+import type { PublishedLessonPayload } from '../../src/shared/publishedLessonTypes'
 import { buildExportPayload } from '../../src/renderer/export/buildExportPayload'
 import {
   buildPdfPrintHtml,
@@ -15,6 +16,10 @@ import { buildStandaloneHtml } from '../../src/renderer/export/buildStandaloneHt
 import { buildWebPackageFiles } from '../../src/renderer/export/buildWebPackage'
 import { pptxGlobalComponentSnapshotKey } from '../../src/renderer/export/pptxShared'
 import { runtimeSnapshotKey } from '../../src/renderer/export/v3ExportSupport'
+import {
+  decodePublishedCode,
+  publishedLessonToExportPayload,
+} from '../../src/player/publishedLesson'
 import {
   createImageNode,
   createShapeNode,
@@ -194,7 +199,7 @@ function makePayload(): ExportPayload {
   })
 }
 
-function decodeStandalonePayload(html: string): ExportPayload {
+function decodeStandalonePayload(html: string): PublishedLessonPayload {
   const encoded = html.match(
     /window\.__H5_LESSON_PAYLOAD__=("[A-Za-z0-9+/=]+");/,
   )?.[1]
@@ -202,7 +207,14 @@ function decodeStandalonePayload(html: string): ExportPayload {
   const binary = atob(JSON.parse(encoded) as string)
   return JSON.parse(new TextDecoder().decode(
     Uint8Array.from(binary, (character) => character.charCodeAt(0)),
-  )) as ExportPayload
+  )) as PublishedLessonPayload
+}
+
+function decodeCourseData(bytes: Uint8Array): PublishedLessonPayload {
+  const source = strFromU8(bytes)
+  const match = source.match(/^window\.__H5_LESSON_PAYLOAD__=(.*);\s*$/s)
+  if (!match?.[1]) throw new Error('测试未找到网页包 Payload')
+  return JSON.parse(match[1]) as PublishedLessonPayload
 }
 
 afterEach(() => {
@@ -216,17 +228,15 @@ describe('Project V5 / Runtime V3 网页导出', () => {
       buildStandaloneHtml(payload, 'window.__PLAYER__=true;'),
     )
 
-    expect(decoded.project.globalRuntime).toEqual(payload.project.globalRuntime)
-    expect(decoded.project.scenes[0]?.runtime).toEqual(
+    const loaded = publishedLessonToExportPayload(decoded)
+    expect(loaded.project.globalRuntime).toEqual(payload.project.globalRuntime)
+    expect(loaded.project.scenes[0]?.runtime).toEqual(
       payload.project.scenes[0]?.runtime,
     )
-    expect(decoded.project.globalLayer).toEqual(
-      payload.project.globalLayer,
-    )
-    expect(decoded.project.globalRuntime?.nodeBindings).toEqual({
+    expect(decoded.globalRuntime?.nodeBindings).toEqual({
       controls: 'global-controls',
     })
-    expect(decoded.project.scenes[0]?.runtime?.nodeBindings).toEqual({
+    expect(decoded.scenes[0]?.runtime?.nodeBindings).toEqual({
       title: 'editable-title',
     })
     expect(Object.keys(decoded.assets).sort()).toEqual([
@@ -235,38 +245,38 @@ describe('Project V5 / Runtime V3 网页导出', () => {
       'scene-fallback',
     ])
     expect(
-      decoded.components['com.example.global-controls@3.0.0']?.runtimeSource,
+      decodePublishedCode(
+        decoded.components['com.example.global-controls@3.0.0']!.code,
+      ),
     ).toBe(componentRuntime)
   })
 
-  it('网页包保留同一 V3 Project，并把运行时和组件依赖改写为包内 URL', () => {
+  it('网页包保留同一运行语义，并把素材依赖改写为包内 URL', () => {
     const payload = makePayload()
     const files = buildWebPackageFiles(payload, 'window.__PLAYER__=true;')
-    const packaged = JSON.parse(strFromU8(files['course.json']!)) as ExportPayload
+    const packaged = decodeCourseData(files['course-data.js']!)
+    const loaded = publishedLessonToExportPayload(packaged)
 
-    expect(packaged.project.globalRuntime).toEqual(payload.project.globalRuntime)
-    expect(packaged.project.scenes[0]?.runtime).toEqual(
+    expect(loaded.project.globalRuntime).toEqual(payload.project.globalRuntime)
+    expect(loaded.project.scenes[0]?.runtime).toEqual(
       payload.project.scenes[0]?.runtime,
     )
-    expect(packaged.project.globalLayer).toEqual(
-      payload.project.globalLayer,
-    )
-    expect(packaged.project.globalRuntime?.nodeBindings).toEqual({
+    expect(packaged.globalRuntime?.nodeBindings).toEqual({
       controls: 'global-controls',
     })
-    expect(packaged.project.scenes[0]?.runtime?.nodeBindings).toEqual({
+    expect(packaged.scenes[0]?.runtime?.nodeBindings).toEqual({
       title: 'editable-title',
     })
     for (const asset of Object.values(packaged.assets)) {
-      expect(asset.dataUrl).toMatch(/^\.\/assets\//)
-      expect(asset.dataUrl).not.toContain('data:')
+      expect(asset.url).toMatch(/^\.\/assets\//)
+      expect(asset.url).not.toContain('data:')
     }
     const component = packaged.components[
       'com.example.global-controls@3.0.0'
     ]!
-    expect(component.runtimeSource).toBe(componentRuntime)
-    expect(component.assets.icon?.dataUrl).toMatch(
-      /^\.\/components\/[^/]+\/assets\//,
+    expect(decodePublishedCode(component.code)).toBe(componentRuntime)
+    expect(component.assets.icon?.url).toMatch(
+      /^\.\/component-assets\/[^/]+\//,
     )
   })
 
@@ -317,7 +327,7 @@ describe('Project V5 / Runtime V3 网页导出', () => {
     const decoded = decodeStandalonePayload(
       buildStandaloneHtml(payload, 'window.__PLAYER__=true;'),
     )
-    expect(decoded.project.globalRuntime?.nodeBindings).toEqual({
+    expect(decoded.globalRuntime?.nodeBindings).toEqual({
       nativeTitle: title.id,
       controls: 'global-controls',
     })

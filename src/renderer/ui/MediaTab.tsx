@@ -21,6 +21,9 @@ import {
 export interface MediaTabProps {
   onImportAudio(): void
   onImportVideo(): void
+  embedded?: boolean
+  showAdvancedAudioSettings?: boolean
+  filterQuery?: string
 }
 
 const SOUND_CHANNELS: Array<{
@@ -98,6 +101,7 @@ interface SoundEntryProps {
   sound: SoundDefinition
   asset: AssetMeta | undefined
   bytes: Uint8Array | undefined
+  showAdvancedSettings: boolean
   onUpdate(patch: Partial<Omit<SoundDefinition, 'id'>>): void
   onDelete(): void
 }
@@ -108,6 +112,7 @@ function SoundEntry({
   bytes,
   onUpdate,
   onDelete,
+  showAdvancedSettings,
 }: SoundEntryProps) {
   const [draftName, setDraftName] = useState(sound.name)
   const previewUrl = useAudioPreviewUrl(asset, bytes)
@@ -170,7 +175,7 @@ function SoundEntry({
         </div>
       )}
 
-      <div className="media-sound-settings">
+      {showAdvancedSettings && <div className="media-sound-settings">
         <label className="media-field">
           <span>声道</span>
           <select
@@ -215,7 +220,7 @@ function SoundEntry({
           />
           默认循环播放
         </label>
-      </div>
+      </div>}
     </article>
   )
 }
@@ -371,7 +376,13 @@ function GlobalAudioSettings({ settings, onUpdate }: GlobalAudioSettingsProps) {
   )
 }
 
-export function MediaTab({ onImportAudio, onImportVideo }: MediaTabProps) {
+export function MediaTab({
+  onImportAudio,
+  onImportVideo,
+  embedded = false,
+  showAdvancedAudioSettings = true,
+  filterQuery = '',
+}: MediaTabProps) {
   const assets = useEditorStore((state) => state.project.assets)
   const assetFiles = useEditorStore((state) => state.assetFiles)
   const audioSettings = useEditorStore((state) => state.project.media.audio)
@@ -383,42 +394,63 @@ export function MediaTab({ onImportAudio, onImportVideo }: MediaTabProps) {
   const addImageNode = useEditorStore((state) => state.addImageNode)
   const addVideoNode = useEditorStore((state) => state.addVideoNode)
 
+  const normalizedFilter = filterQuery.trim().toLocaleLowerCase()
+  const matchesFilter = (value: string): boolean =>
+    !normalizedFilter || value.toLocaleLowerCase().includes(normalizedFilter)
   const soundEntries = useMemo(
-    () => Object.values(sounds),
-    [sounds],
+    () => Object.values(sounds).filter((sound) => {
+      const asset = assets[sound.assetId]
+      return matchesFilter(`${sound.name} ${asset?.filename ?? ''} 音频 声音`)
+    }),
+    [assets, normalizedFilter, sounds],
   )
   const videoAssets = useMemo(
-    () => Object.values(assets).filter((asset) => asset.kind === 'video'),
-    [assets],
+    () => Object.values(assets).filter((asset) =>
+      asset.kind === 'video' && matchesFilter(`${asset.filename} 视频 ${asset.mimeType}`),
+    ),
+    [assets, normalizedFilter],
   )
   const imageAssets = useMemo(
-    () => Object.values(assets).filter((asset) => asset.kind === 'image'),
-    [assets],
+    () => Object.values(assets).filter((asset) =>
+      asset.kind === 'image' && matchesFilter(`${asset.filename} 图片 图像 ${asset.mimeType}`),
+    ),
+    [assets, normalizedFilter],
   )
   const unusedAudioAssets = useMemo(() => {
     const mapped = new Set(Object.values(sounds).map((sound) => sound.assetId))
     return Object.values(assets).filter(
-      (asset) => asset.kind === 'audio' && !mapped.has(asset.id),
+      (asset) => (
+        asset.kind === 'audio' &&
+        !mapped.has(asset.id) &&
+        matchesFilter(`${asset.filename} 音频 声音 ${asset.mimeType}`)
+      ),
     )
-  }, [assets, sounds])
+  }, [assets, normalizedFilter, sounds])
 
   return (
-    <div className="media-tab" data-testid="media-tab">
-      <div className="media-toolbar" aria-label="导入媒体">
-        <button type="button" className="media-import-button" onClick={onImportAudio}>
-          <Upload size={15} />
-          导入声音
-        </button>
-        <button type="button" className="media-import-button" onClick={onImportVideo}>
-          <Upload size={15} />
-          导入视频
-        </button>
-      </div>
+    <div
+      className={`media-tab${embedded ? ' media-tab--embedded' : ''}`}
+      data-testid="media-tab"
+    >
+      {!embedded && (
+        <div className="media-toolbar" aria-label="导入媒体">
+          <button type="button" className="media-import-button" onClick={onImportAudio}>
+            <Upload size={15} />
+            导入声音
+          </button>
+          <button type="button" className="media-import-button" onClick={onImportVideo}>
+            <Upload size={15} />
+            导入视频
+          </button>
+        </div>
+      )}
 
-      <GlobalAudioSettings
-        settings={audioSettings}
-        onUpdate={updateAudioSettings}
-      />
+      {showAdvancedAudioSettings && (
+        <GlobalAudioSettings
+          settings={audioSettings}
+          onUpdate={updateAudioSettings}
+        />
+      )}
 
       <section className="media-section" aria-labelledby="media-sounds-heading">
         <div className="section-heading" id="media-sounds-heading">
@@ -435,6 +467,7 @@ export function MediaTab({ onImportAudio, onImportVideo }: MediaTabProps) {
                 sound={sound}
                 asset={assets[sound.assetId]}
                 bytes={assetFiles[sound.assetId]}
+                showAdvancedSettings={showAdvancedAudioSettings}
                 onUpdate={(patch) => updateSound(sound.id, patch)}
                 onDelete={() => deleteSound(sound.id)}
               />
@@ -495,7 +528,7 @@ export function MediaTab({ onImportAudio, onImportVideo }: MediaTabProps) {
           <span>{imageAssets.length}</span>
         </div>
         {imageAssets.length === 0 ? (
-          <div className="empty-state">图片可从“元素”面板导入</div>
+          <div className="empty-state">点击上方“图片”导入后，会自动保存在这里</div>
         ) : (
           <div className="media-list">
             {imageAssets.map((asset) => {

@@ -127,8 +127,16 @@ export function SceneThumbnail({ scene }: { scene: SceneDocument }) {
         }
 
         const { node } = entry
+        const renderedText = node.type === 'text'
+          ? renderTextNodeCanvas(node, node.width, SCALE)
+          : null
+        const visualWidth = renderedText?.width ?? node.width
+        const visualHeight = renderedText?.height ?? node.height
         context.save()
-        context.translate((node.x + node.width / 2) * SCALE, (node.y + node.height / 2) * SCALE)
+        context.translate(
+          (node.x + visualWidth / 2) * SCALE,
+          (node.y + visualHeight / 2) * SCALE,
+        )
         context.rotate((node.rotation * Math.PI) / 180)
         context.globalAlpha = node.opacity
         if (node.type === 'shape') {
@@ -136,13 +144,12 @@ export function SceneThumbnail({ scene }: { scene: SceneDocument }) {
           context.translate(-node.width / 2, -node.height / 2)
           renderShapeCanvas(context, node)
         } else if (node.type === 'text') {
-          const rendered = renderTextNodeCanvas(node, node.width, SCALE)
           context.drawImage(
-            rendered.canvas,
-            -node.width * SCALE / 2,
-            -rendered.height * SCALE / 2,
-            node.width * SCALE,
-            rendered.height * SCALE,
+            renderedText!.canvas,
+            -renderedText!.width * SCALE / 2,
+            -renderedText!.height * SCALE / 2,
+            renderedText!.width * SCALE,
+            renderedText!.height * SCALE,
           )
         } else if (node.type === 'image') {
           const meta = assets[node.assetId]

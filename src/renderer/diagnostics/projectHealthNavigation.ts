@@ -51,7 +51,7 @@ export function resolveProjectHealthRoute(
     }
   }
 
-  if (diagnostic.scope === 'asset') return { scope: 'scene', tab: 'media' }
+  if (diagnostic.scope === 'asset') return { scope: 'scene', tab: 'elements' }
   if (diagnostic.scope === 'component-package') return { scope: 'scene', tab: 'elements' }
   if (diagnostic.scope === 'interaction') return { scope: 'global', tab: 'automation' }
   return { scope: 'scene', tab: 'properties' }

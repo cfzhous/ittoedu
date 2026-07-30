@@ -1,5 +1,10 @@
 import type { ExportPayload } from '../shared/componentTypes'
+import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
 import { migrateProjectDocument } from '../shared/projectSchema'
+import {
+  isPublishedLessonPayload,
+  publishedLessonToExportPayload,
+} from './publishedLesson'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -21,6 +26,18 @@ export function assertExportPayload(
       cause,
     })
   }
+}
+
+export function normalizePlayerPayload(
+  value: unknown,
+): ExportPayload {
+  if (isPublishedLessonPayload(value)) {
+    const payload = publishedLessonToExportPayload(value)
+    assertExportPayload(payload)
+    return payload
+  }
+  assertExportPayload(value)
+  return value
 }
 
 export function decodeExportPayload(encodedPayload: string): ExportPayload {
@@ -61,8 +78,7 @@ export function decodeExportPayload(encodedPayload: string): ExportPayload {
     }
 
     const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    assertExportPayload(parsed)
-    return parsed
+    return normalizePlayerPayload(parsed)
   } catch (cause) {
     if (
       cause instanceof Error &&
@@ -82,8 +98,7 @@ export function parseExportPayloadJson(json: string): ExportPayload {
 
   try {
     const parsed: unknown = JSON.parse(json)
-    assertExportPayload(parsed)
-    return parsed
+    return normalizePlayerPayload(parsed)
   } catch (cause) {
     if (
       cause instanceof Error &&
@@ -128,3 +143,5 @@ export async function loadExportPayloadFromUrl(
     })
   }
 }
+
+export type PlayerPayload = ExportPayload | PublishedLessonPayload

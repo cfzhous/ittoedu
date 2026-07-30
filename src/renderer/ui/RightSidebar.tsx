@@ -1,8 +1,8 @@
 import { ElementsTab } from './ElementsTab'
 import { NodesTab } from './NodesTab'
 import { PropertiesTab } from './PropertiesTab'
-import { MediaTab } from './MediaTab'
 import { AutomationTab } from './AutomationTab'
+import { DeveloperTab } from './DeveloperTab'
 import { useEditorStore, type SidebarTab } from '../store/editorStore'
 
 interface RightSidebarProps {
@@ -14,12 +14,16 @@ interface RightSidebarProps {
   onReplaceComponent?(packageId: string): void
 }
 
-const tabs: Array<{ id: SidebarTab; label: string }> = [
+const simpleTabs: Array<{ id: SidebarTab; label: string }> = [
   { id: 'elements', label: '元素' },
   { id: 'layers', label: '图层' },
-  { id: 'media', label: '素材' },
   { id: 'properties', label: '属性' },
-  { id: 'automation', label: '自动化' },
+]
+
+const professionalTabs: Array<{ id: SidebarTab; label: string }> = [
+  ...simpleTabs,
+  { id: 'automation', label: '互动与动画' },
+  { id: 'developer', label: '开发' },
 ]
 
 export function RightSidebar({
@@ -31,11 +35,24 @@ export function RightSidebar({
   onReplaceComponent,
 }: RightSidebarProps) {
   const activeTab = useEditorStore((state) => state.activeTab)
+  const editorMode = useEditorStore((state) => state.editorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
+  const tabs = editorMode === 'professional' ? professionalTabs : simpleTabs
 
   return (
-    <aside className="panel right-sidebar" aria-label="编辑面板">
-      <div className="sidebar-tabs" role="tablist">
+    <aside
+      className={`panel right-sidebar${
+        editorMode === 'professional' && activeTab === 'developer'
+          ? ' right-sidebar--developer'
+          : ''
+      }`}
+      aria-label="编辑面板"
+    >
+      <div
+        className="sidebar-tabs"
+        role="tablist"
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+      >
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -56,17 +73,21 @@ export function RightSidebar({
           <ElementsTab
             onAddImage={onAddImage}
             onAddVideo={onAddVideo}
+            onImportAudio={onImportAudio}
+            onImportVideo={onImportVideo}
             onReplaceComponent={onReplaceComponent}
           />
         )}
         {activeTab === 'layers' && <NodesTab />}
-        {activeTab === 'media' && (
-          <MediaTab onImportAudio={onImportAudio} onImportVideo={onImportVideo} />
-        )}
         {activeTab === 'properties' && (
           <PropertiesTab onReplaceImage={onReplaceImage} />
         )}
-        {activeTab === 'automation' && <AutomationTab />}
+        {activeTab === 'automation' && editorMode === 'professional' && (
+          <AutomationTab />
+        )}
+        {activeTab === 'developer' && editorMode === 'professional' && (
+          <DeveloperTab />
+        )}
       </div>
     </aside>
   )

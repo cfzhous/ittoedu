@@ -210,10 +210,11 @@ function applyNodeFrame(
   visualHeight = node.height,
   transition?: RuntimePresentationTransition,
   resolveVisibility?: (authoredVisible: boolean) => boolean,
+  visualWidth = node.width,
 ): void {
-  const x = node.x + node.width / 2
+  const x = node.x + visualWidth / 2
   const y = node.y + visualHeight / 2
-  root.setSize(node.width, visualHeight)
+  root.setSize(visualWidth, visualHeight)
   const duration = Math.max(0, transition?.duration ?? 0)
   const frameVisible = resolveVisibility?.(node.visible) ?? node.visible
   scene.tweens.killTweensOf(root)
@@ -826,18 +827,21 @@ function renderNodeContent(
       if (scene.textures.exists(renderedKey)) scene.textures.remove(renderedKey)
       scene.textures.addCanvas(renderedKey, rendered.canvas)
       const root = scene.add
-        .container(node.x + node.width / 2, node.y + rendered.height / 2)
+        .container(
+          node.x + rendered.width / 2,
+          node.y + rendered.height / 2,
+        )
         .setName(`node:${node.id}`)
         .setDepth(depth)
         .setAngle(node.rotation)
         .setAlpha(node.opacity)
         .setVisible(node.visible)
-      root.setSize(node.width, rendered.height)
+      root.setSize(rendered.width, rendered.height)
       attachToParent(root, context.parentRoot)
       const text = scene.add
-        .image(-node.width / 2, -rendered.height / 2, renderedKey)
+        .image(-rendered.width / 2, -rendered.height / 2, renderedKey)
         .setOrigin(0)
-        .setDisplaySize(node.width, rendered.height)
+        .setDisplaySize(rendered.width, rendered.height)
       root.add(text)
       return {
         id: node.id,
@@ -851,8 +855,11 @@ function renderNodeContent(
           scene.textures.addCanvas(nextKey, nextRendered.canvas)
           text
             .setTexture(nextKey)
-            .setPosition(-nextNode.width / 2, -nextRendered.height / 2)
-            .setDisplaySize(nextNode.width, nextRendered.height)
+            .setPosition(
+              -nextRendered.width / 2,
+              -nextRendered.height / 2,
+            )
+            .setDisplaySize(nextRendered.width, nextRendered.height)
           const previousKey = renderedKey
           renderedKey = nextKey
           if (scene.textures.exists(previousKey)) scene.textures.remove(previousKey)
@@ -862,6 +869,8 @@ function renderNodeContent(
             root,
             nextRendered.height,
             transition,
+            undefined,
+            nextRendered.width,
           )
         },
         destroy(): void {
