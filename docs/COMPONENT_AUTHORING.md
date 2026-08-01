@@ -2,6 +2,8 @@
 
 本文定义 Editor 1.6.0 / Project V7 使用的 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
+文档同步基线：**2026-08-01**。当前包版本仍为 1.6.0；组件包管理、专业“互动与动画 / 开发”、画布文字编辑协议和 PublishedLesson 发布边界已按当前实现核对。
+
 编辑器兼容四代协议：
 
 - V1：原子组件，仅兼容旧包；
@@ -352,7 +354,7 @@ ctx.presentation?.transitionTo('state_correct', {
 
 因此 DOM/hybrid 组件的 DOM 部分应按 overlay 内容设计。场景节点顺序或全局元素的 `layer: 'underlay'` 不能把这部分 DOM 压到 Canvas 后面；它们只对组件的 Phaser 代理/Phaser 部分保持 Canvas 内层级语义。必须位于原生节点背后的可复用视觉应使用 Phaser 组件，或把后景明确交给运行时 DOM underlay。
 
-编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Project V7 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程素材库独立替换模型，须先扩展 Project Schema、归档、迁移、素材面板和全部导出链路。
+编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Project V7 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、迁移、媒体管理和全部导出链路。
 
 Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVisible(false)` / `suspend()` 停止 RAF 和昂贵更新，在 `prepareCapture()` 主动渲染确定帧，在 `destroy()` 释放 geometry、material、texture、render target、renderer、监听和 RAF。加载任务通过 `ctx.capture.waitUntil()` 登记，并提供可理解的缩略图与可捕获静态画面。这样 3D 成本只由使用该组件的工程承担，不成为编辑器核心依赖。
 

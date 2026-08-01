@@ -2,6 +2,8 @@
 
 > 状态：Editor 1.6.0 / Project V7 的“场景 + 命名呈现状态 + 场景/全局声明式交互”、事件驱动入场/退场编排、媒体管理、默认场景目录控制器、编辑/试运行双画布、Runtime API 2 和组件 API 4 构成当前基线；Runtime API 1 与组件 API 1–3 保留兼容。文件名保留 V3 仅为历史兼容。本文记录当前实现边界及完整发布验收要求。
 >
+> 文档同步基线：2026-08-01。当前包版本仍为 1.6.0；本文已按简洁/专业模式、统一“元素”入口、“互动与动画”、受控“开发”工作台、文字显示改进和 PublishedLesson V1 重新核对。
+>
 > 类型真值：`src/shared/runtimeTypes.ts`、`componentTypes.ts`、`projectTypes.ts`。若本文示例与类型不一致，以类型和 Schema 为准。
 
 ## 1. 目标结果
@@ -24,7 +26,7 @@
 14. Three.js 等真 3D 能力按运行时/组件离线打包，编辑器核心和 Player 不直接依赖，且具有可暂停、可捕获、可释放的生命周期。
 15. 捕获按实例准备并立即冻结 Canvas/WebGL；PDF 单页与 PPTX 组件实例/运行时条目分别隔离失败，已成功结果不因后续错误被整批清空。
 16. Windows 发布先校验 Portable/目录版 EXE 的 `FileVersion`、`ProductVersion` 和内嵌 `app.asar` 包名/版本，再启动成品验收，并记录真实大小与 SHA-256。
-17. 简洁/专业模式只改变编辑密度、不改变 Project V7；“元素”统一元素与素材，简洁出现动画原子维护规则和初始可见性，专业规则以“触发 → 条件 → 动作”解释。
+17. 简洁/专业模式只改变编辑密度、不改变 Project V7；“元素”统一添加入口并以“常用 / 媒体”分开快捷添加和既有媒体管理，简洁出现动画原子维护规则和初始可见性，专业规则以“当 / 如果 / 就”解释。
 
 优先级：成品效果 → 逻辑与生命周期 → 全部文字可编辑 → 其他轻编辑项 → 组件化与代码复用。
 
@@ -212,7 +214,7 @@ V3/V4 编辑器递归自动暴露合并后 `props.content` 中的每个字符串
 
 声明式交互负责可枚举、可检查的常用映射。动画也是该规则中的动作：`node.enter` 建立瞬态可见性后入场，`node.exit` 立即禁用输入并在完成后瞬态隐藏。二者均不写回工程节点 `visible` 或命名状态。同一规则的未完成运行重触发时从动作规范起点重播；不同规则的同节点新动画从当前帧接管并取消旧动画。取消不发 `animation.completed`。
 
-编辑界面按复杂度与职责分流。简洁模式选中场景节点时提供“出现动画”，在一个撤销步骤中同时维护当前场景/状态的 `node.activated → node.enter` 与 `playbackInitialVisibility`，且不覆盖可能重叠的专业规则。专业模式中，“属性/交互”只管理该节点的 `node.click`；右侧“规则”Tab 管理 `scene.enter`、`presentation.enter`、`node.activated`、`animation.completed`、音视频事件、`component.event` 和 `runtime.event`，并明确显示“触发 → 条件 → 动作”。两处共用条件、步骤启动方式、局部延迟和完整动作编辑器。复杂逻辑由运行时/组件完成判定并发出语义事件，规则层负责编排可枚举结果。
+编辑界面按复杂度与职责分流。简洁模式选中场景节点时提供“出现动画”，在一个撤销步骤中同时维护当前场景/状态的 `node.activated → node.enter` 与 `playbackInitialVisibility`，且不覆盖可能重叠的专业规则。专业模式中，“属性/交互”只管理该节点的 `node.click`；右侧“互动与动画”管理 `scene.enter`、`presentation.enter`、`node.activated`、`animation.completed`、音视频事件、`component.event` 和 `runtime.event`，并按“当 / 如果 / 就”解释。两处共用条件、步骤启动方式、局部延迟和完整动作编辑器。复杂逻辑由运行时/组件完成判定并发出语义事件，规则层负责编排可枚举结果。
 
 所有宿主入口统一支持 `goToScene(sceneId, targetStateId?)`。带目标状态时，Player 在创建目标场景节点、运行时和组件之前先物化该状态，避免初始状态闪现；同场景调用可直接切换状态。导航守卫若重定向到另一个场景，会丢弃原请求的目标状态并使用重定向场景的初始状态。
 
@@ -248,7 +250,7 @@ global DOM underlay
 
 DOM 层按 1280×720 设计坐标与 Canvas 对齐；每个运行时使用 Shadow Root。Phaser 适合高频动画、碰撞和程序视觉，DOM 适合复杂排版、表格、表单和 HUD，确需协作时使用 hybrid。
 
-Three.js/WebGL 不进入编辑器核心依赖。具体运行时或 V4 组件在构建时把 Three.js 与 loader 打进自己的普通浏览器脚本，使用 DOM 能力挂载 WebGL Canvas；模型默认使用离线 GLB，较大/可复用模型作为组件包 manifest asset，一次性小模型可在 Runtime 2 MiB 上限内离线嵌入。Project V7 当前没有一等 `model` 素材类型，不能伪装为 image；若要模型库和教师独立替换，需另行扩展 Schema、归档、迁移、素材面板和导出。宿主不提供全局 `THREE`，没有 3D 的课件不承担该体积。3D 实例必须响应 resize、显隐、suspend/resume、prepareCapture 和 destroy，并释放全部 GPU 资源。
+Three.js/WebGL 不进入编辑器核心依赖。具体运行时或 V4 组件在构建时把 Three.js 与 loader 打进自己的普通浏览器脚本，使用 DOM 能力挂载 WebGL Canvas；模型默认使用离线 GLB，较大/可复用模型作为组件包 manifest asset，一次性小模型可在 Runtime 2 MiB 上限内离线嵌入。Project V7 当前没有一等 `model` 素材类型，不能伪装为 image；若要模型库和教师独立替换，需另行扩展 Schema、归档、迁移、媒体管理和导出。宿主不提供全局 `THREE`，没有 3D 的课件不承担该体积。3D 实例必须响应 resize、显隐、suspend/resume、prepareCapture 和 destroy，并释放全部 GPU 资源。
 
 ## 9. 生命周期
 
@@ -349,7 +351,7 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 | 成品控制器 | canvas 默认、none、1–12 按钮、`scene.open-picker` 全场景目录/当前项/键盘/关闭生命周期、不选状态、高级固定 `scene.go`、折叠保持/重开复位 |
 | 组件包管理 | 使用统计、引用中禁止删除、无引用删除、同 ID 替换/升级、作用域不兼容回滚、异常隔离 |
 | 协议能力 | Runtime API 2 / Component API 4 版本匹配、`dom/phaser/hybrid` 最小能力隔离、未声明能力不可访问、API 1 与组件 API 1–3 回归 |
-| 编辑易用性 | 简洁/专业切换无工程差异；右栏无重复元素/素材 Tab；素材库内嵌“元素”；图片/视频复用；画布 50%–200% 缩放、Ctrl/Command+滚轮、空格/中键平移、复位且不改坐标 |
+| 编辑易用性 | 简洁/专业切换无工程差异；右栏无重复“素材”一级 Tab；“元素”中的“常用”集中快捷添加，“媒体”只管理既有图片/视频/声音；图片/视频复用同一 Asset ID；画布 50%–200% 缩放、Ctrl/Command+滚轮、空格/中键平移、复位且不改坐标 |
 | 工程检查 | 错误/提醒/建议、定位、错误导出阻断、提醒不阻断、诊断日志轮转与报告导出 |
 | 场景运行时 | API 2 Phaser/DOM/hybrid、节点绑定、素材、跳转、重播、显隐/暂停、捕获准备、销毁、失败隔离 |
 | 全局运行时 | 跨场景状态、事件、守卫、重开重置 |
@@ -383,6 +385,6 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 - [互动组件开发指南](COMPONENT_AUTHORING.md)
 - [Project V7 + Runtime API 1 / 组件 API 3 兼容示例](../examples/runtime-v3-complete/README.md)
 
-Editor 1.6.0 发布必须重新执行 `npm run typecheck`、全量 Vitest、Playwright Electron E2E、Player/Renderer/Electron 生产构建、`npm run dist:win` 与 `npm run verify:release`。`verify:release` 必须在启动成品前核对 Portable 与 `win-unpacked` EXE 的 Windows `FileVersion` / `ProductVersion`，并核对 `resources/app.asar` 内嵌 `package.json` 的名称和版本；报告记录 Portable EXE、目录版 EXE 与 app.asar 的真实大小和 SHA-256。本轮 1.6.0 Windows x64 产物已于 2026-07-23 10:56:03（Asia/Shanghai）实际生成，真实文件名、大小与哈希已写入根目录 `README.md`；Vitest **79 个文件 / 475 项**、Playwright **20/20** 与成品验证 **16/16** 均已通过，最终机器可读证据见 `release/verification/report.json`。
+Editor 1.6.0 发布必须重新执行 `npm run typecheck`、全量 Vitest、Playwright Electron E2E、Player/Renderer/Electron 生产构建、`npm run dist:win` 与 `npm run verify:release`。`verify:release` 必须在启动成品前核对 Portable 与 `win-unpacked` EXE 的 Windows `FileVersion` / `ProductVersion`，并核对 `resources/app.asar` 内嵌 `package.json` 的名称和版本；报告记录 Portable EXE、目录版 EXE 与 app.asar 的真实大小和 SHA-256。当前 1.6.0 Windows x64 制品生成于 2026-07-30，真实文件名、大小与哈希见根目录 `README.md`；当前源码回归为 Vitest **85 个文件 / 518 项**、Playwright **25/25**，发布专项结果以本次生成的 `release/verification/report.json` 为准。
 
 完整发布仍须同时报告“管线状态”和“成品效果状态”；测试通过不等于视觉与教学体验已验收。

@@ -2,6 +2,8 @@
 
 本文定义 Editor 1.6.0 / Project V7 中 `scene.runtime` 与 `globalRuntime` 的自由运行时创作协议。新运行时使用 `RuntimeDocument.runtimeApiVersion: 2`；API 1 继续作为兼容协议。文件名中的 V3 仅沿用播放器架构代际名称，不表示自由运行时 API 为 V3。组件协议是另一套独立版本体系。
 
+文档同步基线：**2026-08-01**。当前包版本仍为 1.6.0；运行时入口、专业“互动与动画 / 开发”职责和 PublishedLesson 发布边界已按当前实现核对。
+
 新工程必须写 `schemaVersion: 7`。V1–V6 仅是加载迁移输入；其中 V6 节点 `animation` 会自动迁移为事件驱动的 `node.activated → node.enter` 规则，新保存统一写 V7。
 
 Project V7 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
@@ -219,7 +221,7 @@ ctx.dom.overlay.append(button)
 
 编辑器核心和 Player 不内置、导入或全局暴露 Three.js。需要地球、太阳系、立体几何或其他真 3D 时，由运行时作者在构建阶段把 Three.js 与所需 loader 一并打进 `source`，运行时仍声明 `renderMode: 'dom'`，把 `WebGLRenderer.domElement` 挂到 `ctx.dom.underlay` 或 `ctx.dom.overlay`；同时需要 Phaser 时才声明 `hybrid`。这让 3D 能力按课件付费，不增加不使用 3D 的工程核心负担。
 
-需要作者提供 3D 模型时，默认交付格式使用 GLB（glTF 二进制）；不要依赖 CDN 或运行时网络。当前 Project V7 的一等素材类型只有图片、声音和视频，不能把 GLB 伪装成图片后塞入 `RuntimeDocument.assets`：一次性小模型只能在 2 MiB 源码上限内随运行时构建产物离线嵌入，较大或可复用模型应放入 V4 组件包的 manifest asset。若产品需要独立替换/管理模型，必须先正式扩展 Project Schema、归档、迁移、编辑器素材面板与导出链路。纹理、网格、动画和解码器必须一并离线打包并在目标设备验证显存与加载时间。改变 `renderMode` 不会自动把 Three.js 场景转换成 Phaser 或 DOM 元素。
+需要作者提供 3D 模型时，默认交付格式使用 GLB（glTF 二进制）；不要依赖 CDN 或运行时网络。当前 Project V7 的一等素材类型只有图片、声音和视频，不能把 GLB 伪装成图片后塞入 `RuntimeDocument.assets`：一次性小模型只能在 2 MiB 源码上限内随运行时构建产物离线嵌入，较大或可复用模型应放入 V4 组件包的 manifest asset。若产品需要独立替换/管理模型，必须先正式扩展 Project Schema、归档、迁移、编辑器“媒体”管理与导出链路。纹理、网格、动画和解码器必须一并离线打包并在目标设备验证显存与加载时间。改变 `renderMode` 不会自动把 Three.js 场景转换成 Phaser 或 DOM 元素。
 
 Three.js/WebGL 运行时至少要做到：
 

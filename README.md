@@ -4,6 +4,8 @@
 
 当前版本：**1.6.0**
 
+文档同步基线：**2026-08-01**。当前包版本仍为 1.6.0；本文及 `docs/` 已按本轮简洁/专业工作流、统一“元素”入口、媒体管理、“互动与动画”、受控“开发”工作台、文字显示改进和 PublishedLesson 发布裁剪重新核对。版本号相同不表示仍是 7 月 23 日的旧实现。
+
 当前架构基线：Editor 1.6.0、Project V7、RuntimeDocument API 2、V4 组件 API 4；Runtime API 1 与组件 API 1–3 继续兼容。Project V7 JSON 是业务真相，DOM、Phaser 和按内容打包的 Three.js 都是可替换的呈现/交互能力，而不是工程模型本身。编辑器定位为 AI-native 课件的轻量编辑与交付容器：手动模式覆盖高频、可解释的基础编辑与事件编排，一次性复杂互动使用场景/全局运行时，高复用且需参数化的能力使用组件。Windows x64 发布提供便携版与目录版；本轮 1.6.0 实际构建的文件名、大小、SHA-256 和时间记录在本文“发布产物与验证基线”中。
 
 ## 快速开始
@@ -179,7 +181,7 @@ Project V7 的声明式交互规则是稳定状态与运行逻辑之间的首选
 - V3：`schemaVersion: 3`、`runtimeApiVersion: 3`，声明 `supportedScopes`，支持真正的全局组件，并递归暴露 `props.content` 中全部文字。
 - V4：`schemaVersion: 4`、`runtimeApiVersion: 4`，在 V3 基础上声明 `renderMode: 'dom' | 'phaser' | 'hybrid'`，按模式只获得 `ctx.dom` 和/或 `ctx.phaser`，并支持显隐、暂停、恢复与捕获准备生命周期。
 
-组件使用可信的离线浏览器 JavaScript，不允许在成品运行时依赖 Node.js、npm、CDN 或远程网络。新组件使用 V4；旧 `examples/runtime-v3-complete/` 是 Runtime API 1 / 组件 API 3 兼容夹具，而不是 Runtime API 2 / 组件 API 4 上下文或新课件整页状态建模模板。Three.js 等第三方库如确有必要，应在构建阶段打进具体运行时/组件；程序化一次性 3D 可由运行时内联，模型默认用离线 GLB 并作为 V4 组件包 asset。Project V7 当前没有一等 `model` 素材类型，不得把 GLB 伪装成图片；独立模型库需后续正式扩展 Schema、归档、迁移、素材面板和导出。不要把 Three.js 加入编辑器核心或假定宿主全局提供 `THREE`。
+组件使用可信的离线浏览器 JavaScript，不允许在成品运行时依赖 Node.js、npm、CDN 或远程网络。新组件使用 V4；旧 `examples/runtime-v3-complete/` 是 Runtime API 1 / 组件 API 3 兼容夹具，而不是 Runtime API 2 / 组件 API 4 上下文或新课件整页状态建模模板。Three.js 等第三方库如确有必要，应在构建阶段打进具体运行时/组件；程序化一次性 3D 可由运行时内联，模型默认用离线 GLB 并作为 V4 组件包 asset。Project V7 当前没有一等 `model` 素材类型，不得把 GLB 伪装成图片；独立模型库需后续正式扩展 Schema、归档、迁移、媒体管理和导出。不要把 Three.js 加入编辑器核心或假定宿主全局提供 `THREE`。
 
 组件画布文字编辑必须显式加入协议：DOM 元素使用 `data-courseware-edit-key="content.title"`；Phaser/hybrid 组件在编辑宿主存在时调用 `ctx.editor?.registerTextRegion({ key, getBounds })`。`key` 必须同时对应 manifest 公开的文字字段或有效 `props.content` 字符串。未登记区域继续整体选择，旧组件继续通过属性栏编辑，不会根据画面文字反推 Props。
 
@@ -267,24 +269,26 @@ PPTX 映射规则：
 
 ## 发布产物与验证基线
 
-`npm run dist:win` 生成的 Windows 产物位于 `release/`。Editor 1.6.0 已于 **2026-07-23 10:56:03（Asia/Shanghai）** 完成 Windows x64 打包：
+`npm run dist:win` 生成的 Windows 产物位于 `release/`。当前 Editor 1.6.0 Windows x64 制品生成于 **2026-07-30（Asia/Shanghai）**，并于 **2026-08-01** 按当前源码与文档重新核对：
 
 `npm run verify:release` 会在启动任何成品前，校验 Portable 与 `win-unpacked` EXE 的 Windows `FileVersion` / `ProductVersion`，再交叉校验 `resources/app.asar` 内嵌 `package.json` 的名称与版本。任何一项与当前 `package.json` 不一致都会硬失败，因此不能复用旧 `win-unpacked`；验证报告同时记录三份产物的大小与 SHA-256。
 
 - 便携版 EXE：`PhaserCoursewareEditor-Portable-1.6.0.exe`，可单文件分发；
 - `win-unpacked/PhaserCoursewareEditor.exe`：目录版，分发时必须保留整个目录。
 
-源码 ZIP 不由 `npm run dist:win` 自动生成；若发布流程另行生成 1.6.0 源码 ZIP，必须按本文“源码 ZIP 说明”排除依赖、构建产物和本机缓存。
+源码 ZIP 不由 `npm run dist:win` 自动生成；打包时只收集当前 Git 跟踪文件的工作区内容，排除依赖、构建产物、发布产物、本机缓存和 Git 元数据。若工作区含尚未提交的文档或源码修改，文件名必须使用打包日期等快照标识，不能继续沿用旧提交号。
 
-GitHub 仓库保留 `release/` 根目录下可独立运行的 Portable EXE；`win-unpacked/`、构建配置、校验截图及其他可重建发布中间产物不进入版本库。
+`release/` 被 `.gitignore` 排除，Portable EXE、源码 ZIP、`win-unpacked/`、校验截图及其他可重建发布产物均不会随源码提交或 `git push` 自动上传；正式分发必须通过单独的制品渠道完成。
 
 | 产物 | 大小 | SHA-256 |
 | --- | ---: | --- |
-| `release/PhaserCoursewareEditor-Portable-1.6.0.exe` | 103,467,714 bytes（98.67 MiB） | `3B0D402E71162A1540D15427C059A28B82CD75E00CE3B3849FE5548A3499DC96` |
-| `release/win-unpacked/PhaserCoursewareEditor.exe` | 225,819,136 bytes（215.36 MiB） | `B2011F80CD7CD13C40179AE0A8E90689474EB9AB744936DC159004172E4B2F2C` |
-| `release/win-unpacked/resources/app.asar` | 158,547,704 bytes（151.20 MiB） | `16D05B76DD400CE9444081D71AA68B2B24579F4F55E8FFA2C6B0DC0D0D22DBF3` |
+| `release/PhaserCoursewareEditor-Portable-1.6.0.exe` | 103,524,302 bytes（98.73 MiB） | `77E5929851E4936E9379B0F4135E2900E01EC3BF9463A1D4AD7A1C0084A2248A` |
+| `release/win-unpacked/PhaserCoursewareEditor.exe` | 225,819,136 bytes（215.36 MiB） | `4012FA34162154688F4D808BADEC183EC6BD396B8BEC7E7A33BC9D7065FA184D` |
+| `release/win-unpacked/resources/app.asar` | 158,850,615 bytes（151.49 MiB） | `99848237B025078B1784FF2AA9647973AA2C3237D8FFFF9BE18ABB54CC726F20` |
 
-发布验收结果：双 TypeScript 配置通过；Vitest **79 个文件 / 475 项**、Playwright **20/20** 全部通过；Player、Renderer、Electron 生产构建完成；Portable 与目录版均实际启动，示例工程完成 GUI 导入、打开、PDF/PPTX/单 HTML 导出，离线 HTML 的画布控制器、键盘翻页和组件交互均可用，且全程无外部网络请求。成品验证 **16/16** 通过，机器可读证据见 `release/verification/report.json`。
+源码 ZIP 的大小与 SHA-256 应在生成后随制品单独发布，不写入 ZIP 内部的 README，避免重新打包时出现自引用哈希失效。
+
+当前源码回归结果：双 TypeScript 配置通过；Vitest **85 个文件 / 518 项**、Playwright **25/25** 全部通过；Player、Renderer、Electron 生产构建完成。发布专项验收覆盖 Portable/目录版启动、版本与 `app.asar`、组件导入、示例工程打开、PDF/PPTX/单 HTML 导出和 `file://` 离线互动；机器可读证据以本次重新生成的 `release/verification/report.json` 为准。测试通过只表示管线状态，不代表真实课件的视觉与教学体验已经验收。
 
 ## 测试与提交要求
 

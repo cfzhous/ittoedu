@@ -35,7 +35,7 @@ render-host-benchmark/
 
 `three-runtime.entry.ts` 在构建时从精确锁定的开发依赖 Three.js `0.185.1` 导入，Vite 把两者卷成一个不含 `import` / `export` / `require` 的 IIFE。该 IIFE 直接注册 `CoursewareRuntime.define(...)`，再被内联到 `project.json`、`.h5lesson` 和单 HTML。编辑器和 Player 源码不导入 Three.js，没有 3D 的课件不付费。
 
-本例使用程序几何，因此没有将 GLB 伪装成工程图片素材，也没有扩展 Project V7 的 `AssetKind`。未来使用离线 GLB 时，一次性小模型可跟随 runtime 打包，高复用模型应作为组件包内部素材；只有需要教师从工程素材库独立替换模型时，才应设计新的一等模型素材协议。
+本例使用程序几何，因此没有将 GLB 伪装成工程图片素材，也没有扩展 Project V7 的 `AssetKind`。未来使用离线 GLB 时，一次性小模型可跟随 runtime 打包，高复用模型应作为组件包内部素材；只有需要教师从工程“媒体”管理中独立替换模型时，才应设计新的一等模型素材协议。
 
 ## 生成
 
