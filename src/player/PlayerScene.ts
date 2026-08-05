@@ -6,7 +6,15 @@ import type {
 import type {
   GlobalLayerItem,
   SceneDocument,
+  SceneNode,
 } from '../shared/projectTypes'
+import type {
+  PlayerAuthoringContext,
+  PlayerAuthoringErrorCode,
+  PlayerAuthoringPatch,
+  PlayerAuthoringScope,
+  PlayerAuthoringTarget,
+} from '../shared/playerAuthoringProtocol'
 import type {
   RuntimeNodeHandle,
   RuntimePresentationApi,
@@ -19,6 +27,7 @@ import {
   resolveSceneEntryStateId,
 } from '../shared/presentation'
 import type { ComponentRegistry } from './ComponentRegistry'
+import type { ComponentAuthoringTargetsChangedHandler } from './ComponentAuthoringTargetRegistry'
 import type { CourseRuntimeKernel } from './CourseRuntimeKernel'
 import type { AudioManager } from './AudioManager'
 import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
@@ -55,7 +64,7 @@ export interface PlayerRuntimeDomLayers {
 interface PendingNavigation {
   index: number
   force: boolean
-  targetStateId?: string
+  targetStateId?: string | null
 }
 
 interface PendingPresentation {
@@ -65,8 +74,22 @@ interface PendingPresentation {
 
 export interface PlayerSceneInitialEntry {
   sceneIndex: number
-  stateId?: string
+  stateId?: string | null
 }
+
+export function resolvePlayerSceneEntryStateId(
+  scene: Pick<SceneDocument, 'presentation'>,
+  requestedStateId: string | null | undefined,
+  authoringMode: boolean,
+): string | null {
+  return authoringMode && requestedStateId === null
+    ? null
+    : resolveSceneEntryStateId(scene, requestedStateId)
+}
+
+export type PlayerSceneAuthoringPatchResult =
+  | { ok: true; target: PlayerAuthoringTarget }
+  | { ok: false; code: PlayerAuthoringErrorCode; message: string }
 
 export class PlayerScene extends Phaser.Scene {
   private currentSceneIndex = -1
@@ -114,6 +137,10 @@ export class PlayerScene extends Phaser.Scene {
     private readonly domLayers: PlayerRuntimeDomLayers,
     private readonly onBackgroundChanged: (color: string) => void,
     private readonly initialEntry: PlayerSceneInitialEntry = { sceneIndex: 0 },
+    private readonly authoringMode = false,
+    private readonly onComponentAuthoringTargetsChanged?:
+      ComponentAuthoringTargetsChangedHandler,
+    private readonly authoringScope: PlayerAuthoringScope = 'scene',
   ) {
     super({ key: 'courseware-player' })
   }
@@ -130,6 +157,7 @@ export class PlayerScene extends Phaser.Scene {
 
   create(): void {
     this.ready = true
+    if (this.authoringMode) this.input.enabled = false
     // PlayerApp may observe a hidden document before Phaser has created this
     // scene. Prime the kernel now; its own cached state is inherited by the
     // global and scene runtimes mounted below.
@@ -163,7 +191,8 @@ export class PlayerScene extends Phaser.Scene {
   showScene(
     index: number,
     force = false,
-    targetStateId?: string,
+    targetStateId?: string | null,
+    bypassNavigationGuards = false,
   ): boolean {
     if (
       !this.ready ||
@@ -173,7 +202,10 @@ export class PlayerScene extends Phaser.Scene {
       return false
     }
     if (!force && index === this.currentSceneIndex && this.pendingNavigation === null) {
-      return targetStateId
+      if (targetStateId === null && this.authoringMode) {
+        return this.showAuthoringBaseState()
+      }
+      return typeof targetStateId === 'string'
         ? this.setPresentationState(targetStateId)
         : false
     }
@@ -187,7 +219,7 @@ export class PlayerScene extends Phaser.Scene {
     }
 
     let resolvedIndex = index
-    if (!force) {
+    if (!force && !bypassNavigationGuards) {
       const requestedSceneId = this.payload.project.scenes[index]?.id
       if (!requestedSceneId) return false
       const resolvedSceneId = this.runtimeKernel.resolveNavigation(requestedSceneId)
@@ -204,7 +236,7 @@ export class PlayerScene extends Phaser.Scene {
     this.pendingNavigation = {
       index: resolvedIndex,
       force,
-      ...(resolvedIndex === index && targetStateId
+      ...(resolvedIndex === index && targetStateId !== undefined
         ? { targetStateId }
         : {}),
     }
@@ -215,6 +247,58 @@ export class PlayerScene extends Phaser.Scene {
   replayScene(): boolean {
     return this.currentSceneIndex >= 0 &&
       this.showScene(this.currentSceneIndex, true)
+  }
+
+  showAuthoringBaseState(): boolean {
+    if (!this.authoringMode || !this.ready || this.currentSceneIndex < 0) {
+      return false
+    }
+    if (
+      this.currentPresentationStateId === null &&
+      this.pendingNavigation === null
+    ) {
+      return false
+    }
+    const sceneDocument = this.payload.project.scenes[this.currentSceneIndex]
+    if (!sceneDocument || this.renderingScene || this.applyingPresentation) {
+      return false
+    }
+    const previous = materializeScene(
+      sceneDocument,
+      this.currentPresentationStateId,
+    )
+    const materialized = materializeScene(sceneDocument, null)
+    const previousNodesById = new Map(
+      previous.nodes.map((node) => [node.id, node]),
+    )
+    const handlesById = new Map(
+      this.renderedNodes.map((handle) => [handle.id, handle]),
+    )
+    this.applyingPresentation = true
+    try {
+      materialized.nodes.forEach((node, depth) => {
+        const handle = handlesById.get(node.id)
+        if (!handle) return
+        if (!valuesEqual(previousNodesById.get(node.id), node)) {
+          this.sceneMotionDirector?.prepareStableUpdate(node.id)
+          try {
+            handle.update(node)
+          } catch (error) {
+            console.error(`基础画面更新节点“${node.name}”失败`, error)
+          }
+          this.sceneMotionDirector?.update(handle, node, node.visible)
+        }
+        handle.root.setDepth(depth)
+        this.sceneNodesRoot.moveTo(handle.root, depth)
+      })
+      this.applySceneBackground(materialized)
+      this.currentPresentationStateId = null
+      this.pendingPresentation = null
+      this.sceneMotionDirector?.refreshInputStates()
+    } finally {
+      this.applyingPresentation = false
+    }
+    return true
   }
 
   restartCourse(): boolean {
@@ -340,6 +424,166 @@ export class PlayerScene extends Phaser.Scene {
     return true
   }
 
+  /**
+   * Applies one complete authoring frame to the live Player. This deliberately
+   * updates only rendered handles and host background/order; Project V7 remains
+   * untouched until the editor commits its own store transaction.
+   */
+  async applyAuthoringPatch(
+    context: PlayerAuthoringContext,
+    patch: PlayerAuthoringPatch,
+  ): Promise<PlayerSceneAuthoringPatchResult> {
+    const contextFailure = this.validateAuthoringContext(context)
+    if (contextFailure) return contextFailure
+
+    if (patch.kind === 'preview-node-motion') {
+      if (patch.target.nodeId !== patch.action.nodeId) {
+        return this.authoringFailure(
+          'target-mismatch',
+          '动画预览目标与动作节点不一致。',
+        )
+      }
+      const director = patch.target.scope === 'scene'
+        ? this.sceneMotionDirector
+        : this.globalMotionDirector
+      if (!director?.preview(patch.action, patch.delayMs)) {
+        return this.authoringFailure(
+          'target-not-found',
+          `当前 Player 中无法预览节点“${patch.action.nodeId}”的动画。`,
+        )
+      }
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'scene-order') {
+      const expectedIds = this.renderedNodes.map((handle) => handle.id)
+      const providedIds = patch.nodeIds
+      const providedSet = new Set(providedIds)
+      if (
+        providedIds.length !== expectedIds.length ||
+        providedSet.size !== providedIds.length ||
+        expectedIds.some((nodeId) => !providedSet.has(nodeId))
+      ) {
+        return this.authoringFailure(
+          'target-mismatch',
+          '节点层级必须完整包含当前场景的所有节点，且不能重复。',
+        )
+      }
+      const handlesById = new Map(
+        this.renderedNodes.map((handle) => [handle.id, handle]),
+      )
+      providedIds.forEach((nodeId, depth) => {
+        const handle = handlesById.get(nodeId)!
+        handle.root.setDepth(depth)
+        this.sceneNodesRoot.moveTo(handle.root, depth)
+      })
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'scene-background') {
+      const assetFailure = this.validateAuthoringAsset(
+        patch.backgroundAssetId,
+        'image',
+        '场景背景',
+      )
+      if (assetFailure) return assetFailure
+      const textureFailure = await this.ensureAuthoringTextures(
+        patch.backgroundAssetId ? [patch.backgroundAssetId] : [],
+      )
+      if (textureFailure) return textureFailure
+      const refreshedContextFailure = this.validateAuthoringContext(context)
+      if (refreshedContextFailure) return refreshedContextFailure
+      const sceneDocument = this.payload.project.scenes[this.currentSceneIndex]!
+      this.applySceneBackground({
+        ...sceneDocument,
+        backgroundColor: patch.backgroundColor,
+        backgroundAssetId: patch.backgroundAssetId,
+      })
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.target.nodeId !== patch.node.id) {
+      return this.authoringFailure(
+        'target-mismatch',
+        '编辑目标 ID 与完整节点 ID 不一致。',
+      )
+    }
+
+    const located = patch.target.scope === 'scene'
+      ? (() => {
+          const scene = this.payload.project.scenes[this.currentSceneIndex]!
+          const canonical = scene.nodes.find((node) => node.id === patch.node.id)
+          const handle = this.renderedNodes.find((item) => item.id === patch.node.id)
+          return canonical && handle
+            ? { canonical, handle, item: null }
+            : null
+        })()
+      : (() => {
+          const entry = this.renderedGlobalItems.find(
+            ({ handle }) => handle.id === patch.node.id,
+          )
+          return entry
+            ? { canonical: entry.item.node, handle: entry.handle, item: entry.item }
+            : null
+        })()
+    if (!located) {
+      return this.authoringFailure(
+        'target-not-found',
+        `当前 Player 中不存在节点“${patch.node.id}”。`,
+      )
+    }
+    const identityFailure = this.validateAuthoringNodeIdentity(
+      located.canonical,
+      patch.node,
+    )
+    if (identityFailure) return identityFailure
+    const assetFailure = this.validateAuthoringNodeAssets(patch.node)
+    if (assetFailure) return assetFailure
+    const textureFailure = await this.ensureAuthoringTextures(
+      this.authoringTextureAssetIds(patch.node),
+    )
+    if (textureFailure) return textureFailure
+    const refreshedContextFailure = this.validateAuthoringContext(context)
+    if (refreshedContextFailure) return refreshedContextFailure
+
+    try {
+      const nextNode = structuredClone(patch.node)
+      if (patch.target.scope === 'scene') {
+        this.sceneMotionDirector?.prepareStableUpdate(nextNode.id)
+        located.handle.update(nextNode)
+        this.sceneMotionDirector?.update(
+          located.handle,
+          nextNode,
+          nextNode.visible,
+        )
+        this.sceneMotionDirector?.refreshInputStates()
+      } else {
+        located.handle.update(nextNode)
+        const currentSceneId = this.payload.project.scenes[this.currentSceneIndex]?.id ?? ''
+        const visible = located.item !== null && this.globalItemVisible(
+          located.item,
+          currentSceneId,
+          nextNode,
+        )
+        located.handle.setHostVisible?.(visible)
+        this.globalMotionDirector?.update(
+          located.handle,
+          nextNode,
+          visible,
+          { preserveTransient: true, activationSceneId: currentSceneId },
+        )
+        this.globalMotionDirector?.refreshInputStates()
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return this.authoringFailure(
+        'update-failed',
+        `节点“${patch.node.name}”的瞬态画面更新失败：${detail}`,
+      )
+    }
+    return { ok: true, target: patch.target }
+  }
+
   clearRenderedScene(): void {
     this.sceneComponentEvents?.dispose()
     this.sceneComponentEvents = null
@@ -400,7 +644,9 @@ export class PlayerScene extends Phaser.Scene {
     if (!request.force && request.index === this.currentSceneIndex) {
       // A later request may cancel an in-flight navigation after its textures
       // have loaded. Drop those now-unused textures while keeping this scene.
-      if (request.targetStateId) {
+      if (request.targetStateId === null && this.authoringMode) {
+        this.showAuthoringBaseState()
+      } else if (typeof request.targetStateId === 'string') {
         this.setPresentationState(request.targetStateId)
       }
       this.releaseUnusedNativeTextures(sceneDocument)
@@ -413,7 +659,7 @@ export class PlayerScene extends Phaser.Scene {
   private renderScene(
     index: number,
     sceneDocument: SceneDocument,
-    requestedStateId?: string,
+    requestedStateId?: string | null,
   ): void {
     this.renderingScene = true
     try {
@@ -422,7 +668,11 @@ export class PlayerScene extends Phaser.Scene {
       // presentationApi() resolves against currentSceneIndex. Set it before any
       // component create() hook runs, otherwise components see the previous scene.
       this.currentSceneIndex = index
-      const entryState = resolveSceneEntryStateId(sceneDocument, requestedStateId)
+      const entryState = resolvePlayerSceneEntryStateId(
+        sceneDocument,
+        requestedStateId,
+        this.authoringMode,
+      )
       const renderedScene = materializeScene(sceneDocument, entryState)
       const sceneRules = sceneDocument.interactions ?? []
       this.currentPresentationStateId = entryState
@@ -442,7 +692,14 @@ export class PlayerScene extends Phaser.Scene {
         courseState: this.runtimeKernel.courseState,
         presentation: this.presentationApi(),
         audio: this.audio,
-        mode: this.interactionsEnabled ? 'preview' : 'capture',
+        mode: this.authoringMode || this.interactionsEnabled ? 'preview' : 'capture',
+        authoring: this.authoringMode,
+        ...(this.authoringMode && this.onComponentAuthoringTargetsChanged
+          ? {
+              onComponentAuthoringTargetsChanged:
+                this.onComponentAuthoringTargetsChanged,
+            }
+          : {}),
         sceneId: sceneDocument.id,
         emitComponentEvent: componentEvents.emit,
         canvasControlsEnabled: this.canvasControlsEnabled,
@@ -451,7 +708,8 @@ export class PlayerScene extends Phaser.Scene {
       this.sceneMotionDirector = new NodeMotionDirector({
         scene: this,
         scope: 'scene',
-        mode: this.interactionsEnabled ? 'preview' : 'capture',
+        mode: this.authoringMode ? 'capture' :
+          this.interactionsEnabled ? 'preview' : 'capture',
         events: this.runtimeKernel.events,
         sceneId: sceneDocument.id,
       })
@@ -517,7 +775,9 @@ export class PlayerScene extends Phaser.Scene {
       this.pendingPresentation = null
       this.applyingPresentation = true
       try {
-        this.emitPresentationChange(sceneDocument.id, null, entryState)
+        if (entryState !== null) {
+          this.emitPresentationChange(sceneDocument.id, null, entryState)
+        }
       } finally {
         this.applyingPresentation = false
       }
@@ -565,6 +825,172 @@ export class PlayerScene extends Phaser.Scene {
     const handle = this.renderedNodes.find((item) => item.id === action.nodeId) ??
       this.renderedGlobalItems.find(({ handle: item }) => item.id === action.nodeId)?.handle
     return handle?.videoController?.execute(action) ?? false
+  }
+
+  private authoringFailure(
+    code: PlayerAuthoringErrorCode,
+    message: string,
+  ): PlayerSceneAuthoringPatchResult {
+    return { ok: false, code, message }
+  }
+
+  private validateAuthoringContext(
+    context: PlayerAuthoringContext,
+  ): PlayerSceneAuthoringPatchResult | null {
+    if (!this.authoringMode) {
+      return this.authoringFailure(
+        'unsupported-host-mode',
+        '当前 Player 未以统一画布编辑宿主模式启动。',
+      )
+    }
+    const currentScene = this.payload.project.scenes[this.currentSceneIndex]
+    if (!this.ready || !currentScene || this.renderingScene) {
+      return this.authoringFailure(
+        'not-ready',
+        'Player 尚未完成当前场景的稳定画面挂载。',
+      )
+    }
+    if (currentScene.id !== context.sceneId) {
+      return this.authoringFailure(
+        'scene-mismatch',
+        `编辑命令属于场景“${context.sceneId}”，当前 Player 显示“${currentScene.id}”。`,
+      )
+    }
+    if (context.stateId !== this.currentPresentationStateId) {
+      return this.authoringFailure(
+        'state-mismatch',
+        `编辑命令属于“${context.stateId ?? '基础'}”，当前 Player 显示“${this.currentPresentationStateId ?? '基础'}”。`,
+      )
+    }
+    return null
+  }
+
+  private validateAuthoringNodeIdentity(
+    canonical: SceneNode,
+    node: SceneNode,
+  ): PlayerSceneAuthoringPatchResult | null {
+    if (canonical.id !== node.id || canonical.type !== node.type) {
+      return this.authoringFailure(
+        'target-mismatch',
+        '瞬态更新不能改变节点 ID 或节点类型。',
+      )
+    }
+    if (
+      canonical.type === 'external-component' &&
+      node.type === 'external-component' &&
+      (
+        canonical.component.packageId !== node.component.packageId ||
+        canonical.component.version !== node.component.version
+      )
+    ) {
+      return this.authoringFailure(
+        'target-mismatch',
+        '瞬态更新不能替换组件包身份。',
+      )
+    }
+    return null
+  }
+
+  private validateAuthoringAsset(
+    assetId: string | null | undefined,
+    expectedKind: 'image' | 'video',
+    label: string,
+  ): PlayerSceneAuthoringPatchResult | null {
+    if (!assetId) return null
+    const meta = this.payload.project.assets[assetId] ??
+      Object.values(this.payload.project.assets).find((asset) => asset.id === assetId)
+    if (
+      !meta ||
+      meta.kind !== expectedKind ||
+      !this.payload.assets[assetId]
+    ) {
+      return this.authoringFailure(
+        'asset-missing',
+        `${label}引用的 ${expectedKind === 'image' ? '图片' : '视频'}素材“${assetId}”不存在或类型不匹配。`,
+      )
+    }
+    return null
+  }
+
+  private validateAuthoringNodeAssets(
+    node: SceneNode,
+  ): PlayerSceneAuthoringPatchResult | null {
+    if (node.type === 'image') {
+      return this.validateAuthoringAsset(node.assetId, 'image', `节点“${node.name}”`)
+    }
+    if (node.type === 'video') {
+      const videoFailure = this.validateAuthoringAsset(
+        node.assetId,
+        'video',
+        `节点“${node.name}”`,
+      )
+      if (videoFailure) return videoFailure
+      if (node.poster.mode === 'image') {
+        return this.validateAuthoringAsset(
+          node.poster.assetId,
+          'image',
+          `视频“${node.name}”的海报帧`,
+        )
+      }
+    }
+    return null
+  }
+
+  private authoringTextureAssetIds(node: SceneNode): string[] {
+    if (node.type === 'image') return [node.assetId]
+    if (
+      node.type === 'video' &&
+      node.poster.mode === 'image' &&
+      node.poster.assetId
+    ) {
+      return [node.poster.assetId]
+    }
+    return []
+  }
+
+  private async ensureAuthoringTextures(
+    assetIds: readonly string[],
+  ): Promise<PlayerSceneAuthoringPatchResult | null> {
+    const uniqueAssetIds = [...new Set(assetIds)]
+    if (uniqueAssetIds.length === 0) return null
+    if (this.load.isLoading()) {
+      await new Promise<void>((resolve) => {
+        this.load.once(Phaser.Loader.Events.COMPLETE, () => resolve(), this)
+      })
+    }
+    const missing = uniqueAssetIds.filter(
+      (assetId) => !this.textures.exists(this.textureKey(assetId)),
+    )
+    if (missing.length === 0) return null
+    const alreadyFailed = missing.find((assetId) => this.attemptedAssetIds.has(assetId))
+    if (alreadyFailed) {
+      return this.authoringFailure(
+        'asset-missing',
+        `图片素材“${alreadyFailed}”无法解码，不能更新画布。`,
+      )
+    }
+    try {
+      this.queueNativeAssets(missing)
+      await new Promise<void>((resolve) => {
+        this.load.once(Phaser.Loader.Events.COMPLETE, () => resolve(), this)
+        this.load.start()
+      })
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return this.authoringFailure(
+        'asset-missing',
+        `画布素材加载失败：${detail}`,
+      )
+    }
+    const unresolved = missing.find(
+      (assetId) => !this.textures.exists(this.textureKey(assetId)),
+    )
+    return unresolved
+      ? this.authoringFailure(
+          'asset-missing',
+          `图片素材“${unresolved}”无法解码，不能更新画布。`,
+        )
+      : null
   }
 
   private queueNativeAssets(assetIds: Iterable<string>): void {
@@ -809,11 +1235,12 @@ export class PlayerScene extends Phaser.Scene {
           ...(state.description ? { description: state.description } : {}),
         }))
       },
-      setState: (stateId) => this.setPresentationState(stateId),
-      transitionTo: (stateId, transition) => this.setPresentationState(
-        stateId,
-        transition,
-      ),
+      setState: (stateId) => this.authoringMode
+        ? false
+        : this.setPresentationState(stateId),
+      transitionTo: (stateId, transition) => this.authoringMode
+        ? false
+        : this.setPresentationState(stateId, transition),
     }
   }
 
@@ -827,7 +1254,8 @@ export class PlayerScene extends Phaser.Scene {
     this.globalMotionDirector = new NodeMotionDirector({
       scene: this,
       scope: 'global',
-      mode: this.interactionsEnabled ? 'preview' : 'capture',
+      mode: this.authoringMode ? 'capture' :
+        this.interactionsEnabled ? 'preview' : 'capture',
       events: this.runtimeKernel.events,
     })
     this.renderedGlobalItems = this.payload.project.globalLayer.map(
@@ -845,7 +1273,14 @@ export class PlayerScene extends Phaser.Scene {
           courseState: this.runtimeKernel.courseState,
           presentation: this.presentationApi(),
           audio: this.audio,
-          mode: this.interactionsEnabled ? 'preview' : 'capture',
+          mode: this.authoringMode || this.interactionsEnabled ? 'preview' : 'capture',
+          authoring: this.authoringMode,
+          ...(this.authoringMode && this.onComponentAuthoringTargetsChanged
+            ? {
+                onComponentAuthoringTargetsChanged:
+                  this.onComponentAuthoringTargetsChanged,
+              }
+            : {}),
           emitComponentEvent: componentEvents.emit,
           canvasControlsEnabled: this.canvasControlsEnabled,
           textureKey: (assetId) => this.textureKey(assetId),
@@ -918,8 +1353,7 @@ export class PlayerScene extends Phaser.Scene {
     flushActivations = true,
   ): void {
     for (const { item, handle } of this.renderedGlobalItems) {
-      const visible = item.node.visible &&
-        isGlobalLayerItemVisible(item, sceneId)
+      const visible = this.globalItemVisible(item, sceneId)
       const previousVisible = this.globalVisibilityByNodeId.get(item.node.id)
       handle.setHostVisible?.(visible)
       this.globalMotionDirector?.update(handle, item.node, visible, {
@@ -930,6 +1364,17 @@ export class PlayerScene extends Phaser.Scene {
     }
     this.globalMotionDirector?.refreshInputStates()
     if (flushActivations) this.globalMotionDirector?.flushActivations()
+  }
+
+  private globalItemVisible(
+    item: GlobalLayerItem,
+    sceneId: string,
+    node: SceneNode = item.node,
+  ): boolean {
+    return node.visible && (
+      this.authoringMode && this.authoringScope === 'global' ||
+      isGlobalLayerItemVisible(item, sceneId)
+    )
   }
 
   private resolveRuntimeNode(nodeId: string): RuntimeNodeHandle | null {

@@ -9,22 +9,34 @@ export interface EditorGameHandle {
   destroy(): void
 }
 
-export function createEditorGame(parent: HTMLElement): EditorGameHandle {
+export interface CreateEditorGameOptions {
+  /** Render only transparent hit targets and transform chrome over Player. */
+  interactionOnly?: boolean
+  /** The unified 1280x720 stage owns fitting, so Phaser must not measure it. */
+  fixedLogicalSize?: boolean
+}
+
+export function createEditorGame(
+  parent: HTMLElement,
+  options: CreateEditorGameOptions = {},
+): EditorGameHandle {
   const bridge = new EditorPhaserBridge()
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     width: CANVAS_WIDTH,
     height: CANVAS_HEIGHT,
     parent,
-    backgroundColor: '#ffffff',
-    transparent: false,
+    backgroundColor: options.interactionOnly ? 'rgba(0,0,0,0)' : '#ffffff',
+    transparent: options.interactionOnly ?? false,
     scale: {
-      mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
+      mode: options.fixedLogicalSize ? Phaser.Scale.NONE : Phaser.Scale.FIT,
+      autoCenter: options.fixedLogicalSize
+        ? Phaser.Scale.NO_CENTER
+        : Phaser.Scale.CENTER_BOTH,
       width: CANVAS_WIDTH,
       height: CANVAS_HEIGHT,
     },
-    scene: [new EditorScene(bridge)],
+    scene: [new EditorScene(bridge, options.interactionOnly)],
     dom: {
       createContainer: true,
       // Component DOM descendants stay inert in edit mode; Phaser zones keep

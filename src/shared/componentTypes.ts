@@ -192,12 +192,54 @@ export interface ComponentEditableTextRegion {
   getBounds(): ComponentEditableTextBounds
 }
 
+export type ComponentAuthoringTargetSource = 'registered' | 'dom'
+
+/** Explicit component text target measured in the canonical stage space. */
+export interface ComponentAuthoringTextTarget {
+  kind: 'component-text'
+  /** Stable for the lifetime of the registration or DOM element. */
+  targetId: string
+  scope: ComponentScope
+  sceneId?: string
+  nodeId: string
+  componentId: string
+  /** Dot-separated path inside the effective component props. */
+  key: string
+  label: string
+  multiline: boolean
+  maxLength?: number
+  source: ComponentAuthoringTargetSource
+  /**
+   * Stage-space rectangle before rotation. Rotate around its center by
+   * `rotation` to obtain the visible target in the 1280 x 720 canvas.
+   */
+  bounds: Readonly<ComponentEditableTextBounds>
+  /** Clockwise degrees inherited from the authored component node. */
+  rotation: number
+}
+
+export interface ComponentAuthoringTargetUpdate {
+  revision: number
+  /** Identifies the component even when cleanup publishes an empty list. */
+  scope: ComponentScope
+  sceneId?: string
+  nodeId: string
+  targets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
+}
+
 export interface ComponentEditorHost {
   /**
    * Registers an explicit canvas text-edit hit target. The returned disposer
    * may be called before component destruction when a region is no longer used.
    */
   registerTextRegion(region: ComponentEditableTextRegion): () => void
+
+  /**
+   * Requests a recomputation after component-internal layout or motion changes
+   * the bounds returned by a registered region. Calls may be coalesced by the
+   * host and are safe no-ops after the component authoring host is destroyed.
+   */
+  invalidate(): void
 }
 
 /** V1-V3 compatibility context. Existing renderer fields stay unchanged; the edit-only host is additive. */

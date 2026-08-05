@@ -127,6 +127,7 @@ function runtime(
 function createHost(
   documentRuntime: RuntimeDocument,
   testEnvironment = createEnvironment(),
+  authoring?: RuntimeHostOptions['authoring'],
 ): { host: RuntimeHost; testEnvironment: TestEnvironment; registry: RuntimeRegistry } {
   const registry = new RuntimeRegistry()
   const events = new CourseEventBus()
@@ -152,6 +153,7 @@ function createHost(
     courseState,
     assetUrl: (assetId) => `asset://${assetId}`,
     registerNavigationGuard: () => () => undefined,
+    ...(authoring ? { authoring } : {}),
   }
   return { host: new RuntimeHost(options), testEnvironment, registry }
 }
@@ -169,6 +171,95 @@ afterEach(() => {
 })
 
 describe('RuntimeHost API 2', () => {
+  it('仅在定义与隔离宿主同时启用 authoring V1 时提供目标登记桥梁', async () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        authoringApiVersion: 1,
+        create(ctx) {
+          window.__runtimeHostContext = ctx
+          window.__disposeRuntimeTarget = ctx.authoring.register({
+            kind: 'text',
+            key: 'title',
+            getBounds() { return { x: 80, y: 60, width: 400, height: 72 } }
+          })
+          return { destroy() {} }
+        }
+      })
+    `
+    const documentRuntime = runtime(2, 'dom', source)
+    documentRuntime.content = {
+      values: { title: '画布标题' },
+      metadata: { title: { label: '主标题', maxLength: 80 } },
+    }
+    const onTargetsChanged = vi.fn()
+    const { host, registry } = createHost(
+      documentRuntime,
+      createEnvironment(),
+      { onTargetsChanged },
+    )
+    await Promise.resolve()
+
+    expect(capturedContext()).toHaveProperty('authoring')
+    expect(onTargetsChanged).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 1,
+      targets: [expect.objectContaining({
+        scope: 'scene',
+        sceneId: 'scene-one',
+        kind: 'text',
+        key: 'title',
+        label: '主标题',
+        bounds: { x: 80, y: 60, width: 400, height: 72 },
+      })],
+    }))
+
+    const disposeTarget = Reflect.get(
+      window,
+      '__disposeRuntimeTarget',
+    ) as (() => void) | undefined
+    disposeTarget?.()
+    await Promise.resolve()
+    expect(onTargetsChanged.mock.calls.at(-1)?.[0].targets).toEqual([])
+
+    host.destroy()
+    registry.dispose()
+  })
+
+  it('不向未声明扩展的旧 Runtime 暴露 authoring，即使宿主有接收器', async () => {
+    const onTargetsChanged = vi.fn()
+    const { host, registry } = createHost(
+      runtime(2, 'dom'),
+      createEnvironment(),
+      { onTargetsChanged },
+    )
+    await Promise.resolve()
+
+    expect(capturedContext()).not.toHaveProperty('authoring')
+    expect(onTargetsChanged).not.toHaveBeenCalled()
+
+    host.destroy()
+    registry.dispose()
+  })
+
+  it('宿主未启用画布编辑时，声明扩展的 Runtime 仍按普通预览运行', () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 1,
+        authoringApiVersion: 1,
+        create(ctx) {
+          window.__runtimeHostContext = ctx
+          return { destroy() {} }
+        }
+      })
+    `
+    const { host, registry } = createHost(runtime(1, 'dom', source))
+
+    expect(capturedContext()).not.toHaveProperty('authoring')
+
+    host.destroy()
+    registry.dispose()
+  })
+
   it('API 1 不受 renderMode 裁剪，继续同时暴露 Phaser、DOM 和节点能力', () => {
     const { host, testEnvironment, registry } = createHost(runtime(1, 'dom'))
     const context = capturedContext()

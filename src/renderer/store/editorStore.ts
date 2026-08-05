@@ -232,10 +232,10 @@ export interface EditorState {
   ): void
   updateSceneRuntime(
     sceneId: string,
-    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>>,
+    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>>,
   ): void
   updateGlobalRuntime(
-    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>>,
+    patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>>,
   ): void
   setSceneRuntime(sceneId: string, runtime: RuntimeDocument | undefined): void
   setGlobalRuntime(runtime: RuntimeDocument | undefined): void
@@ -439,24 +439,39 @@ function normalizedVisibility(
   validSceneIds: Iterable<string>,
   visibility: GlobalLayerVisibility,
 ): GlobalLayerVisibility {
-  const sceneIds = new Set(validSceneIds)
+  const validIds = [...new Set(validSceneIds)]
+  if (visibility.mode === 'all') {
+    return { mode: 'all', sceneIds: [] }
+  }
+  const sceneIds = new Set(validIds)
+  const selectedIds = [...new Set(visibility.sceneIds)].filter(
+    (id) => sceneIds.has(id),
+  )
+  if (selectedIds.length > 0) {
+    return { mode: visibility.mode, sceneIds: selectedIds }
+  }
+  const fallbackSceneId = validIds[0]
+  if (!fallbackSceneId) return { mode: 'all', sceneIds: [] }
   return {
     mode: visibility.mode,
-    sceneIds: [...new Set(visibility.sceneIds)].filter((id) => sceneIds.has(id)),
+    sceneIds: [fallbackSceneId],
   }
 }
 
 function editableRuntimePatch(
-  patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>>,
-): Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>> {
+  patch: Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>>,
+): Partial<Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>> {
   const next: Partial<
-    Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'source'>
+    Pick<RuntimeDocument, 'enabled' | 'renderMode' | 'content' | 'assets' | 'source'>
   > = {}
   if (patch.enabled !== undefined) next.enabled = patch.enabled
   if (patch.renderMode !== undefined) next.renderMode = patch.renderMode
   if (patch.source !== undefined) next.source = patch.source
   if (patch.content !== undefined) {
     next.content = structuredClone(patch.content) as EditableTextContent
+  }
+  if (patch.assets !== undefined) {
+    next.assets = structuredClone(patch.assets)
   }
   return next
 }

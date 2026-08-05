@@ -1,14 +1,14 @@
-# Editor 1.6.0 / Project V7 开发与发布验收基线
+# Editor 1.7.0 / Project V7 开发与发布验收基线
 
-> 状态：Editor 1.6.0 / Project V7 的“场景 + 命名呈现状态 + 场景/全局声明式交互”、事件驱动入场/退场编排、媒体管理、默认场景目录控制器、编辑/试运行双画布、Runtime API 2 和组件 API 4 构成当前基线；Runtime API 1 与组件 API 1–3 保留兼容。文件名保留 V3 仅为历史兼容。本文记录当前实现边界及完整发布验收要求。
+> 状态：Editor 1.7.0 / Project V7 的“场景 + 命名呈现状态 + 场景/全局声明式交互”、事件驱动入场/退场编排、媒体管理、默认场景目录控制器、统一 1280×720 编辑/试运行画布、Runtime API 2、Runtime Authoring V1 和组件 API 4 构成当前基线；Runtime API 1 与组件 API 1–3 保留兼容。文件名保留 V3 仅为历史兼容。本文记录当前实现边界及完整发布验收要求。
 >
-> 文档同步基线：2026-08-01。当前包版本仍为 1.6.0；本文已按简洁/专业模式、统一“元素”入口、“互动与动画”、受控“开发”工作台、文字显示改进和 PublishedLesson V1 重新核对。
+> 文档同步基线：2026-08-05。当前源码包版本为 1.7.0；本文已按简洁/专业模式、统一“元素”入口、统一画布 authoring、“互动与动画”、受控“开发”工作台、文字显示改进和 PublishedLesson V1 重新核对。
 >
 > 类型真值：`src/shared/runtimeTypes.ts`、`componentTypes.ts`、`projectTypes.ts`。若本文示例与类型不一致，以类型和 Schema 为准。
 
 ## 1. 目标结果
 
-编辑器是统一工程容器、轻量编辑宿主和导出入口，不是创作能力上限。Editor 1.6.0 / Project V7 必须同时满足：
+编辑器是统一工程容器、轻量编辑宿主和导出入口，不是创作能力上限。Editor 1.7.0 / Project V7 必须同时满足：
 
 1. 不因编辑器没有时间轴、节点图或粒子面板而降低课件成品效果；
 2. 所有人工创作的可见文字都能在编辑器中修改；
@@ -25,8 +25,11 @@
 13. Project V7 JSON 是业务真相；DOM、Phaser、Canvas/WebGL 只按内容职责接入，改变 `renderMode` 不会伪装成自动代码转换。
 14. Three.js 等真 3D 能力按运行时/组件离线打包，编辑器核心和 Player 不直接依赖，且具有可暂停、可捕获、可释放的生命周期。
 15. 捕获按实例准备并立即冻结 Canvas/WebGL；PDF 单页与 PPTX 组件实例/运行时条目分别隔离失败，已成功结果不因后续错误被整批清空。
-16. Windows 发布先校验 Portable/目录版 EXE 的 `FileVersion`、`ProductVersion` 和内嵌 `app.asar` 包名/版本，再启动成品验收，并记录真实大小与 SHA-256。
+16. Windows 源码交付使用根目录双击入口，按锁文件补齐依赖、构建 Player/Renderer/Electron 并直接启动；不隐式生成 Portable、目录版或安装包。
 17. 简洁/专业模式只改变编辑密度、不改变 Project V7；“元素”统一添加入口并以“常用 / 媒体”分开快捷添加和既有媒体管理，简洁出现动画原子维护规则和初始可见性，专业规则以“当 / 如果 / 就”解释。
+18. 编辑状态和当前位置试运行占用同一 1280×720 Stage，Player 是唯一视觉源；透明 Phaser 层只负责原生节点交互，authoring 宿主冻结互动、音视频、导航和课程状态。
+19. 组件与场景运行时通过显式、可校验的文字/素材目标开放画布编辑；未声明目标的旧内容仍真实显示并保留属性面板入口。
+20. Blueprint、AI 局部 patch 及全部编辑器内 AI 接入延后到 2.0 以后；1.x 只保留版本化 authoring 边界。
 
 优先级：成品效果 → 逻辑与生命周期 → 全部文字可编辑 → 其他轻编辑项 → 组件化与代码复用。
 
@@ -151,6 +154,8 @@ interface RuntimeDocument {
 
 源码通过 `CoursewareRuntime.define({ runtimeApiVersion: 2, create(ctx) {} })` 同步注册，定义版本必须与文档一致。单份源码上限 2 MiB，不允许模块语法；第三方依赖必须在构建阶段打进源码。运行时是可信离线浏览器代码，不是安全沙箱。API 1 旧内容继续兼容，同时取得 DOM 与 Phaser 两组历史能力。
 
+运行时定义可另行声明 `authoringApiVersion: 1`。它与 Runtime API 1/2 独立，仅在隔离 authoring Player 中可选提供 `ctx.authoring.register()` / `invalidate()`；text key 必须存在于 `content.values`，asset key 必须存在于 `assets`。DOM 运行时也可使用 `data-courseware-edit-key` / `data-courseware-asset-key`。目标只发布会话局部的 1280×720 命中快照，不授予 Project 写权限；当前场景的内容/素材修改由全部命名状态共享。未声明 authoring 的旧运行时仍由 Player 显示，只从属性/开发面板编辑。
+
 API 2 公共上下文提供文案、素材、状态、事件、动作、捕获与导航；渲染上下文按 `renderMode` 严格分配：
 
 - `phaser`：`Phaser`、`phaser.scene/root/underlay/overlay` 和 `nodes.get`；
@@ -191,6 +196,7 @@ interface ComponentManifestV4 {
 - V4 按 `renderMode` 只提供 `dom.root` 和/或 `phaser.{Phaser,scene,root}`，并提供 `capture.waitUntil`；
 - V4 生命周期增加 `setVisible`、`suspend/resume`、`prepareCapture`，保留 `setMode/resize/updateProps/setEditorState/destroy`；
 - Player 向组件提供 `scope`、生命周期作用域 `events`、共享 `courseState` 和场景 `presentation`；组件可直接订阅场景事件、共享进度、切换稳定状态，也可用 `emit()` 产生 `component:event`。复杂导航守卫仍由运行时承担。
+- 统一画布的隔离 authoring Player 可向 V1–V4 组件提供可选 `ctx.editor.registerTextRegion()`，并收集 DOM `data-courseware-edit-key`；目标 key 必须对应公开文字字段或有效 `props.content`。普通 preview/capture/成品不提供该桥。
 
 ## 6. 全部文字可编辑
 
@@ -200,7 +206,7 @@ interface ComponentManifestV4 {
 - 场景/全局运行时文字 → `RuntimeDocument.content.values`；
 - V3/V4 组件文字 → `props.content`。
 
-V3/V4 编辑器递归自动暴露合并后 `props.content` 中的每个字符串；显式 Editor Schema 只改善顺序、标签、说明、多行和长度。运行时内容表由属性栏统一编辑。
+V3/V4 编辑器递归自动暴露合并后 `props.content` 中的每个字符串；显式 Editor Schema 只改善顺序、标签、说明、多行和长度。组件可进一步显式登记画布文字目标。运行时内容表由属性栏统一编辑；场景与全局运行时只有显式 Runtime Authoring V1 text/asset 目标可在对应画布作用域原位修改，场景值由该场景全部命名状态共享，全局值由整课共享。
 
 必须覆盖标题、正文、按钮、题干、选项、步骤、成功/失败、重试、全局 HUD 及所有页面/状态。动态结果可计算，但人工模板必须登记。静态扫描不是完整证明，最终需逐状态视觉检查。
 
@@ -250,6 +256,17 @@ global DOM underlay
 
 DOM 层按 1280×720 设计坐标与 Canvas 对齐；每个运行时使用 Shadow Root。Phaser 适合高频动画、碰撞和程序视觉，DOM 适合复杂排版、表格、表单和 HUD，确需协作时使用 hybrid。
 
+编辑器中央 Stage 在上述 Player 平面之外只叠加一个透明的 Phaser EditorScene 和显式 authoring target 层：
+
+```text
+统一 StageViewport（1280×720）
+  ├─ sandbox Player iframe（唯一视觉源）
+  ├─ 透明 Phaser 原生交互层（仅 authoring）
+  └─ 显式 component/runtime target 命中层（仅 authoring）
+```
+
+编辑状态与当前位置试运行不会切换到另一套坐标系或另一张视觉画布。authoring Player 接收完整原生节点/背景/层级 patch；透明 Phaser 层只产生选择和几何预览，拖动完成后 Store 仍只提交一个历史步骤。playback 状态关闭编辑层并把输入交回 Player。
+
 Three.js/WebGL 不进入编辑器核心依赖。具体运行时或 V4 组件在构建时把 Three.js 与 loader 打进自己的普通浏览器脚本，使用 DOM 能力挂载 WebGL Canvas；模型默认使用离线 GLB，较大/可复用模型作为组件包 manifest asset，一次性小模型可在 Runtime 2 MiB 上限内离线嵌入。Project V7 当前没有一等 `model` 素材类型，不能伪装为 image；若要模型库和教师独立替换，需另行扩展 Schema、归档、迁移、媒体管理和导出。宿主不提供全局 `THREE`，没有 3D 的课件不承担该体积。3D 实例必须响应 resize、显隐、suspend/resume、prepareCapture 和 destroy，并释放全部 GPU 资源。
 
 ## 9. 生命周期
@@ -274,22 +291,22 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 
 - 场景列表顶部有固定“全局层”；
 - 左侧场景缩略图展示指定 `thumbnailStateId`，画布下方状态条切换基础与多个命名状态；
-- “编辑状态”直接选择和修改物化后的元素；中央“当前位置试运行”在 Blob sandbox iframe 中用最新工程从当前场景/当前命名状态启动隔离 Player（基础场景回退到当前场景初始状态），并与状态条双向同步；载入或启动失败显示原因和重试入口；顶部“整课预览”在独立窗口从第一场景初始状态开始；
-- 预览文档、工程素材和组件素材使用可撤销 Blob URL，切换/重试/关闭/失败不泄漏；
+- 中央只有一个固定 1280×720 Stage。“编辑状态”由隔离 authoring Player 显示完整合成画面，透明 Phaser 层直接选择和修改物化后的原生元素；authoring 冻结输入、声明式互动、音视频、导航、呈现状态推进和课程状态写入。“当前位置试运行”在原位置切换为 playback Player，从当前场景/当前命名状态启动（基础场景回退初始状态）；载入或启动失败显示原因和重试入口；顶部“整课预览”在独立窗口从第一场景初始状态开始；
+- 预览文档使用父窗口可撤销 Blob URL；工程与组件素材以可转移缓冲区进入 sandbox，再由 iframe 在自身不透明源内创建 Blob URL。切换、重试、关闭或失败时两侧资源均不泄漏，且不以放宽同源隔离或 Base64 大媒体为代价；
 - 顶部切换简洁/专业模式；偏好只存本机，不进入工程。简洁模式右栏为“元素 / 图层 / 属性”，专业模式追加“互动与动画 / 开发”；
 - “元素”只保留“常用 / 媒体”两个基础分类：常用容纳文本、图片、视频、声音和全部图形快捷入口；媒体只管理已进入工程的声音、视频和图片，不重复放置快捷入口或导入按钮，专业模式在媒体管理中追加声音定义、声道音量和默认静音；
 - 简洁“出现动画”提供淡入、滑入、缩放、方向、速度、延迟和预览；专业模式开放 `playbackInitialVisibility`、点击映射、组件包、运行时与完整顺序/并行动作步骤；
 - 视频是可在画布和缩略图中显示海报、可直接选择与修改的原生节点；
 - 全局层可放入文字、图片、图形、视频、教师控制器和支持 global 的 V3/V4 组件，并编辑位置、尺寸、层级和可见范围；
 - 教师控制器允许 1–12 个按钮；默认 `scene.open-picker` 展开全部场景且不选状态，固定 `scene.go` 只作为高级动作；
-- 场景与全局运行时可启停，并编辑全部 `content.values`；
+- 场景与全局运行时可启停，并从属性面板编辑全部 `content.values`；显式 Runtime Authoring V1 目标可在场景或全局画布作用域原位编辑 text/asset，场景值由全部命名状态共享，全局值由整课共享；旧运行时无目标时仍显示；
 - V3/V4 组件属性栏自动显示全部 `props.content`；V4 `renderMode` 是包能力声明，不是编辑器转换器；
 - 组件包管理显示使用数量，引用中禁止删除，同 ID 替换/升级校验作用域并可失败回滚，单实例异常隔离；
 - 编辑画布支持 50%–200% 缩放、Ctrl/Command+滚轮、空格/中键平移和视图复位；视图不写入工程；
 - 顶部工程检查可定位结构问题，错误阻断导出；本地轮转异常日志可导出诊断报告；
 - 工程归档与恢复异步执行，恢复单通道去重并取消过期压缩；保存期间的新编辑保持未保存；关闭窗口提供保存/不保存/取消；
 - 专业“开发”提供加宽的单任务工作台，可受控修改工程内运行时、对象/规则 JSON 和可编辑组件副本；不提供任意文件系统、Shell、通用时间轴或节点图，声明式交互映射也不等于任意 JavaScript 可视化；
-- 原生文字支持稳定双击编辑；运行时和组件文字至少保证属性栏编辑。
+- 原生文字支持稳定双击编辑；组件显式文字目标和场景运行时显式 text/asset 目标可在同一画布命中，未登记内容至少保证属性栏编辑。
 
 ## 11. 规模
 
@@ -327,8 +344,8 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 
 ## 13. 安全
 
-- 编辑状态画布不执行自由运行时；当前位置试运行使用 Blob URL 中的隔离 Player iframe；
-- 当前位置试运行 iframe 不授予同源权限；主进程仅允许编辑器主窗口的同源派生 Blob 子框架，拒绝主框架、独立预览窗口、外部/data/file 和非同源 Blob 导航；Player→编辑器消息携带当前载荷会话令牌，旧实例延迟事件不得覆盖新实例状态；
+- 编辑器 React 主窗口不直接执行自由运行时；统一画布的 authoring / playback 都使用 Blob URL 中、不授予同源权限的隔离 Player iframe；authoring 额外冻结输入、媒体、导航、状态推进与课程状态写入；
+- 主进程仅允许编辑器主窗口的同源派生 Blob 子框架，拒绝主框架、独立预览窗口、外部/data/file 和非同源 Blob 导航；Player↔编辑器 authoring 消息携带协议版本、会话、revision 和场景/状态上下文，旧实例延迟事件不得覆盖新实例状态；
 - 预览和捕获禁用 Node 集成并隔离上下文；
 - 阻止外部网络、新窗口、下载和系统权限；
 - 网页导出 CSP 禁止网络连接；
@@ -341,16 +358,17 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 | --- | --- |
 | Schema | V1→V2→V3→V4→V5→V6→V7、V6 `animation` 确定性迁移、动作步骤、`playbackInitialVisibility`、`scene.open-picker`、未来版本拒绝 |
 | 持久化 | 异步保存/打开、恢复单通道去重与取消、保存并发编辑、关闭三选项、复制/删除场景、ID 重写、撤销/重做 |
-| 文字 | 原生双击、运行时内容表、组件递归 content、保存重开 |
-| 场景状态 | 基础继承、增加/复制/重命名/删除、initial/thumbnail、编辑/当前位置试运行同步、原位组件更新 |
-| 预览入口 | 当前位置试运行从当前场景/状态启动、基础回退初始状态、Blob sandbox、启动失败反馈/重试；整课预览从课程起点独立启动 |
+| 文字 | 原生双击、运行时内容表、组件递归 content、组件显式 DOM/`ctx.editor` 目标、Runtime Authoring V1 text 目标、保存重开 |
+| 场景状态 | 基础继承、增加/复制/重命名/删除、initial/thumbnail、统一画布编辑/试运行切换、原位组件更新、runtime 内容跨状态共享 |
+| 统一画布 | 同一 1280×720 Stage、Player 唯一视觉源、透明 Phaser 原生交互层、fit/zoom/pan 下像素对齐、authoring 冻结互动/媒体/导航/courseState、完整节点 patch 与单步历史 |
+| 预览入口 | 当前位置试运行在同一画布从当前场景/状态启动、基础回退初始状态、Blob sandbox、启动失败反馈/重试；整课预览从课程起点独立启动 |
 | 声明式交互 | 场景 `interactions` / `globalInteractions` 分流、`scene.in` / `presentation.in`、`node.activated` / `animation.completed`、`after-previous` / `with-previous`、步骤 ID/延迟、导航最后独立组、复制/删除引用处理、编辑/Player 一致 |
 | 元素动画 | 简洁出现动画原子创建/更新/移除/撤销及高级冲突保护；专业 `node.enter` / `node.exit`、立即/淡化/四向滑动/缩放、时长/缓动、顺序/并行/延迟、完成事件、中断接管、输入禁用、Player 瞬态可见性与静态稳定帧 |
 | 声音 | 导入/删除、声音 ID、声道和主音量、静音、旁白 ducking、场景/课程生命周期、阻止自动播放后的恢复 |
 | 视频 | 画布与缩略图海报、拖拽缩放、播放动作/事件、表面点击归属、旧点击冲突诊断、循环-ended 诊断、起止时间、循环、声道、资源清理 |
 | 成品控制器 | canvas 默认、none、1–12 按钮、`scene.open-picker` 全场景目录/当前项/键盘/关闭生命周期、不选状态、高级固定 `scene.go`、折叠保持/重开复位 |
 | 组件包管理 | 使用统计、引用中禁止删除、无引用删除、同 ID 替换/升级、作用域不兼容回滚、异常隔离 |
-| 协议能力 | Runtime API 2 / Component API 4 版本匹配、`dom/phaser/hybrid` 最小能力隔离、未声明能力不可访问、API 1 与组件 API 1–3 回归 |
+| 协议能力 | Runtime API 2 / Component API 4 版本匹配、`dom/phaser/hybrid` 最小能力隔离、Runtime Authoring V1 key/target/会话/revision 校验、组件 target 桥、未声明能力不可访问、旧 runtime/组件回归 |
 | 编辑易用性 | 简洁/专业切换无工程差异；右栏无重复“素材”一级 Tab；“元素”中的“常用”集中快捷添加，“媒体”只管理既有图片/视频/声音；图片/视频复用同一 Asset ID；画布 50%–200% 缩放、Ctrl/Command+滚轮、空格/中键平移、复位且不改坐标 |
 | 工程检查 | 错误/提醒/建议、定位、错误导出阻断、提醒不阻断、诊断日志轮转与报告导出 |
 | 场景运行时 | API 2 Phaser/DOM/hybrid、节点绑定、素材、跳转、重播、显隐/暂停、捕获准备、销毁、失败隔离 |
@@ -362,13 +380,14 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 | 网页包 | 完整解压、file/HTTP、音视频相对资源、无外部请求 |
 | PDF | 固定 DOM underlay/Canvas/DOM overlay、组件 DOM/WebGL、全局层、视频海报、无声音、控制器静态开关、prepareCapture、捕获等待/超时与单页失败隔离 |
 | PPTX | 原生对象、视频文件名占位、无声音、控制器静态开关、组件/运行时快照与 fallback、组件实例/运行时条目失败隔离 |
-| 发布 | 类型、测试、E2E、生产构建、发布 EXE；Portable/目录版版本资源、app.asar 包名/版本、三份产物大小与 SHA-256 均与当前 package 一致 |
+| 源码启动 | 类型、测试、E2E、三个生产目录构建与根目录双击入口冒烟；不调用 electron-builder，不生成安装包 |
 
 ## 15. 非目标
 
 当前基线不提供：
 
-- 内置 JavaScript/HTML/CSS 编辑器；
+- Blueprint、AI 局部 patch 或任何编辑器内模型调用；全部 AI 接入延后到 2.0 以后，1.x 只保留版本化 authoring 边界；
+- 通用 Web IDE 或可任意编辑独立 HTML/CSS 文件的工作台；专业“开发”面板仅保留受版本化 Schema 约束的 `RuntimeDocument.source` JavaScript 入口；
 - 时间轴、通用可视化状态图或任意事件节点图（常用映射由声明式交互属性支持）；
 - 任意 HTML 反向拆分成原生节点；
 - 任意程序图形的自动编辑；
@@ -385,6 +404,6 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 - [互动组件开发指南](COMPONENT_AUTHORING.md)
 - [Project V7 + Runtime API 1 / 组件 API 3 兼容示例](../examples/runtime-v3-complete/README.md)
 
-Editor 1.6.0 发布必须重新执行 `npm run typecheck`、全量 Vitest、Playwright Electron E2E、Player/Renderer/Electron 生产构建、`npm run dist:win` 与 `npm run verify:release`。`verify:release` 必须在启动成品前核对 Portable 与 `win-unpacked` EXE 的 Windows `FileVersion` / `ProductVersion`，并核对 `resources/app.asar` 内嵌 `package.json` 的名称和版本；报告记录 Portable EXE、目录版 EXE 与 app.asar 的真实大小和 SHA-256。当前 1.6.0 Windows x64 制品生成于 2026-07-30，真实文件名、大小与哈希见根目录 `README.md`；当前源码回归为 Vitest **85 个文件 / 518 项**、Playwright **25/25**，发布专项结果以本次生成的 `release/verification/report.json` 为准。
+Editor 1.7.0 当前采用根目录 `启动课件编辑器.cmd` 直接运行源码，不构建 Portable、目录版或安装包。提交前必须重新执行 `npm run typecheck`、全量 Vitest、Playwright Electron E2E、Player/Renderer/Electron 生产构建，并对双击入口做真实启动冒烟；入口只能补齐锁定依赖、运行 `build:desktop` 并启动 Electron，不能隐式调用 `electron-builder`。最近一次 1.6.0 Windows x64 制品只是历史记录，不代表当前 1.7.0 源码；当前源码回归为 Vitest **96 个文件 / 615 项**、Playwright **26/26**。
 
 完整发布仍须同时报告“管线状态”和“成品效果状态”；测试通过不等于视觉与教学体验已验收。

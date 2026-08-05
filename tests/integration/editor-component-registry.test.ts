@@ -249,6 +249,7 @@ describe('编辑器 ComponentRegistry', () => {
               label: '标题',
               getBounds: () => ({ x: 12, y: 18, width: 160, height: 40 }),
             })
+            received.editor?.invalidate()
             return { destroy() {} }
           },
         })
@@ -278,6 +279,7 @@ describe('编辑器 ComponentRegistry', () => {
       files: {},
     }
     const registered = vi.fn(() => vi.fn())
+    const invalidated = vi.fn()
     const registry = new ComponentRegistry()
     await registry.loadPackages({ [id]: data })
     const lifecycle = registry.createInstance(
@@ -295,6 +297,7 @@ describe('编辑器 ComponentRegistry', () => {
       undefined,
       undefined,
       registered,
+      invalidated,
     )
 
     expect(context?.editor).toBeDefined()
@@ -302,9 +305,21 @@ describe('编辑器 ComponentRegistry', () => {
       key: 'content.title',
       label: '标题',
     }))
+    expect(invalidated).toHaveBeenCalledOnce()
+    lifecycle.destroy()
+    expect(registered.mock.results[0]?.value).toHaveBeenCalledOnce()
     disposeFromComponent?.()
     expect(registered.mock.results[0]?.value).toHaveBeenCalledOnce()
-    lifecycle.destroy()
+
+    const callsAfterDestroy = invalidated.mock.calls.length
+    context?.editor?.invalidate()
+    const disposeLateRegion = context?.editor?.registerTextRegion({
+      key: 'content.title',
+      getBounds: () => ({ x: 0, y: 0, width: 10, height: 10 }),
+    })
+    disposeLateRegion?.()
+    expect(invalidated).toHaveBeenCalledTimes(callsAfterDestroy)
+    expect(registered).toHaveBeenCalledOnce()
     registry.dispose()
   })
 

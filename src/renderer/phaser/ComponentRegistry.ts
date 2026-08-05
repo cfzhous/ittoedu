@@ -185,6 +185,7 @@ export class ComponentRegistry {
     onLifecycleError?: (failure: ComponentLifecycleFailure) => void,
     domRoot?: HTMLElement,
     onTextRegionRegistered?: (region: ComponentEditableTextRegion) => () => void,
+    onTextRegionsInvalidated?: () => void,
   ): GuardedComponentInstanceLifecycle {
     const definition = this.definitions.get(data.manifest.id)
     if (!definition) {
@@ -208,6 +209,7 @@ export class ComponentRegistry {
       error: Error
     }>> = []
     const textRegionDisposers = new Set<() => void>()
+    let editorActive = mode === 'edit'
     const previewEvents: CourseEventBus = {
       on: () => () => undefined,
       off: () => undefined,
@@ -246,6 +248,7 @@ export class ComponentRegistry {
         ? {
             editor: {
               registerTextRegion(region: ComponentEditableTextRegion): () => void {
+                if (!editorActive) return () => undefined
                 const disposeHostRegion = onTextRegionRegistered?.(region) ?? (() => undefined)
                 let active = true
                 const dispose = (): void => {
@@ -256,6 +259,9 @@ export class ComponentRegistry {
                 }
                 textRegionDisposers.add(dispose)
                 return dispose
+              },
+              invalidate(): void {
+                if (editorActive) onTextRegionsInvalidated?.()
               },
             },
           }
@@ -344,6 +350,8 @@ export class ComponentRegistry {
       onError: onLifecycleError,
     })
     if (!creation.ok) {
+      editorActive = false
+      for (const dispose of [...textRegionDisposers]) dispose()
       previewEvents.dispose()
       previewCourseState.clear()
       throw creation.failure.error
@@ -378,6 +386,7 @@ export class ComponentRegistry {
           ? { prepareCapture: lifecycle.prepareCapture }
           : {}),
       destroy(): void {
+        editorActive = false
         try {
           lifecycle.destroy()
         } finally {

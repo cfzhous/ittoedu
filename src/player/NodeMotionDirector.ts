@@ -13,6 +13,7 @@ import type { RenderedNodeHandle } from './renderNode'
 
 const SLIDE_DISTANCE = 48
 const SCALE_MULTIPLIER = 0.84
+const AUTHORING_EXIT_PREVIEW_HOLD_MS = 180
 
 interface MotionFrame {
   x: number
@@ -64,6 +65,8 @@ export interface UpdateNodeMotionOptions {
 export interface PlayNodeMotionOptions {
   /** Restart this authored action from its canonical endpoint. */
   restartFromBeginning?: boolean
+  /** Editor-only: animate a transient preview even in deterministic capture mode. */
+  animateInCapture?: boolean
 }
 
 function playbackStartsHidden(node: SceneNode): boolean {
@@ -123,6 +126,8 @@ export class NodeMotionDirector {
   private readonly records = new Map<string, MotionRecord>()
   private readonly pendingActivations = new Map<string, PendingActivation>()
   private readonly disabledInputStates = new WeakMap<object, boolean>()
+  private readonly previewTokens = new Map<string, symbol>()
+  private readonly previewTimers = new Map<string, Phaser.Time.TimerEvent>()
   private destroyed = false
 
   constructor(options: NodeMotionDirectorOptions) {
@@ -163,6 +168,7 @@ export class NodeMotionDirector {
   unregister(nodeId: string): void {
     const record = this.records.get(nodeId)
     if (!record) return
+    this.clearPreviewSession(nodeId)
     this.cancelActive(record, false)
     this.records.delete(nodeId)
     this.pendingActivations.delete(nodeId)
@@ -176,6 +182,7 @@ export class NodeMotionDirector {
   prepareStableUpdate(nodeId: string): void {
     const record = this.records.get(nodeId)
     if (!record) return
+    this.clearPreviewSession(nodeId)
     this.cancelActive(record, false)
     this.applyStableFrame(record)
     this.setRuntimeVisible(record, record.eligible)
@@ -354,7 +361,8 @@ export class NodeMotionDirector {
     }
     this.setInputTreeEnabled(root, false)
 
-    const duration = this.mode === 'capture' || this.prefersReducedMotion() ||
+    const duration = this.mode === 'capture' && options.animateInCapture !== true ||
+      this.prefersReducedMotion() ||
       action.effect === 'none'
       ? 0
       : Math.max(0, Math.min(10_000, action.durationMs))
@@ -411,9 +419,66 @@ export class NodeMotionDirector {
     })
   }
 
+  /**
+   * Plays one isolated editor preview and restores the authored stable frame.
+   * The request is session-local and never changes Project or runtimeVisible.
+   */
+  preview(action: NodeMotionAction, delayMs = 0): boolean {
+    const record = this.records.get(action.nodeId)
+    if (
+      this.destroyed ||
+      !record?.eligible ||
+      !record.handle.root.active ||
+      !this.motionTarget(record).active
+    ) {
+      return false
+    }
+
+    this.cancel(action.nodeId, true)
+    const token = Symbol(`node-motion-preview:${action.nodeId}`)
+    this.previewTokens.set(action.nodeId, token)
+    const start = (): void => {
+      this.previewTimers.delete(action.nodeId)
+      if (this.previewTokens.get(action.nodeId) !== token) return
+      void this.play(action, undefined, {
+        restartFromBeginning: true,
+        animateInCapture: true,
+      }).then((completed) => {
+        if (this.previewTokens.get(action.nodeId) !== token) return
+        if (!completed) {
+          this.previewTokens.delete(action.nodeId)
+          return
+        }
+        if (action.type === 'node.exit') {
+          const timer = this.scene.time.delayedCall(
+            AUTHORING_EXIT_PREVIEW_HOLD_MS,
+            () => {
+              if (this.previewTokens.get(action.nodeId) === token) {
+                this.cancel(action.nodeId, true)
+              }
+            },
+          )
+          this.previewTimers.set(action.nodeId, timer)
+        } else {
+          this.cancel(action.nodeId, true)
+        }
+      })
+    }
+    const delay = Math.max(0, Math.min(60_000, delayMs))
+    if (delay === 0) start()
+    else {
+      this.previewTimers.set(
+        action.nodeId,
+        this.scene.time.delayedCall(delay, start),
+      )
+    }
+    return true
+  }
+
   cancel(nodeId: string, restoreStable = true): void {
     const record = this.records.get(nodeId)
     if (!record) return
+    this.clearPreviewSession(nodeId)
     this.cancelActive(record, !restoreStable)
     if (restoreStable) {
       this.applyStableFrame(record)
@@ -425,10 +490,19 @@ export class NodeMotionDirector {
 
   clear(): void {
     if (this.destroyed) return
+    for (const nodeId of this.previewTokens.keys()) {
+      this.clearPreviewSession(nodeId)
+    }
     for (const record of this.records.values()) this.cancelActive(record, false)
     this.records.clear()
     this.pendingActivations.clear()
     this.destroyed = true
+  }
+
+  private clearPreviewSession(nodeId: string): void {
+    this.previewTimers.get(nodeId)?.remove(false)
+    this.previewTimers.delete(nodeId)
+    this.previewTokens.delete(nodeId)
   }
 
   private frameFor(

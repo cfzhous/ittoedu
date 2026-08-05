@@ -23,7 +23,10 @@ import type {
   RuntimePresentationTransition,
   RuntimePresentationApi,
 } from '../shared/runtimeTypes'
-import { mergeComponentProps } from '../shared/componentProps'
+import {
+  mergeComponentProps,
+  resolveComponentEditorState,
+} from '../shared/componentProps'
 import {
   tryCreateComponentLifecycle,
 } from '../shared/componentLifecycleGuard'
@@ -42,6 +45,10 @@ import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
 import { renderTeacherController } from './renderTeacherController'
 import { renderVideoNode } from './renderVideoNode'
 import type { ComponentRegistry } from './ComponentRegistry'
+import {
+  ComponentAuthoringTargetRegistry,
+  type ComponentAuthoringTargetsChangedHandler,
+} from './ComponentAuthoringTargetRegistry'
 import { renderShapeGraphics } from '../shared/phaserShapeRenderer'
 import { renderImageNodeCanvas } from '../shared/imageEffects'
 import { renderTextNodeCanvas } from '../shared/textLayout'
@@ -66,6 +73,11 @@ export interface RenderNodeContext {
   presentation?: RuntimePresentationApi
   audio?: AudioManager
   mode?: RuntimeExecutionMode
+  /** Unified editor host: render preview visuals while suppressing child input. */
+  authoring?: boolean
+  /** Present only in the isolated authoring Player. */
+  onComponentAuthoringTargetsChanged?:
+    ComponentAuthoringTargetsChangedHandler
   sceneId?: string
   /** Lets PlayerScene defer mount-time component events until bindings exist. */
   emitComponentEvent?(detail: ComponentEventDetail): void
@@ -423,7 +435,13 @@ function renderExternalComponent(
   let motionVisible = true
   let domMount: PhaserDomComponentMount | null = null
   let removeDomActivation: (() => void) | null = null
+  let componentAuthoringTargets: ComponentAuthoringTargetRegistry | null = null
+  const disposeComponentAuthoringTargets = (): void => {
+    componentAuthoringTargets?.destroy()
+    componentAuthoringTargets = null
+  }
   const disposeDomMount = (): void => {
+    componentAuthoringTargets?.setDomRoot(undefined)
     removeDomActivation?.()
     removeDomActivation = null
     domMount?.destroy()
@@ -463,6 +481,7 @@ function renderExternalComponent(
     if (failure.phase === 'destroy') return
     visibleFailure = failure
     contentRoot.setVisible(false)
+    disposeComponentAuthoringTargets()
     // Phaser's DOM bridge mirrors frameRoot visibility on every POST_UPDATE.
     // Destroy the failed DOM surface so that sync cannot resurrect it on the
     // next frame while the Phaser error placeholder remains available.
@@ -544,13 +563,18 @@ function renderExternalComponent(
     if (renderMode === 'dom' || renderMode === 'hybrid') {
       domMount = createPhaserDomComponentMount(scene, root, {
         className: `lesson-component-mount--${context.scope}`,
-        interactive: context.mode !== 'capture',
+        interactive: context.mode !== 'capture' && context.authoring !== true,
         instanceId: node.id,
         width: node.width,
         height: node.height,
       })
       const forwardActivation = (): void => {
-        if (context.mode !== 'capture' && root.active && root.visible) {
+        if (
+          context.mode !== 'capture' &&
+          context.authoring !== true &&
+          root.active &&
+          root.visible
+        ) {
           root.emit('pointerup')
         }
       }
@@ -560,12 +584,33 @@ function renderExternalComponent(
       }
     }
 
+    if (
+      context.authoring === true &&
+      context.onComponentAuthoringTargetsChanged
+    ) {
+      componentAuthoringTargets = new ComponentAuthoringTargetRegistry({
+        manifest: componentPackage.manifest,
+        node,
+        scope: context.scope,
+        ...(context.sceneId ? { sceneId: context.sceneId } : {}),
+        ...(domMount ? { domRoot: domMount.root } : {}),
+        onTargetsChanged: context.onComponentAuthoringTargetsChanged,
+      })
+    }
+
+    const editorState = resolveComponentEditorState(
+      componentPackage.manifest,
+      props,
+    )
     const commonContext = {
       instanceId: node.id,
       width: node.width,
       height: node.height,
       props,
-      editorState: {},
+      editorState,
+      ...(componentAuthoringTargets
+        ? { editor: componentAuthoringTargets }
+        : {}),
       actions: context.actions,
       scope: context.scope,
       events: componentEvents.events,
@@ -576,6 +621,15 @@ function renderExternalComponent(
       emit,
     }
 
+    const v4ComponentMode: ComponentCreateContextV4['mode'] =
+      context.authoring === true
+        ? 'edit'
+        : context.mode === 'capture'
+          ? 'capture'
+          : 'preview'
+    const legacyComponentMode: ComponentCreateContext['mode'] =
+      context.authoring === true ? 'edit' : 'preview'
+
     let createLifecycle: () => unknown
     if (definition.runtimeApiVersion === 4) {
       if (!isComponentManifestV4(componentPackage.manifest)) {
@@ -585,7 +639,7 @@ function renderExternalComponent(
         ...commonContext,
         runtimeApiVersion: 4 as const,
         renderMode,
-        mode: context.mode === 'capture' ? 'capture' as const : 'preview' as const,
+        mode: v4ComponentMode,
         capture: { waitUntil: registerCaptureTask },
       }
       let createContext: ComponentCreateContextV4
@@ -618,7 +672,7 @@ function renderExternalComponent(
         Phaser,
         scene,
         root: contentRoot,
-        mode: 'preview',
+        mode: legacyComponentMode,
       }
       createLifecycle = () => definition.create(createContext)
     }
@@ -633,9 +687,9 @@ function renderExternalComponent(
     )
     if (!creation.ok) throw creation.failure.error
     const lifecycle = creation.lifecycle
-    const componentMode = definition.runtimeApiVersion === 4 && context.mode === 'capture'
-      ? 'capture'
-      : 'preview'
+    const componentMode = definition.runtimeApiVersion === 4
+      ? v4ComponentMode
+      : legacyComponentMode
     lifecycle.setMode?.(componentMode)
     lifecycle.resize?.(node.width, node.height)
     lifecycle.setVisible?.(effectiveVisibility())
@@ -646,6 +700,7 @@ function renderExternalComponent(
     let currentWidth = node.width
     let currentHeight = node.height
     let currentProps = structuredClone(props)
+    let currentEditorState = structuredClone(editorState)
     let reportedVisible = effectiveVisibility()
     const updateLifecycleVisibility = (): void => {
       const visible = effectiveVisibility()
@@ -745,6 +800,14 @@ function renderExternalComponent(
           )
           if (!valuesEqual(currentProps, nextProps)) {
             lifecycle.updateProps?.(nextProps)
+            const nextEditorState = resolveComponentEditorState(
+              componentPackage.manifest,
+              nextProps,
+            )
+            if (!valuesEqual(currentEditorState, nextEditorState)) {
+              lifecycle.setEditorState?.(nextEditorState)
+              currentEditorState = structuredClone(nextEditorState)
+            }
             currentProps = structuredClone(nextProps)
           }
         } catch (error) {
@@ -761,12 +824,14 @@ function renderExternalComponent(
         )
         updateLifecycleVisibility()
         domMount?.sync()
+        componentAuthoringTargets?.update(nextNode)
       },
       destroy(): void {
         componentEventState = 'disposed'
         pendingMountEvents.length = 0
         captureTasks.clear()
         lifecycle.destroy()
+        disposeComponentAuthoringTargets()
         componentEvents.dispose()
         disposeDomMount()
 
@@ -785,6 +850,7 @@ function renderExternalComponent(
     pendingMountEvents.length = 0
     componentEvents.dispose()
     captureTasks.clear()
+    disposeComponentAuthoringTargets()
     disposeDomMount()
     console.error(`组件“${componentPackage.manifest.name}”运行失败`, error)
     for (const object of scene.children.list.slice()) {

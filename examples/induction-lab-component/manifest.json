@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene"
+  ],
+  "id": "com.alepha.physics.induction-lab",
+  "name": "电磁感应·磁通量实验台",
+  "version": "1.0.0",
+  "description": "用同一套磁体—闭合线圈—检流计装置，连续观察磁通量及其变化率",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.png",
+  "defaultSize": {
+    "width": 1160,
+    "height": 500
+  },
+  "minSize": {
+    "width": 760,
+    "height": 380
+  },
+  "preserveAspectRatio": false,
+  "assets": {
+    "apparatus": "assets/induction-apparatus-neutral-crop.png",
+    "magnet": "assets/bar-magnet-cutout.png"
+  },
+  "defaultProps": {
+    "mode": "prediction",
+    "content": {
+      "common": {
+        "ariaLabel": "电磁感应概念实验台",
+        "canvasLabel": "磁体、完整闭合线圈与检流计三维装置",
+        "eyebrow": "ELECTROMAGNETIC INDUCTION",
+        "magnetNorth": "N",
+        "magnetSouth": "S",
+        "meterLabel": "检流计",
+        "fluxLabel": "磁通量 Φ",
+        "voltageLabel": "感应电压 U",
+        "timeLabel": "时间 t",
+        "zeroLabel": "0",
+        "phaseApproach": "接近",
+        "phaseHold": "停住",
+        "phaseRecede": "远离",
+        "directionLeft": "指针向左",
+        "directionZero": "指针归零",
+        "directionRight": "指针向右",
+        "disabledHint": "编辑视图中保留确定画面，请在试运行中操作",
+        "captureHint": "静态捕获：装置与曲线已固定",
+        "suspendedHint": "实验台已暂停"
+      },
+      "prediction": {
+        "title": "先押一个答案",
+        "prompt": "同一块磁体，先接近、再停住、最后远离。检流计会怎样？",
+        "instruction": "分别预测三个阶段的指针方向，然后锁定。此处暂不判对错。",
+        "choiceLeft": "左",
+        "choiceZero": "0",
+        "choiceRight": "右",
+        "lockLabel": "锁定预测",
+        "incompleteStatus": "请先完成三个阶段的预测",
+        "readyStatus": "预测已完整，可以锁定",
+        "lockedStatus": "预测已锁定。接下来不改口，只看证据。"
+      },
+      "lab": {
+        "title": "让证据说话",
+        "prompt": "保持装置不变，只改变磁体的运动。",
+        "instruction": "可拖动磁体，也可依次运行四组对照。注意：磁体只接近线圈口，不穿过线圈。",
+        "slowApproach": "慢慢接近",
+        "fastApproach": "快速接近",
+        "holdNear": "近处停住",
+        "recede": "远离线圈",
+        "resetLabel": "重置证据",
+        "recordPrefix": "已观察",
+        "recordSuffix": "4 组",
+        "slowResult": "慢速接近：产生较小的反向脉冲",
+        "fastResult": "快速接近：同方向，幅值更大",
+        "holdResult": "近处停住：磁场很强，但读数为 0",
+        "recedeResult": "远离：脉冲方向翻转",
+        "dragHint": "水平拖动磁体，观察指针与曲线",
+        "readyStatus": "从任意一组开始，但最后要完成四组对照",
+        "evidenceStatus": "四组证据齐了：有磁场，不等于有感应",
+        "compareLabel": "对照我的预测"
+      },
+      "model": {
+        "title": "从现象到模型",
+        "prompt": "决定感应强弱的，究竟是曲线的高度，还是斜率？",
+        "instruction": "拖动共享时间线，让上下两条曲线在同一时刻对齐。",
+        "formulaFlux": "Φ = BA cosθ",
+        "formulaEmf": "|E| = N |ΔΦ / Δt|",
+        "closedCircuitNote": "闭合电路中：I = E / R",
+        "slopeCallout": "看斜率，不看高度",
+        "zeroCallout": "磁通量不变 → 感应电压为 0",
+        "fieldLabel": "磁感应强度 B",
+        "areaLabel": "线圈面积 A",
+        "angleLabel": "夹角 θ",
+        "verifyLabel": "我找到了关系",
+        "needsExploreStatus": "请先拖动时间线，再改变 B、A 或 θ",
+        "repairStatus": "再看一眼停住区：Φ 很高，但 U = 0",
+        "masteredStatus": "关系建立：U 跟随Φ 的变化率，而不是Φ 本身"
+      },
+      "lenz": {
+        "title": "方向不是背口令",
+        "prompt": "感应磁场反抗的是“磁通量的变化”，不是原磁场本身。",
+        "instruction": "接近情况已给出；请完成远离情况。",
+        "approachWorked": "接近：向右的磁通量增加 → 感应磁场向左",
+        "recedeQuestion": "远离时，向右的磁通量减小。感应磁场向哪边？",
+        "chooseLeft": "向左",
+        "chooseRight": "向右",
+        "submitLabel": "检查方向",
+        "attemptStatus": "先判断原磁通量在变大还是变小",
+        "repairStatus": "不是简单“和原磁场相反”。远离时它要阻止减小。",
+        "masteredStatus": "正确：远离时，感应磁场向右，努力维持原有磁通量",
+        "principle": "反抗的是变化"
+      },
+      "transfer": {
+        "title": "换一个装置还会吗",
+        "prompt": "不看“磁体有没有动”，只问：穿过线圈的磁通量变了吗？",
+        "instruction": "对三种情况分别选择“有感应”或“无感应”。",
+        "case1Title": "电磁铁电流增大",
+        "case1Reason": "线圈不动，但 B 随时间增大",
+        "case2Title": "线圈在匀强磁场中转动",
+        "case2Reason": "B 不变，但 θ 持续变化",
+        "case3Title": "磁体与线圈同速平移",
+        "case3Reason": "二者相对位置与线圈姿态保持不变",
+        "yesLabel": "有感应",
+        "noLabel": "无感应",
+        "checkLabel": "检查三组判断",
+        "incompleteStatus": "请先完成三组判断",
+        "repairStatus": "回到 Φ = BA cosθ：只要 B、A 或 θ 使 Φ 变化，就会有感应",
+        "masteredStatus": "三组都正确：你已经从“磁体是否运动”迁移到“磁通量是否变化”",
+        "summaryLabel": "完成概念重建"
+      }
+    },
+    "copper": "#b66a2c",
+    "copperLight": "#e2a35f",
+    "northColor": "#c94d46",
+    "southColor": "#385f8f",
+    "fluxColor": "#315f9a",
+    "voltageColor": "#ad3e42",
+    "ink": "#252321",
+    "paper": "#f3eee4",
+    "reducedMotion": false
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "mode",
+        "label": "教学环节",
+        "type": "select",
+        "options": [
+          { "label": "预测", "value": "prediction" },
+          { "label": "证据", "value": "lab" },
+          { "label": "模型", "value": "model" },
+          { "label": "方向", "value": "lenz" },
+          { "label": "迁移", "value": "transfer" }
+        ]
+      },
+      {
+        "key": "content.prediction.title",
+        "label": "预测标题",
+        "type": "text",
+        "maxLength": 40
+      },
+      {
+        "key": "content.lab.instruction",
+        "label": "实验指导",
+        "type": "textarea",
+        "maxLength": 180
+      },
+      {
+        "key": "content.model.slopeCallout",
+        "label": "模型核心句",
+        "type": "text",
+        "maxLength": 40
+      },
+      {
+        "key": "content.lenz.principle",
+        "label": "楞次定律核心句",
+        "type": "text",
+        "maxLength": 40
+      },
+      {
+        "key": "content.transfer.prompt",
+        "label": "迁移提示",
+        "type": "textarea",
+        "maxLength": 160
+      },
+      {
+        "key": "copper",
+        "label": "线圈铜色",
+        "type": "color"
+      },
+      {
+        "key": "fluxColor",
+        "label": "磁通量曲线",
+        "type": "color"
+      },
+      {
+        "key": "voltageColor",
+        "label": "电压曲线",
+        "type": "color"
+      },
+      {
+        "key": "paper",
+        "label": "纸张背景",
+        "type": "color"
+      },
+      {
+        "key": "reducedMotion",
+        "label": "强制减少动效",
+        "type": "boolean"
+      }
+    ]
+  }
+}

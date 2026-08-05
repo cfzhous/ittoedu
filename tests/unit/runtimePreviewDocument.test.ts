@@ -26,12 +26,16 @@ describe('runtime preview document', () => {
     expect(document).toContain('courseware-preview-bootstrap:ready')
     expect(document).toContain('courseware-preview-bootstrap:error')
     expect(document).toContain('__H5_LESSON_PLAYER_OPTIONS__')
+    expect(document).toContain('playerOptions.shellControls = false')
+    expect(document).toContain('materializePayloadAssets')
+    expect(document).toContain('URL.createObjectURL')
   })
 
   it('allows only blob-backed frames in the editor shell CSP', () => {
     const editorHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
 
     expect(editorHtml).toContain('frame-src blob:')
+    expect(editorHtml).toContain("connect-src 'self' blob:")
     expect(editorHtml).not.toContain("frame-src 'none'")
     const bootstrapSource = readFileSync(resolve(
       process.cwd(),

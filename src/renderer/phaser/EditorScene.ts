@@ -18,6 +18,7 @@ import type { EditorPhaserBridge } from './EditorPhaserBridge'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
 import { ExternalComponentNodeAdapter } from './adapters/ExternalComponentNodeAdapter'
 import { ImageNodeAdapter } from './adapters/ImageNodeAdapter'
+import { ProxyNodeAdapter } from './adapters/ProxyNodeAdapter'
 import { VideoNodeAdapter } from './adapters/VideoNodeAdapter'
 import { TeacherControllerNodeAdapter } from './adapters/TeacherControllerNodeAdapter'
 import type { AdapterBounds, NodeAdapter } from './adapters/NodeAdapter'
@@ -119,7 +120,10 @@ export class EditorScene extends Phaser.Scene {
     nodes: TransformSnapshot[]
   } | null = null
 
-  constructor(private readonly bridge: EditorPhaserBridge) {
+  constructor(
+    private readonly bridge: EditorPhaserBridge,
+    private readonly interactionOnly = false,
+  ) {
     super({ key: 'EditorScene' })
   }
 
@@ -144,15 +148,19 @@ export class EditorScene extends Phaser.Scene {
     this.document = structuredClone(document)
     this.assets = assets
     this.components = components
-    this.cameras.main.setBackgroundColor(document.backgroundColor)
+    this.cameras.main.setBackgroundColor(
+      this.interactionOnly ? 'rgba(0,0,0,0)' : document.backgroundColor,
+    )
     this.backgroundImage?.destroy()
     this.backgroundImage = null
-    await Promise.all([
-      this.loadBackground(document, generation),
-      this.componentRegistry.loadPackages(components).catch((error) => {
-        console.error('组件注册失败', error)
-      }),
-    ])
+    if (!this.interactionOnly) {
+      await Promise.all([
+        this.loadBackground(document, generation),
+        this.componentRegistry.loadPackages(components).catch((error) => {
+          console.error('组件注册失败', error)
+        }),
+      ])
+    }
     if (!this.scene.isActive() || generation !== this.documentLoadGeneration) return
     document.nodes.forEach((node) => this.mountAdapter(node))
     this.reorderNodes(document.nodes.map((node) => node.id))
@@ -205,7 +213,9 @@ export class EditorScene extends Phaser.Scene {
   }
 
   setBackground(color: string): void {
-    this.cameras.main.setBackgroundColor(color)
+    this.cameras.main.setBackgroundColor(
+      this.interactionOnly ? 'rgba(0,0,0,0)' : color,
+    )
     if (this.document) this.document.backgroundColor = color
   }
 
@@ -330,6 +340,12 @@ export class EditorScene extends Phaser.Scene {
 
   private mountAdapter(node: SceneNode): void {
     let adapter: NodeAdapter
+    if (this.interactionOnly) {
+      adapter = new ProxyNodeAdapter(this, node)
+      this.adapters.set(node.id, adapter)
+      this.configureAdapterInput(adapter)
+      return
+    }
     switch (node.type) {
       case 'text':
         adapter = new TextNodeAdapter(this, node)
@@ -454,6 +470,9 @@ export class EditorScene extends Phaser.Scene {
         }
         this.drawGuides(snapped.guideX, snapped.guideY)
         this.showCurrentSelection()
+        this.bridge.emitTransformsPreview({
+          nodes: this.currentTransforms(this.dragStart.nodes),
+        })
       },
     )
     target.on(Phaser.Input.Events.DRAG_END, () => {
@@ -546,6 +565,9 @@ export class EditorScene extends Phaser.Scene {
             this.previewGroupResize(this.resizeStart, pointer, dragX, dragY)
           }
           this.showCurrentSelection()
+          this.bridge.emitTransformsPreview({
+            nodes: this.currentTransforms(this.resizeStart.nodes),
+          })
         },
       )
       handle.on(Phaser.Input.Events.DRAG_END, () => {
@@ -597,6 +619,9 @@ export class EditorScene extends Phaser.Scene {
         adapter.previewRotation(item.bounds.rotation + delta)
       }
       this.showCurrentSelection()
+      this.bridge.emitTransformsPreview({
+        nodes: this.currentTransforms(this.rotationStart.nodes),
+      })
     })
     rotationHandle.on(Phaser.Input.Events.DRAG_END, () => {
       if (!this.rotationStart) return

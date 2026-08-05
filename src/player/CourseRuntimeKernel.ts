@@ -9,12 +9,28 @@ import type {
 import type { SceneDocument } from '../shared/projectTypes'
 import { CourseEventBus } from './CourseEventBus'
 import { CourseStateStore } from './CourseStateStore'
-import { RuntimeHost, type RuntimeMountEnvironment } from './RuntimeHost'
+import {
+  RuntimeHost,
+  type RuntimeAuthoringHostOptions,
+  type RuntimeMountEnvironment,
+} from './RuntimeHost'
 import { RuntimeRegistry } from './RuntimeRegistry'
 import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
 
 export interface CourseRuntimeKernelOptions {
   mode?: RuntimeExecutionMode
+  /** Authoring hosts expose an inert course-state surface to trusted runtimes. */
+  freezeCourseState?: boolean
+  /** Optional target sink supplied only by the isolated unified editor host. */
+  authoring?: RuntimeAuthoringHostOptions
+}
+
+class FrozenCourseStateStore extends CourseStateStore {
+  override set(_key: string, _value: unknown): void {}
+
+  override delete(_key: string): void {}
+
+  override clear(): void {}
 }
 
 export class CourseRuntimeKernel {
@@ -36,14 +52,16 @@ export class CourseRuntimeKernel {
   constructor(
     private readonly payload: ExportPayload,
     private readonly actions: Readonly<RuntimeHostActions>,
-    options: CourseRuntimeKernelOptions = {},
+    private readonly options: CourseRuntimeKernelOptions = {},
   ) {
     this.mode = options.mode ?? 'preview'
     this.width = payload.project.canvas.width
     this.height = payload.project.canvas.height
-    this.courseState = new CourseStateStore((change) => {
-      this.events.emit('state:change', { scope: 'course', ...change })
-    })
+    this.courseState = options.freezeCourseState
+      ? new FrozenCourseStateStore()
+      : new CourseStateStore((change) => {
+          this.events.emit('state:change', { scope: 'course', ...change })
+        })
   }
 
   mountGlobal(environment: RuntimeMountEnvironment): void {
@@ -212,6 +230,7 @@ export class CourseRuntimeKernel {
         return asset.dataUrl
       },
       registerNavigationGuard: (guard) => this.registerNavigationGuard(guard),
+      ...(this.options.authoring ? { authoring: this.options.authoring } : {}),
     })
     if (!this.visible) host.setVisible(false)
     if (this.suspended) host.suspend()

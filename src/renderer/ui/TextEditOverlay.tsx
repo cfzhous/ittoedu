@@ -175,6 +175,30 @@ export function TextEditOverlay({
       onCommit(value.text, value.runs)
     }
   }
+  const scheduleBlurFinish = () => {
+    if (finishTimerRef.current !== null) {
+      window.clearTimeout(finishTimerRef.current)
+    }
+    finishTimerRef.current = window.setTimeout(() => {
+      finishTimerRef.current = null
+      const active = document.activeElement
+      if (
+        active instanceof HTMLIFrameElement &&
+        active.classList.contains('runtime-preview-frame')
+      ) {
+        // Chromium can focus a newly laid-out sandboxed authoring iframe when
+        // the Electron window is resized. That visual host is inert in edit
+        // mode and must never end an in-progress text transaction.
+        const editor = editorRef.current
+        if (editor?.isConnected) {
+          editor.focus({ preventScroll: true })
+          blurReadyRef.current = true
+        }
+        return
+      }
+      finish(false)
+    }, 0)
+  }
 
   useLayoutEffect(() => {
     const update = () => {
@@ -183,21 +207,41 @@ export function TextEditOverlay({
       const scaleX = canvasRect.width / 1280
       const scaleY = canvasRect.height / 720
       const fontSize = node.style.fontSize * scaleY
-      setMetrics({
+      const next = {
         left: canvasRect.left - workspaceRect.left + node.x * scaleX,
         top: canvasRect.top - workspaceRect.top + node.y * scaleY,
         width: Math.max(16, node.width * scaleX),
         height: Math.max(16, node.height * scaleY),
         fontSize,
         lineHeight: fontSize * 1.22 + node.style.lineSpacing * scaleY,
-      })
+      }
+      setMetrics((current) => current &&
+          current.left === next.left &&
+          current.top === next.top &&
+          current.width === next.width &&
+          current.height === next.height &&
+          current.fontSize === next.fontSize &&
+          current.lineHeight === next.lineHeight
+        ? current
+        : next)
     }
     update()
+    // CSS transforms do not resize an element's content box, so neither
+    // ResizeObserver nor window.resize fires while the Stage zooms or pans.
+    // Track only this short-lived editing transaction and skip React updates
+    // once the visual geometry is stable.
+    let animationFrame = 0
+    const trackVisualGeometry = () => {
+      update()
+      animationFrame = window.requestAnimationFrame(trackVisualGeometry)
+    }
+    animationFrame = window.requestAnimationFrame(trackVisualGeometry)
     const observer = new ResizeObserver(update)
     observer.observe(canvas)
     observer.observe(workspace)
     window.addEventListener('resize', update)
     return () => {
+      window.cancelAnimationFrame(animationFrame)
       observer.disconnect()
       window.removeEventListener('resize', update)
     }
@@ -322,7 +366,7 @@ export function TextEditOverlay({
           onPreview(value.text, value.runs)
           if (pendingBlurRef.current) {
             pendingBlurRef.current = false
-            finishTimerRef.current = window.setTimeout(() => finish(false), 0)
+            scheduleBlurFinish()
           }
         }}
         onBlur={(event) => {
@@ -334,7 +378,7 @@ export function TextEditOverlay({
           // Ignore focus churn from the pointer sequence that opened this
           // editor. The deferred focus above arms real blur commits.
           if (!blurReadyRef.current) return
-          finish(false)
+          scheduleBlurFinish()
         }}
         onKeyDown={(event) => {
           if (composingRef.current || event.nativeEvent.isComposing) return

@@ -10,14 +10,30 @@ import {
 } from '@/renderer/project/blobUrlRegistry'
 import { assertV3ExportDependencies } from '@/renderer/export/v3ExportSupport'
 
+export const SANDBOX_ASSET_PLACEHOLDER_PREFIX =
+  'courseware-preview-asset:' as const
+
+export interface RuntimePreviewAssetTransfer {
+  placeholder: `${typeof SANDBOX_ASSET_PLACEHOLDER_PREFIX}${number}`
+  mimeType: string
+  bytes: ArrayBuffer
+}
+
 export interface RuntimePreviewPayloadInput {
   project: ProjectDocument
   assetFiles: Readonly<Record<string, Uint8Array>>
   components: Readonly<Record<string, ComponentPackageData>>
+  /**
+   * Sandboxed iframes have an opaque origin and cannot reliably consume Blob
+   * URLs created by the editor window. Transfer bytes across that boundary so
+   * the iframe can create same-context Blob URLs without Base64 expansion.
+   */
+  assetUrlMode?: 'object-url' | 'sandbox-transfer'
 }
 
 export interface RuntimePreviewPayloadResources {
   payload: ExportPayload
+  assetTransfers: RuntimePreviewAssetTransfer[]
   revoke(): void
 }
 
@@ -65,7 +81,9 @@ function findComponent(
 }
 
 /**
- * Builds the Player payload with object URLs instead of Base64 media. The
+ * Builds the Player payload with object URLs by default. Sandboxed preview
+ * hosts can opt into transferable bytes plus placeholder URLs; the iframe
+ * materializes those placeholders as Blob URLs in its own opaque origin. The
  * caller owns the returned resource set and must revoke it when replacing or
  * closing the preview iframe.
  */
@@ -73,7 +91,24 @@ export function createRuntimePreviewPayloadResources(
   input: RuntimePreviewPayloadInput,
   urlApi?: ObjectUrlApi,
 ): RuntimePreviewPayloadResources {
-  const registry = new BlobUrlRegistry(urlApi)
+  const registry = input.assetUrlMode === 'sandbox-transfer'
+    ? null
+    : new BlobUrlRegistry(urlApi)
+  const assetTransfers: RuntimePreviewAssetTransfer[] = []
+  const createAssetUrl = (
+    key: string,
+    bytes: Uint8Array,
+    mimeType: string,
+  ): string => {
+    if (registry) return registry.create(key, bytes, mimeType)
+    const placeholder = `${SANDBOX_ASSET_PLACEHOLDER_PREFIX}${assetTransfers.length}` as const
+    assetTransfers.push({
+      placeholder,
+      mimeType,
+      bytes: Uint8Array.from(bytes).buffer,
+    })
+    return placeholder
+  }
   try {
     const payload: ExportPayload = {
       project: structuredClone(input.project),
@@ -88,7 +123,7 @@ export function createRuntimePreviewPayloadResources(
       }
       payload.assets[meta.id] = {
         mimeType: meta.mimeType,
-        dataUrl: registry.create(
+        dataUrl: createAssetUrl(
           `project:${meta.id}`,
           bytes,
           meta.mimeType,
@@ -122,7 +157,7 @@ export function createRuntimePreviewPayloadResources(
         const mimeType = inferMimeType(assetPath)
         assets[assetKey] = {
           mimeType,
-          dataUrl: registry.create(
+          dataUrl: createAssetUrl(
             `component:${recordKey}:${assetKey}`,
             bytes,
             mimeType,
@@ -139,12 +174,13 @@ export function createRuntimePreviewPayloadResources(
     assertV3ExportDependencies(payload)
     return {
       payload,
+      assetTransfers,
       revoke() {
-        registry.dispose()
+        registry?.dispose()
       },
     }
   } catch (error) {
-    registry.dispose()
+    registry?.dispose()
     throw error
   }
 }

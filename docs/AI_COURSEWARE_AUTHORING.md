@@ -1,10 +1,10 @@
-# AI 互动课件创作与接入规范（Editor 1.6.0 / Project V7）
+# AI 互动课件创作与接入规范（Editor 1.7.0 / Project V7）
 
 > 读者：根据教学策划、文案和素材直接制作课件的 AI。
 >
 > 目标：一次产出可由本编辑器打开、轻改、预览和导出的完整 `.h5lesson`，不因编辑器面板能力而牺牲成品效果。
 
-> 文档同步基线：2026-08-01。当前包版本仍为 Editor 1.6.0；本规范已同步简洁/专业模式、统一“元素”入口、媒体管理、“互动与动画”、受控“开发”工作台、原生文字显示能力和 PublishedLesson V1 发布边界。
+> 文档同步基线：2026-08-05。当前源码包版本为 Editor 1.7.0；本规范已同步简洁/专业模式、统一“元素”入口、统一画布 authoring、媒体管理、“互动与动画”、受控“开发”工作台、原生文字显示能力、PublishedLesson V1 发布边界和旗舰课例。
 
 > 版本术语必须严格区分：新工程使用 Project `schemaVersion: 7`；新场景/全局自由运行时使用 `RuntimeDocument.runtimeApiVersion: 2`，API 1 继续兼容；新组件使用组件 `schemaVersion: 4` 与组件 `runtimeApiVersion: 4`，组件 API 1–3 继续兼容。文件名中的 “runtime-v3” 只表示历史播放器代际，不代表自由运行时 API 版本。
 
@@ -31,6 +31,8 @@
 
 Project V7 JSON 是唯一业务真相：它描述场景、命名状态、声明式交互、素材绑定、运行时文档、组件实例及公开参数。DOM、Phaser、Canvas、WebGL 和 Three.js 都只是执行这些数据的呈现/交互能力。架构不以 DOM 或 Phaser 为业务核心，也不承诺修改 `renderMode` 后自动转换实现代码。
 
+中央工作区只有一个固定 1280×720 画布，不再分别维护编辑画面和运行画面。Player 是“编辑状态”和“当前位置试运行”的唯一视觉源：编辑状态使用隔离 authoring Player 合成原生节点、组件、场景/全局运行时，并在上方叠加透明 Phaser 原生交互层；该层只负责选择和几何变换。authoring Player 冻结学生输入、声明式互动、音视频、导航、状态推进和课程状态写入；切换到“当前位置试运行”后，同一画布位置才启用完整 playback 行为。
+
 编辑器提供“场景 + 场景状态 + 场景/全局声明式交互”创作模型。简洁模式右侧只保留“元素 / 图层 / 属性”，并提供原子化“出现动画”；专业模式追加“互动与动画 / 开发”，开放组件、运行时、完整规则和受控工程代码编辑。两种模式只改变工作入口和信息密度，不改变或降级 Project V7。简单的按钮点击、状态切换、场景跳转、声音播放和静音控制应优先写成 `SceneDocument.interactions` 或课程级 `globalInteractions`：专业模式在“属性”中维护节点基础点击，在“互动与动画”维护非点击触发；全局规则用 `scene.in` 限定生效场景。复杂判定、连续拖拽、粒子、时间轴式动画和算法行为仍由运行时或组件承担。AI 仍可在场景运行时、全局运行时和组件代码中使用 Phaser、DOM、SVG、Canvas、WebGL、Tween、程序音效和本地素材。
 
 编辑器提供事件驱动的元素入场/退场编排。动画不是从场景开始后独立计时，而是作为 `interactions` / `globalInteractions` 的动作，由点击、场景/状态进入、组件事件、运行时事件、音视频事件、节点激活或前一动画完成触发。动作步骤可顺序等待或与前一步同时开始，并可设置相对触发点的局部延迟。它仍不是关键帧、路径或通用时间轴；复杂连续运动继续由组件/运行时承担。
@@ -38,6 +40,8 @@ Project V7 JSON 是唯一业务真相：它描述场景、命名状态、声明�
 节点的 `playbackInitialVisibility` 只决定互动 Player 初始使用作者可见性还是先隐藏等待入场动作。入场/退场只修改播放器瞬态可见性，不写回节点 `visible`，也不切换 `scene.presentation`。编辑画布、缩略图与 PDF/PPTX 始终使用作者设定的稳定画面。
 
 普通教师主要修改登记后的文案和公开属性。专业“开发”面板采用加宽的单任务工作台，通过“运行时 / 对象 JSON / 规则 JSON / 组件代码”切换并一次只呈现一类内容；可校验并修改当前工程承载的场景/全局运行时源码、所选对象 JSON、规则 JSON，以及用户创建的工程内可编辑组件副本。它不是通用网页 IDE，不提供文件系统、Shell、远程依赖、Node/Electron API 或编辑器自身源码。AI 或可复现生成脚本仍是批量生成和复杂实现的首选。
+
+Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调用。全部 AI 接入统一延后到 2.0 以后；当前只保留带协议版本、会话、revision、上下文和能力声明的 authoring 边界，使未来能力可以显式接入而不改变 Project V7 真相。AI 目前应在编辑器外按本文生成完整工程或可复现脚本，不得把现有手工 authoring 协议描述成已经接入的 AI 功能。
 
 稳定、可命名、会反复到达的视觉情况（例如题目、答错、答对、完成）必须优先由场景原生节点和 `scene.presentation.states` 表达。运行时负责判定、事件、过渡、临时粒子/拖拽轨迹、程序动画和无法合理声明为元素的效果，并通过 `ctx.presentation.setState()` 或 `transitionTo()` 切换稳定状态。不得把整页稳定 UI 全部重建在运行时中，仅留下一个无法在画布中查看和修改的空场景。
 
@@ -202,7 +206,7 @@ interface TeacherControllerNode extends BaseNode {
 - 状态切换会取消受影响节点未完成的瞬态动画并恢复新状态基线；随后发布 `presentation.enter`，由自动化决定是否继续播放入场或退场。动画不能替代命名稳定状态；
 - 基础不是运行时状态。运行端只切换 `states` 中的命名状态。
 
-左侧面板切换场景；画布下方状态条切换同一场景的基础和命名状态。中央画布分为“编辑状态”和“当前位置试运行”：前者不执行自由运行时、可直接选择元素；后者在 Blob sandbox iframe 中执行真实 Player，并直接从当前场景与当前命名状态启动，用于就地验证互动但不直接拖改元素。编辑基础场景时，当前位置试运行使用该场景的 `initialStateId`。预览文档、工程素材和组件素材使用临时 Blob URL，实例替换、关闭、重试或失败时必须撤销。顶部“整课预览”在独立窗口中从第一场景初始状态开始，适合检查完整课程流程。试运行载入或启动失败时必须显示可读原因和重试入口，不能只留下空白画布。
+左侧面板切换场景；画布下方状态条切换同一场景的基础和命名状态。中央工作区的“编辑状态”和“当前位置试运行”共用同一 1280×720 画布与 Player 视觉语义：编辑状态从当前基础或命名状态启动 authoring Player，执行组件与自由运行时的稳定视觉创建，但冻结互动、媒体、导航、呈现状态推进和课程状态写入，并由透明 Phaser 层选择/变换原生元素；当前位置试运行在原位置启用完整 playback Player，从当前场景和当前命名状态真实运行，基础场景则使用该场景 `initialStateId`。预览文档使用父窗口临时 Blob URL；工程和组件素材以可转移二进制缓冲区进入 sandbox，再由 iframe 在自身不透明源内创建 Blob URL。实例替换、关闭、重试或失败时必须分别回收文档与素材 URL。顶部“整课预览”在独立窗口中从第一场景初始状态开始，适合检查完整课程流程。任何中央 Player 载入或启动失败都必须显示可读原因和重试入口，不能只留下空白画布。
 
 ### 5.2 声明式交互规则
 
@@ -217,7 +221,7 @@ interface TeacherControllerNode extends BaseNode {
 - 连续 `with-previous` 步骤组成并行动作组；下一项 `after-previous` 必须等整组完成。场景跳转、重播或重开会销毁当前作用域，必须作为最后一个独立动作组；
 - 映射必须引用稳定的场景、状态、节点和声音 ID。复制或删除对象后要通过编辑器校验映射，不能依赖显示名称或数组序号。
 
-Editor 1.6.0 的简洁模式选中场景节点后提供“出现动画”：选择效果时必须在同一次历史提交中写入当前场景/状态的 `node.activated → node.enter` 规则并设置 `playbackInitialVisibility: 'hidden'`；选择“无”时成对移除。已有重叠专业入场规则时不得静默覆盖。专业模式将完整规则分成两个职责入口：选中节点时，“属性”中的“交互”只维护该节点的 `node.click` 规则；右侧“互动与动画”维护进入场景/状态、节点激活、动画完成、声音结束、视频生命周期/时间点、组件事件和 `runtime.event` 等非点击规则，并以“当 / 如果 / 就”解释机制，提供自然语言摘要、搜索/筛选、常用模板和可读动作序列。进入全局层后，两处改为读写 `globalInteractions`，并提供“生效场景”编辑。运行时事件必须显式选择 `scene` 或 `global` 来源：场景来源校验当前场景 ID，全局来源可由当前场景或全局规则接收。两处共用 `scene.in` / `presentation.in` 条件及元素动画、状态、场景、声音、视频动作编辑器，不得让同一条点击规则同时出现在两个入口。
+Editor 1.7.0 的简洁模式选中场景节点后提供“出现动画”：选择效果时必须在同一次历史提交中写入当前场景/状态的 `node.activated → node.enter` 规则并设置 `playbackInitialVisibility: 'hidden'`；选择“无”时成对移除。已有重叠专业入场规则时不得静默覆盖。专业模式将完整规则分成两个职责入口：选中节点时，“属性”中的“交互”只维护该节点的 `node.click` 规则；右侧“互动与动画”维护进入场景/状态、节点激活、动画完成、声音结束、视频生命周期/时间点、组件事件和 `runtime.event` 等非点击规则，并以“当 / 如果 / 就”解释机制，提供自然语言摘要、搜索/筛选、常用模板和可读动作序列。进入全局层后，两处改为读写 `globalInteractions`，并提供“生效场景”编辑。运行时事件必须显式选择 `scene` 或 `global` 来源：场景来源校验当前场景 ID，全局来源可由当前场景或全局规则接收。两处共用 `scene.in` / `presentation.in` 条件及元素动画、状态、场景、声音、视频动作编辑器，不得让同一条点击规则同时出现在两个入口。
 
 能在该模型中清楚表达的行为必须优先使用声明式规则，以便教师查看“点击哪个按钮会发生什么”。只有复杂算法、连续手势、程序动画、导航守卫或无法枚举的条件才进入运行时；运行时与声明式规则可协作，但不得让两者为同一触发器重复执行同一动作。
 
@@ -278,7 +282,7 @@ Editor 1.6.0 的简洁模式选中场景节点后提供“出现动画”：选�
 
 - DOM 组件把 `data-courseware-edit-key="content.title"` 标在真实文字元素上；可选补充 `data-courseware-edit-label` 与 `data-courseware-edit-multiline="true"`；
 - Phaser/hybrid 组件在 `ctx.editor` 存在时调用 `registerTextRegion({ key, getBounds })`，`getBounds()` 返回组件本地坐标；登记函数返回注销函数；
-- `ctx.editor` 是仅编辑画布可能提供的可选兼容扩展，兼容上下文类型 V1–V4 都必须判空；Player 的 preview/capture 不提供；
+- `ctx.editor` 是隔离 authoring Player 在编辑状态可能提供的可选兼容扩展，兼容上下文类型 V1–V4 都必须判空；当前位置试运行、整课预览、普通 preview/capture 和成品 Player 不提供；
 - `key` 必须对应已公开的 `text` / `textarea` 字段或有效 `props.content` 字符串。V1 通常没有公开字段，因此仍按整体组件编辑；
 - 未登记区域、旧组件和试运行模式继续整体选择或通过属性栏编辑，不得因未实现协议而报错；
 - 状态覆盖中的修改必须写到当前状态，组件在 `updateProps()` 中即时刷新。
@@ -343,11 +347,59 @@ CoursewareRuntime.define({
 })
 ```
 
+### 7.1 Runtime Authoring V1：显式画布目标
+
+Runtime Authoring 是独立于 `runtimeApiVersion: 1 | 2` 的可选扩展。需要让场景或全局运行时的文字、图片在对应画布作用域中原位修改时，定义显式声明 `authoringApiVersion: 1`，并仅在 `ctx.authoring` 存在时登记目标：
+
+```js
+CoursewareRuntime.define({
+  runtimeApiVersion: 2,
+  authoringApiVersion: 1,
+  create(ctx) {
+    const removeTitleTarget = ctx.authoring?.register({
+      kind: 'text',
+      key: 'title',
+      label: '实验标题',
+      multiline: false,
+      maxLength: 80,
+      layer: 'overlay',
+      getBounds: () => ({ x: 72, y: 48, width: 420, height: 58 })
+    })
+
+    const removePhotoTarget = ctx.authoring?.register({
+      kind: 'asset',
+      key: 'apparatusImage',
+      label: '实验装置图',
+      getBounds: () => ({ x: 80, y: 132, width: 560, height: 410 })
+    })
+
+    return {
+      destroy() {
+        removeTitleTarget?.()
+        removePhotoTarget?.()
+      }
+    }
+  }
+})
+```
+
+DOM / hybrid 运行时也可在真实元素上使用 `data-courseware-edit-key="title"` 或 `data-courseware-asset-key="apparatusImage"`；可选补充 `data-courseware-edit-label` 和 `data-courseware-edit-multiline`。规则如下：
+
+- text key 必须已存在于 `RuntimeDocument.content.values`，asset key 必须已存在于 `RuntimeDocument.assets`；未知键被忽略，运行时代码不能借目标直接写 Project；
+- `getBounds()` 返回当前运行时逻辑坐标中的有限、正宽高矩形，宿主统一归一化到 1280×720；布局变化后可调用 `ctx.authoring.invalidate()`；
+- `ctx.authoring` 只在隔离 authoring Player 且定义显式选择 V1 时存在；试运行、整课预览、捕获和成品必须在该字段缺失时正常工作；
+- 修改 `scene.runtime` 的 `content.values` 或 `assets` 由该场景基础与全部命名状态共享，不写入某个 `presentation` 状态覆盖；修改 `globalRuntime` 则由整课共享。界面必须按作用域明确提示；
+- 未声明 `authoringApiVersion`、未登记目标或来自旧协议的运行时仍由 Player 完整显示，只继续通过属性/开发面板编辑，不得生成不可见占位或尝试从像素反推数据。
+
+Runtime Authoring V1 是确定性的人工编辑协议，不是 Blueprint 或 AI patch。未来 AI 只能通过新的版本化边界接入，1.x 不把模型调用塞进 `ctx.authoring`。
+
+### 7.2 运行时能力与开发入口
+
 API 2 的 `renderMode` 是严格能力声明：`phaser` 只获得 Phaser 根与节点句柄，`dom` 只获得 Shadow DOM 根，`hybrid` 才同时获得两者。API 1 旧运行时仍同时取得两组能力。修改字段不会自动把 DOM、Phaser、Canvas、WebGL 或 Three.js 源码转换为另一种实现；必须同步修改代码并重新验收。
 
 单个运行时源码不得超过 2 MiB；不能使用 `import`、`export` 或 `require`，依赖必须预打包为普通浏览器 JavaScript。异步素材用 `capture.waitUntil()` 登记；Canvas/WebGL 在 `prepareCapture()` 中主动渲染确定帧。完整上下文与示例见 [自由运行时开发指南](RUNTIME_V3_AUTHORING.md)。
 
-专业“开发”面板允许对当前场景或全局 `RuntimeDocument.source` 创建最小模板、校验并应用修改；进入该面板时右侧栏会加宽，四类任务通过工作区标签切换，代码区不自动折行。应用进入正常撤销历史，执行仍只发生在现有隔离 Player。面板还可受控修改所选对象 JSON 和当前规则 JSON：对象 ID/类型及规则 ID 不可更改，应用前必须通过 Project/Interaction Schema。此入口不自动生成实现，也不因更改 `renderMode` 改写源码。
+专业“开发”面板允许对当前场景或全局 `RuntimeDocument.source` 创建最小模板、校验并应用修改；进入该面板时右侧栏会加宽，四类任务通过工作区标签切换，代码区不自动折行。应用进入正常撤销历史，源码只在隔离 Player 内执行：编辑状态使用冻结的 authoring 宿主，试运行/预览使用 playback 宿主。面板还可受控修改所选对象 JSON 和当前规则 JSON：对象 ID/类型及规则 ID 不可更改，应用前必须通过 Project/Interaction Schema。此入口不自动生成实现，也不因更改 `renderMode` 改写源码。
 
 ## 8. 跨场景动作、事件和状态
 
@@ -471,8 +523,8 @@ API 2 运行时只可使用 `renderMode` 声明的能力：
 
 运行时和 `.h5component` 都是可信本地 JavaScript，不是普通素材。
 
-- 编辑主窗口不执行场景/全局运行时；预览和静态捕获在受限环境执行；
-- 中央当前位置试运行把生成的预览文档、工程素材和组件素材装入临时 Blob URL，并通过无同源权限的 sandbox iframe 执行 Player；主进程只对编辑器主窗口的同源派生 Blob 子框架放行，主框架、独立预览窗口及外部/data/file 导航仍被拒绝。编辑器用当前会话令牌过滤被替换实例的延迟消息，并在切换、重试、关闭或失败时撤销 Blob URL；这是实例隔离、资源释放与一致性机制，不是恶意代码安全证明；
+- 编辑器 React 主窗口不直接执行场景/全局运行时；中央统一画布在无同源权限的 sandbox iframe 中执行隔离 Player。编辑状态使用冻结互动、媒体、导航和课程状态的 authoring 宿主，当前位置试运行使用完整 playback 宿主，静态捕获使用 capture 宿主；
+- 中央 Player 用父窗口临时 Blob URL 承载预览文档，并把工程与组件素材作为可转移二进制缓冲区交给 sandbox，由 iframe 在自身不透明源内创建 Blob URL；主进程只对编辑器主窗口的同源派生 Blob 子框架放行，主框架、独立预览窗口及外部/data/file 导航仍被拒绝。编辑器用当前会话令牌过滤被替换实例的延迟消息，切换、重试、关闭或失败时分别回收文档与素材 URL；这是实例隔离、资源释放与一致性机制，不是恶意代码安全证明；
 - 不允许 Node.js、Electron API、远程模块、CDN、远程 API、下载、新窗口或系统权限；
 - 单 HTML 和网页包使用 CSP 限制网络；所有依赖和素材必须离线；
 - 格式校验、CSP 和 Electron 隔离不是针对恶意 JavaScript 的绝对安全沙箱；
@@ -525,6 +577,7 @@ PPTX 中：
 - “工程检查”是交付前的结构化门禁：检查素材、场景/状态/节点引用、`scene.interactions`、`globalInteractions`、控制器、运行时、组件包和静态兜底。错误阻断所有成品导出；提醒和建议不阻断。每项应能定位到可处理位置。
 - “导出诊断报告”导出本地异常日志与版本/平台信息，不包含课件素材；它用于崩溃、预览或组件问题排查，不等于工程内容检查。
 - 编辑画布支持 50%–200% 缩放、Ctrl/Command+滚轮、空格或鼠标中键平移与一键复位。视图变换不修改节点坐标，也不进入工程或成品；验收截图必须区分编辑视图与实际 1280×720 Player 结果。
+- 编辑状态与当前位置试运行必须保持同一 1280×720 Stage 边界、Player 粗粒度平面和状态物化语义；透明 Phaser 编辑层只能处理原生节点命中与几何，不得重新绘制一套视觉。
 
 ## 15. AI 的强制工作流
 
@@ -536,7 +589,7 @@ PPTX 中：
 6. 优先把场景节点和全局元素点击、状态/场景跳转、声音和视频控制写成 `scene.interactions` / `globalInteractions`；为全局规则设置准确的 `scene.in`；再为每个确有必要的运行时和组件选择最小 `renderMode`，定义创建、更新、resize、显隐、暂停/恢复、捕获准备和销毁责任。
 7. 常见的单元素入场优先使用简洁模式“出现动画”；更复杂、可枚举的入场/退场写成专业规则动作，明确触发事件、目标元素、顺序/并行关系、局部延迟和完成后的下一步；只有连续路径、关键帧或算法运动进入组件/运行时。
 8. 直接生成 Project V7、嵌入组件、素材和可复现脚本；确认新工程含 `globalLayer`、`globalInteractions`、`interactions`、`media.audio` 和 `playback`，且不产出历史结构。
-9. 在编辑器中逐个切换基础和命名状态，实际修改原生文字、组件参数、动画与几何，保存、重开，再用“当前位置试运行”从当前场景/状态核查局部行为，用“整课预览”从课程起点核查完整流程，并检查网页导出同步。
+9. 在统一画布中逐个切换基础和命名状态，实际修改原生文字、组件显式文字目标、运行时显式 text/asset 目标、动画与几何；确认运行时内容提示“所有状态共享”，保存、重开，再用“当前位置试运行”从当前场景/状态核查局部行为，用“整课预览”从课程起点核查完整流程，并检查网页导出同步。
 10. 为可视组件提供缩略图，并验证组件包使用计数、安全替换/删除、场景缩略图状态、组件缩略图/名称后备、背景、全局元素、固定 DOM/Canvas 平面、持久化和静态导出结果；Three.js/GLB 如有使用，还要验证离线加载、低配设备、显存释放与确定帧捕获。
 11. 运行工程检查并修复全部错误，再真实操作所有核心互动；分别报告管线状态和成品效果状态。
 
@@ -567,8 +620,9 @@ PPTX 中：
 - 简洁/专业模式切换不改变工程；简洁右栏为“元素 / 图层 / 属性”，专业追加“互动与动画 / 开发”；“元素”只有一个搜索/分类入口；简洁出现动画原子维护规则与初始隐藏、可整体撤销，并在已有重叠专业规则时拒绝覆盖；
 - `.h5lesson` 可异步打开、保存、重新打开，V1–V6 工程可迁移并重新写为 V7；保存期间的新修改仍保持未保存，自动恢复去重且可取消过期压缩，关闭窗口三选项正确；
 - Runtime API 2 与组件 API 4 的 `renderMode` 能力隔离、生命周期、粗粒度 DOM/Canvas 合成和确定性捕获通过；Runtime API 1 与组件 API 1–3 兼容回归通过；
-- 场景基础/状态覆盖、原生文字、运行时内容表和 V3/V4 `props.content` 修改后能持久化；DOM `data-courseware-edit-key` 与 `ctx.editor.registerTextRegion()` 只在编辑态命中，并正确写入基础/状态 Props；
-- 场景缩略图使用指定状态并显示背景、原生元素和组件；编辑状态与当前位置试运行使用同一状态物化语义；当前位置试运行从当前场景/状态启动且失败可见、可重试，Blob 资源会释放；整课预览从课程起点启动；
+- 场景基础/状态覆盖、原生文字、运行时内容表和 V3/V4 `props.content` 修改后能持久化；组件 DOM `data-courseware-edit-key` 与 `ctx.editor.registerTextRegion()` 只在 authoring 编辑态命中，并正确写入基础/状态 Props；
+- Runtime Authoring V1 的 registered/DOM text 与 asset 目标只接受已登记键；场景目标修改后由该场景全部状态共享，全局目标由整课共享；未声明目标的旧运行时仍可见并可从属性面板修改；
+- 场景缩略图使用指定状态并显示背景、原生元素和组件；编辑状态与当前位置试运行使用同一 1280×720 Player 视觉与状态物化语义，透明 Phaser 层不造成位置偏差；authoring 冻结互动、媒体、导航和课程状态；当前位置试运行从当前场景/状态启动且失败可见、可重试，Blob 资源会释放；整课预览从课程起点启动；
 - 预览、单 HTML 和网页包使用同一运行语义，事件驱动入场/退场、顺序/并行等待、动画完成触发、声音、视频和结构化控制器可离线播放；控制器默认场景目录列出全部场景且只进入目标初始状态，固定 `scene.go`、1–12 按钮和折叠保持正确；
 - 组件包使用统计、安全删除、同 ID 替换/升级与失败隔离通过；已有图片/视频可从“元素”→“媒体”重复添加且继续复用同一 Asset ID；编辑画布缩放/平移不改工程坐标；
 - 专业开发面板可校验并撤销场景/全局 runtime source、对象/规则 JSON 修改；第三方组件不可直接改写，工程内可编辑副本使用新 ID/版本且保留原包；
@@ -587,6 +641,8 @@ PPTX 中：
 - 列出真实未实现项、终端差异、静态导出差异和剩余风险。
 
 ## 18. 示例与边界
+
+新课件应优先参考《不是磁场，而是变化》及其生成脚本：它先从误概念诊断和教学证据链出发，再选择承载方式；把题面、反馈和完成画面落实为原生节点与命名状态，只把连续拖动、曲线和装置响应交给 V4 组件，并用 `component.event → presentation.set` 保持结果可查看、可修改。运行 `npm run build:induction` 重建课件，再运行 `npm run validate:induction` 核对 Project V7、组件 API 4、可编辑文字、状态可达性和离线导出。
 
 阅读并运行 [Project V7 + Runtime API 1 / 组件 API 3 兼容示例](../examples/runtime-v3-complete/README.md)。它展示旧运行时、全局组件、事件动画和生命周期兼容行为；其中也明确标出协议兼容演示与新课件推荐状态建模之间的边界。它不是 Runtime API 2 / 组件 API 4 新上下文范本：
 

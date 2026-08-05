@@ -8,6 +8,8 @@ const appMocks = vi.hoisted(() => ({
   audioDestroy: vi.fn(),
   sceneLifecycleOrder: [] as string[],
   sceneSetDocumentVisible: vi.fn(),
+  playerSceneConstructorArgs: [] as unknown[][],
+  runtimeKernelOptions: [] as Array<Record<string, unknown> | undefined>,
 }))
 
 vi.mock('phaser', () => ({
@@ -44,6 +46,13 @@ vi.mock('../../src/player/CourseRuntimeKernel', () => ({
     readonly events = {
       on: () => () => {},
     }
+    constructor(
+      _payload: unknown,
+      _actions: unknown,
+      options?: Record<string, unknown>,
+    ) {
+      appMocks.runtimeKernelOptions.push(options)
+    }
     destroy(): void { appMocks.runtimeDestroy() }
   },
 }))
@@ -57,6 +66,9 @@ vi.mock('../../src/player/AudioManager', () => ({
 
 vi.mock('../../src/player/PlayerScene', () => ({
   PlayerScene: class FakePlayerScene {
+    constructor(...args: unknown[]) {
+      appMocks.playerSceneConstructorArgs.push(args)
+    }
     setDocumentVisible(visible: boolean): void {
       appMocks.sceneSetDocumentVisible(visible)
       appMocks.sceneLifecycleOrder.push(`visible:${visible}`)
@@ -78,7 +90,9 @@ vi.mock('../../src/player/PlayerControls', () => ({
 }))
 
 vi.mock('../../src/player/PlayerKeyboardNavigation', () => ({
-  PlayerKeyboardNavigation: class FakeKeyboardNavigation {},
+  PlayerKeyboardNavigation: class FakeKeyboardNavigation {
+    destroy(): void {}
+  },
 }))
 
 vi.mock('../../src/player/ScenePickerOverlay', () => ({
@@ -97,6 +111,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.clearAllMocks()
   appMocks.sceneLifecycleOrder.length = 0
+  appMocks.playerSceneConstructorArgs.length = 0
+  appMocks.runtimeKernelOptions.length = 0
   document.body.replaceChildren()
 })
 
@@ -109,9 +125,11 @@ describe('PlayerApp fixed renderer planes', () => {
       assets: {},
       components: {},
     }
+    const ignoredComponentTargets = vi.fn()
     const player = new PlayerApp(payload, root, {
       controls: false,
       mode: 'capture',
+      onComponentAuthoringTargetsChanged: ignoredComponentTargets,
     })
 
     const zIndex = (selector: string): string | undefined =>
@@ -121,6 +139,7 @@ describe('PlayerApp fixed renderer planes', () => {
     expect(zIndex('.lesson-canvas-host')).toBe('2')
     expect(zIndex('.lesson-runtime-layer--scene-overlay')).toBe('3')
     expect(zIndex('.lesson-runtime-layer--global-overlay')).toBe('4')
+    expect(appMocks.playerSceneConstructorArgs.at(-1)?.[13]).toBeUndefined()
 
     player.destroy()
     expect(root).toBeEmptyDOMElement()
@@ -161,5 +180,63 @@ describe('PlayerApp fixed renderer planes', () => {
 
     expect(appMocks.sceneLifecycleOrder).toEqual(['suspend', 'prepare'])
     player.destroy()
+  })
+
+  it('编辑宿主保留显式 null 基础态并屏蔽 Player 输入', () => {
+    const root = document.createElement('div')
+    document.body.append(root)
+    const project = createProject({ includeDefaultController: false })
+    const payload: ExportPayload = { project, assets: {}, components: {} }
+    const onComponentAuthoringTargetsChanged = vi.fn()
+
+    const player = new PlayerApp(payload, root, {
+      controls: false,
+      hostMode: 'authoring',
+      initialSceneId: project.scenes[0]!.id,
+      initialStateId: null,
+      onComponentAuthoringTargetsChanged,
+    })
+
+    const args = appMocks.playerSceneConstructorArgs.at(-1)!
+    expect(args[11]).toEqual({ sceneIndex: 0, stateId: null })
+    expect(args[12]).toBe(true)
+    expect(args[13]).toBe(onComponentAuthoringTargetsChanged)
+    expect(appMocks.runtimeKernelOptions.at(-1)).toMatchObject({
+      mode: 'capture',
+      freezeCourseState: true,
+    })
+    expect(root.querySelector('.lesson-authoring-input-shield')).not.toBeNull()
+    expect(root.querySelector('.lesson-canvas-host')).toHaveStyle({
+      pointerEvents: 'none',
+    })
+    expect(root.querySelector('.lesson-footer')).toBeNull()
+    player.destroy()
+  })
+
+  it('内嵌画布只隐藏外层底栏，不禁用画布内控制器', () => {
+    const footerRoot = document.createElement('div')
+    const footerProject = createProject({ includeDefaultController: false })
+    footerProject.playback.controls = 'footer'
+    const footerPlayer = new PlayerApp({
+      project: footerProject,
+      assets: {},
+      components: {},
+    }, footerRoot, { shellControls: false })
+
+    expect(footerRoot.querySelector('.lesson-footer')).toBeNull()
+    expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(false)
+    footerPlayer.destroy()
+
+    const canvasRoot = document.createElement('div')
+    const canvasProject = createProject({ includeDefaultController: true })
+    const canvasPlayer = new PlayerApp({
+      project: canvasProject,
+      assets: {},
+      components: {},
+    }, canvasRoot, { shellControls: false })
+
+    expect(canvasRoot.querySelector('.lesson-footer')).toBeNull()
+    expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(true)
+    canvasPlayer.destroy()
   })
 })

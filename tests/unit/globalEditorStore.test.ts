@@ -174,6 +174,22 @@ describe('Project V5 global-layer editor store', () => {
     })
   })
 
+  it('keeps filtered global visibility schema-valid while the UI changes mode', () => {
+    const store = useEditorStore.getState()
+    store.addScene()
+    const firstSceneId = useEditorStore.getState().project.scenes[0]!.id
+    store.setEditingScope('global')
+    store.addTextNode()
+    const nodeId = useEditorStore.getState().project.globalLayer[0]!.node.id
+
+    store.updateGlobalLayerSettings(nodeId, {
+      visibility: { mode: 'include', sceneIds: [] },
+    })
+
+    expect(useEditorStore.getState().project.globalLayer[0]!.visibility)
+      .toEqual({ mode: 'include', sceneIds: [firstSceneId] })
+  })
+
   it('authors native text, image, and shape nodes in the persistent global layer', () => {
     const store = useEditorStore.getState()
     store.addScene()

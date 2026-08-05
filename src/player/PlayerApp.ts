@@ -1,5 +1,8 @@
 import * as Phaser from 'phaser'
-import type { ExportPayload } from '../shared/componentTypes'
+import type {
+  ComponentHostActions,
+  ExportPayload,
+} from '../shared/componentTypes'
 import { ComponentRegistry } from './ComponentRegistry'
 import { createPlayerComponentHostActions } from './componentHostActions'
 import { CourseRuntimeKernel } from './CourseRuntimeKernel'
@@ -19,18 +22,50 @@ import {
 } from './PlayerScene'
 import type { RuntimeExecutionMode } from '../shared/runtimeTypes'
 import type { RuntimePresentationTransition } from '../shared/runtimeTypes'
+import type { ComponentAuthoringTargetsChangedHandler } from './ComponentAuthoringTargetRegistry'
+import type { RuntimeAuthoringTargetsChangedHandler } from './RuntimeAuthoringTargetRegistry'
+import {
+  PLAYER_AUTHORING_CAPABILITIES,
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+  type PlayerAuthoringAckMessage,
+  type PlayerAuthoringErrorCode,
+  type PlayerAuthoringErrorMessage,
+  type PlayerAuthoringPatchCommand,
+  type PlayerAuthoringReadyMessage,
+  type PlayerAuthoringScope,
+  type PlayerHostMode,
+} from '../shared/playerAuthoringProtocol'
 
 export interface PlayerAppOptions {
   transparent?: boolean
   renderWidth?: number
   renderHeight?: number
   controls?: boolean
+  /** Hide only the outer shell footer; authored canvas controls remain active. */
+  shellControls?: boolean
   mode?: RuntimeExecutionMode
   /** Start directly at this authored scene instead of briefly rendering page 1. */
   initialSceneId?: string
-  /** Optional named presentation state within `initialSceneId`. */
-  initialStateId?: string
+  /** Named state, or explicit base (`null`) in the isolated authoring host. */
+  initialStateId?: string | null
+  /** Isolated editor host; omitted for every delivery/capture surface. */
+  hostMode?: PlayerHostMode
+  /** Which authoring layer the unified editor currently exposes. */
+  authoringScope?: PlayerAuthoringScope
+  /** Internal bridge callback; ordinary callers should leave it undefined. */
+  onRuntimeAuthoringTargetsChanged?: RuntimeAuthoringTargetsChangedHandler
+  /** Internal bridge callback; ordinary callers should leave it undefined. */
+  onComponentAuthoringTargetsChanged?: ComponentAuthoringTargetsChangedHandler
 }
+
+const FROZEN_AUTHORING_ACTIONS: Readonly<ComponentHostActions> = Object.freeze({
+  goToScene: () => false,
+  nextScene: () => false,
+  previousScene: () => false,
+  replayScene: () => false,
+  restartCourse: () => false,
+})
 
 function createRuntimeDomLayer(
   className: string,
@@ -70,9 +105,13 @@ export class PlayerApp {
   private readonly scenePicker: ScenePickerOverlay | null
   private readonly scenePickerEventDisposers: Array<() => void> = []
   private readonly captureMode: boolean
+  private readonly hostMode: PlayerHostMode
+  private readonly authoringMode: boolean
   private readonly resizeObserver: ResizeObserver | null
   private alignmentFrame: number | null = null
   private capturePreparation: Promise<void> | null = null
+  private authoringQueue: Promise<void> = Promise.resolve()
+  private lastAuthoringRevision = -1
   private destroyed = false
 
   constructor(
@@ -84,6 +123,10 @@ export class PlayerApp {
       throw new Error('课件至少需要一个场景')
     }
     this.captureMode = options.mode === 'capture'
+    this.hostMode = options.hostMode === 'authoring' && !this.captureMode
+      ? 'authoring'
+      : 'playback'
+    this.authoringMode = this.hostMode === 'authoring'
     const requestedInitialSceneIndex = options.initialSceneId
       ? payload.project.scenes.findIndex((scene) => scene.id === options.initialSceneId)
       : 0
@@ -111,6 +154,7 @@ export class PlayerApp {
       position: 'absolute',
       inset: '0',
       zIndex: '2',
+      ...(this.authoringMode ? { pointerEvents: 'none' } : {}),
     })
     const logicalWidth = payload.project.canvas.width
     const logicalHeight = payload.project.canvas.height
@@ -151,14 +195,30 @@ export class PlayerApp {
       this.runtimeDomLayers.scene.overlay,
       this.runtimeDomLayers.global.overlay,
     )
+    if (this.authoringMode) {
+      const inputShield = document.createElement('div')
+      inputShield.className = 'lesson-authoring-input-shield'
+      inputShield.setAttribute('aria-hidden', 'true')
+      Object.assign(inputShield.style, {
+        position: 'absolute',
+        inset: '0',
+        zIndex: '5',
+        background: 'transparent',
+        pointerEvents: 'auto',
+      })
+      stage.append(inputShield)
+    }
     if (!options.transparent) {
       stage.style.backgroundColor = initialScene.backgroundColor
     }
 
-    const controlsMode = options.controls === false
+    const authoredControlsMode = options.controls === false
       ? 'none'
       : (payload.project.playback?.controls ?? 'footer')
-    const footer = controlsMode === 'footer'
+    const shellControlsMode = this.authoringMode || options.shellControls === false
+      ? 'none'
+      : authoredControlsMode
+    const footer = shellControlsMode === 'footer'
       ? document.createElement('footer')
       : null
     if (footer) footer.className = 'lesson-footer'
@@ -175,9 +235,22 @@ export class PlayerApp {
         () => { this.replayScene() },
       )
       : null
-    const hostActions = createPlayerComponentHostActions(this)
+    const hostActions = this.authoringMode
+      ? FROZEN_AUTHORING_ACTIONS
+      : createPlayerComponentHostActions(this)
     this.runtimeKernel = new CourseRuntimeKernel(payload, hostActions, {
-      mode: options.mode,
+      // Runtime API 1/2 has no authoring execution-mode literal. Reuse its
+      // deterministic capture branch in the isolated editor host so trusted
+      // runtimes do not start preview-only timers, media or autonomous motion.
+      mode: this.authoringMode ? 'capture' : options.mode,
+      freezeCourseState: this.authoringMode,
+      ...(this.authoringMode && options.onRuntimeAuthoringTargetsChanged
+        ? {
+            authoring: {
+              onTargetsChanged: options.onRuntimeAuthoringTargetsChanged,
+            },
+          }
+        : {}),
     })
     this.audio = new AudioManager(
       payload.project,
@@ -188,14 +261,15 @@ export class PlayerApp {
       },
       this.runtimeKernel.events,
       {
-        mode: options.mode,
+        mode: this.authoringMode ? 'capture' : options.mode,
         unlockTarget: typeof window === 'undefined' ? undefined : window,
       },
     )
     this.disposeAudioToggle = this.runtimeKernel.events.on('audio:toggle-mute', () => {
       this.audio.toggleMuted()
     })
-    this.keyboardNavigation = !this.captureMode && options.controls !== false &&
+    this.keyboardNavigation = !this.captureMode && !this.authoringMode &&
+      options.controls !== false &&
       (payload.project.playback?.keyboardNavigation ?? true)
       ? new PlayerKeyboardNavigation(
           payload.project.scenes.length,
@@ -221,19 +295,24 @@ export class PlayerApp {
       hostActions,
       this.runtimeKernel,
       this.audio,
-      !this.captureMode,
-      this.captureMode || controlsMode === 'canvas',
+      !this.captureMode && !this.authoringMode,
+      this.captureMode || this.authoringMode || authoredControlsMode === 'canvas',
       this.runtimeDomLayers,
       (color) => {
         if (!options.transparent) this.stage.style.backgroundColor = color
       },
       {
         sceneIndex: initialSceneIndex,
-        ...(initialStateId ? { stateId: initialStateId } : {}),
+        ...(initialStateId !== undefined ? { stateId: initialStateId } : {}),
       },
+      this.authoringMode,
+      this.authoringMode
+        ? options.onComponentAuthoringTargetsChanged
+        : undefined,
+      this.authoringMode ? options.authoringScope ?? 'scene' : 'scene',
     )
 
-    this.scenePicker = this.captureMode
+    this.scenePicker = this.captureMode || this.authoringMode
       ? null
       : new ScenePickerOverlay({
           stage,
@@ -315,15 +394,20 @@ export class PlayerApp {
     }
   }
 
-  goToScene(index: number, targetStateId?: string): boolean {
+  goToScene(index: number, targetStateId?: string | null): boolean {
     if (this.destroyed) {
       return false
     }
     this.scenePicker?.close()
-    return this.playerScene.showScene(index, false, targetStateId)
+    return this.playerScene.showScene(
+      index,
+      false,
+      targetStateId,
+      this.authoringMode,
+    )
   }
 
-  goToSceneById(sceneId: string, targetStateId?: string): boolean {
+  goToSceneById(sceneId: string, targetStateId?: string | null): boolean {
     if (this.destroyed) return false
     const index = this.payload.project.scenes.findIndex(
       (scene) => scene.id === sceneId,
@@ -373,10 +457,88 @@ export class PlayerApp {
   }
 
   setPresentationState(
-    stateId: string,
+    stateId: string | null,
     transition?: RuntimePresentationTransition,
   ): boolean {
+    if (stateId === null) {
+      return this.authoringMode && this.playerScene.showAuthoringBaseState()
+    }
     return this.playerScene.setPresentationState(stateId, transition)
+  }
+
+  getHostMode(): PlayerHostMode {
+    return this.hostMode
+  }
+
+  getAuthoringReadyMessage(
+    sessionId: string,
+  ): PlayerAuthoringReadyMessage | null {
+    const sceneId = this.getCurrentSceneId()
+    if (!this.authoringMode || this.destroyed || !sceneId) return null
+    return {
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.ready,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId,
+      context: {
+        sceneId,
+        stateId: this.getCurrentPresentationStateId(),
+      },
+      capabilities: PLAYER_AUTHORING_CAPABILITIES,
+    }
+  }
+
+  /** Serializes transient frames so a slower asset load cannot overtake a drag. */
+  applyAuthoringCommand(
+    command: PlayerAuthoringPatchCommand,
+  ): Promise<PlayerAuthoringAckMessage | PlayerAuthoringErrorMessage> {
+    return new Promise((resolve) => {
+      const apply = async (): Promise<void> => {
+        if (!this.authoringMode) {
+          resolve(this.authoringError(
+            command,
+            'unsupported-host-mode',
+            '当前 Player 不是统一画布编辑宿主。',
+          ))
+          return
+        }
+        if (this.destroyed) {
+          resolve(this.authoringError(
+            command,
+            'not-ready',
+            'Player 已销毁，不能继续应用画面更新。',
+          ))
+          return
+        }
+        if (command.revision <= this.lastAuthoringRevision) {
+          resolve(this.authoringError(
+            command,
+            'stale-revision',
+            `编辑修订 ${command.revision} 已过期，当前已应用 ${this.lastAuthoringRevision}。`,
+          ))
+          return
+        }
+        const result = await this.playerScene.applyAuthoringPatch(
+          command.context,
+          command.patch,
+        )
+        if (!result.ok) {
+          resolve(this.authoringError(command, result.code, result.message))
+          return
+        }
+        this.lastAuthoringRevision = command.revision
+        resolve({
+          type: PLAYER_AUTHORING_MESSAGE_TYPES.ack,
+          protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+          sessionId: command.sessionId,
+          requestId: command.requestId,
+          revision: command.revision,
+          context: command.context,
+          target: result.target,
+        })
+      }
+      const queued = this.authoringQueue.then(apply, apply)
+      this.authoringQueue = queued.catch(() => undefined)
+    })
   }
 
   async waitForCaptureReady(): Promise<void> {
@@ -445,6 +607,22 @@ export class PlayerApp {
       } catch (error) {
         console.error(`组件“${component.manifest.name}”注册失败`, error)
       }
+    }
+  }
+
+  private authoringError(
+    command: PlayerAuthoringPatchCommand,
+    code: PlayerAuthoringErrorCode,
+    message: string,
+  ): PlayerAuthoringErrorMessage {
+    return {
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.error,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: command.sessionId,
+      requestId: command.requestId,
+      revision: command.revision,
+      code,
+      message,
     }
   }
 

@@ -20,6 +20,10 @@ import { CourseStateStore } from './CourseStateStore'
 import type { CourseEventBus } from './CourseEventBus'
 import type { RuntimeRegistry } from './RuntimeRegistry'
 import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
+import {
+  RuntimeAuthoringTargetRegistry,
+  type RuntimeAuthoringTargetsChangedHandler,
+} from './RuntimeAuthoringTargetRegistry'
 
 export interface RuntimeLayerTargets<T> {
   underlay: T
@@ -50,6 +54,12 @@ export interface RuntimeHostOptions {
   courseState: CourseStateStoreContract
   assetUrl(assetId: string): string
   registerNavigationGuard(guard: RuntimeNavigationGuard): RuntimeEventDisposer
+  /** Optional isolated-player authoring sink. Ordinary preview/capture omits it. */
+  authoring?: RuntimeAuthoringHostOptions
+}
+
+export interface RuntimeAuthoringHostOptions {
+  onTargetsChanged: RuntimeAuthoringTargetsChangedHandler
 }
 
 class ScopedEventBus implements CourseEventBusContract {
@@ -193,6 +203,7 @@ export class RuntimeHost {
   private readonly looseObjects: Phaser.GameObjects.GameObject[] = []
   private readonly guardDisposers = new Set<RuntimeEventDisposer>()
   private readonly capturePromises = new Set<Promise<unknown>>()
+  private authoringRegistry: RuntimeAuthoringTargetRegistry | null = null
   private lifecycle: RuntimeInstanceLifecycle | null = null
   private failure: Error | null = null
   private destroyed = false
@@ -222,6 +233,18 @@ export class RuntimeHost {
         options.label,
         runtime.runtimeApiVersion,
       )
+      if (definition.authoringApiVersion === 1 && options.authoring) {
+        this.authoringRegistry = new RuntimeAuthoringTargetRegistry({
+          scope: options.scope,
+          sceneId: options.sceneId,
+          width: options.width,
+          height: options.height,
+          content: runtime.content,
+          assets: runtime.assets,
+          ...(exposesDom ? { domRoots: this.domRoots() } : {}),
+          onTargetsChanged: options.authoring.onTargetsChanged,
+        })
+      }
       const contentValues = Object.freeze({ ...runtime.content.values })
       const commonContext: RuntimeCommonContext = {
         scope: options.scope,
@@ -279,6 +302,9 @@ export class RuntimeHost {
             return disposer
           },
         },
+        ...(this.authoringRegistry
+          ? { authoring: this.authoringRegistry }
+          : {}),
         emit: (eventName, payload) => {
           options.events.emit('runtime:event', {
             scope: options.scope,
@@ -369,6 +395,8 @@ export class RuntimeHost {
       for (const dispose of [...this.guardDisposers]) dispose()
       this.guardDisposers.clear()
       this.scopedEvents.dispose()
+      this.authoringRegistry?.destroy()
+      this.authoringRegistry = null
       this.underlayMount?.removeAll(true)
       this.overlayMount?.removeAll(true)
       for (const object of scene.children.list.slice()) {
@@ -411,7 +439,9 @@ export class RuntimeHost {
   }
 
   resize(width: number, height: number): void {
-    if (this.destroyed || typeof this.lifecycle?.resize !== 'function') return
+    if (this.destroyed) return
+    this.authoringRegistry?.resize(width, height)
+    if (typeof this.lifecycle?.resize !== 'function') return
     try {
       this.lifecycle.resize(width, height)
     } catch (error) {
@@ -468,6 +498,8 @@ export class RuntimeHost {
       console.error(`运行时“${this.options.label}”销毁失败`, error)
     }
     this.lifecycle = null
+    this.authoringRegistry?.destroy()
+    this.authoringRegistry = null
     for (const dispose of [...this.guardDisposers]) dispose()
     this.guardDisposers.clear()
     this.scopedEvents.dispose()

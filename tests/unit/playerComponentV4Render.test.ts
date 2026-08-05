@@ -122,7 +122,19 @@ function packageData(renderMode: ComponentRenderMode): ComponentPackageData {
       minSize: { width: 16, height: 16 },
       preserveAspectRatio: false,
       assets: {},
-      defaultProps: {},
+      defaultProps: {
+        title: '可编辑标题',
+        previewPageId: 'intro',
+      },
+      editor: {
+        properties: [{ key: 'title', label: '标题', type: 'text' }],
+        pages: [
+          { id: 'intro', label: '导入页', propertyKeys: ['title'] },
+          { id: 'detail', label: '讲解页', propertyKeys: ['title'] },
+        ],
+        defaultPageId: 'intro',
+        previewPageProp: 'previewPageId',
+      },
       supportedScopes: ['scene'],
       renderMode,
     },
@@ -174,6 +186,8 @@ function mountHarness() {
 function renderComponent(
   renderMode: ComponentRenderMode,
   create: ComponentDefinitionV4['create'],
+  contextOverrides: Partial<RenderNodeContext> = {},
+  nodeOverrides: Partial<ExternalComponentNode> = {},
 ) {
   const component = packageData(renderMode)
   const definition: ComponentDefinitionV4 = {
@@ -206,11 +220,20 @@ function renderComponent(
     mode: 'preview',
     sceneId: 'scene-1',
     textureKey: (assetId) => assetId,
+    ...contextOverrides,
   }
   const scene = sceneHarness()
-  const node = componentNode(component.manifest.id)
+  const node = {
+    ...componentNode(component.manifest.id),
+    ...nodeOverrides,
+  }
   const handle = renderNode(scene, node, 1, context)
   return { component, context, definition, handle, node, registry, scene }
+}
+
+async function flushAuthoringTargets(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
 }
 
 describe('Player Component API 4 renderer capabilities', () => {
@@ -244,6 +267,128 @@ describe('Player Component API 4 renderer capabilities', () => {
       expect(document.body).toBeEmptyDOMElement()
     },
   )
+
+  it('只在 authoring Player 注入 editor，并把组件完整切到 edit 模式', async () => {
+    let received: ComponentCreateContextV4 | undefined
+    const setMode = vi.fn()
+    const onTargetsChanged = vi.fn()
+    const { handle } = renderComponent('phaser', (context) => {
+      received = context
+      context.editor?.registerTextRegion({
+        key: 'title',
+        getBounds: () => ({ x: 20, y: 12, width: 180, height: 36 }),
+      })
+      return { setMode, destroy() {} }
+    }, {
+      authoring: true,
+      onComponentAuthoringTargetsChanged: onTargetsChanged,
+    })
+
+    await flushAuthoringTargets()
+    expect(received?.mode).toBe('edit')
+    expect(received?.editor).toBeDefined()
+    expect(setMode).toHaveBeenCalledWith('edit')
+    expect(onTargetsChanged).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: 'scene',
+      sceneId: 'scene-1',
+      targets: [expect.objectContaining({
+        kind: 'component-text',
+        key: 'title',
+      })],
+    }))
+
+    handle.destroy()
+    expect(onTargetsChanged).toHaveBeenLastCalledWith(expect.objectContaining({
+      targets: [],
+    }))
+  })
+
+  it('按 previewPageProp 初始化多页 editorState，并在 props 更新时同步', () => {
+    let received: ComponentCreateContextV4 | undefined
+    const updateProps = vi.fn()
+    const setEditorState = vi.fn()
+    const { handle, node } = renderComponent('phaser', (context) => {
+      received = context
+      return { updateProps, setEditorState, destroy() {} }
+    }, {
+      authoring: true,
+    }, {
+      props: { previewPageId: 'detail' },
+    })
+
+    expect(received?.editorState).toEqual({ pageId: 'detail' })
+
+    const introNode = {
+      ...node,
+      props: { previewPageId: 'intro' },
+    }
+    handle.update(introNode)
+    expect(updateProps).toHaveBeenLastCalledWith(expect.objectContaining({
+      previewPageId: 'intro',
+    }))
+    expect(setEditorState).toHaveBeenCalledOnce()
+    expect(setEditorState).toHaveBeenLastCalledWith({ pageId: 'intro' })
+
+    handle.update(introNode)
+    expect(setEditorState).toHaveBeenCalledOnce()
+    handle.destroy()
+  })
+
+  it.each([
+    ['preview', 'preview'],
+    ['capture', 'capture'],
+  ] as const)(
+    '%s Player 即使收到回调也不创建组件 editor',
+    async (mode, expectedMode) => {
+      let received: ComponentCreateContextV4 | undefined
+      const onTargetsChanged = vi.fn()
+      const { handle } = renderComponent('phaser', (context) => {
+        received = context
+        return { destroy() {} }
+      }, {
+        mode,
+        onComponentAuthoringTargetsChanged: onTargetsChanged,
+      })
+
+      await flushAuthoringTargets()
+      expect(received?.mode).toBe(expectedMode)
+      expect(received?.editor).toBeUndefined()
+      expect(onTargetsChanged).not.toHaveBeenCalled()
+      handle.destroy()
+    },
+  )
+
+  it('生命周期失败时立即撤销已发布目标，销毁不会重复发布', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const onTargetsChanged = vi.fn()
+    const { handle, node } = renderComponent('phaser', (context) => {
+      context.editor?.registerTextRegion({
+        key: 'title',
+        getBounds: () => ({ x: 20, y: 12, width: 180, height: 36 }),
+      })
+      return {
+        resize(width) {
+          if (width !== 320) throw new Error('authoring resize failed')
+        },
+        destroy() {},
+      }
+    }, {
+      authoring: true,
+      onComponentAuthoringTargetsChanged: onTargetsChanged,
+    })
+
+    await flushAuthoringTargets()
+    expect(onTargetsChanged).toHaveBeenCalledTimes(1)
+    handle.update({ ...node, width: 360 })
+    expect(onTargetsChanged).toHaveBeenCalledTimes(2)
+    expect(onTargetsChanged).toHaveBeenLastCalledWith(expect.objectContaining({
+      targets: [],
+    }))
+
+    handle.destroy()
+    expect(onTargetsChanged).toHaveBeenCalledTimes(2)
+    consoleError.mockRestore()
+  })
 
   it('销毁 DOM 组件时同时销毁宿主，不遗留页面节点', () => {
     const mount = mountHarness()

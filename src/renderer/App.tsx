@@ -30,6 +30,7 @@ import {
   createMediaAssetImport,
   readImageDimensions,
   readMediaMetadata,
+  type ImportedImageAsset,
 } from './project/assetManager'
 import { openProjectArchiveAsync } from './project/projectArchive'
 import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
@@ -194,14 +195,15 @@ export default function App() {
   const importSound = useEditorStore((state) => state.importSound)
 
   const run = useCallback(
-    async (operation: () => Promise<void>, fallback: string) => {
-      if (busy) return
+    async <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
+      if (busy) return undefined
       setBusy(true)
       setError(null)
       try {
-        await operation()
+        return await operation()
       } catch (error) {
         setError(readableError(error, fallback))
+        return undefined
       } finally {
         setBusy(false)
       }
@@ -349,6 +351,16 @@ export default function App() {
     },
     [addImageNode, replaceImageAsset, run],
   )
+
+  const selectImageAsset = useCallback(async (): Promise<ImportedImageAsset | null> => {
+    const imported = await run(async () => {
+      const file = await desktopApi().selectImage()
+      if (!file) return null
+      const dimensions = await readImageDimensions(file.bytes, file.mimeType)
+      return createImageAssetImport(file, { dimensions })
+    }, '图片读取失败。请重新选择受支持的图片。')
+    return imported ?? null
+  }, [run])
 
   const selectAndImportAudio = useCallback(async () => {
     await run(async () => {
@@ -681,6 +693,7 @@ export default function App() {
             onAddVideo={(x, y) =>
               void selectAndImportVideo('add', { x, y })
             }
+            onSelectImageAsset={selectImageAsset}
           />
           <SceneStateStrip />
         </div>

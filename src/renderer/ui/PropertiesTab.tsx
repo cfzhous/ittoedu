@@ -1399,12 +1399,22 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
   const updateSettings = useEditorStore(
     (state) => state.updateGlobalLayerSettings,
   )
+  const [pendingVisibilityMode, setPendingVisibilityMode] = useState<
+    Exclude<GlobalLayerVisibility['mode'], 'all'> | null
+  >(null)
+  useEffect(() => {
+    setPendingVisibilityMode(null)
+  }, [nodeId])
   if (!placement) return null
 
   const setVisibility = (visibility: GlobalLayerVisibility) => {
     updateSettings(nodeId, { visibility })
   }
-  const selected = new Set(placement.visibility.sceneIds)
+  const selected = new Set(
+    pendingVisibilityMode === placement.visibility.mode
+      ? []
+      : placement.visibility.sceneIds,
+  )
 
   return (
     <section
@@ -1429,10 +1439,20 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
           { value: 'include', label: '仅所选场景' },
           { value: 'exclude', label: '除所选场景外' },
         ]}
-        onChange={(mode) => setVisibility({
-          mode,
-          sceneIds: mode === 'all' ? [] : placement.visibility.sceneIds,
-        })}
+        onChange={(mode) => {
+          if (mode === 'all') {
+            setPendingVisibilityMode(null)
+            setVisibility({ mode, sceneIds: [] })
+            return
+          }
+          const startsEmpty = placement.visibility.mode === 'all' ||
+            placement.visibility.sceneIds.length === 0
+          setPendingVisibilityMode(startsEmpty ? mode : null)
+          setVisibility({
+            mode,
+            sceneIds: startsEmpty ? [] : placement.visibility.sceneIds,
+          })
+        }}
       />
       {placement.visibility.mode !== 'all' && (
         <fieldset className="visibility-scene-list">
@@ -1445,9 +1465,18 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
                 type="checkbox"
                 checked={selected.has(scene.id)}
                 onChange={(event) => {
-                  const sceneIds = new Set(placement.visibility.sceneIds)
+                  const sceneIds = new Set(
+                    pendingVisibilityMode === placement.visibility.mode
+                      ? []
+                      : placement.visibility.sceneIds,
+                  )
                   if (event.target.checked) sceneIds.add(scene.id)
                   else sceneIds.delete(scene.id)
+                  setPendingVisibilityMode(
+                    sceneIds.size === 0 && placement.visibility.mode !== 'all'
+                      ? placement.visibility.mode
+                      : null,
+                  )
                   setVisibility({
                     mode: placement.visibility.mode,
                     sceneIds: [...sceneIds],

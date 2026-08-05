@@ -3,6 +3,7 @@ dist-electron/
 dist-player/
 dist-renderer/
 release/
+release-rebuild-*/
 artifacts/
 output/
 test-results/

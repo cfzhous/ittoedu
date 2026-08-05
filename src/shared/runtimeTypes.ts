@@ -5,6 +5,7 @@ export type RuntimeRenderMode = 'phaser' | 'dom' | 'hybrid'
 export type RuntimeLayer = 'underlay' | 'overlay'
 export type RuntimeScope = 'global' | 'scene'
 export type RuntimeExecutionMode = 'preview' | 'capture'
+export type RuntimeAuthoringApiVersion = 1
 
 export interface EditableTextMetadata {
   label?: string
@@ -171,6 +172,78 @@ export interface RuntimeCaptureContext {
   waitUntil(promise: Promise<unknown>): void
 }
 
+export interface RuntimeAuthoringBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface RuntimeAuthoringTargetRegistrationBase {
+  /** Stable key in RuntimeDocument.content.values or RuntimeDocument.assets. */
+  key: string
+  /** Optional author-facing label shown by the canvas editor. */
+  label?: string
+  /** Used only to preserve coarse underlay/overlay hit-test order. */
+  layer?: RuntimeLayer
+  /**
+   * Bounds in the runtime's current logical coordinate system. The host
+   * normalizes snapshots to the canonical 1280 x 720 authoring canvas.
+   */
+  getBounds(): RuntimeAuthoringBounds
+}
+
+export interface RuntimeAuthoringTextTargetRegistration
+  extends RuntimeAuthoringTargetRegistrationBase {
+  kind: 'text'
+  multiline?: boolean
+  maxLength?: number
+}
+
+export interface RuntimeAuthoringAssetTargetRegistration
+  extends RuntimeAuthoringTargetRegistrationBase {
+  kind: 'asset'
+}
+
+export type RuntimeAuthoringTargetRegistration =
+  | RuntimeAuthoringTextTargetRegistration
+  | RuntimeAuthoringAssetTargetRegistration
+
+/** Optional authoring bridge. It is absent from ordinary preview/capture hosts. */
+export interface RuntimeAuthoringApi {
+  register(target: RuntimeAuthoringTargetRegistration): RuntimeEventDisposer
+  /** Re-measures registered and declarative DOM targets after layout changes. */
+  invalidate(): void
+}
+
+export type RuntimeAuthoringTargetSource = 'registered' | 'dom'
+
+/** A read-only, session-local target snapshot emitted by an isolated Player. */
+export interface RuntimeAuthoringTarget {
+  /** Stable for the lifetime of the registered region or DOM element. */
+  targetId: string
+  scope: RuntimeScope
+  sceneId?: string
+  kind: 'text' | 'asset'
+  key: string
+  label?: string
+  multiline?: boolean
+  maxLength?: number
+  layer: RuntimeLayer
+  source: RuntimeAuthoringTargetSource
+  /** Axis-aligned bounds normalized to the canonical 1280 x 720 canvas. */
+  bounds: Readonly<RuntimeAuthoringBounds>
+}
+
+export interface RuntimeAuthoringTargetUpdate {
+  /** Monotonically increases for each changed snapshot from one host. */
+  revision: number
+  /** Identifies the host even when cleanup publishes an empty target list. */
+  scope: RuntimeScope
+  sceneId?: string
+  targets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
+}
+
 interface RuntimeCreateContextBase {
   scope: RuntimeScope
   mode: RuntimeExecutionMode
@@ -187,6 +260,8 @@ interface RuntimeCreateContextBase {
   courseState: CourseStateStore
   capture: RuntimeCaptureContext
   navigation: RuntimeNavigationApi
+  /** Present only when the definition and isolated host both opt into authoring V1. */
+  authoring?: RuntimeAuthoringApi
   emit(eventName: string, payload?: unknown): void
 }
 
@@ -248,11 +323,15 @@ export interface RuntimeInstanceLifecycle {
 
 export interface RuntimeDefinitionV1 {
   runtimeApiVersion: 1
+  /** Optional canvas-authoring extension; independent from Runtime API 1/2. */
+  authoringApiVersion?: RuntimeAuthoringApiVersion
   create(context: RuntimeCreateContextV1): RuntimeInstanceLifecycle
 }
 
 export interface RuntimeDefinitionV2 {
   runtimeApiVersion: 2
+  /** Optional canvas-authoring extension; independent from Runtime API 1/2. */
+  authoringApiVersion?: RuntimeAuthoringApiVersion
   create(context: RuntimeCreateContextV2): RuntimeInstanceLifecycle
 }
 

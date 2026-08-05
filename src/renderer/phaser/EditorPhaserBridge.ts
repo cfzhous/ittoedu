@@ -6,7 +6,6 @@ import type {
   TextRun,
 } from '../../shared/projectTypes'
 import type { EditorScene } from './EditorScene'
-import { onElementAnimationPreviewRequested } from './elementAnimationPreviewBus'
 import type { ComponentCanvasTextTarget } from './adapters/ExternalComponentNodeAdapter'
 
 export interface NodeMoveEndEvent {
@@ -45,6 +44,8 @@ export interface NodesTransformEndEvent {
   nodes: NodeTransformEndEvent[]
 }
 
+export type NodesTransformPreviewEvent = NodesTransformEndEvent
+
 type Handler<T> = (event: T) => void
 
 export class EditorPhaserBridge {
@@ -65,17 +66,11 @@ export class EditorPhaserBridge {
   private readonly resizeHandlers = new Set<Handler<NodeResizeEndEvent>>()
   private readonly rotateHandlers = new Set<Handler<NodeRotateEndEvent>>()
   private readonly transformsHandlers = new Set<Handler<NodesTransformEndEvent>>()
+  private readonly transformPreviewHandlers =
+    new Set<Handler<NodesTransformPreviewEvent>>()
   private readonly doubleClickHandlers = new Set<Handler<string>>()
   private readonly componentTextDoubleClickHandlers =
     new Set<Handler<ComponentCanvasTextTarget>>()
-  private readonly stopAnimationPreviewListener: () => void
-
-  constructor() {
-    this.stopAnimationPreviewListener = onElementAnimationPreviewRequested((request) => {
-      this.previewNodeMotion(request.action, request.delayMs)
-    })
-  }
-
   attach(scene: EditorScene): void {
     this.scene = scene
     if (this.pending) {
@@ -150,7 +145,6 @@ export class EditorPhaserBridge {
   }
 
   dispose(): void {
-    this.stopAnimationPreviewListener()
     this.scene = null
     this.pending = undefined
   }
@@ -178,6 +172,12 @@ export class EditorPhaserBridge {
   onNodesTransformEnd(handler: Handler<NodesTransformEndEvent>): () => void {
     this.transformsHandlers.add(handler)
     return () => this.transformsHandlers.delete(handler)
+  }
+  onNodesTransformPreview(
+    handler: Handler<NodesTransformPreviewEvent>,
+  ): () => void {
+    this.transformPreviewHandlers.add(handler)
+    return () => this.transformPreviewHandlers.delete(handler)
   }
   onTextDoubleClick(handler: Handler<string>): () => void {
     this.doubleClickHandlers.add(handler)
@@ -210,6 +210,9 @@ export class EditorPhaserBridge {
   }
   emitTransformsEnd(event: NodesTransformEndEvent): void {
     this.transformsHandlers.forEach((handler) => handler(event))
+  }
+  emitTransformsPreview(event: NodesTransformPreviewEvent): void {
+    this.transformPreviewHandlers.forEach((handler) => handler(event))
   }
   emitTextDoubleClick(nodeId: string): void {
     this.doubleClickHandlers.forEach((handler) => handler(nodeId))

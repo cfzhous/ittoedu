@@ -12,7 +12,7 @@ import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { ElectronApplication, Page } from 'playwright'
 import sharp from 'sharp'
-import { strToU8, unzipSync, zipSync } from 'fflate'
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 
 const root = resolve(__dirname, '..', '..')
 const outputDir = join(tmpdir(), 'phaser-courseware-editor-e2e')
@@ -21,6 +21,10 @@ const projectPath = join(outputDir, 'roundtrip.h5lesson')
 const componentProjectPath = join(outputDir, 'component-roundtrip.h5lesson')
 const globalComponentProjectPath = join(outputDir, 'global-component-roundtrip.h5lesson')
 const globalNativeProjectPath = join(outputDir, 'global-native-roundtrip.h5lesson')
+const globalRuntimeAuthoringProjectPath = join(
+  outputDir,
+  'global-runtime-authoring.h5lesson',
+)
 const imageProjectPath = join(outputDir, 'image-roundtrip.h5lesson')
 const htmlPath = join(outputDir, 'offline-courseware.html')
 const webPackagePath = join(outputDir, 'offline-courseware-web.zip')
@@ -223,6 +227,7 @@ async function addText(page: Page) {
   await page.getByRole('tab', { name: '元素' }).click()
   await page.getByRole('tab', { name: '常用' }).click()
   await page.getByTestId('add-text').click()
+  await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
 }
 
 async function addRectangle(page: Page) {
@@ -250,8 +255,10 @@ async function dragElementToCanvas(
   // canvas so Chromium preserves the custom courseware MIME payload.
   await page.getByTestId(testId).dragTo(workspace, {
     targetPosition: {
-      x: canvasBounds.x - workspaceBounds.x + logicalPoint.x,
-      y: canvasBounds.y - workspaceBounds.y + logicalPoint.y,
+      x: canvasBounds.x - workspaceBounds.x +
+        (logicalPoint.x / 1280) * canvasBounds.width,
+      y: canvasBounds.y - workspaceBounds.y +
+        (logicalPoint.y / 720) * canvasBounds.height,
     },
   })
   const propertiesTab = page.getByRole('tab', { name: '属性' })
@@ -287,8 +294,8 @@ async function dragElementToCanvas(
       },
       {
         sourceTestId: testId,
-        clientX: canvasBounds.x + logicalPoint.x,
-        clientY: canvasBounds.y + logicalPoint.y,
+        clientX: canvasBounds.x + (logicalPoint.x / 1280) * canvasBounds.width,
+        clientY: canvasBounds.y + (logicalPoint.y / 720) * canvasBounds.height,
       },
     )
   }
@@ -304,7 +311,10 @@ async function editDefaultText(page: Page, value: string) {
   await page.getByRole('button', { name: '编辑局部文字格式' }).click()
   const editor = page.getByTestId('text-edit-overlay')
   await editor.waitFor()
+  await expect(editor).toBeFocused()
   await editor.fill(value)
+  await expect(editor).toHaveText(value)
+  await expect(editor).toBeFocused()
   await editor.press('Control+Enter')
   await expect(editor).toHaveCount(0)
   await page.waitForTimeout(500)
@@ -320,11 +330,14 @@ async function editDefaultTextWithComposition(page: Page, value: string) {
   await editor.press('Control+Enter')
   await expect(editor).toBeVisible()
   await editor.dispatchEvent('compositionend', { data: '中文' })
-  await editor.evaluate((element) => (element as HTMLTextAreaElement).blur())
+  // A real browser may deliver the pending blur immediately after IME ends.
+  // Tabbing is valid whether the overlay is still focused or already closing,
+  // and avoids racing a locator that has just been intentionally detached.
+  await page.keyboard.press('Tab')
   await expect(editor).toHaveCount(0)
 }
 
-test.describe.serial('Phaser 课件编辑器 V1.6', () => {
+test.describe.serial('Phaser 课件编辑器 V1.7', () => {
   test.beforeAll(() => {
     mkdirSync(outputDir, { recursive: true })
     mkdirSync(visualOutputDirectory, { recursive: true })
@@ -334,6 +347,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       componentProjectPath,
       globalComponentProjectPath,
       globalNativeProjectPath,
+      globalRuntimeAuthoringProjectPath,
       imageProjectPath,
       htmlPath,
       webPackagePath,
@@ -377,6 +391,63 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
         'manifest.json': strToU8(`${JSON.stringify(globalManifest, null, 2)}\n`),
         'runtime.js': strToU8(globalRuntime),
       }, { level: 9 })),
+    )
+    const authoringArchive = unzipSync(readFileSync(join(
+      root,
+      'examples',
+      'sample-project.h5lesson',
+    )))
+    const authoringProjectEntry = authoringArchive['project.json']
+    if (!authoringProjectEntry) {
+      throw new Error('示例工程缺少 project.json')
+    }
+    const authoringProject = JSON.parse(strFromU8(authoringProjectEntry))
+    const originalRuntimeAssetId = 'asset_runtime_authoring_original'
+    const originalRuntimeAssetPath = 'assets/runtime-authoring-original.png'
+    const originalRuntimeAssetBytes = readFileSync(firstImagePath)
+    authoringProject.assets[originalRuntimeAssetId] = {
+      id: originalRuntimeAssetId,
+      filename: 'runtime-authoring-original.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: originalRuntimeAssetPath,
+      byteLength: originalRuntimeAssetBytes.byteLength,
+      width: 1024,
+      height: 1024,
+    }
+    authoringArchive[originalRuntimeAssetPath] = Uint8Array.from(
+      originalRuntimeAssetBytes,
+    )
+    authoringProject.scenes[0].runtime = {
+      enabled: true,
+      runtimeApiVersion: 2,
+      renderMode: 'dom',
+      source: `CoursewareRuntime.define({runtimeApiVersion:2,authoringApiVersion:1,create:function(ctx){var probe={mode:ctx.mode,authoring:Boolean(ctx.authoring)};if(ctx.authoring){probe.replayAccepted=ctx.actions.replayScene();ctx.courseState.set('e2e-authoring-write','changed');probe.stateAfterWrite=ctx.courseState.get('e2e-authoring-write');}window.__e2eSceneAuthoringProbe=probe;var label=document.createElement('div');label.dataset.coursewareEditKey='title';label.dataset.coursewareEditLabel='场景标题';label.textContent=ctx.content.get('title');Object.assign(label.style,{position:'absolute',left:'240px',top:'48px',width:'360px',height:'64px',boxSizing:'border-box',padding:'12px 20px',border:'1px solid #a78bfa',borderRadius:'12px',color:'#f5f3ff',background:'#4c1d95',font:'600 26px Microsoft YaHei'});var image=document.createElement('img');image.dataset.coursewareAssetKey='hero';image.dataset.coursewareEditLabel='场景主视觉';image.src=ctx.assets.url('hero');image.alt='场景主视觉';Object.assign(image.style,{position:'absolute',left:'920px',top:'480px',width:'150px',height:'150px',border:'2px solid #c4b5fd',borderRadius:'18px',objectFit:'cover'});ctx.dom.overlay.append(label,image);return{destroy:function(){label.remove();image.remove();}};}});`,
+      content: {
+        values: { title: '场景画布初始标题' },
+        metadata: { title: { label: '场景标题' } },
+      },
+      assets: {
+        hero: { assetId: originalRuntimeAssetId },
+      },
+    }
+    authoringProject.globalRuntime = {
+      enabled: true,
+      runtimeApiVersion: 2,
+      renderMode: 'dom',
+      source: `CoursewareRuntime.define({runtimeApiVersion:2,authoringApiVersion:1,create:function(ctx){var label=document.createElement('div');label.dataset.coursewareEditKey='title';label.dataset.coursewareEditLabel='全局标题';label.textContent=ctx.content.get('title');Object.assign(label.style,{position:'absolute',left:'240px',top:'160px',width:'360px',height:'72px',boxSizing:'border-box',padding:'16px 22px',border:'1px solid #60a5fa',borderRadius:'12px',color:'#eff6ff',background:'#172554',font:'600 28px Microsoft YaHei'});ctx.dom.overlay.append(label);return{destroy:function(){label.remove();}};}});`,
+      content: {
+        values: { title: '全局画布初始标题' },
+        metadata: { title: { label: '全局标题' } },
+      },
+      assets: {},
+    }
+    authoringArchive['project.json'] = strToU8(
+      `${JSON.stringify(authoringProject, null, 2)}\n`,
+    )
+    writeFileSync(
+      globalRuntimeAuthoringProjectPath,
+      Buffer.from(zipSync(authoringArchive, { level: 9 })),
     )
     rmSync(webPackageDirectory, { recursive: true, force: true })
   })
@@ -422,7 +493,37 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       await expect(
         simpleMotion.getByRole('button', { name: '淡入' }),
       ).toHaveAttribute('aria-pressed', 'true')
+      const authoringFrame = page.frames().find((frame) => (
+        frame !== page.mainFrame() && frame.url().startsWith('blob:')
+      ))
+      if (!authoringFrame) throw new Error('统一编辑 Player iframe 未创建')
+      const readTextMotionFrame = () => authoringFrame.evaluate(() => {
+        const player = (window as any).__H5_LESSON_PLAYER__
+        const handle = player?.playerScene?.renderedNodes?.find(
+          (item: any) => item.type === 'text',
+        )
+        const target = handle?.motionRoot ?? handle?.root
+        return target
+          ? {
+              x: target.x,
+              y: target.y,
+              alpha: target.alpha,
+              scaleX: target.scaleX,
+              scaleY: target.scaleY,
+              visible: target.visible,
+            }
+          : null
+      })
+      const stableMotionFrame = await readTextMotionFrame()
+      if (!stableMotionFrame) throw new Error('文字动画视觉节点未创建')
       await simpleMotion.getByRole('button', { name: '预览' }).click()
+      await expect.poll(async () => (await readTextMotionFrame())?.alpha ?? 1, {
+        timeout: 2_000,
+        intervals: [20, 30, 50],
+      }).toBeLessThan(stableMotionFrame.alpha * 0.9)
+      await expect.poll(readTextMotionFrame, { timeout: 3_000 }).toEqual(
+        stableMotionFrame,
+      )
 
       await page.getByRole('button', {
         name: '当前位置试运行',
@@ -481,6 +582,9 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
   test('当前位置试运行：Blob 沙箱中的真实 Player 可启动', async () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
+      await page.getByTestId('global-layer-entry').click()
+      await page.getByRole('tab', { name: '属性' }).click()
+      await page.getByLabel('导航控制方式').selectOption('footer')
       await page.getByRole('button', { name: '专业' }).click()
       await page.getByRole('tab', { name: '互动与动画' }).click()
       await expect(
@@ -506,17 +610,55 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
         page.frameLocator('iframe[title="当前位置试运行"]')
           .locator('.lesson-canvas-host canvas'),
       ).toBeVisible({ timeout: 15_000 })
+      await expect(
+        page.frameLocator('iframe[title="当前位置试运行"]')
+          .locator('.lesson-footer'),
+      ).toHaveCount(0)
       await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
       const runtimeFrame = page.frames().find((frame) => (
         frame !== page.mainFrame() && frame.url().startsWith('blob:')
       ))
       if (!runtimeFrame) throw new Error('当前位置试运行 iframe 未创建')
+      await expect.poll(() => runtimeFrame.evaluate(() => {
+        const root = document.querySelector<HTMLElement>('#lesson-root')
+        const stage = document.querySelector<HTMLElement>('.lesson-stage')
+        if (!root || !stage) return null
+        const rootBounds = root.getBoundingClientRect()
+        const stageBounds = stage.getBoundingClientRect()
+        return {
+          widthError: Math.abs(rootBounds.width - stageBounds.width),
+          heightError: Math.abs(rootBounds.height - stageBounds.height),
+        }
+      })).toEqual({ widthError: 0, heightError: 0 })
       await expect.poll(() => runtimeFrame.evaluate(
         () => (window as any).__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? null,
       )).toBe(1)
       await expect.poll(() => runtimeFrame.evaluate(
         () => (window as any).__H5_LESSON_PLAYER__?.getCurrentPresentationStateId() ?? null,
       )).not.toBe('state_initial')
+
+      const previewSrc = await previewFrame.getAttribute('src')
+      const navigationAccepted = await runtimeFrame.evaluate(() => {
+        const player = (window as any).__H5_LESSON_PLAYER__
+        player.runtimeKernel.courseState.set('e2e-run-continuity', {
+          score: 73,
+        })
+        ;(window as any).__e2eRunFrameSentinel = 'same-player-session'
+        return player.previousScene()
+      })
+      expect(navigationAccepted).toBe(true)
+      await expect.poll(() => runtimeFrame.evaluate(
+        () => (window as any).__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? null,
+      )).toBe(0)
+      expect(await previewFrame.getAttribute('src')).toBe(previewSrc)
+      await expect.poll(() => runtimeFrame.evaluate(() => ({
+        state: (window as any).__H5_LESSON_PLAYER__
+          ?.runtimeKernel.courseState.get('e2e-run-continuity'),
+        sentinel: (window as any).__e2eRunFrameSentinel,
+      }))).toEqual({
+        state: { score: 73 },
+        sentinel: 'same-player-session',
+      })
 
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -526,18 +668,341 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
     }
   })
 
-  test('画布视图支持轻量缩放并一键恢复适合窗口', async () => {
+  test('Player 与编辑交互层在 100%、150% 和重置后保持同位', async () => {
     const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
+      const playerFrame = page.locator('.runtime-preview-frame')
+      await expect(playerFrame).toHaveAttribute('src', /^blob:/)
+      const initialFrameSrc = await playerFrame.getAttribute('src')
+      await addText(page)
+      await expect.poll(() => playerFrame.getAttribute('src')).not.toBe(
+        initialFrameSrc,
+      )
+      await expect(page.locator('.runtime-preview-loading')).toHaveCount(0, {
+        timeout: 15_000,
+      })
+      await expect.poll(async () => {
+        const currentSrc = await playerFrame.getAttribute('src')
+        const frame = page.frames().find((candidate) => candidate.url() === currentSrc)
+        return frame?.evaluate(() => (
+          (window as any).__H5_LESSON_PLAYER__?.playerScene?.renderedNodes
+            ?.some((handle: any) => handle.type === 'text') ?? false
+        )) ?? false
+      }).toBe(true)
+      await page.getByRole('tab', { name: '属性' }).click()
+      const initialNodeBounds = {
+        x: Number(await commonNodeField(page, 'X').inputValue()),
+        y: Number(await commonNodeField(page, 'Y').inputValue()),
+        width: Number(await commonNodeField(page, '宽').inputValue()),
+        height: Number(await commonNodeField(page, '高').inputValue()),
+      }
       const zoom = page.getByLabel('画布缩放比例')
       const stage = page.getByTestId('canvas-stage')
+      const alignmentError = async () => {
+        const [stageBounds, playerBounds] = await Promise.all([
+          stage.boundingBox(),
+          playerFrame.boundingBox(),
+        ])
+        if (!stageBounds || !playerBounds) return Number.POSITIVE_INFINITY
+        return Math.max(
+          Math.abs(stageBounds.x - playerBounds.x),
+          Math.abs(stageBounds.y - playerBounds.y),
+          Math.abs(stageBounds.width - playerBounds.width),
+          Math.abs(stageBounds.height - playerBounds.height),
+        )
+      }
       await expect(zoom).toHaveText('100%')
-      await page.getByRole('button', { name: '放大画布' }).click()
-      await expect(zoom).toHaveText('110%')
-      await expect(stage).toHaveAttribute('style', /scale\(1\.1\)/)
+      await expect.poll(alignmentError).toBeLessThan(0.75)
+      const before = await stage.boundingBox()
+      if (!before) throw new Error('统一画布不可见')
+      for (let index = 0; index < 5; index += 1) {
+        await page.getByRole('button', { name: '放大画布' }).click()
+      }
+      await expect(zoom).toHaveText('150%')
+      await expect.poll(async () => (await stage.boundingBox())?.width ?? 0)
+        .toBeCloseTo(before.width * 1.5, 0)
+      await expect.poll(alignmentError).toBeLessThan(0.75)
+      const viewportBounds = await page.locator('.canvas-viewport').boundingBox()
+      const beforePan = await stage.boundingBox()
+      if (!viewportBounds || !beforePan) throw new Error('画布平移区域不可见')
+      await page.mouse.move(
+        viewportBounds.x + viewportBounds.width / 2,
+        viewportBounds.y + viewportBounds.height / 2,
+      )
+      await page.mouse.down({ button: 'middle' })
+      await page.mouse.move(
+        viewportBounds.x + viewportBounds.width / 2 + 84,
+        viewportBounds.y + viewportBounds.height / 2 + 48,
+        { steps: 4 },
+      )
+      await page.mouse.up({ button: 'middle' })
+      await expect.poll(async () => {
+        const bounds = await stage.boundingBox()
+        if (!bounds) return 0
+        return Math.hypot(bounds.x - beforePan.x, bounds.y - beforePan.y)
+      }).toBeGreaterThan(80)
+      await expect.poll(alignmentError).toBeLessThan(0.75)
+      const pannedStage = await stage.boundingBox()
+      if (!pannedStage) throw new Error('平移后的统一画布不可见')
+      const textCenter = {
+        x: pannedStage.x + (
+          initialNodeBounds.x + initialNodeBounds.width / 2
+        ) / 1280 * pannedStage.width,
+        y: pannedStage.y + (
+          initialNodeBounds.y + initialNodeBounds.height / 2
+        ) / 720 * pannedStage.height,
+      }
+      const blankPoint = {
+        x: pannedStage.x + 260 / 1280 * pannedStage.width,
+        y: pannedStage.y + 140 / 720 * pannedStage.height,
+      }
+      await page.mouse.click(blankPoint.x, blankPoint.y)
+      await page.getByRole('tab', { name: '图层' }).click()
+      await expect(page.locator('.node-item--selected')).toHaveCount(0)
+      await page.mouse.click(textCenter.x, textCenter.y)
+      await expect(page.getByRole('tab', { name: '属性' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      )
+      await page.getByRole('tab', { name: '图层' }).click()
+      await expect(page.locator('.node-item--selected')).toHaveCount(1)
+      await page.waitForTimeout(420)
+      await page.getByRole('tab', { name: '属性' }).click()
+      await page.mouse.move(textCenter.x, textCenter.y)
+      await page.mouse.down()
+      await page.mouse.move(textCenter.x + 60, textCenter.y + 30, { steps: 8 })
+      await page.mouse.up()
+      await expect.poll(async () => Number(
+        await commonNodeField(page, 'X').inputValue(),
+      )).toBeGreaterThan(initialNodeBounds.x + 30)
+      await expect.poll(async () => Number(
+        await commonNodeField(page, 'Y').inputValue(),
+      )).toBeGreaterThan(initialNodeBounds.y + 15)
       await page.getByRole('button', { name: '适合窗口' }).click()
       await expect(zoom).toHaveText('100%')
-      await expect(stage).toHaveAttribute('style', /translate3d\(0px, 0px, 0px\) scale\(1\)/)
+      await expect.poll(async () => (await stage.boundingBox())?.width ?? 0)
+        .toBeCloseTo(before.width, 0)
+      await expect.poll(alignmentError).toBeLessThan(0.75)
+      expect(pageErrors).toEqual([])
+      expect(consoleErrors).toEqual([])
+    } finally {
+      await closeEditor(app)
+    }
+  })
+
+  test('统一画布：场景/全局运行时文字与图片可原位编辑并往返', async () => {
+    const { app, page, pageErrors, consoleErrors } = await launchEditor()
+    try {
+      await patchDialogs(app, {
+        projectOpen: globalRuntimeAuthoringProjectPath,
+        imageOpen: replacementImagePath,
+      })
+      await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await page.getByTestId('global-layer-entry').click()
+
+      const target = page.getByRole('button', {
+        name: '全局标题，双击编辑文字',
+      })
+      await expect(target).toBeVisible({ timeout: 15_000 })
+      const playerFrame = page.locator('iframe[title="统一编辑画布"]')
+      const authoringFrame = page.frames().find((frame) => (
+        frame !== page.mainFrame() && frame.url().startsWith('blob:')
+      ))
+      if (!authoringFrame) throw new Error('统一编辑 Player iframe 未创建')
+      const runtimeVisualAlignmentError = async (
+        runtimeLabel: string,
+        editKey: string,
+        authoringTarget: typeof target,
+      ) => {
+        const [frameBounds, targetBounds, inner] = await Promise.all([
+          playerFrame.boundingBox(),
+          authoringTarget.boundingBox(),
+          authoringFrame.evaluate(({ runtimeLabel: label, editKey: key }) => {
+            const mounts = Array.from(
+              document.querySelectorAll<HTMLElement>('.lesson-runtime-mount'),
+            ).filter((candidate) => candidate.dataset.runtimeLabel?.startsWith(label))
+            const element = mounts
+              .map((mount) => mount.shadowRoot?.querySelector<HTMLElement>(
+                `[data-courseware-edit-key="${key}"]`,
+              ))
+              .find((candidate): candidate is HTMLElement => Boolean(candidate))
+            if (!element) return null
+            const bounds = element.getBoundingClientRect()
+            return {
+              x: bounds.x,
+              y: bounds.y,
+              width: bounds.width,
+              height: bounds.height,
+              viewportWidth: document.documentElement.clientWidth,
+              viewportHeight: document.documentElement.clientHeight,
+            }
+          }, { runtimeLabel, editKey }),
+        ])
+        if (!frameBounds || !targetBounds || !inner) {
+          return Number.POSITIVE_INFINITY
+        }
+        const scaleX = frameBounds.width / inner.viewportWidth
+        const scaleY = frameBounds.height / inner.viewportHeight
+        return Math.max(
+          Math.abs(targetBounds.x - (frameBounds.x + inner.x * scaleX)),
+          Math.abs(targetBounds.y - (frameBounds.y + inner.y * scaleY)),
+          Math.abs(targetBounds.width - inner.width * scaleX),
+          Math.abs(targetBounds.height - inner.height * scaleY),
+        )
+      }
+      const globalAlignmentError = () => runtimeVisualAlignmentError(
+        '全局运行时',
+        'title',
+        target,
+      )
+      await expect.poll(globalAlignmentError).toBeLessThan(1)
+
+      const zoom = page.getByLabel('画布缩放比例')
+      for (let index = 0; index < 5; index += 1) {
+        await page.getByRole('button', { name: '放大画布' }).click()
+      }
+      await expect(zoom).toHaveText('150%')
+      await expect.poll(globalAlignmentError).toBeLessThan(1)
+      const viewportBounds = await page.locator('.canvas-viewport').boundingBox()
+      const beforePan = await playerFrame.boundingBox()
+      if (!viewportBounds || !beforePan) throw new Error('统一画布平移区域不可见')
+      await page.mouse.move(
+        viewportBounds.x + viewportBounds.width / 2,
+        viewportBounds.y + viewportBounds.height / 2,
+      )
+      await page.mouse.down({ button: 'middle' })
+      await page.mouse.move(
+        viewportBounds.x + viewportBounds.width / 2 + 72,
+        viewportBounds.y + viewportBounds.height / 2 + 42,
+        { steps: 4 },
+      )
+      await page.mouse.up({ button: 'middle' })
+      await expect.poll(async () => {
+        const bounds = await playerFrame.boundingBox()
+        if (!bounds) return 0
+        return Math.hypot(bounds.x - beforePan.x, bounds.y - beforePan.y)
+      }).toBeGreaterThan(70)
+      await expect.poll(globalAlignmentError).toBeLessThan(1)
+      await target.focus()
+      await page.screenshot({
+        path: join(
+          visualOutputDirectory,
+          'editor-v17-unified-runtime-zoom-pan.png',
+        ),
+      })
+      await page.getByRole('button', { name: '适合窗口' }).click()
+      await expect(zoom).toHaveText('100%')
+      await expect.poll(globalAlignmentError).toBeLessThan(1)
+
+      await target.focus()
+      await target.press('Enter')
+      const editor = page.getByTestId('canvas-plain-text-editor')
+      await expect(editor).toBeVisible()
+      await editor.getByRole('textbox', { name: '全局标题' })
+        .fill('全局画布新标题')
+      await editor.getByRole('textbox', { name: '全局标题' }).press('Enter')
+      await expect(editor).toHaveCount(0)
+
+      await page.getByRole('button', {
+        name: '打开场景“欢迎”；缩略图使用状态“初始”',
+      }).click()
+      const sceneTextTarget = page.getByRole('button', {
+        name: '场景标题，双击编辑文字',
+      })
+      await expect(sceneTextTarget).toBeVisible({ timeout: 15_000 })
+      await expect.poll(() => authoringFrame.evaluate(
+        () => (window as any).__e2eSceneAuthoringProbe ?? null,
+      )).toEqual({
+        mode: 'capture',
+        authoring: true,
+        replayAccepted: false,
+        stateAfterWrite: undefined,
+      })
+      await expect.poll(() => runtimeVisualAlignmentError(
+        '场景运行时',
+        'title',
+        sceneTextTarget,
+      )).toBeLessThan(1)
+      await sceneTextTarget.focus()
+      await sceneTextTarget.press('Enter')
+      await expect(editor).toBeVisible()
+      await editor.getByRole('textbox', { name: '场景标题' })
+        .fill('场景画布新标题')
+      await editor.getByRole('textbox', { name: '场景标题' }).press('Enter')
+      await expect(editor).toHaveCount(0)
+
+      const sceneAssetTarget = page.getByRole('button', {
+        name: '场景主视觉，双击替换图片',
+      })
+      await expect(sceneAssetTarget).toBeVisible({ timeout: 15_000 })
+      await sceneAssetTarget.focus()
+      await sceneAssetTarget.press('Enter')
+      await expect(page.locator('.runtime-preview-loading')).toHaveCount(0, {
+        timeout: 15_000,
+      })
+      await expect(page.locator('.status-bar')).toContainText(
+        '已替换运行时图片',
+      )
+
+      await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+      await expect.poll(() => {
+        const archive = unzipSync(readFileSync(globalRuntimeAuthoringProjectPath))
+        const entry = archive['project.json']
+        if (!entry) return null
+        const project = JSON.parse(strFromU8(entry))
+        const sceneRuntime = project.scenes?.[0]?.runtime
+        const replacementAssetId = sceneRuntime?.assets?.hero?.assetId
+        const replacementAsset = project.assets?.[replacementAssetId]
+        return {
+          globalTitle: project.globalRuntime?.content?.values?.title ?? null,
+          sceneTitle: sceneRuntime?.content?.values?.title ?? null,
+          replacementAssetChanged:
+            Boolean(replacementAssetId) &&
+            replacementAssetId !== 'asset_runtime_authoring_original',
+          replacementAssetExists: Boolean(replacementAsset),
+          replacementBytesExist: Boolean(
+            replacementAsset?.path && archive[replacementAsset.path],
+          ),
+        }
+      }).toEqual({
+        globalTitle: '全局画布新标题',
+        sceneTitle: '场景画布新标题',
+        replacementAssetChanged: true,
+        replacementAssetExists: true,
+        replacementBytesExist: true,
+      })
+
+      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await page.getByTestId('global-layer-entry').click()
+      const reopenedGlobalTarget = page.getByRole('button', {
+        name: '全局标题，双击编辑文字',
+      })
+      await expect(reopenedGlobalTarget).toBeVisible({ timeout: 15_000 })
+      await reopenedGlobalTarget.focus()
+      await reopenedGlobalTarget.press('Enter')
+      await expect(editor.getByRole('textbox', { name: '全局标题' }))
+        .toHaveValue('全局画布新标题')
+      await editor.getByRole('textbox', { name: '全局标题' }).press('Escape')
+      await expect(editor).toHaveCount(0)
+
+      await page.getByRole('button', {
+        name: '打开场景“欢迎”；缩略图使用状态“初始”',
+      }).click()
+      const reopenedSceneTextTarget = page.getByRole('button', {
+        name: '场景标题，双击编辑文字',
+      })
+      await expect(reopenedSceneTextTarget).toBeVisible({ timeout: 15_000 })
+      await reopenedSceneTextTarget.focus()
+      await reopenedSceneTextTarget.press('Enter')
+      await expect(editor.getByRole('textbox', { name: '场景标题' }))
+        .toHaveValue('场景画布新标题')
+      await editor.getByRole('textbox', { name: '场景标题' }).press('Escape')
+      await expect(editor).toHaveCount(0)
+      await expect(page.getByRole('button', {
+        name: '场景主视觉，双击替换图片',
+      })).toBeVisible({ timeout: 15_000 })
+
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
     } finally {
@@ -845,6 +1310,20 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
         y: editorBounds.y + (y / 720) * editorBounds.height,
       })
 
+      await expect(
+        page.getByRole('button', { name: '组件标题，双击编辑组件文字' }),
+      ).toHaveCount(1)
+      const titlePoint = designPoint(470, 252)
+      await page.mouse.dblclick(titlePoint.x, titlePoint.y, { delay: 40 })
+      const canvasTextEditor = page.getByTestId('canvas-plain-text-editor')
+      await expect(canvasTextEditor).toBeVisible()
+      await canvasTextEditor.getByRole('textbox', { name: '组件标题' })
+        .fill('画布内积分器')
+      await canvasTextEditor.getByRole('textbox', { name: '组件标题' })
+        .press('Enter')
+      await expect(canvasTextEditor).toHaveCount(0)
+      await expect(componentTitle).toHaveValue('画布内积分器')
+
       const dragStart = designPoint(460, 270)
       const dragEnd = designPoint(520, 310)
       await page.mouse.move(dragStart.x, dragStart.y)
@@ -886,7 +1365,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       await expect(commonNodeField(page, 'Y')).toHaveValue(String(movedY))
       await expect(commonNodeField(page, '宽')).toHaveValue(String(resizedWidth))
       await expect(commonNodeField(page, '高')).toHaveValue(String(resizedHeight))
-      await expect(page.getByLabel('组件标题', { exact: true })).toHaveValue('课堂积分器')
+      await expect(page.getByLabel('组件标题', { exact: true })).toHaveValue('画布内积分器')
       await expect(page.getByLabel('初始数值', { exact: true })).toHaveValue('7')
 
       const previewPromise = app.waitForEvent('window')
@@ -931,7 +1410,7 @@ test.describe.serial('Phaser 课件编辑器 V1.6', () => {
       await page.getByTestId('add-text').click()
 
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
-      await page.waitForTimeout(250)
+      await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
       const bounds = await canvas.boundingBox()
       if (!bounds) throw new Error('全局层编辑画布不可见')
       await page.mouse.dblclick(

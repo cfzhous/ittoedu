@@ -2,10 +2,19 @@ import type { ExportPayload } from '../shared/componentTypes'
 import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
 import { PlayerApp, type PlayerAppOptions } from './PlayerApp'
 import {
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+  parsePlayerAuthoringPatchCommand,
+  type PlayerAuthoringErrorCode,
+  type PlayerAuthoringErrorMessage,
+} from '../shared/playerAuthoringProtocol'
+import {
   decodeExportPayload,
   loadExportPayloadFromUrl,
   normalizePlayerPayload,
 } from './payload'
+
+let authoringTargetsMessageRevision = 0
 
 export function startPlayer(
   payloadOrEncoded: ExportPayload | PublishedLessonPayload | string,
@@ -54,13 +63,48 @@ function startAndExposePlayer(
   payload: ExportPayload | PublishedLessonPayload | string,
 ): PlayerApp | null {
   try {
+    authoringTargetsMessageRevision = 0
+    const configuredOptions = window.__H5_LESSON_PLAYER_OPTIONS__ ?? {}
+    const authoringSessionId = window.__H5_LESSON_BRIDGE_TOKEN__
+    const options: PlayerAppOptions = {
+      ...configuredOptions,
+      ...(configuredOptions.hostMode === 'authoring' &&
+        typeof authoringSessionId === 'string' && authoringSessionId
+        ? {
+            onRuntimeAuthoringTargetsChanged: (update) => {
+              postEditorBridgeMessage({
+                type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
+                protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+                sessionId: authoringSessionId,
+                revision: ++authoringTargetsMessageRevision,
+                update,
+              })
+            },
+            onComponentAuthoringTargetsChanged: (update) => {
+              postEditorBridgeMessage({
+                type: PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets,
+                protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+                sessionId: authoringSessionId,
+                revision: ++authoringTargetsMessageRevision,
+                update,
+              })
+            },
+          }
+        : {
+            onRuntimeAuthoringTargetsChanged: undefined,
+            onComponentAuthoringTargetsChanged: undefined,
+          }),
+    }
     const player = startPlayer(
       payload,
       'lesson-root',
-      window.__H5_LESSON_PLAYER_OPTIONS__,
+      options,
     )
     window.__H5_LESSON_PLAYER__ = player
-    postEditorBridgeMessage({ type: 'courseware-player:ready' })
+    postEditorBridgeMessage({
+      type: 'courseware-player:ready',
+      hostMode: player.getHostMode(),
+    })
     return player
   } catch (error) {
     showBootstrapError(error)
@@ -75,12 +119,103 @@ let pendingBridgeScene: {
 } | null = null
 let pendingBridgeState: {
   sceneId: string | null
-  stateId: string
+  stateId: string | null
   transition?: Parameters<PlayerApp['setPresentationState']>[1]
 } | null = null
 let lastForwardedBridgeSceneId: string | null = null
 let holdBridgePresentationEvents = false
 let heldBridgePresentationDetail: unknown = null
+let authoringReadyPosted = false
+
+function authoringErrorMessage(
+  value: unknown,
+  code: PlayerAuthoringErrorCode,
+  message: string,
+): PlayerAuthoringErrorMessage {
+  const candidate = typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : {}
+  return {
+    type: PLAYER_AUTHORING_MESSAGE_TYPES.error,
+    protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+    ...(typeof candidate.sessionId === 'string'
+      ? { sessionId: candidate.sessionId }
+      : {}),
+    ...(typeof candidate.requestId === 'string'
+      ? { requestId: candidate.requestId }
+      : {}),
+    ...(typeof candidate.revision === 'number'
+      ? { revision: candidate.revision }
+      : {}),
+    code,
+    message,
+  }
+}
+
+function postAuthoringReadyIfNeeded(player: PlayerApp): void {
+  if (authoringReadyPosted || player.getHostMode() !== 'authoring') return
+  const sessionId = window.__H5_LESSON_BRIDGE_TOKEN__
+  if (typeof sessionId !== 'string' || !sessionId) return
+  const ready = player.getAuthoringReadyMessage(sessionId)
+  if (!ready) return
+  authoringReadyPosted = true
+  postEditorBridgeMessage({ ...ready })
+}
+
+function handleAuthoringBridgeMessage(
+  value: unknown,
+  player: PlayerApp | undefined,
+): boolean {
+  const candidate = typeof value === 'object' && value !== null
+    ? value as { type?: unknown }
+    : null
+  if (candidate?.type !== PLAYER_AUTHORING_MESSAGE_TYPES.patch) return false
+  const parsed = parsePlayerAuthoringPatchCommand(value)
+  if (!parsed.ok) {
+    postEditorBridgeMessage({
+      ...authoringErrorMessage(value, 'invalid-command', parsed.message),
+    })
+    return true
+  }
+  const expectedSessionId = window.__H5_LESSON_BRIDGE_TOKEN__
+  if (
+    typeof expectedSessionId !== 'string' ||
+    !expectedSessionId ||
+    parsed.command.sessionId !== expectedSessionId
+  ) {
+    postEditorBridgeMessage({
+      ...authoringErrorMessage(
+        parsed.command,
+        'invalid-session',
+        '编辑命令不属于当前隔离 Player 会话。',
+      ),
+    })
+    return true
+  }
+  if (!player) {
+    postEditorBridgeMessage({
+      ...authoringErrorMessage(
+        parsed.command,
+        'not-ready',
+        'Player 尚未完成启动。',
+      ),
+    })
+    return true
+  }
+  void player.applyAuthoringCommand(parsed.command)
+    .then((response) => postEditorBridgeMessage({ ...response }))
+    .catch((error) => {
+      const detail = error instanceof Error ? error.message : String(error)
+      postEditorBridgeMessage({
+        ...authoringErrorMessage(
+          parsed.command,
+          'update-failed',
+          `Player 画面更新失败：${detail}`,
+        ),
+      })
+    })
+  return true
+}
 
 function applyPendingBridgeState(player: PlayerApp): void {
   const pending = pendingBridgeState
@@ -101,6 +236,7 @@ function handleEditorBridgeMessage(event: MessageEvent): void {
     transition?: unknown
   } | null
   const player = window.__H5_LESSON_PLAYER__
+  if (handleAuthoringBridgeMessage(event.data, player)) return
   if (!message || !player || typeof message.type !== 'string') return
   if (
     message.type === 'courseware-editor:set-scene' &&
@@ -124,9 +260,10 @@ function handleEditorBridgeMessage(event: MessageEvent): void {
     }
   } else if (
     message.type === 'courseware-editor:set-presentation-state' &&
-    typeof message.stateId === 'string'
+    (typeof message.stateId === 'string' || message.stateId === null)
   ) {
-    const transition = typeof message.transition === 'object' && message.transition !== null
+    const transition = message.stateId !== null &&
+      typeof message.transition === 'object' && message.transition !== null
       ? message.transition as Parameters<PlayerApp['setPresentationState']>[1]
       : undefined
     const sceneId = typeof message.sceneId === 'string'
@@ -196,6 +333,7 @@ function forwardPlayerEvent(event: Event): void {
       type: 'courseware-player:scene-change',
       detail: sceneDetail,
     })
+    postAuthoringReadyIfNeeded(player)
     if (heldBridgePresentationDetail !== null) {
       postEditorBridgeMessage({
         type: 'courseware-player:presentation-change',
@@ -248,6 +386,8 @@ function destroyExposedPlayer(event: PageTransitionEvent): void {
   pendingBridgeScene = null
   pendingBridgeState = null
   heldBridgePresentationDetail = null
+  authoringReadyPosted = false
+  authoringTargetsMessageRevision = 0
 }
 
 async function bootstrapPlayerFromUrl(

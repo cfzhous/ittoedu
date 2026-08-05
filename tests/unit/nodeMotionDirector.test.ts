@@ -19,6 +19,12 @@ interface TweenConfig {
   onComplete(): void
 }
 
+interface DelayedCall {
+  delay: number
+  callback(): void
+  remove: ReturnType<typeof vi.fn>
+}
+
 class FakeRoot {
   active = true
   visible = true
@@ -59,9 +65,11 @@ class FakeRoot {
 function sceneHarness(): {
   scene: Phaser.Scene
   tweens: TweenConfig[]
+  delayedCalls: DelayedCall[]
   killTweensOf: ReturnType<typeof vi.fn>
 } {
   const tweens: TweenConfig[] = []
+  const delayedCalls: DelayedCall[] = []
   const killTweensOf = vi.fn()
   return {
     scene: {
@@ -72,8 +80,20 @@ function sceneHarness(): {
           return { stop: vi.fn() }
         }),
       },
+      time: {
+        delayedCall: vi.fn((delay: number, callback: () => void) => {
+          const call: DelayedCall = {
+            delay,
+            callback,
+            remove: vi.fn(),
+          }
+          delayedCalls.push(call)
+          return call
+        }),
+      },
     } as unknown as Phaser.Scene,
     tweens,
+    delayedCalls,
     killTweensOf,
   }
 }
@@ -151,6 +171,36 @@ afterEach(() => {
 })
 
 describe('NodeMotionDirector', () => {
+  it('在 capture 语义的编辑 Player 中仍可临时预览动画并恢复稳定帧', async () => {
+    const { scene, tweens, delayedCalls } = sceneHarness()
+    const root = new FakeRoot()
+    const director = new NodeMotionDirector({
+      scene,
+      scope: 'scene',
+      mode: 'capture',
+      events: new CourseEventBus(),
+      sceneId: 'scene_one',
+      prefersReducedMotion: () => false,
+    })
+    director.register(handle(root), node())
+
+    expect(director.preview(action('node.enter', 'fade'))).toBe(true)
+    expect(root.alpha).toBe(0)
+    expect(tweens[0]).toMatchObject({ duration: 300, alpha: 0.75 })
+    tweens[0]!.onComplete()
+    await Promise.resolve()
+    expect(root).toMatchObject({ visible: true, alpha: 0.75 })
+
+    expect(director.preview(action('node.exit', 'fade'))).toBe(true)
+    expect(tweens[1]).toMatchObject({ duration: 300, alpha: 0 })
+    tweens[1]!.onComplete()
+    await Promise.resolve()
+    expect(root.visible).toBe(false)
+    expect(delayedCalls.at(-1)?.delay).toBe(180)
+    delayedCalls.at(-1)?.callback()
+    expect(root).toMatchObject({ visible: true, alpha: 0.75 })
+  })
+
   it('isolates playback motion from an in-flight authored presentation frame', async () => {
     const { scene, tweens, killTweensOf } = sceneHarness()
     const director = new NodeMotionDirector({

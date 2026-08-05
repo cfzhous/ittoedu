@@ -47,7 +47,8 @@ type PreviewAwareRenderContext = RenderNodeContext & {
 }
 
 function isPreviewContext(context: RenderNodeContext): boolean {
-  return (context as PreviewAwareRenderContext).mode !== 'capture'
+  return (context as PreviewAwareRenderContext).mode !== 'capture' &&
+    context.authoring !== true
 }
 
 async function toggleDocumentFullscreen(): Promise<void> {

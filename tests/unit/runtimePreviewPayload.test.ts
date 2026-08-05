@@ -35,6 +35,7 @@ describe('runtime preview Blob payload', () => {
       dataUrl: 'blob:preview-1',
     })
     expect(resources.payload.assets.video?.dataUrl).not.toContain('base64')
+    expect(resources.assetTransfers).toEqual([])
     expect(createdBlobs[0]?.size).toBe(videoBytes.byteLength)
     resources.revoke()
     resources.revoke()
@@ -72,5 +73,44 @@ describe('runtime preview Blob payload', () => {
     })).toThrow('素材“missing.png”缺少二进制数据')
     expect(revokeObjectURL).toHaveBeenCalledTimes(1)
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:preview-partial')
+  })
+
+  it('为隔离画布传输素材，由 iframe 在自身来源创建 Blob URL', () => {
+    const project = createProject({ includeDefaultController: false })
+    project.assets.image = {
+      id: 'image',
+      filename: 'pixel.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/pixel.png',
+      byteLength: 3,
+    }
+    const createObjectURL = vi.fn()
+    const revokeObjectURL = vi.fn()
+
+    const resources = createRuntimePreviewPayloadResources({
+      project,
+      assetFiles: { image: new Uint8Array([0, 1, 2]) },
+      components: {},
+      assetUrlMode: 'sandbox-transfer',
+    }, {
+      createObjectURL,
+      revokeObjectURL,
+    })
+
+    expect(resources.payload.assets.image).toEqual({
+      mimeType: 'image/png',
+      dataUrl: 'courseware-preview-asset:0',
+    })
+    expect(resources.assetTransfers).toHaveLength(1)
+    expect(resources.assetTransfers[0]).toMatchObject({
+      placeholder: 'courseware-preview-asset:0',
+      mimeType: 'image/png',
+    })
+    expect([...new Uint8Array(resources.assetTransfers[0]!.bytes)])
+      .toEqual([0, 1, 2])
+    expect(createObjectURL).not.toHaveBeenCalled()
+    resources.revoke()
+    expect(revokeObjectURL).not.toHaveBeenCalled()
   })
 })

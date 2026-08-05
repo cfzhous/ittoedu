@@ -1,5 +1,5 @@
 export const APP_NAME = 'Phaser 课件编辑器'
-export const APP_VERSION = '1.6.0'
+export const APP_VERSION = '1.7.0'
 export const CANVAS_WIDTH = 1280 as const
 export const CANVAS_HEIGHT = 720 as const
 export const PROJECT_SCHEMA_VERSION = 7 as const

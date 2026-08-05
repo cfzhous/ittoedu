@@ -1,14 +1,16 @@
 # 场景与全局自由运行时开发指南（API 2）
 
-本文定义 Editor 1.6.0 / Project V7 中 `scene.runtime` 与 `globalRuntime` 的自由运行时创作协议。新运行时使用 `RuntimeDocument.runtimeApiVersion: 2`；API 1 继续作为兼容协议。文件名中的 V3 仅沿用播放器架构代际名称，不表示自由运行时 API 为 V3。组件协议是另一套独立版本体系。
+本文定义 Editor 1.7.0 / Project V7 中 `scene.runtime` 与 `globalRuntime` 的自由运行时创作协议。新运行时使用 `RuntimeDocument.runtimeApiVersion: 2`；API 1 继续作为兼容协议。文件名中的 V3 仅沿用播放器架构代际名称，不表示自由运行时 API 为 V3。组件协议是另一套独立版本体系。
 
-文档同步基线：**2026-08-01**。当前包版本仍为 1.6.0；运行时入口、专业“互动与动画 / 开发”职责和 PublishedLesson 发布边界已按当前实现核对。
+文档同步基线：**2026-08-05**。当前源码包版本为 1.7.0；运行时入口、统一画布 Runtime Authoring V1、专业“互动与动画 / 开发”职责和 PublishedLesson 发布边界已按当前实现核对。
 
 新工程必须写 `schemaVersion: 7`。V1–V6 仅是加载迁移输入；其中 V6 节点 `animation` 会自动迁移为事件驱动的 `node.activated → node.enter` 规则，新保存统一写 V7。
 
 Project V7 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
 
-编辑器的“编辑状态”画布不执行自由运行时，只物化基础或命名状态；中央“当前位置试运行”在 Blob sandbox iframe 中执行与导出相同的真实 Player，并直接从当前场景和当前命名状态启动（基础场景使用当前场景初始状态）。预览文档、工程素材和组件素材使用临时 Blob URL；实例替换、关闭、重试或失败时统一撤销。状态条与 Player 双向同步，已被新实例替换的旧消息会因会话不匹配而被忽略；载入或启动失败会显示原因和重试入口。顶部“整课预览”则在独立窗口中从第一场景初始状态开始。
+编辑器的“编辑状态”和“当前位置试运行”使用同一块 1280×720 画布，Player 是唯一视觉源。编辑状态在 Blob sandbox iframe 中使用隔离 authoring Player 创建场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。当前位置试运行在原画布位置切换为完整 playback Player，直接从当前场景和当前命名状态启动（基础场景使用当前场景初始状态）。两种状态都使用会话过滤；父窗口用临时 Blob URL 承载文档，素材以可转移缓冲区进入沙箱后由 iframe 创建本地 Blob URL，实例替换、关闭、重试或失败时分别回收。顶部“整课预览”仍在独立窗口中从第一场景初始状态开始。
+
+Runtime Authoring V1 是可选、确定性的人工编辑扩展，与 Runtime API 1/2 相互独立。Blueprint、AI 局部 patch 和其他编辑器内 AI 接入延后到 2.0 以后；1.x 只预留版本化边界，不调用模型，也不允许运行时直接写工程 Store。
 
 类型真值以 [`src/shared/runtimeTypes.ts`](../src/shared/runtimeTypes.ts) 和 [`src/shared/runtimeSchema.ts`](../src/shared/runtimeSchema.ts) 为准。
 
@@ -138,6 +140,10 @@ interface RuntimeCreateContextBase {
   courseState: CourseStateStore
   capture: { waitUntil(promise: Promise<unknown>): void }
   navigation: { guard(guard: RuntimeNavigationGuard): () => void }
+  authoring?: {
+    register(target: RuntimeAuthoringTargetRegistration): () => void
+    invalidate(): void
+  }
   emit(eventName: string, payload?: unknown): void
 }
 
@@ -184,6 +190,63 @@ const scoreText = ctx.content
 不得把最终显示文案只写在 `source`。内部状态键、事件名和不会显示的调试字符串不属于可编辑文案。静态后备画面中的文字应由同一内容表生成。
 
 `metadata` 用于改善属性栏标签、说明、多行模式和长度约束；即使没有 metadata，`values` 中的每项仍可编辑。
+
+### 5.1 Runtime Authoring V1：显式文字与图片目标
+
+属性面板是所有运行时内容的基础入口。如果场景或全局运行时还希望让教师直接在对应画布作用域中修改稳定文字或替换图片，定义必须显式声明独立的 authoring 版本：
+
+```js
+CoursewareRuntime.define({
+  runtimeApiVersion: 2,
+  authoringApiVersion: 1,
+
+  create(ctx) {
+    const removeTitle = ctx.authoring?.register({
+      kind: 'text',
+      key: 'title',
+      label: '互动标题',
+      multiline: false,
+      maxLength: 80,
+      layer: 'overlay',
+      getBounds: function () {
+        return { x: 72, y: 48, width: 420, height: 60 }
+      }
+    })
+
+    const removeImage = ctx.authoring?.register({
+      kind: 'asset',
+      key: 'apparatusImage',
+      label: '实验装置图',
+      layer: 'underlay',
+      getBounds: function () {
+        return { x: 80, y: 130, width: 560, height: 420 }
+      }
+    })
+
+    return {
+      destroy() {
+        removeTitle?.()
+        removeImage?.()
+      }
+    }
+  }
+})
+```
+
+`authoringApiVersion` 属于 `CoursewareRuntime.define()` 的定义，不写入 `RuntimeDocument`，也不改变 `runtimeApiVersion`。只有定义声明 V1、宿主处于隔离 authoring 状态且不是普通 preview/capture 时，`ctx.authoring` 才存在。
+
+目标约束：
+
+- text `key` 必须已存在于 `RuntimeDocument.content.values`；asset `key` 必须已存在于 `RuntimeDocument.assets`。未知、空白或越界键被忽略；
+- `getBounds()` 返回运行时当前逻辑坐标中的有限、正宽高矩形；宿主把它归一化到规范 1280×720 画布。目标移动或布局改变后调用 `ctx.authoring.invalidate()`，销毁或不再使用时调用登记返回的 disposer；
+- `layer: 'underlay' | 'overlay'` 只描述粗粒度命中优先级，不会改变 Player 的固定 DOM/Canvas 平面；
+- DOM / hybrid 运行时可在真实元素上使用 `data-courseware-edit-key="title"` 或 `data-courseware-asset-key="apparatusImage"`，并可补充 `data-courseware-edit-label`、`data-courseware-edit-multiline`；宿主仍会验证键是否已登记；
+- 目标快照是只读、会话局部的数据。运行时拿不到工程写权限，编辑器提交后重建/同步运行时文档；旧会话或过期 revision 不得覆盖新实例；
+- `content.values` 与 `assets` 位于整个 `RuntimeDocument`，不属于 `scene.presentation`，也不生成状态专属覆盖；
+- `scene.runtime` 目标只在当前场景编辑作用域出现，画布修改由该场景基础及全部命名状态共享，界面必须明确提示“所有状态共享”；
+- `globalRuntime` 目标只在“全局层”编辑作用域出现，画布修改由整课共享。未声明 `authoringApiVersion` 的旧运行时和没有目标的区域仍由 Player 正常显示，并继续从属性/开发面板编辑；宿主不得用空框替换、扫描像素或根据 DOM 文本猜测数据键。
+
+Runtime Authoring V1 不等于 AI patch。未来 Blueprint 或 AI 能力必须使用新的版本化协议和明确授权接入，不能复用本扩展偷偷修改源码或工程结构。
 
 ## 6. Phaser、DOM 与 WebGL 分层
 
@@ -283,7 +346,7 @@ Project V7 不再把动画时机存在节点上。可枚举的入场/退场是 `
 
 `playbackInitialVisibility: 'hidden'` 只表示互动 Player 开始时先隐藏等待入场。入场/退场只改变 Player 瞬态可见性和输入，不写回节点 `visible`、不调用 `presentation.setState()`。编辑画布、缩略图、PDF/PPTX 按作者稳定可见性显示。运行时不应为同一可枚举节奏重复实现 Tween；只有路径、关键帧、物理、粒子或算法动画继续属于运行时/组件。
 
-运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。编辑画布只显示“运行时效果请点当前位置试运行”的提示，真实效果仍须在“当前位置试运行”或“整课预览”验收。
+运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。编辑状态由 authoring Player 显示运行时真实稳定视觉；只有显式登记的 text/asset 区域可原位编辑，学生互动和瞬态业务仍须在“当前位置试运行”或“整课预览”验收。
 
 API 2 的 `phaser` / `hybrid` 上下文中，`ctx.nodes.get('actual_node_id')` 仍可直接按节点 ID 查询，用于兼容旧工程或临时诊断；新创作不应在 `source` 中硬编码节点 ID。
 
@@ -475,6 +538,8 @@ interface RuntimeInstanceLifecycle {
 
 运行时是可信本地代码。预览和捕获环境禁用 Node.js、Electron API、外部导航、下载、权限和网络，但这不是恶意 JavaScript 的绝对沙箱。
 
+统一画布不会把运行时放进 React 主窗口执行。authoring 与 playback 都位于不授予同源权限的 sandbox iframe；authoring 额外冻结宿主输入、动作、内置媒体、导航、呈现状态变化与课程状态写入，并且只通过带版本、会话和 revision 的只读目标快照与编辑器通信。运行时是可信代码，仍必须在 authoring/capture 上下文中停止自行创建的原生音频、外部计时和业务推进；`ctx.authoring` 不是安全沙箱，也不是工程写 API。
+
 不要存放密钥、账号、隐私数据或远程控制逻辑；不要尝试访问本机文件系统；只分发经审查的工程。
 
 ## 16. 发布检查清单
@@ -482,6 +547,8 @@ interface RuntimeInstanceLifecycle {
 - [ ] 选择 scene/global 作用域有明确理由，没有为形式而组件化。
 - [ ] 新 `source` 同步且只注册一个 API 2 定义；API 1 仅用于旧内容兼容；无模块语法和远程依赖。
 - [ ] 所有人工可见文字都来自 `content.values`，metadata 标签清楚。
+- [ ] 如开放统一画布编辑，定义显式使用 `authoringApiVersion: 1`；registered/DOM text 与 asset key 分别存在于 `content.values` / `assets`，目标边界、更新、注销和普通宿主无 `ctx.authoring` 时均正确。
+- [ ] 运行时内容/素材的画布修改共享语义明确：`scene.runtime` 由当前场景全部命名状态共享，`globalRuntime` 由整课共享；旧运行时和未声明目标区域仍正常显示并可从属性面板编辑。
 - [ ] 所有素材通过稳定绑定访问，静态后备引用存在。
 - [ ] `renderMode` 是最小且真实的能力声明；源码没有访问未声明的 DOM/Phaser 能力，也没有误以为切换字段会自动转换代码。
 - [ ] Phaser/DOM/WebGL 对象放入正确粗粒度 underlay/Canvas/overlay 平面，没有依赖跨渲染器逐对象交错。
@@ -498,5 +565,6 @@ interface RuntimeInstanceLifecycle {
 - [ ] Three.js 如有使用，仅打包在该运行时内，GLB/纹理/loader 均离线，编辑器核心不承担 Three.js 依赖。
 - [ ] 工程检查没有阻断导出的错误；需要排障时已导出诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。
+- [ ] 编辑状态与当前位置试运行使用同一 1280×720 Player 视觉边界；authoring 冻结互动、媒体、导航和课程状态，透明 Phaser 层没有造成位置偏移或重复视觉。
 
 API 1 兼容参考见 [`examples/runtime-v3-complete/`](../examples/runtime-v3-complete/README.md)。API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。后者的规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求；前者保留旧协议夹具。两者都不替代真实课件的命名呈现状态设计。

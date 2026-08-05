@@ -834,20 +834,37 @@ button:disabled {
   opacity: 0.35;
 }
 
+.canvas-viewport {
+  position: absolute;
+  inset: 42px 22px 22px;
+  overflow: visible;
+}
+
+.canvas-stage-stack {
+  position: absolute;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  outline: 1px solid rgba(255, 255, 255, 0.12);
+  background: #111318;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  isolation: isolate;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
 .canvas-stage {
   position: absolute;
-  inset: 22px;
-  display: grid;
-  place-items: center;
-  filter: drop-shadow(0 18px 42px rgba(0, 0, 0, 0.34));
-  transform-origin: center;
-  will-change: transform;
+  inset: 0;
+  z-index: 3;
+  width: 1280px;
+  height: 720px;
 }
 
 .canvas-stage canvas {
   display: block;
-  border-radius: 2px;
-  outline: 1px solid rgba(255, 255, 255, 0.08);
+  width: 1280px !important;
+  height: 720px !important;
 }
 
 .canvas-label {
@@ -870,25 +887,6 @@ button:disabled {
   border-color: rgba(156, 118, 255, 0.28);
   color: #c9bcf8;
   background: rgba(48, 35, 75, 0.88);
-}
-
-.runtime-edit-hint {
-  position: absolute;
-  top: 2px;
-  left: 9px;
-  z-index: 8;
-  max-width: min(260px, calc(50% - 80px));
-  padding: 1px 7px;
-  overflow: hidden;
-  border: 1px solid rgba(156, 118, 255, 0.28);
-  border-radius: 999px;
-  color: #c9bcf8;
-  background: rgba(35, 28, 55, 0.86);
-  font-size: 9px;
-  line-height: 14px;
-  pointer-events: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .canvas-mode-switch {
@@ -972,36 +970,165 @@ button:disabled {
   text-align: center;
 }
 
-.canvas-stage[data-panning="true"] canvas {
+.canvas-stage-stack[data-panning="true"] canvas {
   cursor: grabbing !important;
 }
 
-.workspace--run .canvas-stage--editor {
+.workspace--run .canvas-stage--authoring {
   visibility: hidden;
   pointer-events: none;
 }
 
 .runtime-preview-frame {
   position: absolute;
-  inset: 42px 22px 22px;
-  z-index: 3;
-  width: calc(100% - 44px);
-  height: calc(100% - 64px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
   background: #111318;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.workspace--edit .runtime-preview-frame {
+  pointer-events: none;
+}
+
+.canvas-authoring-targets {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.canvas-authoring-target {
+  position: absolute;
+  min-width: 12px;
+  min-height: 12px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #d9e9ff;
+  background: transparent;
+  cursor: text;
+  pointer-events: none;
+}
+
+.canvas-authoring-target--asset {
+  cursor: alias;
+}
+
+.canvas-authoring-target--component-text {
+  transform-origin: center;
+}
+
+.canvas-authoring-target--hovered,
+.canvas-authoring-target:focus-visible {
+  border-color: rgba(91, 156, 255, 0.9);
+  background: rgba(91, 156, 255, 0.055);
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(13, 31, 55, 0.34);
+}
+
+.canvas-authoring-target--component-text.canvas-authoring-target--hovered,
+.canvas-authoring-target--component-text:focus-visible {
+  border-color: rgba(156, 118, 255, 0.92);
+  background: rgba(156, 118, 255, 0.055);
+}
+
+.canvas-authoring-target--component-text .canvas-authoring-target__badge {
+  border-color: rgba(156, 118, 255, 0.56);
+}
+
+.canvas-authoring-target:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.canvas-authoring-target__badge {
+  position: absolute;
+  top: -28px;
+  left: -1px;
+  display: inline-flex;
+  max-width: 240px;
+  height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 1px solid rgba(91, 156, 255, 0.52);
+  border-radius: 6px;
+  color: #e9f2ff;
+  background: rgba(17, 24, 35, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  font: 600 11px/1 Inter, "Microsoft YaHei", sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  transform: translateY(3px);
+  transition: opacity 100ms ease, transform 100ms ease;
+  white-space: nowrap;
+}
+
+.canvas-authoring-target--hovered .canvas-authoring-target__badge,
+.canvas-authoring-target:focus-visible .canvas-authoring-target__badge {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.canvas-plain-text-editor {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(91, 156, 255, 0.78);
+  border-radius: 8px;
+  background: rgba(17, 24, 35, 0.97);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  transform-origin: center;
+}
+
+.canvas-plain-text-editor__label,
+.canvas-plain-text-editor__hint {
+  overflow: hidden;
+  color: #afbdd0;
+  font: 600 11px/1.2 Inter, "Microsoft YaHei", sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-plain-text-editor__hint {
+  color: #728096;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.canvas-plain-text-editor__control {
+  width: 100%;
+  min-height: 34px;
+  resize: none;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 5px;
+  outline: none;
+  color: #f3f6fb;
+  background: #0f141d;
+  font: 14px/1.45 Inter, "Microsoft YaHei", sans-serif;
+}
+
+.canvas-plain-text-editor__control:focus {
+  border-color: #5b9cff;
+  box-shadow: 0 0 0 2px rgba(91, 156, 255, 0.18);
 }
 
 .runtime-preview-loading {
   position: absolute;
-  inset: 42px 22px 22px;
-  z-index: 3;
+  inset: 0;
+  z-index: 8;
   display: grid;
   place-items: center;
   padding: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
   color: var(--text-secondary);
   background: #111318;
   text-align: center;
@@ -1012,7 +1139,7 @@ button:disabled {
 }
 
 .runtime-preview-loading--error {
-  z-index: 4;
+  z-index: 8;
   color: #fecaca;
   background: rgba(27, 17, 20, 0.97);
 }

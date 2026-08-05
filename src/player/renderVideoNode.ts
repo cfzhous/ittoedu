@@ -195,7 +195,8 @@ export function renderVideoNode(
   let poster: Phaser.GameObjects.Image | null = null
   let posterAssetId: string | null = null
   const eventDisposers: RuntimeEventDisposer[] = []
-  const captureMode = context.mode === 'capture'
+  // Unified authoring shows the stable poster frame and never starts media.
+  const captureMode = context.mode === 'capture' || context.authoring === true
 
   const root = scene.add
     .container(node.x + node.width / 2, node.y + node.height / 2)

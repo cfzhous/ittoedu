@@ -239,8 +239,10 @@ export function validateRuntimeSource(source: string): void {
 function isRuntimeDefinition(value: unknown): value is RuntimeDefinition {
   if (typeof value !== 'object' || value === null) return false
   const runtimeApiVersion = Reflect.get(value, 'runtimeApiVersion')
+  const authoringApiVersion = Reflect.get(value, 'authoringApiVersion')
   return (
     SUPPORTED_RUNTIME_API_VERSIONS.has(runtimeApiVersion as RuntimeApiVersion) &&
+    (authoringApiVersion === undefined || authoringApiVersion === 1) &&
     typeof Reflect.get(value, 'create') === 'function'
   )
 }
@@ -340,7 +342,9 @@ export class RuntimeRegistry {
       throw new Error(`运行时“${this.loadingLabel}”重复调用了 define`)
     }
     if (!isRuntimeDefinition(definition)) {
-      throw new Error('运行时定义格式无效：需要 runtimeApiVersion 1/2 和 create()')
+      throw new Error(
+        '运行时定义格式无效：需要 runtimeApiVersion 1/2、可选 authoringApiVersion 1 和 create()',
+      )
     }
     this.definitionDuringLoad = definition
   }

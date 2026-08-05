@@ -1,5 +1,6 @@
 import {
   Hand,
+  ImagePlus,
   LoaderCircle,
   Maximize2,
   Minus,
@@ -9,7 +10,11 @@ import {
   RotateCcw,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentPackageData } from '../../shared/componentTypes'
+import type {
+  ComponentAuthoringTextTarget,
+  ComponentPackageData,
+  ExportPayload,
+} from '../../shared/componentTypes'
 import type {
   ExternalComponentNode,
   RuntimeAssetMap,
@@ -17,13 +22,22 @@ import type {
   SceneNode,
   TextNode,
 } from '../../shared/projectTypes'
+import type { RuntimeAuthoringTarget } from '../../shared/runtimeTypes'
 import {
-  getComponentPropValue,
-  mergeComponentProps,
-  setComponentPropValue,
-} from '../../shared/componentProps'
+  PLAYER_AUTHORING_MESSAGE_TYPES,
+  PLAYER_AUTHORING_PROTOCOL_VERSION,
+  isPlayerAuthoringSnapshotAck,
+  parsePlayerAuthoringReadyMessage,
+  playerAuthoringSnapshotBarrierForCommand,
+  type PlayerAuthoringPatch,
+  type PlayerAuthoringPatchCommand,
+  type PlayerAuthoringSnapshotBarrier,
+  type PlayerComponentAuthoringTargetsMessage,
+  type PlayerHostMode,
+  type PlayerRuntimeAuthoringTargetsMessage,
+} from '../../shared/playerAuthoringProtocol'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
-import type { ComponentCanvasTextTarget } from '../phaser/adapters/ExternalComponentNodeAdapter'
+import { onElementAnimationPreviewRequested } from '../phaser/elementAnimationPreviewBus'
 import {
   selectActiveScene,
   selectEditingNodes,
@@ -31,7 +45,7 @@ import {
   useEditorStore,
 } from '../store/editorStore'
 import { TextEditOverlay } from './TextEditOverlay'
-import { ComponentTextEditOverlay } from './ComponentTextEditOverlay'
+import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
@@ -40,30 +54,58 @@ import {
 } from '../../shared/presentation'
 import { buildStandaloneHtml } from '../export/buildStandaloneHtml'
 import { loadPlayerBundle } from '../export/loadPlayerBundle'
-import { jsonToBase64 } from '../export/base64'
 import {
   createRuntimePreviewBlobResources,
   type RuntimePreviewBlobResources,
 } from '../preview/runtimePreviewDocument'
 import {
   createRuntimePreviewPayloadResources,
+  type RuntimePreviewAssetTransfer,
   type RuntimePreviewPayloadResources,
 } from '../preview/runtimePreviewPayload'
+import {
+  releaseRuntimePreviewResources,
+  stopRuntimePreviewFrame,
+  type ActiveRuntimePreviewResources,
+} from '../preview/runtimePreviewLifecycle'
 import {
   isCurrentRuntimePreviewBootstrapMessage,
   isCurrentRuntimePreviewPlayerMessage,
 } from '../preview/runtimePreviewProtocol'
-import { hasEnabledRuntime } from './sceneThumbnailComposition'
+import {
+  clientToWorld,
+  createStageViewportTransform,
+  rotatedRectIntersectsStage,
+  STAGE_VIEWPORT_HEIGHT,
+  STAGE_VIEWPORT_WIDTH,
+} from '../authoring/stageViewportTransform'
+import { runtimeTargetMatchesEditingContext } from '../authoring/runtimeAuthoringContext'
+import {
+  beginComponentTextEditSession,
+  componentTextEditSessionMatchesContext,
+  componentTextTargetMatchesSession,
+  resolveComponentTextEdit,
+  type ComponentTextEditContext,
+  type ComponentTextEditSession,
+} from '../authoring/componentTextEditSession'
+import { isAuthoringCanvasInteractive } from '../authoring/authoringReadiness'
+import {
+  beginRuntimeTargetEditSession,
+  runtimeTargetEditSessionMatchesContext,
+  runtimeTargetMatchesEditSession,
+  validateRuntimeTargetEditSession,
+  type RuntimeTargetEditContext,
+  type RuntimeTargetEditSession,
+} from '../authoring/runtimeTargetEditSession'
+import type { ImportedImageAsset } from '../project/assetManager'
 
 interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
   onAddVideo(x?: number, y?: number): void
+  onSelectImageAsset(): Promise<ImportedImageAsset | null>
 }
 
-function blobForBytes(bytes: Uint8Array, mimeType: string): Blob {
-  const copy = Uint8Array.from(bytes)
-  return new Blob([copy.buffer], { type: mimeType })
-}
+const EMPTY_RUNTIME_ASSETS: RuntimeAssetMap = Object.freeze({})
 
 function nodesEqual(
   previous: SceneDocument['nodes'][number],
@@ -91,6 +133,29 @@ function withDirectionAwareTextAutoSize(
   }
 }
 
+function pointInsideRotatedBounds(
+  point: { x: number; y: number },
+  bounds: { x: number; y: number; width: number; height: number },
+  rotation: number,
+): boolean {
+  const centerX = bounds.x + bounds.width / 2
+  const centerY = bounds.y + bounds.height / 2
+  const radians = -rotation * Math.PI / 180
+  const dx = point.x - centerX
+  const dy = point.y - centerY
+  const localX = dx * Math.cos(radians) - dy * Math.sin(radians)
+  const localY = dx * Math.sin(radians) + dy * Math.cos(radians)
+  return Math.abs(localX) <= bounds.width / 2 &&
+    Math.abs(localY) <= bounds.height / 2
+}
+
+function pointInsideSceneNode(
+  point: { x: number; y: number },
+  node: SceneNode,
+): boolean {
+  return node.visible && pointInsideRotatedBounds(point, node, node.rotation)
+}
+
 const RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS = 12_000
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -108,11 +173,156 @@ type RuntimePreviewFeedback = {
   message: string
 } | null
 
-export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
+function sanitizeRuntimeAuthoringTargets(
+  update: PlayerRuntimeAuthoringTargetsMessage['update'],
+  hostKey: string,
+): ReadonlyArray<Readonly<RuntimeAuthoringTarget>> {
+  if (
+    (update.scope !== 'scene' && update.scope !== 'global') ||
+    (update.scope === 'scene' &&
+      (typeof update.sceneId !== 'string' || !update.sceneId.trim()))
+  ) {
+    return []
+  }
+  const sanitized: RuntimeAuthoringTarget[] = []
+  for (const candidate of update.targets) {
+    if (
+      !candidate ||
+      candidate.scope !== update.scope ||
+      candidate.sceneId !== update.sceneId ||
+      (candidate.kind !== 'text' && candidate.kind !== 'asset') ||
+      (candidate.layer !== 'underlay' && candidate.layer !== 'overlay') ||
+      (candidate.source !== 'registered' && candidate.source !== 'dom') ||
+      typeof candidate.targetId !== 'string' ||
+      !candidate.targetId ||
+      candidate.targetId.length > 256 ||
+      typeof candidate.key !== 'string' ||
+      !candidate.key ||
+      candidate.key.length > 256
+    ) {
+      continue
+    }
+    if (!candidate.bounds || typeof candidate.bounds !== 'object') continue
+    const { x, y, width, height } = candidate.bounds
+    if (![x, y, width, height].every(Number.isFinite)) continue
+    const left = Math.max(0, x)
+    const top = Math.max(0, y)
+    const right = Math.min(STAGE_VIEWPORT_WIDTH, x + width)
+    const bottom = Math.min(STAGE_VIEWPORT_HEIGHT, y + height)
+    if (right <= left || bottom <= top) continue
+    sanitized.push(Object.freeze({
+      ...candidate,
+      targetId: `${hostKey}:${candidate.targetId}`,
+      ...(typeof candidate.label === 'string'
+        ? { label: candidate.label.slice(0, 120) }
+        : { label: undefined }),
+      bounds: Object.freeze({
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+      }),
+    }))
+  }
+  return Object.freeze(sanitized)
+}
+
+function sanitizeComponentAuthoringTargets(
+  update: PlayerComponentAuthoringTargetsMessage['update'],
+  hostKey: string,
+): ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> {
+  if (
+    (update.scope !== 'scene' && update.scope !== 'global') ||
+    typeof update.nodeId !== 'string' ||
+    !update.nodeId ||
+    update.nodeId.length > 256 ||
+    (update.scope === 'scene' &&
+      (typeof update.sceneId !== 'string' || !update.sceneId.trim()))
+  ) {
+    return []
+  }
+  const sanitized: ComponentAuthoringTextTarget[] = []
+  for (const candidate of update.targets) {
+    if (
+      !candidate ||
+      candidate.kind !== 'component-text' ||
+      candidate.scope !== update.scope ||
+      candidate.sceneId !== update.sceneId ||
+      candidate.nodeId !== update.nodeId ||
+      (candidate.source !== 'registered' && candidate.source !== 'dom') ||
+      typeof candidate.targetId !== 'string' ||
+      !candidate.targetId ||
+      candidate.targetId.length > 256 ||
+      typeof candidate.componentId !== 'string' ||
+      !candidate.componentId ||
+      candidate.componentId.length > 256 ||
+      typeof candidate.key !== 'string' ||
+      !candidate.key ||
+      candidate.key.length > 256 ||
+      typeof candidate.multiline !== 'boolean' ||
+      !Number.isFinite(candidate.rotation)
+    ) {
+      continue
+    }
+    if (!candidate.bounds || typeof candidate.bounds !== 'object') continue
+    const { x, y, width, height } = candidate.bounds
+    if (
+      ![x, y, width, height].every(Number.isFinite) ||
+      width <= 0 ||
+      height <= 0
+    ) {
+      continue
+    }
+    if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation)) {
+      continue
+    }
+    const maxLength = candidate.maxLength
+    sanitized.push(Object.freeze({
+      ...candidate,
+      targetId: `component:${hostKey}:${candidate.targetId}`,
+      label: typeof candidate.label === 'string' && candidate.label.trim()
+        ? candidate.label.slice(0, 120)
+        : candidate.key.slice(0, 120),
+      ...(
+        maxLength === undefined ||
+        (Number.isSafeInteger(maxLength) && maxLength > 0 && maxLength <= 1_000_000)
+          ? { maxLength }
+          : { maxLength: undefined }
+      ),
+      bounds: Object.freeze({
+        x,
+        y,
+        width,
+        height,
+      }),
+    }))
+  }
+  return Object.freeze(sanitized)
+}
+
+type CanvasAuthoringHit =
+  | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
+  | { kind: 'component'; target: Readonly<ComponentAuthoringTextTarget> }
+
+export function Workspace({
+  onAddImage,
+  onAddVideo,
+  onSelectImageAsset,
+}: WorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement>(null)
+  const stageViewportRef = useRef<HTMLDivElement>(null)
   const gameHostRef = useRef<HTMLDivElement>(null)
   const gameRef = useRef<EditorGameHandle | null>(null)
   const runtimeFrameRef = useRef<HTMLIFrameElement>(null)
+  const lastParentFocusRef = useRef<HTMLElement | null>(null)
+  const authoringFocusRecoveryTimerRef = useRef<number | null>(null)
+  const retiredPreviewResourcesRef = useRef(new Set<{
+    document: RuntimePreviewBlobResources | null
+    payload: RuntimePreviewPayloadResources | null
+    timer: number
+  }>())
+  const activePreviewResourcesRef =
+    useRef<ActiveRuntimePreviewResources | null>(null)
   const previousSceneRef = useRef<SceneDocument | null>(null)
   const previousResourcesRef = useRef<{
     assets: RuntimeAssetMap
@@ -120,19 +330,57 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
   } | null>(null)
   const previewInitRef = useRef<{
     token: string
-    encodedPayload: string
+    payload: ExportPayload
+    assetTransfers: RuntimePreviewAssetTransfer[]
     playerBundle: string
     initialSceneId: string
-    initialStateId: string
+    initialStateId: string | null
+    editingScope: 'scene' | 'global'
+    hostMode: PlayerHostMode
+    bootstrapSent: boolean
   } | null>(null)
+  const authoringReadyRef = useRef(false)
+  const authoringRevisionRef = useRef(0)
+  const authoringSnapshotBarrierRef =
+    useRef<PlayerAuthoringSnapshotBarrier | null>(null)
+  const lastRuntimeTargetsRevisionRef = useRef(-1)
+  const lastComponentTargetsRevisionRef = useRef(-1)
+  const pendingAuthoringNodesRef = useRef(new Map<string, {
+    scope: 'scene' | 'global'
+    node: SceneNode
+  }>())
+  const authoringFrameRef = useRef<number | null>(null)
+  const runtimeTargetsByHostRef = useRef(new Map<
+    string,
+    ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
+  >())
+  const componentTargetsByHostRef = useRef(new Map<
+    string,
+    ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
+  >())
   const previewStartupTimerRef = useRef<number | null>(null)
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
-  const [runtimeAssets, setRuntimeAssets] = useState<RuntimeAssetMap>({})
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFeedback, setPreviewFeedback] = useState<RuntimePreviewFeedback>(null)
   const [previewRetryRevision, setPreviewRetryRevision] = useState(0)
-  const [componentTextTarget, setComponentTextTarget] =
-    useState<ComponentCanvasTextTarget | null>(null)
+  const [acknowledgedPreviewGeneration, setAcknowledgedPreviewGeneration] =
+    useState<object | null>(null)
+  const [runtimeTargets, setRuntimeTargets] =
+    useState<ReadonlyArray<Readonly<RuntimeAuthoringTarget>>>([])
+  const [componentTargets, setComponentTargets] =
+    useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
+  const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
+    useState<Readonly<RuntimeTargetEditSession> | null>(null)
+  const [activeComponentTextSession, setActiveComponentTextSession] =
+    useState<Readonly<ComponentTextEditSession> | null>(null)
+  const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
+    useState<string | null>(null)
+  const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
+    useState<string | null>(null)
+  const [stageViewportSize, setStageViewportSize] = useState({
+    width: STAGE_VIEWPORT_WIDTH,
+    height: STAGE_VIEWPORT_HEIGHT,
+  })
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 })
   const [panning, setPanning] = useState(false)
   const spacePressedRef = useRef(false)
@@ -159,17 +407,114 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
   const editingTextNodeId = useEditorStore(
     (state) => state.editingTextNodeId,
   )
-  const projectAssets = useEditorStore((state) => state.project.assets)
   const project = useEditorStore((state) => state.project)
   const assetFiles = useEditorStore((state) => state.assetFiles)
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
   )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
-  const showRuntimeEditHint = canvasMode === 'edit' && hasEnabledRuntime(
-    scene,
-    project.globalRuntime,
-  )
+
+  const stageTransform = useMemo(() => createStageViewportTransform({
+    viewport: {
+      x: 0,
+      y: 0,
+      width: stageViewportSize.width,
+      height: stageViewportSize.height,
+    },
+    zoom: view.zoom,
+    pan: { x: view.x, y: view.y },
+  }), [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
+  const previewRebuildKey = useMemo(() => {
+    const nodeIdentity = (node: SceneNode) => ({
+      id: node.id,
+      type: node.type,
+      ...(node.type === 'external-component'
+        ? {
+            componentId: node.component.packageId,
+            componentVersion: node.component.version,
+          }
+        : {}),
+    })
+    // A playback Player is a continuous course session. Its own scene/state
+    // telemetry updates the editor's active context, but must not recreate the
+    // iframe (which would reset global components, audio and courseState).
+    // Project changes still rebuild the session because the complete Project
+    // V7 document participates in this mode-specific key.
+    if (canvasMode === 'run') {
+      return JSON.stringify({ mode: canvasMode, project })
+    }
+    return JSON.stringify({
+      mode: canvasMode,
+      authoringContext: [editingScope, scene.id, activePresentationStateId],
+      sceneStructure: {
+        id: scene.id,
+        nodes: scene.nodes.map(nodeIdentity),
+        stateIds: ensureScenePresentation(scene).states.map((state) => state.id),
+        runtime: scene.runtime ?? null,
+      },
+      globalStructure: project.globalLayer.map((item) => ({
+        ...nodeIdentity(item.node),
+        layer: item.layer,
+        visibility: item.visibility,
+      })),
+      globalRuntime: project.globalRuntime ?? null,
+      assets: project.assets,
+    })
+  }, [activePresentationStateId, canvasMode, editingScope, project, scene])
+  const previewGeneration = useMemo<object>(() => ({}), [
+    assetFiles,
+    canvasMode,
+    componentPackages,
+    previewRebuildKey,
+    previewRetryRevision,
+  ])
+  const authoringCanvasInteractive = isAuthoringCanvasInteractive({
+    canvasMode,
+    playerReady: authoringReadyRef.current,
+    snapshotPending: authoringSnapshotBarrierRef.current !== null,
+    hasPreviewFeedback: previewFeedback !== null,
+    generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
+  })
+
+  useEffect(() => {
+    const rememberParentFocus = (event: FocusEvent) => {
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        target !== runtimeFrameRef.current
+      ) {
+        lastParentFocusRef.current = target
+      }
+    }
+    const recoverFromAuthoringFrameFocus = () => {
+      if (authoringFocusRecoveryTimerRef.current !== null) {
+        window.clearTimeout(authoringFocusRecoveryTimerRef.current)
+      }
+      authoringFocusRecoveryTimerRef.current = window.setTimeout(() => {
+        authoringFocusRecoveryTimerRef.current = null
+        const frame = runtimeFrameRef.current
+        const previous = lastParentFocusRef.current
+        if (
+          useEditorStore.getState().canvasMode === 'edit' &&
+          frame &&
+          window.document.activeElement === frame &&
+          previous?.isConnected
+        ) {
+          previous.focus({ preventScroll: true })
+        }
+      }, 0)
+    }
+    window.document.addEventListener('focusin', rememberParentFocus, true)
+    window.addEventListener('blur', recoverFromAuthoringFrameFocus)
+    return () => {
+      window.document.removeEventListener('focusin', rememberParentFocus, true)
+      window.removeEventListener('blur', recoverFromAuthoringFrameFocus)
+      if (authoringFocusRecoveryTimerRef.current !== null) {
+        window.clearTimeout(authoringFocusRecoveryTimerRef.current)
+        authoringFocusRecoveryTimerRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -206,18 +551,92 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
     setView({ zoom: 1, x: 0, y: 0 })
   }, [])
 
+  useLayoutEffect(() => {
+    const viewport = stageViewportRef.current
+    if (!viewport) return
+    const update = () => {
+      const rect = viewport.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return
+      setStageViewportSize((current) => (
+        current.width === rect.width && current.height === rect.height
+          ? current
+          : { width: rect.width, height: rect.height }
+      ))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(viewport)
+    window.addEventListener('resize', update)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [])
+
   const clearRuntimePreviewStartupTimer = useCallback(() => {
     if (previewStartupTimerRef.current === null) return
     window.clearTimeout(previewStartupTimerRef.current)
     previewStartupTimerRef.current = null
   }, [])
 
+  const revokeRetiredPreviewResources = useCallback(() => {
+    for (const resources of retiredPreviewResourcesRef.current) {
+      window.clearTimeout(resources.timer)
+      resources.document?.revoke()
+      resources.payload?.revoke()
+    }
+    retiredPreviewResourcesRef.current.clear()
+  }, [])
+
+  const retirePreviewResources = useCallback((
+    documentResources: RuntimePreviewBlobResources | null,
+    payloadResources: RuntimePreviewPayloadResources | null,
+  ) => {
+    if (!documentResources && !payloadResources) return
+    const resources = {
+      document: documentResources,
+      payload: payloadResources,
+      timer: 0,
+    }
+    resources.timer = window.setTimeout(() => {
+      resources.document?.revoke()
+      resources.payload?.revoke()
+      retiredPreviewResourcesRef.current.delete(resources)
+    }, 10_000)
+    retiredPreviewResourcesRef.current.add(resources)
+  }, [])
+
   const failRuntimePreview = useCallback((token: string, message: string) => {
     if (previewInitRef.current?.token !== token) return
+    previewInitRef.current = null
+    authoringReadyRef.current = false
+    authoringSnapshotBarrierRef.current = null
+    setAcknowledgedPreviewGeneration(null)
     clearRuntimePreviewStartupTimer()
+    if (authoringFrameRef.current !== null) {
+      window.cancelAnimationFrame(authoringFrameRef.current)
+      authoringFrameRef.current = null
+    }
+    pendingAuthoringNodesRef.current.clear()
+    runtimeTargetsByHostRef.current.clear()
+    componentTargetsByHostRef.current.clear()
+    lastRuntimeTargetsRevisionRef.current = -1
+    lastComponentTargetsRevisionRef.current = -1
+    setRuntimeTargets([])
+    setComponentTargets([])
+    setActiveRuntimeTextSession(null)
+    setActiveComponentTextSession(null)
+    setHoveredAuthoringTargetId(null)
+    setReplacingRuntimeAssetTargetId(null)
+    stopRuntimePreviewFrame(runtimeFrameRef.current)
+    setPreviewUrl(null)
+    activePreviewResourcesRef.current = releaseRuntimePreviewResources(
+      activePreviewResourcesRef.current,
+      token,
+    )
     setPreviewFeedback({
       kind: 'error',
-      title: '当前位置试运行启动失败',
+      title: '统一画布启动失败',
       message,
     })
   }, [clearRuntimePreviewStartupTimer])
@@ -225,7 +644,7 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
   const retryRuntimePreview = useCallback(() => {
     setPreviewFeedback({
       kind: 'loading',
-      title: '正在准备当前位置试运行',
+      title: '正在重新准备画布',
       message: '正在重新创建隔离播放器…',
     })
     setPreviewRetryRevision((revision) => revision + 1)
@@ -247,72 +666,281 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
     }
   }, [activePresentationStateId, scene.id])
 
-  useEffect(() => {
-    clearRuntimePreviewStartupTimer()
-    if (canvasMode !== 'run') {
-      previewInitRef.current = null
-      setPreviewUrl(null)
-      setPreviewFeedback(null)
+  const postAuthoringPatch = useCallback((patch: PlayerAuthoringPatch) => {
+    const init = previewInitRef.current
+    const target = runtimeFrameRef.current?.contentWindow
+    if (
+      !target ||
+      !init ||
+      init.hostMode !== 'authoring' ||
+      !authoringReadyRef.current
+    ) {
+      if (init && authoringSnapshotBarrierRef.current) {
+        failRuntimePreview(
+          init.token,
+          '编辑画布在初始同步期间失去连接。请重新载入画布。',
+        )
+      }
+      return null
+    }
+    const editorState = useEditorStore.getState()
+    const currentScene = selectActiveScene(editorState)
+    authoringRevisionRef.current += 1
+    const command: PlayerAuthoringPatchCommand = {
+      type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
+      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
+      sessionId: init.token,
+      requestId: crypto.randomUUID(),
+      revision: authoringRevisionRef.current,
+      context: {
+        sceneId: currentScene.id,
+        stateId: editorState.activePresentationStateId,
+      },
+      patch,
+    }
+    try {
+      target.postMessage(command, '*')
+    } catch {
+      if (authoringSnapshotBarrierRef.current) {
+        failRuntimePreview(
+          init.token,
+          '编辑画布在初始同步期间无法继续发送更新。请重新载入画布。',
+        )
+      }
+      return null
+    }
+    // Property-panel edits may arrive while the initial snapshot is still
+    // applying. Move the gate forward so an older snapshot ACK cannot expose
+    // a canvas that is still catching up with the editor store.
+    if (authoringSnapshotBarrierRef.current) {
+      authoringSnapshotBarrierRef.current =
+        playerAuthoringSnapshotBarrierForCommand(command)
+    }
+    return command
+  }, [failRuntimePreview])
+
+  useEffect(() => onElementAnimationPreviewRequested(({ action, delayMs }) => {
+    const store = useEditorStore.getState()
+    const currentNode = selectEditingNodes(store).find(
+      (node) => node.id === action.nodeId,
+    )
+    if (!currentNode) {
+      store.setStatus('动画预览目标已失效，请重新选择')
       return
     }
+    const posted = postAuthoringPatch({
+      kind: 'preview-node-motion',
+      target: {
+        kind: 'native-node',
+        scope: store.editingScope,
+        nodeId: currentNode.id,
+      },
+      action,
+      delayMs,
+    })
+    if (!posted) {
+      store.setStatus('编辑画布尚未就绪，请稍后重试动画预览')
+    }
+  }), [postAuthoringPatch])
+
+  const flushAuthoringNodePatches = useCallback(() => {
+    authoringFrameRef.current = null
+    const pending = [...pendingAuthoringNodesRef.current.values()]
+    pendingAuthoringNodesRef.current.clear()
+    for (const { scope, node } of pending) {
+      postAuthoringPatch({
+        kind: 'native-node',
+        target: {
+          kind: 'native-node',
+          scope,
+          nodeId: node.id,
+        },
+        node,
+      })
+    }
+  }, [postAuthoringPatch])
+
+  const queueAuthoringNodePatch = useCallback((
+    scope: 'scene' | 'global',
+    node: SceneNode,
+  ) => {
+    pendingAuthoringNodesRef.current.set(
+      `${scope}:${node.id}`,
+      { scope, node: structuredClone(node) },
+    )
+    if (authoringFrameRef.current !== null) return
+    authoringFrameRef.current = window.requestAnimationFrame(
+      flushAuthoringNodePatches,
+    )
+  }, [flushAuthoringNodePatches])
+
+  const syncCompleteAuthoringSnapshot = useCallback(() => {
+    const editorState = useEditorStore.getState()
+    const currentScene = selectActiveScene(editorState)
+    const materialized = materializeScene(
+      currentScene,
+      editorState.activePresentationStateId,
+    )
+    if (authoringFrameRef.current !== null) {
+      window.cancelAnimationFrame(authoringFrameRef.current)
+      authoringFrameRef.current = null
+    }
+    pendingAuthoringNodesRef.current.clear()
+    const patches: PlayerAuthoringPatch[] = [
+      ...materialized.nodes.map((node): PlayerAuthoringPatch => ({
+        kind: 'native-node',
+        target: { kind: 'native-node', scope: 'scene', nodeId: node.id },
+        node,
+      })),
+      ...editorState.project.globalLayer.map((item): PlayerAuthoringPatch => ({
+        kind: 'native-node',
+        target: {
+          kind: 'native-node',
+          scope: 'global',
+          nodeId: item.node.id,
+        },
+        node: item.node,
+      })),
+      {
+        kind: 'scene-background',
+        target: { kind: 'scene-background', scope: 'scene' },
+        backgroundColor: materialized.backgroundColor,
+        backgroundAssetId: materialized.backgroundAssetId ?? null,
+      },
+      {
+        kind: 'scene-order',
+        target: { kind: 'scene-order', scope: 'scene' },
+        nodeIds: materialized.nodes.map((node) => node.id),
+      },
+    ]
+    let lastCommand: PlayerAuthoringPatchCommand | null = null
+    for (const patch of patches) {
+      lastCommand = postAuthoringPatch(patch)
+      if (!lastCommand) return null
+    }
+    return lastCommand
+  }, [postAuthoringPatch])
+
+  useEffect(() => () => {
+    if (authoringFrameRef.current !== null) {
+      window.cancelAnimationFrame(authoringFrameRef.current)
+      authoringFrameRef.current = null
+    }
+    pendingAuthoringNodesRef.current.clear()
+  }, [])
+
+  useEffect(() => {
+    clearRuntimePreviewStartupTimer()
+    authoringReadyRef.current = false
+    authoringRevisionRef.current = 0
+    authoringSnapshotBarrierRef.current = null
+    setAcknowledgedPreviewGeneration(null)
+    lastRuntimeTargetsRevisionRef.current = -1
+    lastComponentTargetsRevisionRef.current = -1
+    if (authoringFrameRef.current !== null) {
+      window.cancelAnimationFrame(authoringFrameRef.current)
+      authoringFrameRef.current = null
+    }
+    pendingAuthoringNodesRef.current.clear()
+    runtimeTargetsByHostRef.current.clear()
+    componentTargetsByHostRef.current.clear()
+    setRuntimeTargets([])
+    setComponentTargets([])
+    setActiveRuntimeTextSession(null)
+    setActiveComponentTextSession(null)
 
     let blobResources: RuntimePreviewBlobResources | null = null
     let payloadResources: RuntimePreviewPayloadResources | null = null
+    let token: string | null = null
     try {
       const editorState = useEditorStore.getState()
       const initialScene = selectActiveScene(editorState)
-      const initialStateId = editorState.activePresentationStateId ??
-        ensureScenePresentation(initialScene).initialStateId
+      const hostMode: PlayerHostMode = canvasMode === 'edit'
+        ? 'authoring'
+        : 'playback'
+      const initialStateId = hostMode === 'authoring'
+        ? editorState.activePresentationStateId
+        : editorState.activePresentationStateId ??
+          ensureScenePresentation(initialScene).initialStateId
       payloadResources = createRuntimePreviewPayloadResources({
         project,
         assetFiles,
         components: componentPackages,
+        assetUrlMode: 'sandbox-transfer',
       })
       const payload = payloadResources.payload
       const playerBundle = loadPlayerBundle()
-      const token = crypto.randomUUID()
+      const currentToken = crypto.randomUUID()
+      token = currentToken
       previewInitRef.current = {
-        token,
-        encodedPayload: jsonToBase64(payload),
+        token: currentToken,
+        payload,
+        assetTransfers: payloadResources.assetTransfers,
         playerBundle,
         initialSceneId: initialScene.id,
         initialStateId,
+        editingScope: editorState.editingScope,
+        hostMode,
+        bootstrapSent: false,
       }
       blobResources = createRuntimePreviewBlobResources(
         buildStandaloneHtml(payload, playerBundle),
-        token,
+        currentToken,
       )
+      activePreviewResourcesRef.current = {
+        token: currentToken,
+        document: blobResources,
+        payload: payloadResources,
+      }
       setPreviewUrl(blobResources.documentUrl)
       setPreviewFeedback({
         kind: 'loading',
-        title: '正在准备当前位置试运行',
-        message: '正在载入隔离预览页面…',
+        title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
+        message: '正在载入隔离 Player…',
       })
       previewStartupTimerRef.current = window.setTimeout(() => {
         failRuntimePreview(
-          token,
-          '播放器在 12 秒内没有完成启动。请重试；若仍失败，请检查当前工程的运行时或组件。',
+          currentToken,
+          '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前工程的运行时或组件。',
         )
       }, RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS)
     } catch (error) {
+      if (token) {
+        activePreviewResourcesRef.current = releaseRuntimePreviewResources(
+          activePreviewResourcesRef.current,
+          token,
+        )
+      }
       blobResources?.revoke()
       blobResources = null
       payloadResources?.revoke()
       payloadResources = null
       previewInitRef.current = null
+      setAcknowledgedPreviewGeneration(null)
       const message = error instanceof Error ? error.message : String(error)
       setPreviewUrl(null)
       setPreviewFeedback({
         kind: 'error',
-        title: '当前位置试运行创建失败',
+        title: '统一画布创建失败',
         message,
       })
     }
 
     return () => {
       clearRuntimePreviewStartupTimer()
-      blobResources?.revoke()
-      payloadResources?.revoke()
+      if (token && previewInitRef.current?.token === token) {
+        previewInitRef.current = null
+      }
+      const activeResources = activePreviewResourcesRef.current
+      if (token && activeResources?.token === token) {
+        activePreviewResourcesRef.current = null
+        retirePreviewResources(
+          activeResources.document,
+          activeResources.payload,
+        )
+      }
+      blobResources = null
+      payloadResources = null
     }
   }, [
     assetFiles,
@@ -320,8 +948,13 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
     clearRuntimePreviewStartupTimer,
     componentPackages,
     failRuntimePreview,
+    previewRebuildKey,
     previewRetryRevision,
-    project,
+    retirePreviewResources,
+  ])
+
+  useEffect(() => () => revokeRetiredPreviewResources(), [
+    revokeRetiredPreviewResources,
   ])
 
   useEffect(() => {
@@ -334,7 +967,13 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
       const message = event.data as {
         type?: unknown
         token?: unknown
+        protocolVersion?: unknown
+        sessionId?: unknown
+        revision?: unknown
         message?: unknown
+        code?: unknown
+        update?: PlayerRuntimeAuthoringTargetsMessage['update'] |
+          PlayerComponentAuthoringTargetsMessage['update']
         detail?: {
           sceneId?: unknown
           stateId?: unknown
@@ -350,16 +989,31 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         )
       ) {
         const init = previewInitRef.current
-        if (!init) return
+        if (!init || init.bootstrapSent) return
         setPreviewFeedback({
           kind: 'loading',
-          title: '正在启动当前位置试运行',
-          message: '隔离页面已连接，正在启动播放器…',
+          title: init.hostMode === 'authoring'
+            ? '正在启动编辑画布'
+            : '正在启动当前位置试运行',
+          message: '隔离页面已连接，正在启动 Player…',
         })
-        runtimeFrameRef.current?.contentWindow?.postMessage({
-          type: 'courseware-preview-bootstrap:init',
-          ...init,
-        }, '*')
+        const target = runtimeFrameRef.current?.contentWindow
+        if (!target) return
+        init.bootstrapSent = true
+        try {
+          target.postMessage({
+            type: 'courseware-preview-bootstrap:init',
+            ...init,
+          }, '*', init.assetTransfers.map((asset) => asset.bytes))
+        } catch (error) {
+          init.bootstrapSent = false
+          failRuntimePreview(
+            init.token,
+            error instanceof Error
+              ? `素材传输失败：${error.message}`
+              : '素材传输失败。',
+          )
+        }
         return
       }
       if (
@@ -389,11 +1043,150 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         return
       }
       if (message.type === 'courseware-player:ready') {
+        if (canvasMode === 'run') {
+          clearRuntimePreviewStartupTimer()
+          setPreviewFeedback(null)
+        }
+        return
+      }
+      if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
+        const init = previewInitRef.current
+        if (!init || init.hostMode !== 'authoring') return
+        if (authoringReadyRef.current) return
+        const parsed = parsePlayerAuthoringReadyMessage(event.data)
+        if (!parsed.ok) {
+          failRuntimePreview(
+            init.token,
+            `编辑画布握手无效：${parsed.message}。请重新载入画布。`,
+          )
+          return
+        }
+        if (
+          parsed.ready.sessionId !== init.token ||
+          parsed.ready.context.sceneId !== init.initialSceneId ||
+          parsed.ready.context.stateId !== init.initialStateId
+        ) {
+          failRuntimePreview(
+            init.token,
+            '编辑画布返回了不一致的场景或状态。请重新载入画布。',
+          )
+          return
+        }
+        authoringReadyRef.current = true
+        setPreviewFeedback({
+          kind: 'loading',
+          title: '正在同步编辑画布',
+          message: 'Player 已启动，正在应用当前画面的完整快照…',
+        })
+        const lastCommand = syncCompleteAuthoringSnapshot()
+        if (!lastCommand) {
+          failRuntimePreview(
+            init.token,
+            '当前画面的完整快照未能发送。请重新载入画布。',
+          )
+          return
+        }
+        authoringSnapshotBarrierRef.current =
+          playerAuthoringSnapshotBarrierForCommand(lastCommand)
+        return
+      }
+      if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack) {
+        const barrier = authoringSnapshotBarrierRef.current
+        if (!barrier) return
+        if (!isPlayerAuthoringSnapshotAck(event.data, barrier)) return
+        if (pendingAuthoringNodesRef.current.size > 0) {
+          if (authoringFrameRef.current !== null) {
+            window.cancelAnimationFrame(authoringFrameRef.current)
+          }
+          flushAuthoringNodePatches()
+          return
+        }
+        authoringSnapshotBarrierRef.current = null
         clearRuntimePreviewStartupTimer()
+        setAcknowledgedPreviewGeneration(previewGeneration)
         setPreviewFeedback(null)
         return
       }
       if (
+        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets &&
+        message.protocolVersion === PLAYER_AUTHORING_PROTOCOL_VERSION &&
+        message.sessionId === previewInitRef.current?.token &&
+        typeof message.revision === 'number' &&
+        Number.isSafeInteger(message.revision) &&
+        message.revision > lastRuntimeTargetsRevisionRef.current &&
+        message.update &&
+        typeof message.update.scope === 'string' &&
+        Array.isArray(message.update.targets)
+      ) {
+        lastRuntimeTargetsRevisionRef.current = message.revision
+        const hostKey = `${message.update.scope}:${message.update.sceneId ?? ''}`
+        runtimeTargetsByHostRef.current.set(
+          hostKey,
+          sanitizeRuntimeAuthoringTargets(
+            message.update as PlayerRuntimeAuthoringTargetsMessage['update'],
+            hostKey,
+          ),
+        )
+        setRuntimeTargets(
+          [...runtimeTargetsByHostRef.current.values()].flat(),
+        )
+        return
+      }
+      if (
+        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets &&
+        message.protocolVersion === PLAYER_AUTHORING_PROTOCOL_VERSION &&
+        message.sessionId === previewInitRef.current?.token &&
+        typeof message.revision === 'number' &&
+        Number.isSafeInteger(message.revision) &&
+        message.revision > lastComponentTargetsRevisionRef.current &&
+        message.update &&
+        typeof message.update.scope === 'string' &&
+        'nodeId' in message.update &&
+        typeof message.update.nodeId === 'string' &&
+        Array.isArray(message.update.targets)
+      ) {
+        lastComponentTargetsRevisionRef.current = message.revision
+        const hostKey = [
+          message.update.scope,
+          message.update.sceneId ?? '',
+          message.update.nodeId,
+        ].join(':')
+        componentTargetsByHostRef.current.set(
+          hostKey,
+          sanitizeComponentAuthoringTargets(
+            message.update as PlayerComponentAuthoringTargetsMessage['update'],
+            hostKey,
+          ),
+        )
+        setComponentTargets(
+          [...componentTargetsByHostRef.current.values()].flat(),
+        )
+        return
+      }
+      if (
+        message.type === PLAYER_AUTHORING_MESSAGE_TYPES.error &&
+        message.protocolVersion === PLAYER_AUTHORING_PROTOCOL_VERSION &&
+        message.sessionId === previewInitRef.current?.token
+      ) {
+        const token = previewInitRef.current?.token
+        if (token && authoringSnapshotBarrierRef.current) {
+          failRuntimePreview(
+            token,
+            typeof message.message === 'string'
+              ? `初始画面同步失败：${message.message}。请重新载入画布。`
+              : '初始画面同步失败。请重新载入画布。',
+          )
+          return
+        }
+        useEditorStore.getState().setStatus(
+          typeof message.message === 'string'
+            ? `画布同步未应用：${message.message}`
+            : '画布同步未应用，请重试。',
+        )
+        return
+      }
+      if (
+        canvasMode === 'run' &&
         message.type === 'courseware-player:scene-change' &&
         typeof message.detail?.sceneId === 'string'
       ) {
@@ -417,6 +1210,7 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
           statusMessage: `当前位置试运行：${nextScene.name}`,
         }))
       } else if (
+        canvasMode === 'run' &&
         message.type === 'courseware-player:presentation-change' &&
         typeof message.detail?.stateId === 'string'
       ) {
@@ -438,8 +1232,12 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [
+    canvasMode,
     clearRuntimePreviewStartupTimer,
     failRuntimePreview,
+    flushAuthoringNodePatches,
+    previewGeneration,
+    syncCompleteAuthoringSnapshot,
     syncRuntimePreview,
   ])
 
@@ -469,48 +1267,432 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         : undefined,
     [document.nodes, editingTextNodeId],
   )
+  const visibleRuntimeTargets = useMemo(
+    () => runtimeTargets.filter((target) => (
+      (target.kind === 'text' || target.kind === 'asset') &&
+      runtimeTargetMatchesEditingContext(target, editingScope, scene.id)
+    )),
+    [editingScope, runtimeTargets, scene.id],
+  )
+  const visibleComponentTargets = useMemo(
+    () => componentTargets.filter((target) => {
+      if (target.scope !== editingScope) return false
+      if (target.scope === 'scene' && target.sceneId !== scene.id) return false
+      return document.nodes.some((node) => (
+        node.id === target.nodeId &&
+        node.type === 'external-component' &&
+        node.visible
+      ))
+    }),
+    [componentTargets, document.nodes, editingScope, scene.id],
+  )
+  const activeComponentTextTarget = useMemo(() => {
+    if (
+      !activeComponentTextSession ||
+      !componentTextEditSessionMatchesContext(activeComponentTextSession, {
+        projectId: project.id,
+        scope: editingScope,
+        sceneId: scene.id,
+        stateId: activePresentationStateId,
+      })
+    ) {
+      return undefined
+    }
+    return visibleComponentTargets.find((target) => (
+      componentTextTargetMatchesSession(target, activeComponentTextSession)
+    ))
+  }, [
+    activeComponentTextSession,
+    activePresentationStateId,
+    editingScope,
+    project.id,
+    scene.id,
+    visibleComponentTargets,
+  ])
   const componentEditingNode = useMemo(
-    () => componentTextTarget
+    () => activeComponentTextSession && activeComponentTextTarget
       ? document.nodes.find(
           (node): node is ExternalComponentNode => (
-            node.id === componentTextTarget.nodeId &&
-            node.type === 'external-component'
+            node.id === activeComponentTextSession.nodeId &&
+            node.type === 'external-component' &&
+            node.component.packageId === activeComponentTextSession.componentId &&
+            node.component.version === activeComponentTextSession.componentVersion
           ),
         )
       : undefined,
-    [componentTextTarget, document.nodes],
+    [activeComponentTextSession, activeComponentTextTarget, document.nodes],
   )
-  const componentEditingValue = useMemo(() => {
-    if (!componentEditingNode) return ''
-    const component = componentPackages[
-      componentEditingNode.component.packageId
-    ]
-    if (!component) return ''
-    const value = getComponentPropValue(
-      mergeComponentProps(component.manifest, componentEditingNode.props),
-      componentTextTarget?.key ?? '',
-    )
-    return typeof value === 'string' ? value : ''
-  }, [componentEditingNode, componentPackages, componentTextTarget?.key])
+  const componentEditingValue = activeComponentTextSession?.initialValue ?? ''
+  const activeRuntimeTextTarget = useMemo(() => {
+    if (
+      !activeRuntimeTextSession ||
+      activeRuntimeTextSession.kind !== 'text' ||
+      !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession, {
+        projectId: project.id,
+        scope: editingScope,
+        sceneId: scene.id,
+      })
+    ) {
+      return undefined
+    }
+    return visibleRuntimeTargets.find((target) => (
+      runtimeTargetMatchesEditSession(target, activeRuntimeTextSession)
+    ))
+  }, [
+    activeRuntimeTextSession,
+    editingScope,
+    project.id,
+    scene.id,
+    visibleRuntimeTargets,
+  ])
+  const activeRuntimeTextValue = activeRuntimeTextTarget?.kind === 'text'
+    ? (activeRuntimeTextTarget.scope === 'global'
+        ? project.globalRuntime
+        : scene.runtime
+      )?.content.values[activeRuntimeTextTarget.key] ?? ''
+    : ''
 
   useEffect(() => {
-    const next: RuntimeAssetMap = {}
-    const urls: string[] = []
-    for (const [assetId, meta] of Object.entries(projectAssets)) {
-      const bytes = assetFiles[assetId]
-      if (!bytes) continue
-      const url = URL.createObjectURL(blobForBytes(bytes, meta.mimeType))
-      urls.push(url)
-      next[assetId] = { meta, bytes, url }
+    if (
+      canvasMode !== 'edit' ||
+      !activeRuntimeTextSession ||
+      !activeRuntimeTextTarget
+    ) {
+      setActiveRuntimeTextSession(null)
     }
-    setRuntimeAssets(next)
-    return () => urls.forEach((url) => URL.revokeObjectURL(url))
-  }, [assetFiles, projectAssets])
+  }, [activeRuntimeTextSession, activeRuntimeTextTarget, canvasMode])
+
+  useEffect(() => {
+    if (
+      canvasMode !== 'edit' ||
+      !activeComponentTextSession ||
+      !activeComponentTextTarget
+    ) {
+      setActiveComponentTextSession(null)
+    }
+  }, [activeComponentTextSession, activeComponentTextTarget, canvasMode])
+
+  const currentComponentTextEditContext = useCallback(
+    (): ComponentTextEditContext => {
+      const store = useEditorStore.getState()
+      const nodes = selectEditingNodes(store)
+      const visibleComponentNodeIds = new Set(nodes.flatMap((node) => (
+        node.type === 'external-component' && node.visible ? [node.id] : []
+      )))
+      return {
+        projectId: store.project.id,
+        scope: store.editingScope,
+        sceneId: store.activeSceneId,
+        stateId: store.activePresentationStateId,
+        nodes,
+        componentPackages: store.componentPackages,
+        // Read the synchronous host registry rather than React render state so
+        // a blur racing with target cleanup can never commit a retired target.
+        targets: [...componentTargetsByHostRef.current.values()]
+          .flat()
+          .filter((target) => (
+            target.scope === store.editingScope &&
+            (target.scope === 'global' ||
+              target.sceneId === store.activeSceneId) &&
+            visibleComponentNodeIds.has(target.nodeId)
+          )),
+      }
+    },
+    [],
+  )
+
+  const currentRuntimeTargetEditContext = useCallback(
+    (): RuntimeTargetEditContext => {
+      const store = useEditorStore.getState()
+      return {
+        projectId: store.project.id,
+        scope: store.editingScope,
+        sceneId: store.activeSceneId,
+        stateId: store.activePresentationStateId,
+        // Read the synchronous host registry so a commit racing with target
+        // cleanup cannot write into a replacement Runtime that happens to use
+        // the same content or asset key.
+        targets: [...runtimeTargetsByHostRef.current.values()]
+          .flat()
+          .filter((target) => (
+            (target.kind === 'text' || target.kind === 'asset') &&
+            runtimeTargetMatchesEditingContext(
+              target,
+              store.editingScope,
+              store.activeSceneId,
+            )
+          )),
+      }
+    },
+    [],
+  )
+
+  const beginComponentTextEdit = useCallback((
+    target: Readonly<ComponentAuthoringTextTarget>,
+  ) => {
+    useEditorStore.getState().commitTextEdit()
+    const store = useEditorStore.getState()
+    const result = beginComponentTextEditSession(
+      target,
+      currentComponentTextEditContext(),
+    )
+    if (!result.ok) {
+      store.setStatus(
+        result.reason === 'context-changed'
+          ? '组件文字编辑上下文已切换，请重新选择'
+          : '组件文字目标已失效，请重新选择',
+      )
+      setActiveComponentTextSession(null)
+      return
+    }
+    store.selectNode(result.session.nodeId)
+    setActiveRuntimeTextSession(null)
+    setActiveComponentTextSession(result.session)
+  }, [currentComponentTextEditContext])
+
+  const commitComponentText = useCallback((
+    session: Readonly<ComponentTextEditSession>,
+    value: string,
+  ) => {
+    const store = useEditorStore.getState()
+    const result = resolveComponentTextEdit(
+      session,
+      value,
+      currentComponentTextEditContext(),
+    )
+    if (!result.ok) {
+      store.setStatus(
+        result.reason === 'context-changed'
+          ? '组件文字编辑上下文已切换，未写入修改'
+          : '组件文字目标已失效，未写入修改',
+      )
+      setActiveComponentTextSession(null)
+      return
+    }
+    store.updateNode(result.nodeId, {
+      props: result.props,
+    })
+    store.setStatus(
+      session.stateId === null || session.scope === 'global'
+        ? '已更新组件文字'
+        : '已更新当前演示状态中的组件文字',
+    )
+    setActiveComponentTextSession(null)
+  }, [currentComponentTextEditContext])
+
+  const beginRuntimeTextEdit = useCallback((
+    target: Readonly<RuntimeAuthoringTarget>,
+  ) => {
+    if (target.kind !== 'text') return
+    const store = useEditorStore.getState()
+    store.commitTextEdit()
+    const result = beginRuntimeTargetEditSession(
+      target,
+      currentRuntimeTargetEditContext(),
+    )
+    if (!result.ok) {
+      store.setStatus(
+        result.reason === 'context-changed'
+          ? '运行时文字编辑上下文已切换，请重新选择'
+          : '运行时文字目标已失效，请重新选择',
+      )
+      setActiveRuntimeTextSession(null)
+      return
+    }
+    setActiveComponentTextSession(null)
+    setActiveRuntimeTextSession(result.session)
+  }, [currentRuntimeTargetEditContext])
+
+  const commitRuntimeText = useCallback((
+    session: Readonly<RuntimeTargetEditSession>,
+    value: string,
+  ) => {
+    const store = useEditorStore.getState()
+    const result = validateRuntimeTargetEditSession(
+      session,
+      currentRuntimeTargetEditContext(),
+    )
+    if (!result.ok) {
+      store.setStatus(
+        result.reason === 'context-changed'
+          ? '运行时文字编辑上下文已切换，未写入修改'
+          : '运行时文字目标已失效，未写入修改',
+      )
+      setActiveRuntimeTextSession(null)
+      return
+    }
+    const target = result.target
+    const runtime = target.scope === 'global'
+      ? store.project.globalRuntime
+      : store.project.scenes.find((item) => item.id === target.sceneId)?.runtime
+    if (
+      !runtime ||
+      target.kind !== 'text' ||
+      !Object.prototype.hasOwnProperty.call(runtime.content.values, target.key)
+    ) {
+      store.setStatus('运行时文字目标已失效，请重新选择')
+      setActiveRuntimeTextSession(null)
+      return
+    }
+    const patch = {
+      content: {
+        ...runtime.content,
+        values: {
+          ...runtime.content.values,
+          [target.key]: value,
+        },
+      },
+    }
+    if (target.scope === 'global') {
+      store.updateGlobalRuntime(patch)
+      store.setStatus('已更新全局运行时文字；此内容由整课共享')
+    } else if (target.sceneId) {
+      store.updateSceneRuntime(target.sceneId, patch)
+      store.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
+    }
+    setActiveRuntimeTextSession(null)
+  }, [currentRuntimeTargetEditContext])
+
+  const replaceRuntimeAsset = useCallback(async (
+    target: Readonly<RuntimeAuthoringTarget>,
+  ) => {
+    if (target.kind !== 'asset' || replacingRuntimeAssetTargetId) return
+    const store = useEditorStore.getState()
+    const started = beginRuntimeTargetEditSession(
+      target,
+      currentRuntimeTargetEditContext(),
+    )
+    if (!started.ok) {
+      store.setStatus(
+        started.reason === 'context-changed'
+          ? '运行时图片编辑上下文已切换，请重新选择'
+          : '运行时图片目标已失效，请重新选择',
+      )
+      return
+    }
+    const session = started.session
+    setReplacingRuntimeAssetTargetId(session.targetId)
+    try {
+      const imported = await onSelectImageAsset()
+      if (!imported) return
+      const latestState = useEditorStore.getState()
+      const result = validateRuntimeTargetEditSession(
+        session,
+        currentRuntimeTargetEditContext(),
+      )
+      if (!result.ok) {
+        latestState.setStatus(
+          result.reason === 'context-changed'
+            ? '运行时图片编辑上下文已切换，未写入修改'
+            : '运行时图片目标已失效，未写入修改',
+        )
+        return
+      }
+      const liveTarget = result.target
+      const runtime = liveTarget.scope === 'global'
+        ? latestState.project.globalRuntime
+        : latestState.project.scenes.find(
+            (item) => item.id === liveTarget.sceneId,
+          )?.runtime
+      if (
+        liveTarget.kind !== 'asset' ||
+        !runtime ||
+        !Object.prototype.hasOwnProperty.call(runtime.assets, liveTarget.key)
+      ) {
+        latestState.setStatus('运行时图片目标已失效，请重新选择')
+        return
+      }
+      const patch = {
+        assets: {
+          ...runtime.assets,
+          [liveTarget.key]: { assetId: imported.meta.id },
+        },
+      }
+      const activeTabBeforeImport = latestState.activeTab
+      latestState.importAsset(imported.meta, imported.bytes)
+      useEditorStore.setState({ activeTab: activeTabBeforeImport })
+      if (liveTarget.scope === 'global') {
+        latestState.updateGlobalRuntime(patch)
+        latestState.setStatus('已替换全局运行时图片；此素材由整课共享')
+      } else if (liveTarget.sceneId) {
+        latestState.updateSceneRuntime(liveTarget.sceneId, patch)
+        latestState.setStatus('已替换运行时图片；此素材由当前场景的所有状态共享')
+      }
+    } finally {
+      setReplacingRuntimeAssetTargetId(null)
+    }
+  }, [
+    currentRuntimeTargetEditContext,
+    onSelectImageAsset,
+    replacingRuntimeAssetTargetId,
+  ])
+
+  const canvasAuthoringHitAtClientPoint = useCallback((
+    clientX: number,
+    clientY: number,
+  ): CanvasAuthoringHit | null => {
+    const viewport = stageViewportRef.current
+    if (!viewport || !authoringCanvasInteractive) return null
+    const rect = viewport.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    const transform = createStageViewportTransform({
+      viewport: {
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      },
+      zoom: view.zoom,
+      pan: { x: view.x, y: view.y },
+    })
+    const point = clientToWorld(transform, { x: clientX, y: clientY })
+    const ordered = [...visibleRuntimeTargets].sort((left, right) => (
+      (left.layer === 'overlay' ? 1 : 0) -
+      (right.layer === 'overlay' ? 1 : 0)
+    ))
+    const runtimeTarget = ordered.reverse().find((candidate) => (
+      point.x >= candidate.bounds.x &&
+      point.x <= candidate.bounds.x + candidate.bounds.width &&
+      point.y >= candidate.bounds.y &&
+      point.y <= candidate.bounds.y + candidate.bounds.height
+    )) ?? null
+    if (runtimeTarget?.layer === 'overlay') {
+      return { kind: 'runtime', target: runtimeTarget }
+    }
+    const componentTarget = [...visibleComponentTargets].reverse().find(
+      (candidate) => pointInsideRotatedBounds(
+        point,
+        candidate.bounds,
+        candidate.rotation,
+      ),
+    )
+    if (componentTarget) {
+      return { kind: 'component', target: componentTarget }
+    }
+    if (
+      runtimeTarget?.layer === 'underlay' &&
+      document.nodes.some((node) => pointInsideSceneNode(point, node))
+    ) {
+      return null
+    }
+    return runtimeTarget ? { kind: 'runtime', target: runtimeTarget } : null
+  }, [
+    authoringCanvasInteractive,
+    document.nodes,
+    visibleRuntimeTargets,
+    view.x,
+    view.y,
+    view.zoom,
+    visibleComponentTargets,
+  ])
 
   useLayoutEffect(() => {
     const host = gameHostRef.current
     if (!host) return
-    const handle = createEditorGame(host)
+    const handle = createEditorGame(host, {
+      interactionOnly: true,
+      fixedLogicalSize: true,
+    })
     gameRef.current = handle
     const findCanvas = () => {
       const element = host.querySelector('canvas')
@@ -533,6 +1715,25 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
           else merged.add(nodeId)
         }
         store.selectNodes([...merged])
+      }),
+      handle.bridge.onNodesTransformPreview(({ nodes }) => {
+        const store = useEditorStore.getState()
+        if (store.canvasMode !== 'edit') return
+        const currentById = new Map(
+          selectEditingNodes(store).map((node) => [node.id, node]),
+        )
+        for (const { nodeId, ...patch } of nodes) {
+          const current = currentById.get(nodeId)
+          if (!current) continue
+          const normalizedPatch = withDirectionAwareTextAutoSize(
+            current,
+            patch,
+          )
+          queueAuthoringNodePatch(
+            store.editingScope,
+            { ...current, ...normalizedPatch } as SceneNode,
+          )
+        }
       }),
       handle.bridge.onNodeMoveEnd(({ nodeId, x, y }) =>
         useEditorStore.getState().updateNode(nodeId, { x, y }),
@@ -574,15 +1775,10 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         )
       }),
       handle.bridge.onTextDoubleClick((nodeId) => {
-        setComponentTextTarget(null)
+        setActiveComponentTextSession(null)
+        setActiveRuntimeTextSession(null)
         useEditorStore.getState().selectNode(nodeId)
         useEditorStore.getState().beginTextEdit(nodeId, 'canvas')
-      }),
-      handle.bridge.onComponentTextDoubleClick((target) => {
-        const store = useEditorStore.getState()
-        store.commitTextEdit()
-        store.selectNode(target.nodeId)
-        setComponentTextTarget(target)
       }),
     ]
 
@@ -593,7 +1789,19 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
       gameRef.current = null
       setCanvas(null)
     }
-  }, [])
+  }, [queueAuthoringNodePatch])
+
+  useLayoutEffect(() => {
+    // Scale.NONE deliberately leaves sizing to the unified stage, but Phaser
+    // then does not observe ancestor CSS transforms. Refresh its cached canvas
+    // bounds after every zoom/pan commit so pointer coordinates stay in the
+    // same 1280×720 space as the Player and authoring targets.
+    gameRef.current?.game.scale.refresh()
+  }, [
+    stageTransform.scale,
+    stageTransform.stageRect.x,
+    stageTransform.stageRect.y,
+  ])
 
   useEffect(() => {
     const handle = gameRef.current
@@ -601,7 +1809,7 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
     const previous = previousSceneRef.current
     const previousResources = previousResourcesRef.current
     const resourcesChanged =
-      previousResources?.assets !== runtimeAssets ||
+      previousResources?.assets !== EMPTY_RUNTIME_ASSETS ||
       previousResources?.components !== componentPackages
 
     if (
@@ -610,7 +1818,7 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
       previous.backgroundAssetId !== document.backgroundAssetId ||
       resourcesChanged
     ) {
-      handle.bridge.loadScene(document, runtimeAssets, componentPackages)
+      handle.bridge.loadScene(document, EMPTY_RUNTIME_ASSETS, componentPackages)
     } else {
       if (previous.backgroundColor !== document.backgroundColor) {
         handle.bridge.setBackground(document.backgroundColor)
@@ -631,12 +1839,53 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         handle.bridge.reorderNodes(document.nodes.map((node) => node.id))
       }
     }
+    if (canvasMode === 'edit' && authoringReadyRef.current) {
+      const previousById = new Map(
+        previous?.nodes.map((node) => [node.id, node]) ?? [],
+      )
+      for (const node of document.nodes) {
+        const before = previousById.get(node.id)
+        if (!before || !nodesEqual(before, node)) {
+          queueAuthoringNodePatch(editingScope, node)
+        }
+      }
+      if (editingScope === 'scene') {
+        if (
+          !previous ||
+          previous.backgroundColor !== document.backgroundColor ||
+          previous.backgroundAssetId !== document.backgroundAssetId
+        ) {
+          postAuthoringPatch({
+            kind: 'scene-background',
+            target: { kind: 'scene-background', scope: 'scene' },
+            backgroundColor: document.backgroundColor,
+            backgroundAssetId: document.backgroundAssetId ?? null,
+          })
+        }
+        const previousOrder = previous?.nodes.map((node) => node.id).join('|')
+        const nextOrder = document.nodes.map((node) => node.id).join('|')
+        if (previousOrder !== nextOrder) {
+          postAuthoringPatch({
+            kind: 'scene-order',
+            target: { kind: 'scene-order', scope: 'scene' },
+            nodeIds: document.nodes.map((node) => node.id),
+          })
+        }
+      }
+    }
     previousSceneRef.current = structuredClone(document)
     previousResourcesRef.current = {
-      assets: runtimeAssets,
+      assets: EMPTY_RUNTIME_ASSETS,
       components: componentPackages,
     }
-  }, [componentPackages, document, runtimeAssets])
+  }, [
+    canvasMode,
+    componentPackages,
+    document,
+    editingScope,
+    postAuthoringPatch,
+    queueAuthoringNodePatch,
+  ])
 
   useEffect(() => {
     gameRef.current?.bridge.selectNodes(selectedNodeIds)
@@ -649,33 +1898,39 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
     }
   }, [editingTextNodeId, selectedNode])
 
-  useEffect(() => {
-    if (
-      canvasMode !== 'edit' ||
-      (componentTextTarget && !componentEditingNode)
-    ) {
-      setComponentTextTarget(null)
-    }
-  }, [canvasMode, componentEditingNode, componentTextTarget])
-
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault()
     if (canvasMode !== 'edit') return
     const value = event.dataTransfer.getData(
       'application/x-courseware-element',
     )
-    if (!value || !canvas) return
-    const rect = canvas.getBoundingClientRect()
+    const viewport = stageViewportRef.current
+    if (!value || !viewport) return
+    const viewportRect = viewport.getBoundingClientRect()
+    if (viewportRect.width <= 0 || viewportRect.height <= 0) return
+    const transform = createStageViewportTransform({
+      viewport: {
+        x: viewportRect.left,
+        y: viewportRect.top,
+        width: viewportRect.width,
+        height: viewportRect.height,
+      },
+      zoom: view.zoom,
+      pan: { x: view.x, y: view.y },
+    })
+    const rect = transform.stageRect
     if (
-      event.clientX < rect.left ||
-      event.clientX > rect.right ||
-      event.clientY < rect.top ||
-      event.clientY > rect.bottom
+      event.clientX < rect.x ||
+      event.clientX > rect.x + rect.width ||
+      event.clientY < rect.y ||
+      event.clientY > rect.y + rect.height
     ) {
       return
     }
-    const x = (event.clientX - rect.left) * (1280 / rect.width)
-    const y = (event.clientY - rect.top) * (720 / rect.height)
+    const { x, y } = clientToWorld(transform, {
+      x: event.clientX,
+      y: event.clientY,
+    })
     const store = useEditorStore.getState()
     if (value === 'text') store.addTextNode(x, y)
     else if (value === 'rectangle') store.addRectangleNode(x, y)
@@ -743,7 +1998,15 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
       }}
       onPointerMoveCapture={(event) => {
         const pan = panRef.current
-        if (!pan || pan.pointerId !== event.pointerId) return
+        if (!pan || pan.pointerId !== event.pointerId) {
+          const hit = canvasAuthoringHitAtClientPoint(event.clientX, event.clientY)
+          setHoveredAuthoringTargetId((current) => (
+            current === hit?.target.targetId
+              ? current
+              : hit?.target.targetId ?? null
+          ))
+          return
+        }
         event.preventDefault()
         event.stopPropagation()
         setView((current) => ({
@@ -760,6 +2023,29 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
         setPanning(false)
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }}
+      onPointerLeave={() => setHoveredAuthoringTargetId(null)}
+      onDoubleClickCapture={(event) => {
+        if (
+          !authoringCanvasInteractive ||
+          (event.target instanceof HTMLElement &&
+            event.target.closest(
+              '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .component-text-edit-overlay',
+            ))
+        ) {
+          return
+        }
+        const hit = canvasAuthoringHitAtClientPoint(event.clientX, event.clientY)
+        if (!hit) return
+        event.preventDefault()
+        event.stopPropagation()
+        if (hit.kind === 'component') {
+          beginComponentTextEdit(hit.target)
+        } else if (hit.target.kind === 'text') {
+          beginRuntimeTextEdit(hit.target)
+        } else {
+          void replaceRuntimeAsset(hit.target)
         }
       }}
     >
@@ -798,11 +2084,6 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
           </span>
         </div>
       )}
-      {showRuntimeEditHint && (
-        <div className="runtime-edit-hint" data-testid="runtime-edit-hint">
-          运行时效果请点“当前位置试运行”
-        </div>
-      )}
       <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
         1280 × 720 · {editingScope === 'global'
           ? `全局层 · ${editingNodes.length} 个元素`
@@ -810,66 +2091,204 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
             ? '基础'
             : ensureScenePresentation(scene).states.find((state) => state.id === activePresentationStateId)?.name ?? '状态'}`}
       </div>
-      <div
-        ref={gameHostRef}
-        className="canvas-stage canvas-stage--editor"
-        data-testid="canvas-stage"
-        aria-hidden={canvasMode === 'run'}
-        data-panning={panning || undefined}
-        style={{
-          transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.zoom})`,
-          transition: panning ? 'none' : 'transform 120ms ease-out',
-        }}
-      />
-      {canvasMode === 'run' && previewUrl && (
-        <iframe
-          ref={runtimeFrameRef}
-          className="runtime-preview-frame"
-          title="当前位置试运行"
-          sandbox="allow-scripts"
-          src={previewUrl}
-          onError={() => {
-            const token = previewInitRef.current?.token
-            if (token) failRuntimePreview(token, '隔离预览页面无法载入。')
-          }}
-        />
-      )}
-      {canvasMode === 'run' && previewFeedback && (
+      <div ref={stageViewportRef} className="canvas-viewport">
         <div
-          className={`runtime-preview-loading runtime-preview-loading--${previewFeedback.kind}`}
-          role={previewFeedback.kind === 'error' ? 'alert' : 'status'}
-          aria-live="polite"
+          className="canvas-stage-stack"
+          data-panning={panning || undefined}
+          style={{
+            left: stageTransform.stageRect.x,
+            top: stageTransform.stageRect.y,
+            width: STAGE_VIEWPORT_WIDTH,
+            height: STAGE_VIEWPORT_HEIGHT,
+            transform: `scale(${stageTransform.scale})`,
+            // Geometry must change atomically: the Player, Phaser hit proxies and
+            // authoring targets all consume this transform in the same frame.
+            transition: 'none',
+          }}
         >
-          <div className="runtime-preview-loading__panel">
-            {previewFeedback.kind === 'loading' && (
-              <LoaderCircle
-                className="runtime-preview-loading__spinner"
-                size={24}
-                aria-hidden="true"
-              />
-            )}
-            <strong>{previewFeedback.title}</strong>
-            <span>{previewFeedback.message}</span>
-            {previewFeedback.kind === 'error' && (
-              <button type="button" onClick={retryRuntimePreview}>
-                <RotateCcw size={14} aria-hidden="true" />重新试运行
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-      {canvasMode === 'run' && !previewUrl && !previewFeedback && (
-        <div className="runtime-preview-loading" role="status" aria-live="polite">
-          <div className="runtime-preview-loading__panel">
-            <LoaderCircle
-              className="runtime-preview-loading__spinner"
-              size={24}
-              aria-hidden="true"
+          {previewUrl && (
+            <iframe
+              ref={runtimeFrameRef}
+              className="runtime-preview-frame"
+              title={canvasMode === 'edit' ? '统一编辑画布' : '当前位置试运行'}
+              sandbox="allow-scripts"
+              inert={canvasMode === 'edit'}
+              tabIndex={canvasMode === 'edit' ? -1 : undefined}
+              aria-hidden={canvasMode === 'edit' ? true : undefined}
+              onFocus={() => {
+                if (canvasMode !== 'edit') return
+                if (authoringFocusRecoveryTimerRef.current !== null) {
+                  window.clearTimeout(authoringFocusRecoveryTimerRef.current)
+                }
+                authoringFocusRecoveryTimerRef.current = window.setTimeout(() => {
+                  authoringFocusRecoveryTimerRef.current = null
+                  const previous = lastParentFocusRef.current
+                  if (
+                    window.document.activeElement === runtimeFrameRef.current &&
+                    previous?.isConnected
+                  ) {
+                    previous.focus({ preventScroll: true })
+                  }
+                }, 0)
+              }}
+              src={previewUrl}
+              onError={() => {
+                const token = previewInitRef.current?.token
+                if (token) failRuntimePreview(token, '隔离预览页面无法载入。')
+              }}
             />
-            <strong>正在准备当前位置试运行</strong>
-          </div>
+          )}
+          <div
+            ref={gameHostRef}
+            className="canvas-stage canvas-stage--authoring"
+            data-testid="canvas-stage"
+            aria-hidden={canvasMode === 'run'}
+          />
+          {authoringCanvasInteractive && (
+            visibleRuntimeTargets.length > 0 ||
+            visibleComponentTargets.length > 0 ||
+            activeRuntimeTextTarget ||
+            activeComponentTextTarget
+          ) && (
+            <div
+              className="canvas-authoring-targets"
+              data-testid="runtime-authoring-targets"
+              aria-label="画布可编辑内容"
+            >
+              {visibleRuntimeTargets.map((target) => (
+                <button
+                  key={target.targetId}
+                  type="button"
+                  className={`canvas-authoring-target canvas-authoring-target--${target.kind}${
+                    hoveredAuthoringTargetId === target.targetId
+                      ? ' canvas-authoring-target--hovered'
+                      : ''
+                  }`}
+                  aria-label={`${target.label ?? target.key}，双击${target.kind === 'text' ? '编辑文字' : '替换图片'}`}
+                  title={`双击${target.kind === 'text' ? '编辑文字' : '替换图片'}：${target.label ?? target.key}`}
+                  disabled={replacingRuntimeAssetTargetId === target.targetId}
+                  style={{
+                    left: target.bounds.x,
+                    top: target.bounds.y,
+                    width: target.bounds.width,
+                    height: target.bounds.height,
+                    zIndex: target.layer === 'overlay' ? 2 : 1,
+                  }}
+                  onFocus={() => setHoveredAuthoringTargetId(target.targetId)}
+                  onBlur={() => setHoveredAuthoringTargetId(null)}
+                  onClick={() => {
+                    if (target.kind === 'text') {
+                      beginRuntimeTextEdit(target)
+                    } else {
+                      setActiveComponentTextSession(null)
+                      void replaceRuntimeAsset(target)
+                    }
+                  }}
+                >
+                  <span className="canvas-authoring-target__badge" aria-hidden="true">
+                    {target.kind === 'asset'
+                      ? <ImagePlus size={14} />
+                      : 'T'}
+                    <span>{target.label ?? target.key}</span>
+                  </span>
+                </button>
+              ))}
+              {activeRuntimeTextSession && activeRuntimeTextTarget?.kind === 'text' && (
+                <CanvasPlainTextEditor
+                  key={activeRuntimeTextTarget.targetId}
+                  bounds={activeRuntimeTextTarget.bounds}
+                  label={activeRuntimeTextTarget.label ?? activeRuntimeTextTarget.key}
+                  value={activeRuntimeTextValue}
+                  multiline={activeRuntimeTextTarget.multiline}
+                  maxLength={activeRuntimeTextTarget.maxLength}
+                  onCommit={(value) => commitRuntimeText(activeRuntimeTextSession, value)}
+                  onCancel={() => setActiveRuntimeTextSession(null)}
+                />
+              )}
+              {visibleComponentTargets.map((target) => (
+                <button
+                  key={target.targetId}
+                  type="button"
+                  className={`canvas-authoring-target canvas-authoring-target--component-text${
+                    hoveredAuthoringTargetId === target.targetId
+                      ? ' canvas-authoring-target--hovered'
+                      : ''
+                  }`}
+                  aria-label={`${target.label}，双击编辑组件文字`}
+                  title={`双击编辑组件文字：${target.label}`}
+                  style={{
+                    left: target.bounds.x,
+                    top: target.bounds.y,
+                    width: target.bounds.width,
+                    height: target.bounds.height,
+                    zIndex: 3,
+                    transform: `rotate(${target.rotation}deg)`,
+                  }}
+                  onFocus={() => setHoveredAuthoringTargetId(target.targetId)}
+                  onBlur={() => setHoveredAuthoringTargetId(null)}
+                  onClick={() => beginComponentTextEdit(target)}
+                >
+                  <span className="canvas-authoring-target__badge" aria-hidden="true">
+                    T<span>{target.label}</span>
+                  </span>
+                </button>
+              ))}
+              {activeComponentTextSession && activeComponentTextTarget && componentEditingNode && (
+                <CanvasPlainTextEditor
+                  key={activeComponentTextTarget.targetId}
+                  bounds={activeComponentTextTarget.bounds}
+                  label={activeComponentTextTarget.label}
+                  value={componentEditingValue}
+                  multiline={activeComponentTextTarget.multiline}
+                  maxLength={activeComponentTextTarget.maxLength}
+                  rotation={activeComponentTextTarget.rotation}
+                  onCommit={(value) => commitComponentText(
+                    activeComponentTextSession,
+                    value,
+                  )}
+                  onCancel={() => setActiveComponentTextSession(null)}
+                />
+              )}
+            </div>
+          )}
+          {previewFeedback && (
+            <div
+              className={`runtime-preview-loading runtime-preview-loading--${previewFeedback.kind}`}
+              role={previewFeedback.kind === 'error' ? 'alert' : 'status'}
+              aria-live="polite"
+            >
+              <div className="runtime-preview-loading__panel">
+                {previewFeedback.kind === 'loading' && (
+                  <LoaderCircle
+                    className="runtime-preview-loading__spinner"
+                    size={24}
+                    aria-hidden="true"
+                  />
+                )}
+                <strong>{previewFeedback.title}</strong>
+                <span>{previewFeedback.message}</span>
+                {previewFeedback.kind === 'error' && (
+                  <button type="button" onClick={retryRuntimePreview}>
+                    <RotateCcw size={14} aria-hidden="true" />重新载入画布
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {!previewUrl && !previewFeedback && (
+            <div className="runtime-preview-loading" role="status" aria-live="polite">
+              <div className="runtime-preview-loading__panel">
+                <LoaderCircle
+                  className="runtime-preview-loading__spinner"
+                  size={24}
+                  aria-hidden="true"
+                />
+                <strong>正在准备统一画布</strong>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
       {canvasMode === 'edit' && editingNode && canvas && workspaceRef.current && (
         <TextEditOverlay
           key={editingNode.id}
@@ -929,40 +2348,6 @@ export function Workspace({ onAddImage, onAddVideo }: WorkspaceProps) {
             }
             gameRef.current?.bridge.setTextEditing(null)
           }}
-        />
-      )}
-      {canvasMode === 'edit' &&
-        componentTextTarget &&
-        componentEditingNode &&
-        canvas &&
-        workspaceRef.current && (
-        <ComponentTextEditOverlay
-          key={`${componentTextTarget.nodeId}:${componentTextTarget.key}`}
-          node={componentEditingNode}
-          target={componentTextTarget}
-          value={componentEditingValue}
-          workspace={workspaceRef.current}
-          canvas={canvas}
-          onCommit={(value) => {
-            const store = useEditorStore.getState()
-            const current = selectEditingNodes(store).find(
-              (node): node is ExternalComponentNode => (
-                node.id === componentTextTarget.nodeId &&
-                node.type === 'external-component'
-              ),
-            )
-            if (current) {
-              store.updateNode(current.id, {
-                props: setComponentPropValue(
-                  current.props,
-                  componentTextTarget.key,
-                  value,
-                ),
-              })
-            }
-            setComponentTextTarget(null)
-          }}
-          onCancel={() => setComponentTextTarget(null)}
         />
       )}
     </main>

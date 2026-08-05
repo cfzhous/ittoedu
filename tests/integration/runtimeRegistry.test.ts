@@ -85,6 +85,27 @@ describe('RuntimeRegistry', () => {
     registry.dispose()
   })
 
+  it('把画布编辑 V1 作为独立可选扩展登记，并拒绝未知扩展版本', () => {
+    const registry = new RuntimeRegistry()
+    const definition = registry.executeRuntime(`
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        authoringApiVersion: 1,
+        create() { return { destroy() {} } }
+      })
+    `, '画布编辑运行时', 2)
+    expect(definition.authoringApiVersion).toBe(1)
+
+    expect(() => registry.executeRuntime(`
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        authoringApiVersion: 2,
+        create() { return { destroy() {} } }
+      })
+    `, '未知画布编辑版本', 2)).toThrow('authoringApiVersion 1')
+    registry.dispose()
+  })
+
   it('拒绝不支持的 API 版本、缺少 create 的定义和执行异常', () => {
     const registry = new RuntimeRegistry()
     expect(() => registry.executeRuntime(`

@@ -327,6 +327,47 @@ describe('rich text editing UI', () => {
     expect(onPreview).toHaveBeenLastCalledWith('resize 期间正在输入', [])
   })
 
+  it('缩放或平移只改变视觉矩形时仍跟随 Player 画布', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    const workspace = document.createElement('div')
+    const canvas = document.createElement('canvas')
+    workspace.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 1400, bottom: 800,
+      width: 1400, height: 800, toJSON: () => ({}),
+    })
+    let canvasBounds = {
+      x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 720,
+      width: 1280, height: 720, toJSON: () => ({}),
+    }
+    canvas.getBoundingClientRect = () => canvasBounds
+    const node = createTextNode({ x: 100, y: 80, width: 240, height: 100 })
+    render(
+      <TextEditOverlay
+        node={node}
+        workspace={workspace}
+        canvas={canvas}
+        onPreview={() => undefined}
+        onCommit={() => undefined}
+        onCancel={() => undefined}
+      />,
+    )
+    const editor = screen.getByTestId('text-edit-overlay')
+    expect(editor).toHaveStyle({ left: '100px', top: '80px', width: '240px' })
+
+    canvasBounds = {
+      x: 50, y: 30, left: 50, top: 30, right: 690, bottom: 390,
+      width: 640, height: 360, toJSON: () => ({}),
+    }
+    await waitFor(() => expect(editor).toHaveStyle({
+      left: '100px',
+      top: '70px',
+      width: '120px',
+    }))
+  })
+
   it('waits for IME composition to finish before committing a blur', async () => {
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
