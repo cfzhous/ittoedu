@@ -1148,8 +1148,61 @@ export const sceneDocumentSchema = z.object({
   }
 })
 
+const presenterKeyBindingSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  command: z.enum(['next', 'previous']),
+  key: z.string().min(1).max(64),
+  altKey: z.boolean(),
+  ctrlKey: z.boolean(),
+  shiftKey: z.boolean(),
+  metaKey: z.boolean(),
+}).strict()
+
+const projectPresenterSettingsSchema = z.object({
+  enabled: z.boolean(),
+  strategy: z.enum(['scene-navigation', 'authored-command']),
+  additionalBindings: z.array(presenterKeyBindingSchema).max(32),
+}).strict().superRefine((presenter, context) => {
+  const ids = presenter.additionalBindings.map((binding) => binding.id)
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['additionalBindings'],
+      message: '翻页笔附加按键 ID 不能重复',
+    })
+  }
+
+  const signatures = new Map<string, number>()
+  presenter.additionalBindings.forEach((binding, index) => {
+    if (binding.key === 'PageDown' || binding.key === 'PageUp') {
+      context.addIssue({
+        code: 'custom',
+        path: ['additionalBindings', index, 'key'],
+        message: 'PageDown/PageUp 是内建标准绑定，不能作为附加按键重复配置',
+      })
+    }
+    const signature = [
+      binding.key,
+      binding.altKey,
+      binding.ctrlKey,
+      binding.shiftKey,
+      binding.metaKey,
+    ].join('\0')
+    const existingIndex = signatures.get(signature)
+    if (existingIndex !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['additionalBindings', index],
+        message: `翻页笔附加按键与第 ${existingIndex + 1} 项重复`,
+      })
+    } else {
+      signatures.set(signature, index)
+    }
+  })
+})
+
 export const projectDocumentSchema = z.object({
-  schemaVersion: z.literal(7),
+  schemaVersion: z.literal(8),
   id: z.string().min(1),
   title: z.string().min(1),
   createdAt: z.string().datetime(),
@@ -1166,10 +1219,11 @@ export const projectDocumentSchema = z.object({
   globalInteractions: sceneInteractionsSchema,
   media: projectMediaSettingsSchema,
   playback: z.object({
-    controls: z.enum(['canvas', 'footer', 'none']),
+    controls: z.enum(['canvas', 'none']),
     keyboardNavigation: z.boolean(),
-  }),
-}).superRefine((project, context) => {
+    presenter: projectPresenterSettingsSchema,
+  }).strict(),
+}).strict().superRefine((project, context) => {
   const ruleIds = project.globalInteractions.map((rule) => rule.id)
   if (new Set(ruleIds).size !== ruleIds.length) {
     context.addIssue({
@@ -1689,13 +1743,24 @@ export function migrateProjectV6ToV7(project: ProjectDocumentV6): ProjectDocumen
   })
   return projectDocumentSchema.parse({
     ...structuredClone(project),
-    schemaVersion: 7,
+    schemaVersion: 8,
     scenes: project.scenes.map(migrateSceneV6ToV7),
     globalLayer: project.globalLayer.map((item) => ({
       ...structuredClone(item),
       node: migrateSceneNodeV6ToV7(item.node),
     })),
     globalInteractions: globalScope.rules,
+    playback: {
+      controls: project.playback.controls === 'footer'
+        ? 'none'
+        : project.playback.controls,
+      keyboardNavigation: project.playback.keyboardNavigation,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
+    },
   })
 }
 

@@ -448,5 +448,4 @@ export {
   parseExportPayloadJson,
 } from './payload'
 export { PlayerApp } from './PlayerApp'
-export { PlayerControls } from './PlayerControls'
 export { PlayerScene } from './PlayerScene'

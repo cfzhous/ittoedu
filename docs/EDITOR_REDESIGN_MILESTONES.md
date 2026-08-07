@@ -1,5 +1,7 @@
 # 编辑器体验重构与轻量发布裁剪策划
 
+> 历史归档说明：本文是 Editor 1.6.x / Project V7 已完成重构的验收记录，用于追溯内部原型，不是 Editor 1.0.0 / Project V8 的当前开发计划。当前路线以根目录 `MULTI_SURFACE_DEVELOPMENT_PLAN.md` 为准。
+
 > 适用版本：Editor 1.6.x / Project V7
 >
 > 状态：里程碑 1–5 已完成（2026-07-29）；实现—文档一致性与当前制品于 2026-08-01 重新核对

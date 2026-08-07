@@ -4,7 +4,6 @@ import { UserFacingError } from '@/shared/errors'
 import type { ComponentManifest } from '@/shared/componentTypes'
 import type { ProjectDocument } from '@/shared/projectTypes'
 import { migrateProjectDocument } from '@/shared/projectSchema'
-import { materializeScene } from '@/shared/presentation'
 import {
   createExternalComponentNode,
   createImageNode,
@@ -26,7 +25,7 @@ import {
   fitImageSize,
 } from '@/renderer/project/assetManager'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 function makeComponentFiles(): Record<string, Uint8Array> {
   const manifest: ComponentManifest = {
@@ -111,7 +110,7 @@ describe('project factories', () => {
     })
 
     expect(project).toMatchObject({
-      schemaVersion: 7,
+      schemaVersion: 8,
       id: 'project_1',
       title: '未命名课件',
       createdAt: '2026-07-20T00:00:00.000Z',
@@ -133,7 +132,7 @@ describe('project factories', () => {
         layer: 'overlay',
         visibility: { mode: 'all', sceneIds: [] },
       }],
-      ...createProjectV5Fields('canvas'),
+      ...createProjectV8Fields('canvas'),
     })
 
     const text = createTextNode({ id: 'text_1' })
@@ -166,8 +165,8 @@ describe('project factories', () => {
   })
 })
 
-describe('project format migration', () => {
-  it('migrates V2 projects through V3-V7 without inventing executable content', () => {
+describe('archived project migration helpers (not used by product entry points)', () => {
+  it('migrates V2 projects through V8 without inventing executable content', () => {
     const current = structuredClone(makeArchiveData().project) as unknown as Record<
       string,
       unknown
@@ -178,15 +177,15 @@ describe('project format migration', () => {
 
     const migrated = migrateProjectDocument(current)
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.globalLayer).toEqual([])
     expect(migrated.globalRuntime).toBeUndefined()
     expect(migrated.scenes.every((scene) => scene.runtime === undefined)).toBe(true)
     expect(migrated.scenes.every((scene) => scene.interactions.length === 0)).toBe(true)
-    expect(migrated).toMatchObject(createProjectV5Fields('footer'))
+    expect(migrated).toMatchObject(createProjectV8Fields('none'))
   })
 
-  it('migrates V3 global components into the unified V7 global layer', () => {
+  it('migrates V3 global components into the unified global layer', () => {
     const current = structuredClone(makeArchiveData().project) as unknown as Record<
       string,
       unknown
@@ -206,11 +205,11 @@ describe('project format migration', () => {
 
     const migrated = migrateProjectDocument(current)
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.globalLayer).toEqual(current.globalComponents)
   })
 
-  it('migrates V4 projects to V7 media, playback, interactions, and asset kinds', () => {
+  it('migrates V4 projects to current media, playback, interactions, and asset kinds', () => {
     const current = structuredClone(makeArchiveData().project) as unknown as Record<
       string,
       unknown
@@ -229,10 +228,10 @@ describe('project format migration', () => {
 
     const migrated = migrateProjectDocument(current)
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.scenes.every((scene) => scene.interactions.length === 0)).toBe(true)
     expect(migrated.assets.asset_image?.kind).toBe('image')
-    expect(migrated).toMatchObject(createProjectV5Fields('footer'))
+    expect(migrated).toMatchObject(createProjectV8Fields('none'))
   })
 
   it('migrates V5 controllers to stable structured actions and adds global rules', () => {
@@ -278,7 +277,7 @@ describe('project format migration', () => {
     const migrated = migrateProjectDocument(current)
     const controller = migrated.globalLayer[0]?.node
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.globalInteractions).toEqual([])
     expect(controller).toMatchObject({
       type: 'teacher-controller',
@@ -446,11 +445,11 @@ describe('project format migration', () => {
       componentPackages: {},
     })
 
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.globalLayer).toEqual([])
     expect(migrated.scenes[0]!.interactions).toEqual([])
     expect(migrated.assets.asset_legacy?.kind).toBe('image')
-    expect(migrated).toMatchObject(createProjectV5Fields('footer'))
+    expect(migrated).toMatchObject(createProjectV8Fields('none'))
     expect(migrated.scenes[0]).toMatchObject({
       id: 'legacy_scene',
       name: '旧版场景',
@@ -524,7 +523,7 @@ describe('project format migration', () => {
 })
 
 describe('project archive', () => {
-  it('imports Project V6 base/state/global animations as V7 activation rules', () => {
+  it('rejects Project V6 archives before any legacy animation migration', () => {
     const source = makeArchiveData()
     const scene = source.project.scenes[0]!
     const sceneNode = scene.nodes.find((node) => node.id === 'image_node')!
@@ -574,66 +573,12 @@ describe('project archive', () => {
     }
     files['project.json'] = strToU8(JSON.stringify(legacy))
 
-    const restored = openProjectArchive(zipSync(files)).project
-    expect(restored.schemaVersion).toBe(7)
-    expect(restored.scenes[0]!.nodes.find((node) => node.id === sceneNode.id))
-      .toMatchObject({ playbackInitialVisibility: 'hidden' })
-    expect(materializeScene(restored.scenes[0]!, 'state_initial').nodes.find(
-      (node) => node.id === sceneNode.id,
-    )).toMatchObject({ playbackInitialVisibility: 'hidden' })
-    expect(materializeScene(restored.scenes[0]!, 'state_inherited').nodes.find(
-      (node) => node.id === sceneNode.id,
-    )).toMatchObject({ playbackInitialVisibility: 'hidden' })
-    expect(restored.scenes[0]!.nodes.some((node) => 'animation' in node)).toBe(false)
-    expect(restored.scenes[0]!.presentation!.states.every((state) => (
-      Object.values(state.nodeOverrides).every((override) => !('animation' in override))
-    ))).toBe(true)
-    expect(restored.globalLayer.some((item) => 'animation' in item.node)).toBe(false)
-    expect(restored.globalLayer.find((item) => item.node.id === globalNode.id)?.node)
-      .toMatchObject({ playbackInitialVisibility: 'hidden' })
-
-    const sceneAnimationRules = restored.scenes[0]!.interactions.filter(
-      (rule) => rule.trigger.type === 'node.activated',
+    expect(() => openProjectArchive(zipSync(files))).toThrowError(
+      expect.objectContaining({
+        title: '旧工程格式不受支持',
+        message: expect.stringContaining('Project V6'),
+      }),
     )
-    expect(sceneAnimationRules).toHaveLength(2)
-    expect(sceneAnimationRules).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        conditions: [{ type: 'presentation.in', stateIds: ['state_inherited'] }],
-        actions: [expect.objectContaining({
-          delayMs: 120,
-          action: expect.objectContaining({
-            type: 'node.enter',
-            nodeId: sceneNode.id,
-            effect: 'slide',
-            direction: 'left',
-            durationMs: 560,
-          }),
-        })],
-      }),
-      expect.objectContaining({
-        conditions: [{ type: 'presentation.in', stateIds: ['state_initial'] }],
-        actions: [expect.objectContaining({
-          delayMs: 40,
-          action: expect.objectContaining({
-            type: 'node.enter',
-            effect: 'scale',
-            durationMs: 320,
-          }),
-        })],
-      }),
-    ]))
-    expect(restored.globalInteractions).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        trigger: { type: 'node.activated', nodeId: globalNode.id },
-        actions: [expect.objectContaining({
-          action: expect.objectContaining({
-            type: 'node.enter',
-            effect: 'fade',
-            durationMs: 240,
-          }),
-        })],
-      }),
-    ]))
   })
 
   it('migrates Project V5 without inventing an entrance effect', () => {
@@ -646,7 +591,7 @@ describe('project archive', () => {
     delete legacy.globalInteractions
 
     const migrated = migrateProjectDocument(legacy)
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
     expect(migrated.globalInteractions).toEqual([])
     expect(migrated.scenes.flatMap((scene) => scene.nodes))
       .toSatisfy((nodes: Array<{ animation?: unknown; playbackInitialVisibility: string }>) =>
@@ -868,6 +813,26 @@ describe('project archive', () => {
       }),
     )
   })
+
+  it.each([1, 2, 3, 4, 5, 6, 7])(
+    'rejects Project V%i without invoking the archived migration chain',
+    (schemaVersion) => {
+      const project = {
+        ...makeArchiveData().project,
+        schemaVersion,
+      }
+      const bytes = zipSync({
+        'project.json': strToU8(JSON.stringify(project)),
+      })
+
+      expect(() => openProjectArchive(bytes)).toThrowError(
+        expect.objectContaining({
+          title: '旧工程格式不受支持',
+          message: expect.stringContaining(`Project V${schemaVersion}`),
+        }),
+      )
+    },
+  )
 
   it('rejects malformed project JSON and missing declared binary files', () => {
     const invalidProject = {

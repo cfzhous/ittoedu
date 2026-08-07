@@ -45,7 +45,7 @@ export type PlayerAuthoringPatch =
   | {
       kind: 'native-node'
       target: Extract<PlayerAuthoringTarget, { kind: 'native-node' }>
-      /** Complete, materialized Project V7 node. The Player never merges partials. */
+      /** Complete, materialized Project V8 node. The Player never merges partials. */
       node: SceneNode
     }
   | {
@@ -61,7 +61,7 @@ export type PlayerAuthoringPatch =
       nodeIds: string[]
     }
   | {
-      /** Ephemeral visual preview; never mutates Project V7 or playback state. */
+      /** Ephemeral visual preview; never mutates Project V8 or playback state. */
       kind: 'preview-node-motion'
       target: Extract<PlayerAuthoringTarget, { kind: 'native-node' }>
       action: NodeMotionAction

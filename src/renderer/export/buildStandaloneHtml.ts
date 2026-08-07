@@ -65,59 +65,6 @@ body {
   display: block;
 }
 
-.lesson-footer {
-  z-index: 10;
-  display: flex;
-  min-height: 58px;
-  flex: 0 0 58px;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 8px 18px;
-  border-top: 1px solid #2b303a;
-  background: rgba(21, 24, 30, 0.98);
-}
-
-.lesson-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.lesson-control-button {
-  min-width: 76px;
-  min-height: 38px;
-  padding: 8px 14px;
-  border: 1px solid #444b59;
-  border-radius: 8px;
-  color: #f3f5f7;
-  background: #272c35;
-  font: inherit;
-  cursor: pointer;
-}
-
-.lesson-control-button:hover:not(:disabled) {
-  border-color: #5b9cff;
-  background: #303744;
-}
-
-.lesson-control-button:focus-visible {
-  outline: 2px solid #77adff;
-  outline-offset: 2px;
-}
-
-.lesson-control-button:disabled {
-  color: #737b89;
-  cursor: default;
-  opacity: 0.72;
-}
-
-.lesson-page-indicator {
-  min-width: 74px;
-  color: #e3e7ed;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 .lesson-player-error {
   display: grid;
   width: 100%;
@@ -130,37 +77,6 @@ body {
   text-align: center;
 }
 
-@media (max-height: 360px) {
-  .lesson-footer {
-    min-height: 46px;
-    flex-basis: 46px;
-    padding-block: 4px;
-  }
-
-  .lesson-control-button {
-    min-height: 34px;
-    padding-block: 5px;
-  }
-}
-
-@media (max-width: 420px) {
-  .lesson-footer {
-    padding-inline: 8px;
-  }
-
-  .lesson-controls {
-    gap: 4px;
-  }
-
-  .lesson-control-button {
-    min-width: 58px;
-    padding-inline: 6px;
-  }
-
-  .lesson-page-indicator {
-    min-width: 50px;
-  }
-}
 `.trim()
 
 function escapeHtmlText(value: string): string {

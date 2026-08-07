@@ -75,6 +75,7 @@ interface AutomationTriggerOption {
   value: AutomationTriggerType
   label: string
   needs?: 'state' | 'sound' | 'video' | 'component' | 'node' | 'animation'
+  disabled?: boolean
 }
 
 const AUTOMATION_TRIGGER_OPTIONS: AutomationTriggerOption[] = [
@@ -89,6 +90,11 @@ const AUTOMATION_TRIGGER_OPTIONS: AutomationTriggerOption[] = [
   { value: 'video.time', label: '视频到达时间点', needs: 'video' },
   { value: 'component.event', label: '组件发出事件', needs: 'component' },
   { value: 'runtime.event', label: '运行时发出事件' },
+  {
+    value: 'presenter.command',
+    label: '翻页笔命令（演示输入层尚未启用）',
+    disabled: true,
+  },
 ]
 
 const AUDIO_CHANNELS = [
@@ -295,6 +301,7 @@ function automationTriggerUnavailable(
     animations: number
   },
 ): boolean {
+  if (option.disabled) return true
   switch (option.needs) {
     case 'state': return counts.states === 0
     case 'sound': return counts.sounds === 0
@@ -342,6 +349,8 @@ function defaultAutomationTrigger(
       }
     case 'runtime.event':
       return { type, scope: 'scene', eventName: 'complete' }
+    case 'presenter.command':
+      return { type, command: 'next' }
   }
 }
 
@@ -444,6 +453,8 @@ function describeTrigger(
       return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”播放结束`
     case 'video.time':
       return `视频“${namedReference(context.nodes, trigger.nodeId, '缺失视频')}”播放到 ${trigger.seconds} 秒`
+    case 'presenter.command':
+      return `翻页笔发出“${trigger.command === 'next' ? '前进' : '后退'}”命令`
   }
 }
 
@@ -780,6 +791,24 @@ function AutomationTriggerEditor({
             {states.map((state) => (
               <option key={state.id} value={state.id}>{state.name}</option>
             ))}
+          </select>
+        </div>
+      ) : null}
+
+      {trigger.type === 'presenter.command' ? (
+        <div className="form-field">
+          <label htmlFor={`${idPrefix}-presenter-command`}>演示命令</label>
+          <select
+            id={`${idPrefix}-presenter-command`}
+            className="form-input"
+            value={trigger.command}
+            onChange={(event) => onChange({
+              ...trigger,
+              command: event.currentTarget.value as 'next' | 'previous',
+            })}
+          >
+            <option value="next">前进</option>
+            <option value="previous">后退</option>
           </select>
         </div>
       ) : null}

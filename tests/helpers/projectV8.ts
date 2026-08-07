@@ -1,6 +1,6 @@
 import type { ProjectDocument } from '../../src/shared/projectTypes'
 
-export function createProjectV5Fields(
+export function createProjectV8Fields(
   controls: ProjectDocument['playback']['controls'] = 'none',
 ): Pick<ProjectDocument, 'media' | 'playback' | 'globalInteractions'> {
   return {
@@ -27,6 +27,11 @@ export function createProjectV5Fields(
     playback: {
       controls,
       keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
     },
   }
 }

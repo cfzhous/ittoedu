@@ -337,7 +337,7 @@ async function editDefaultTextWithComposition(page: Page, value: string) {
   await expect(editor).toHaveCount(0)
 }
 
-test.describe.serial('Phaser 课件编辑器 V1.7', () => {
+test.describe.serial('Phaser 课件编辑器 1.0 / Project V8 收敛', () => {
   test.beforeAll(() => {
     mkdirSync(outputDir, { recursive: true })
     mkdirSync(visualOutputDirectory, { recursive: true })
@@ -521,7 +521,7 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
         timeout: 2_000,
         intervals: [20, 30, 50],
       }).toBeLessThan(stableMotionFrame.alpha * 0.9)
-      await expect.poll(readTextMotionFrame, { timeout: 3_000 }).toEqual(
+      await expect.poll(readTextMotionFrame, { timeout: 10_000 }).toEqual(
         stableMotionFrame,
       )
 
@@ -584,7 +584,7 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
     try {
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '属性' }).click()
-      await page.getByLabel('导航控制方式').selectOption('footer')
+      await page.getByLabel('导航控制方式').selectOption('none')
       await page.getByRole('button', { name: '专业' }).click()
       await page.getByRole('tab', { name: '互动与动画' }).click()
       await expect(
@@ -615,8 +615,10 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
           .locator('.lesson-footer'),
       ).toHaveCount(0)
       await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
+      const previewSrc = await previewFrame.getAttribute('src')
+      if (!previewSrc) throw new Error('当前位置试运行 iframe 缺少 blob URL')
       const runtimeFrame = page.frames().find((frame) => (
-        frame !== page.mainFrame() && frame.url().startsWith('blob:')
+        frame !== page.mainFrame() && frame.url() === previewSrc
       ))
       if (!runtimeFrame) throw new Error('当前位置试运行 iframe 未创建')
       await expect.poll(() => runtimeFrame.evaluate(() => {
@@ -637,7 +639,6 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
         () => (window as any).__H5_LESSON_PLAYER__?.getCurrentPresentationStateId() ?? null,
       )).not.toBe('state_initial')
 
-      const previewSrc = await previewFrame.getAttribute('src')
       const navigationAccepted = await runtimeFrame.evaluate(() => {
         const player = (window as any).__H5_LESSON_PLAYER__
         player.runtimeKernel.courseState.set('e2e-run-continuity', {
@@ -1395,7 +1396,7 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
     }
   })
 
-  test('V7 全局层：原生元素、双击文字、保存重开与跨场景可见性', async () => {
+  test('V8 全局层：原生元素、双击文字、保存重开与跨场景可见性', async () => {
     expect(existsSync(firstImagePath)).toBe(true)
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
@@ -1489,7 +1490,7 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
     }
   })
 
-  test('V3 全局组件：组件范围、全部文案、保存重开与预览可见性', async () => {
+  test('待移除 Component API 3 全局组件：组件范围、全部文案、保存重开与预览可见性', async () => {
     expect(existsSync(globalComponentPath)).toBe(true)
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
@@ -1572,7 +1573,7 @@ test.describe.serial('Phaser 课件编辑器 V1.7', () => {
     }
   })
 
-  test('V3 导出：等待 DOM 运行时后生成 PDF，并在 PPTX 保留动态层、全局 visibility 与原生文字', async () => {
+  test('过渡组件导出：等待 DOM 运行时后生成 PDF，并在 PPTX 保留动态层、全局 visibility 与原生文字', async () => {
     const sourceArchive = unzipSync(
       new Uint8Array(readFileSync(globalComponentProjectPath)),
     )

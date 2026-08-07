@@ -850,9 +850,9 @@ async function main(): Promise<void> {
   const benchmarkTable = importComponentPackage(Uint8Array.from(tableBytes))
   const benchmarkLegacy = importComponentPackage(Uint8Array.from(legacyBytes))
   assert(
-    benchmarkProject.project.schemaVersion === 7 &&
+    benchmarkProject.project.schemaVersion === 8 &&
       benchmarkProject.project.scenes.length === 5,
-    '渲染宿主基准必须是五场景 Project V7 工程',
+    '渲染宿主基准必须是五场景 Project V8 工程',
   )
   assert(
     benchmarkProject.project.scenes[1]?.runtime?.runtimeApiVersion === 2 &&
@@ -878,7 +878,7 @@ async function main(): Promise<void> {
   )
   pass(
     '渲染宿主基准',
-    'Project V7、API 2 Phaser/Three、V4 DOM 与 V3 兼容组件产物均通过正式解析器',
+    'Project V8、API 2 Phaser/Three、V4 DOM 与待移除 V3 兼容组件产物均通过正式解析器',
   )
 
   await verifyPortableStartup()

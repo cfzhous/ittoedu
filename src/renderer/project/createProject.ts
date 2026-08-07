@@ -155,6 +155,11 @@ export function createProject(options: CreateProjectOptions = {}): ProjectDocume
     playback: {
       controls: includeDefaultController ? 'canvas' : 'none',
       keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
     },
   }
 }

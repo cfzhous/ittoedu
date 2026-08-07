@@ -26,7 +26,7 @@ describe('runtime preview document', () => {
     expect(document).toContain('courseware-preview-bootstrap:ready')
     expect(document).toContain('courseware-preview-bootstrap:error')
     expect(document).toContain('__H5_LESSON_PLAYER_OPTIONS__')
-    expect(document).toContain('playerOptions.shellControls = false')
+    expect(document).not.toContain('playerOptions.shellControls')
     expect(document).toContain('materializePayloadAssets')
     expect(document).toContain('URL.createObjectURL')
   })

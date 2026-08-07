@@ -74,6 +74,10 @@ export const interactionTriggerSchema = z.discriminatedUnion('type', [
     type: z.literal('animation.completed'),
     actionId: stableIdSchema,
   }).strict(),
+  z.object({
+    type: z.literal('presenter.command'),
+    command: z.enum(['next', 'previous']),
+  }).strict(),
 ])
 
 const presentationInConditionSchema = z.object({

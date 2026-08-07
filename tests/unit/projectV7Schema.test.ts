@@ -247,7 +247,7 @@ function migratedMotionHarness(node: SceneNode) {
   return { director, handle, root, tweens }
 }
 
-describe('Project V7 text direction compatibility', () => {
+describe('Project V8 text direction compatibility', () => {
   it('normalizes legacy vertical text to vertical-rl and accepts both new directions', () => {
     const legacy = structuredClone(
       createProject({ includeDefaultController: false }),
@@ -302,7 +302,7 @@ describe('Project V7 text direction compatibility', () => {
   })
 })
 
-describe('Project V7 interaction protocol', () => {
+describe('Project V8 interaction protocol', () => {
   it('accepts event-driven motion steps and completion triggers', () => {
     expect(interactionRuleSchema.parse(stepRule())).toEqual(stepRule())
     expect(interactionRuleSchema.parse(stepRule({
@@ -354,7 +354,7 @@ describe('Project V7 interaction protocol', () => {
   })
 })
 
-describe('Project V6 to V7 migration', () => {
+describe('archived Project V6 migration helper', () => {
   it('parses V6 independently and migrates raw actions and effective animations deterministically', () => {
     const legacy = legacyV6Project()
     expect(projectDocumentV6Schema.safeParse(legacy).success).toBe(true)
@@ -362,7 +362,7 @@ describe('Project V6 to V7 migration', () => {
 
     const migrated = migrateProjectDocument(legacy)
     expect(migrated).toEqual(migrateProjectDocument(structuredClone(legacy)))
-    expect(migrated.schemaVersion).toBe(7)
+    expect(migrated.schemaVersion).toBe(8)
 
     const scene = migrated.scenes[0]!
     expect(scene.nodes.find((node) => node.id === 'animated_scene'))
@@ -520,7 +520,7 @@ describe('Project V6 to V7 migration', () => {
   })
 })
 
-describe('Project V7 motion reference validation', () => {
+describe('Project V8 motion reference validation', () => {
   it('reports and blocks missing completion actions and motion targets', () => {
     const project = createProject({ includeDefaultController: false })
     project.scenes[0]!.interactions.push({

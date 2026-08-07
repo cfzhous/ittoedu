@@ -21,7 +21,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 /**
  * Keyboard-only scene navigation. It intentionally owns no DOM controls so
- * canvas-authored controllers and the legacy footer can use it independently.
+ * canvas-authored controllers and keyboard input can use it independently.
  */
 export class PlayerKeyboardNavigation {
   private currentIndex = 0

@@ -46,7 +46,7 @@ async function phaserTexts(page: Page): Promise<string[]> {
   })
 }
 
-test('Project V7 五种渲染路径可离线互动且反复切换不泄漏宿主', async () => {
+test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主', async () => {
   mkdirSync(visualOutputDirectory, { recursive: true })
   const browser = await chromium.launch()
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })

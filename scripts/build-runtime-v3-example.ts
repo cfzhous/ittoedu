@@ -56,7 +56,7 @@ const timestamp = reproducibleTimestamp.toISOString()
 const globalContent: RuntimeDocument['content'] = {
   values: {
     ariaLabel: '课程全局状态面板',
-    hudTitle: 'Project V7 跨场景状态',
+    hudTitle: 'Project V8 跨场景状态',
     progressTemplate: '已到访 {current}/{total} · {scene}',
     challengePending: '挑战状态：等待完成 · 全局组件操作 {count} 次',
     challengeComplete: '挑战状态：已经完成 · 全局组件操作 {count} 次',
@@ -504,7 +504,7 @@ async function main(): Promise<void> {
   }
 
   const projectCandidate: ProjectDocument = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: 'project_runtime_v3_complete_example',
     title: 'Runtime V3 完整互动示例',
     createdAt: timestamp,
@@ -577,6 +577,11 @@ async function main(): Promise<void> {
     playback: {
       controls: 'none',
       keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
     },
     scenes: [
       {
@@ -905,7 +910,7 @@ async function main(): Promise<void> {
 
   const reopened = openProjectArchive(lessonArchive)
   if (
-    reopened.project.schemaVersion !== 7 ||
+    reopened.project.schemaVersion !== 8 ||
     reopened.project.scenes.length !== 3 ||
     reopened.project.globalLayer.length !== 1 ||
     reopened.project.globalRuntime?.source !== globalRuntimeSource ||
@@ -927,13 +932,13 @@ async function main(): Promise<void> {
   const html = buildStandaloneHtml(payload, { playerBundle })
   await fs.writeFile(standaloneHtmlPath, html, 'utf8')
 
-  console.log(`已生成 Project V7 JSON：${projectJsonPath}`)
+  console.log(`已生成 Project V8 JSON：${projectJsonPath}`)
   console.log(`已生成 V3 全局组件包：${componentArchivePath}`)
-  console.log(`已生成 Project V7 工程：${lessonArchivePath}`)
+  console.log(`已生成 Project V8 工程：${lessonArchivePath}`)
   console.log(`已生成离线单 HTML：${standaloneHtmlPath}`)
 }
 
 main().catch((error: unknown) => {
-  console.error('生成 Project V7 / Runtime V3 完整示例失败', error)
+  console.error('生成 Project V8 / Runtime V3 过渡示例失败', error)
   process.exitCode = 1
 })

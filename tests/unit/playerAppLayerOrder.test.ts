@@ -85,10 +85,6 @@ vi.mock('../../src/player/PlayerScene', () => ({
   },
 }))
 
-vi.mock('../../src/player/PlayerControls', () => ({
-  PlayerControls: class FakePlayerControls {},
-}))
-
 vi.mock('../../src/player/PlayerKeyboardNavigation', () => ({
   PlayerKeyboardNavigation: class FakeKeyboardNavigation {
     destroy(): void {}
@@ -213,19 +209,18 @@ describe('PlayerApp fixed renderer planes', () => {
     player.destroy()
   })
 
-  it('内嵌画布只隐藏外层底栏，不禁用画布内控制器', () => {
-    const footerRoot = document.createElement('div')
-    const footerProject = createProject({ includeDefaultController: false })
-    footerProject.playback.controls = 'footer'
-    const footerPlayer = new PlayerApp({
-      project: footerProject,
+  it('Project V8 不创建外层底栏，并按工程控制画布内控制器', () => {
+    const noneRoot = document.createElement('div')
+    const noneProject = createProject({ includeDefaultController: false })
+    const nonePlayer = new PlayerApp({
+      project: noneProject,
       assets: {},
       components: {},
-    }, footerRoot, { shellControls: false })
+    }, noneRoot)
 
-    expect(footerRoot.querySelector('.lesson-footer')).toBeNull()
+    expect(noneRoot.querySelector('.lesson-footer')).toBeNull()
     expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(false)
-    footerPlayer.destroy()
+    nonePlayer.destroy()
 
     const canvasRoot = document.createElement('div')
     const canvasProject = createProject({ includeDefaultController: true })
@@ -233,7 +228,7 @@ describe('PlayerApp fixed renderer planes', () => {
       project: canvasProject,
       assets: {},
       components: {},
-    }, canvasRoot, { shellControls: false })
+    }, canvasRoot)
 
     expect(canvasRoot.querySelector('.lesson-footer')).toBeNull()
     expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(true)

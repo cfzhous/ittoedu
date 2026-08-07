@@ -146,7 +146,7 @@ describe('unified Player authoring host', () => {
     expect(processPendingNavigation).toHaveBeenCalledOnce()
   })
 
-  it('updates a full materialized node without mutating Project V7', async () => {
+  it('updates a full materialized node without mutating Project V8', async () => {
     const harness = createSceneHarness()
     const projectBefore = structuredClone(harness.project)
     const nextNode = { ...structuredClone(harness.first), x: 318, opacity: 0.6 }

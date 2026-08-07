@@ -171,8 +171,8 @@ beforeAll(async () => {
 })
 
 describe('render host benchmark fixture', () => {
-  it('is a complete Project V7 document with one scene for each route', () => {
-    expect(project.schemaVersion).toBe(7)
+  it('is a complete Project V8 document with one scene for each route', () => {
+    expect(project.schemaVersion).toBe(8)
     expect(project.scenes.map(({ id }) => id)).toEqual([
       'scene_native_nodes',
       'scene_runtime_phaser',
@@ -182,7 +182,15 @@ describe('render host benchmark fixture', () => {
     ])
     expect(project.globalLayer).toHaveLength(1)
     expect(project.globalInteractions).toEqual([])
-    expect(project.playback).toEqual({ controls: 'canvas', keyboardNavigation: true })
+    expect(project.playback).toEqual({
+      controls: 'canvas',
+      keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
+    })
     expect(project.scenes.every((scene) => Array.isArray(scene.interactions))).toBe(true)
 
     const [nativeScene, phaserScene, threeScene, tableScene, legacyScene] = project.scenes

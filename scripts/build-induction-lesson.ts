@@ -1230,7 +1230,15 @@ function buildProject(
       fadeMs: 260,
     },
   }
-  project.playback = { controls: 'canvas', keyboardNavigation: true }
+  project.playback = {
+    controls: 'canvas',
+    keyboardNavigation: true,
+    presenter: {
+      enabled: true,
+      strategy: 'authored-command',
+      additionalBindings: [],
+    },
+  }
 
   const controller = project.globalLayer.find(
     (item) => item.node.type === 'teacher-controller',
@@ -1435,7 +1443,7 @@ function assertProjectSemantics(project: ProjectDocument, manifest: ComponentMan
     scene_lenz: ['approach_worked', 'recede_attempt', 'direction_repair', 'direction_mastered'],
     scene_transfer: ['transfer_attempt', 'transfer_repair', 'transfer_mastered', 'exit_summary'],
   }
-  if (project.schemaVersion !== 7) throw new Error('工程不是 Project V7')
+  if (project.schemaVersion !== 8) throw new Error('工程不是 Project V8')
   if (project.canvas.width !== 1280 || project.canvas.height !== 720) {
     throw new Error('工程画布不是 1280×720')
   }
@@ -1673,7 +1681,7 @@ async function main(): Promise<void> {
 
   const summary = {
     title: reopenedProject.title,
-    format: 'Project V7 / Component API 4',
+    format: 'Project V8 / Component API 4',
     canvas: reopenedProject.canvas,
     output: {
       lessonArchive: path.relative(root, lessonArchivePath).replaceAll('\\', '/'),

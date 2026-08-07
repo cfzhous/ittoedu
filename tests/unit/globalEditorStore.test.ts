@@ -62,7 +62,7 @@ beforeEach(() => {
   useEditorStore.getState().createNewProject()
 })
 
-describe('Project V5 global-layer editor store', () => {
+describe('Project V8 global-layer editor store', () => {
   it('accepts only global-capable V3 packages and creates an undoable placement', () => {
     const store = useEditorStore.getState()
     const global = componentPackage('com.example.global', ['scene', 'global'])

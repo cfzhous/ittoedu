@@ -426,7 +426,7 @@ export class PlayerScene extends Phaser.Scene {
 
   /**
    * Applies one complete authoring frame to the live Player. This deliberately
-   * updates only rendered handles and host background/order; Project V7 remains
+   * updates only rendered handles and host background/order; Project V8 remains
    * untouched until the editor commits its own store transaction.
    */
   async applyAuthoringPatch(

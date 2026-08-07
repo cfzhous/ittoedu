@@ -1,6 +1,5 @@
 import { strToU8, unzip, unzipSync, zip, zipSync } from 'fflate'
 import {
-  migrateProjectDocument,
   projectDocumentSchema,
 } from '@/shared/projectSchema'
 import { PROJECT_SCHEMA_VERSION } from '@/shared/constants'
@@ -72,7 +71,18 @@ function readProjectDocument(bytes: Uint8Array): ProjectDocument {
 
   if (typeof value === 'object' && value !== null) {
     const schemaVersion = Reflect.get(value, 'schemaVersion')
-    if (typeof schemaVersion === 'number' && schemaVersion > PROJECT_SCHEMA_VERSION) {
+    if (
+      typeof schemaVersion === 'number' &&
+      Number.isInteger(schemaVersion) &&
+      schemaVersion !== PROJECT_SCHEMA_VERSION
+    ) {
+      if (schemaVersion < PROJECT_SCHEMA_VERSION && schemaVersion >= 1) {
+        throw new UserFacingError(
+          '旧工程格式不受支持',
+          `该工程使用 Project V${schemaVersion}，内部正式版只接受 Project V${PROJECT_SCHEMA_VERSION}，不会自动迁移旧工程。`,
+          '请使用对应的旧版编辑器打开，或使用单独的离线转换工具生成 Project V8。',
+        )
+      }
       throw new UserFacingError(
         '工程格式版本不支持',
         `该工程使用格式版本 ${schemaVersion}，当前编辑器仅支持版本 ${PROJECT_SCHEMA_VERSION}。`,
@@ -82,7 +92,7 @@ function readProjectDocument(bytes: Uint8Array): ProjectDocument {
   }
 
   try {
-    return migrateProjectDocument(value)
+    return projectDocumentSchema.parse(value)
   } catch (error) {
     const result = projectDocumentSchema.safeParse(value)
     const issue = result.success ? undefined : result.error.issues[0]

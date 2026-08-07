@@ -1,12 +1,12 @@
-# Project V7 渲染宿主基准
+# Project V8 渲染宿主过渡基准
 
-这是一份可重复生成、完全离线的 Project V7 工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Project V7 JSON 根据内容职责选择最小的渲染增强层。
+这是一份可重复生成、完全离线的 Project V8 工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Project V8 JSON 根据内容职责选择最小的渲染增强层。当前仍保留一条 Component API 3 兼容路径，只用于协议断代期间定位回归；完成 Component API 4 收敛后会由当前协议夹具替换。
 
 基准刻意把五类能力分成五页，便于直接比较编辑边界、运行时能力、组件复用价值和兼容成本。
 
 | 场景 | 承载方式 | 要验证的结论 |
 | --- | --- | --- |
-| 01 纯原生节点 | Project V7 文字与图形 | 稳定、高编辑需求内容不需要 runtime |
+| 01 纯原生节点 | Project V8 文字与图形 | 稳定、高编辑需求内容不需要 runtime |
 | 02 Runtime API 2 Phaser runtime | `renderMode: phaser` | 只用一次的粒子/程序动画直接写在场景 runtime 更短 |
 | 03 Runtime API 2 Three.js runtime | `renderMode: dom` | Three.js 可预打包进单个 runtime，核心 Player 不需要导入 Three.js |
 | 04 Component API 4 DOM 表格 | `renderMode: dom` 组件 | 高复用、需结构化编辑的表格适合组件化 |
@@ -35,7 +35,7 @@ render-host-benchmark/
 
 `three-runtime.entry.ts` 在构建时从精确锁定的开发依赖 Three.js `0.185.1` 导入，Vite 把两者卷成一个不含 `import` / `export` / `require` 的 IIFE。该 IIFE 直接注册 `CoursewareRuntime.define(...)`，再被内联到 `project.json`、`.h5lesson` 和单 HTML。编辑器和 Player 源码不导入 Three.js，没有 3D 的课件不付费。
 
-本例使用程序几何，因此没有将 GLB 伪装成工程图片素材，也没有扩展 Project V7 的 `AssetKind`。未来使用离线 GLB 时，一次性小模型可跟随 runtime 打包，高复用模型应作为组件包内部素材；只有需要教师从工程“媒体”管理中独立替换模型时，才应设计新的一等模型素材协议。
+本例使用程序几何，因此没有将 GLB 伪装成工程图片素材，也没有扩展 Project V8 的 `AssetKind`。未来使用离线 GLB 时，一次性小模型可跟随 runtime 打包，高复用模型应作为组件包内部素材；只有需要教师从工程“媒体”管理中独立替换模型时，才应设计新的一等模型素材协议。
 
 ## 生成
 

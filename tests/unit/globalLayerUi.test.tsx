@@ -70,7 +70,7 @@ beforeEach(() => {
 
 afterEach(() => cleanup())
 
-describe('Project V5 global-layer editor UI', () => {
+describe('Project V8 global-layer editor UI', () => {
   it('switches explicitly between the fixed global entry and a scene', () => {
     const sceneId = useEditorStore.getState().activeSceneId
     render(<ScenePanel />)

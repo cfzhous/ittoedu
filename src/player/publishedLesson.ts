@@ -279,8 +279,14 @@ export function publishedLessonToExportPayload(
     }
   })
 
+  const publishedPlayback = cloneJson(published.playback) as {
+    controls: ProjectDocument['playback']['controls'] | 'footer'
+    keyboardNavigation: boolean
+    presenter?: ProjectDocument['playback']['presenter']
+  }
+
   const project: ProjectDocument = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: 'published-lesson',
     title: published.title,
     createdAt: '1970-01-01T00:00:00.000Z',
@@ -337,7 +343,19 @@ export function publishedLessonToExportPayload(
     })),
     globalInteractions: cloneJson(published.globalInteractions),
     media: cloneJson(published.media),
-    playback: cloneJson(published.playback),
+    playback: {
+      controls: publishedPlayback.controls === 'footer'
+        ? 'none'
+        : publishedPlayback.controls,
+      keyboardNavigation: publishedPlayback.keyboardNavigation,
+      presenter: publishedPlayback.presenter
+        ? cloneJson(publishedPlayback.presenter)
+        : {
+            enabled: true,
+            strategy: 'scene-navigation',
+            additionalBindings: [],
+          },
+    },
   }
   return { project, assets, components }
 }

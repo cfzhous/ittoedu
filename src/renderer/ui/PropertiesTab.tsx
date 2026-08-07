@@ -1568,7 +1568,6 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
                 value={project.playback.controls}
                 options={[
                   { value: 'canvas', label: '画布内全局控制器（推荐）' },
-                  { value: 'footer', label: '兼容旧版底栏' },
                   { value: 'none', label: '不显示控制器' },
                 ]}
                 onChange={(controls) => {
@@ -1580,9 +1579,6 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
               <button type="button" className="secondary-button" onClick={ensureTeacherController}>
                 <SlidersHorizontal size={14} />添加或定位教师控制器
               </button>
-              {project.playback.controls === 'footer' && (
-                <p className="property-hint">这是旧工程兼容模式。改用画布内控制器后，成品 HTML 的画布外底栏将彻底移除。</p>
-              )}
             </section>
             {editorMode === 'professional' && (
               <RuntimeInspector

@@ -852,7 +852,6 @@ export function sizeHiddenPlayerStage(
   const shell = root.querySelector<HTMLElement>('.lesson-shell')
   const stage = root.querySelector<HTMLElement>('.lesson-stage')
   const canvasHost = root.querySelector<HTMLElement>('.lesson-canvas-host')
-  const footer = root.querySelector<HTMLElement>('.lesson-footer')
   if (shell) {
     Object.assign(shell.style, {
       position: 'relative',
@@ -881,5 +880,4 @@ export function sizeHiddenPlayerStage(
       height: `${height}px`,
     })
   }
-  if (footer) footer.style.display = 'none'
 }

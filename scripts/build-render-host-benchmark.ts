@@ -571,9 +571,9 @@ async function main(): Promise<void> {
   )
 
   const projectCandidate: ProjectDocument = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: 'project_render_host_benchmark',
-    title: 'Project V7 渲染宿主完整基准',
+    title: 'Project V8 渲染宿主完整基准',
     createdAt: timestamp,
     updatedAt: timestamp,
     canvas: { width: 1280, height: 720 },
@@ -597,7 +597,15 @@ async function main(): Promise<void> {
         narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
       },
     },
-    playback: { controls: 'canvas', keyboardNavigation: true },
+    playback: {
+      controls: 'canvas',
+      keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
+    },
     scenes: [
       {
         id: 'scene_native_nodes',
@@ -612,7 +620,7 @@ async function main(): Promise<void> {
           textNode('native_edit_text', '可编辑性说明', '稳定内容\n直接编辑\n文字 · 图形 · 排版', 110, 210, 280, 250, {
             fontSize: 25, bold: true, align: 'center', color: '#e0f2fe',
           }),
-          textNode('native_truth_text', '业务真相说明', 'Project V7 JSON\n是唯一业务真相\n渲染器只是执行层', 500, 210, 280, 250, {
+          textNode('native_truth_text', '业务真相说明', 'Project V8 JSON\n是唯一业务真相\n渲染器只是执行层', 500, 210, 280, 250, {
             fontSize: 25, bold: true, align: 'center', color: '#ccfbf1',
           }),
           textNode('native_enhance_text', '增强层说明', 'Phaser · DOM · Three.js\n按效果选择\n不互相替代', 890, 210, 280, 250, {
@@ -713,7 +721,7 @@ async function main(): Promise<void> {
 
   const reopened = openProjectArchive(lessonArchive)
   if (
-    reopened.project.schemaVersion !== 7 ||
+    reopened.project.schemaVersion !== 8 ||
     reopened.project.scenes.length !== 5 ||
     reopened.project.scenes[1]?.runtime?.runtimeApiVersion !== 2 ||
     reopened.project.scenes[2]?.runtime?.source !== threeRuntimeSource ||
@@ -735,7 +743,7 @@ async function main(): Promise<void> {
 
   console.log(`已生成 Three.js 离线 Runtime：${threeBundlePath}`)
   console.log(`已生成 Three.js ${threePackageMetadata.version} 第三方通知：${thirdPartyNoticesPath}`)
-  console.log(`已生成 Project V7 JSON：${projectJsonPath}`)
+  console.log(`已生成 Project V8 JSON：${projectJsonPath}`)
   console.log(`已生成两个组件包：${exampleDirectory}`)
   console.log(`已生成渲染宿主基准工程：${lessonArchivePath}`)
   console.log(`已生成离线单 HTML：${standaloneHtmlPath}`)

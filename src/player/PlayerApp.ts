@@ -7,7 +7,6 @@ import { ComponentRegistry } from './ComponentRegistry'
 import { createPlayerComponentHostActions } from './componentHostActions'
 import { CourseRuntimeKernel } from './CourseRuntimeKernel'
 import { PreparedCanvasSnapshots } from './PreparedCanvasSnapshots'
-import { PlayerControls } from './PlayerControls'
 import { PlayerKeyboardNavigation } from './PlayerKeyboardNavigation'
 import { AudioManager } from './AudioManager'
 import {
@@ -42,8 +41,6 @@ export interface PlayerAppOptions {
   renderWidth?: number
   renderHeight?: number
   controls?: boolean
-  /** Hide only the outer shell footer; authored canvas controls remain active. */
-  shellControls?: boolean
   mode?: RuntimeExecutionMode
   /** Start directly at this authored scene instead of briefly rendering page 1. */
   initialSceneId?: string
@@ -92,7 +89,6 @@ function createRuntimeDomLayer(
 export class PlayerApp {
   readonly game: Phaser.Game
 
-  private readonly controls: PlayerControls | null
   private readonly keyboardNavigation: PlayerKeyboardNavigation | null
   readonly audio: AudioManager
   private readonly disposeAudioToggle: () => void
@@ -214,27 +210,10 @@ export class PlayerApp {
 
     const authoredControlsMode = options.controls === false
       ? 'none'
-      : (payload.project.playback?.controls ?? 'footer')
-    const shellControlsMode = this.authoringMode || options.shellControls === false
-      ? 'none'
-      : authoredControlsMode
-    const footer = shellControlsMode === 'footer'
-      ? document.createElement('footer')
-      : null
-    if (footer) footer.className = 'lesson-footer'
+      : payload.project.playback.controls
 
     shell.append(stage)
-    if (footer) shell.append(footer)
     root.replaceChildren(shell)
-
-    this.controls = footer
-      ? new PlayerControls(
-        footer,
-        payload.project.scenes.length,
-        (targetIndex) => this.goToScene(targetIndex),
-        () => { this.replayScene() },
-      )
-      : null
     const hostActions = this.authoringMode
       ? FROZEN_AUTHORING_ACTIONS
       : createPlayerComponentHostActions(this)
@@ -281,7 +260,6 @@ export class PlayerApp {
       this.componentRegistry,
       (index) => {
         this.scenePicker?.close()
-        this.controls?.setIndex(index)
         this.keyboardNavigation?.setIndex(index)
         window.dispatchEvent(new CustomEvent('courseware-scene-change', {
           detail: {
@@ -582,7 +560,6 @@ export class PlayerApp {
     }
     if (this.alignmentFrame !== null) cancelAnimationFrame(this.alignmentFrame)
     this.alignmentFrame = null
-    this.controls?.destroy()
     this.keyboardNavigation?.destroy()
     this.scenePickerEventDisposers.splice(0).forEach((dispose) => dispose())
     this.scenePicker?.destroy()

@@ -17,7 +17,7 @@ import {
   createImageNode,
   createShapeNode,
 } from '../../src/renderer/project/createProject'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 const assetId = '../../asset:hero'
 const componentKey = '../../component:key'
@@ -49,7 +49,7 @@ const motionWebNode = createShapeNode('rectangle', {
 })
 
 const project: ProjectDocument = {
-  schemaVersion: 7,
+  schemaVersion: 8,
   id: 'web-package-project',
   title: '网页包 </title><script>bad()</script>',
   createdAt: '2026-07-21T00:00:00.000Z',
@@ -112,7 +112,7 @@ const project: ProjectDocument = {
     },
   },
   globalLayer: [],
-  ...createProjectV5Fields(),
+  ...createProjectV8Fields(),
 }
 
 const imageBytes = new Uint8Array(512 * 1024).map((_, index) => index % 251)

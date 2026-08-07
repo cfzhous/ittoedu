@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "id": "project_render_host_benchmark",
-  "title": "Project V7 渲染宿主完整基准",
+  "title": "Project V8 渲染宿主完整基准",
   "createdAt": "2026-07-23T00:00:00.000Z",
   "updatedAt": "2026-07-23T00:00:00.000Z",
   "canvas": {
@@ -212,7 +212,7 @@
           "opacity": 1,
           "locked": false,
           "type": "text",
-          "text": "Project V7 JSON\n是唯一业务真相\n渲染器只是执行层",
+          "text": "Project V8 JSON\n是唯一业务真相\n渲染器只是执行层",
           "runs": [],
           "style": {
             "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
@@ -869,6 +869,11 @@
   },
   "playback": {
     "controls": "canvas",
-    "keyboardNavigation": true
+    "keyboardNavigation": true,
+    "presenter": {
+      "enabled": true,
+      "strategy": "scene-navigation",
+      "additionalBindings": []
+    }
   }
 }

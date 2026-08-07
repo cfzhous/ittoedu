@@ -7,7 +7,7 @@ import type { ExportPayload } from '../../src/shared/componentTypes'
 import type { SceneNode } from '../../src/shared/projectTypes'
 import { buildStandaloneHtml } from '../../src/renderer/export/buildStandaloneHtml'
 import { buildWebPackageFiles } from '../../src/renderer/export/buildWebPackage'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 const projectRoot = resolve(__dirname, '..', '..')
 const outputDirectory = join(tmpdir(), 'phaser-courseware-runtime-v3-e2e')
@@ -214,7 +214,7 @@ function createPayload(): ExportPayload {
           interactions: [],
         },
       ],
-      ...createProjectV5Fields('footer'),
+      ...createProjectV8Fields('none'),
     },
     assets: {},
     components: {
@@ -301,6 +301,15 @@ async function clickLogicalPoint(
   )
 }
 
+async function expectCurrentScene(
+  page: import('@playwright/test').Page,
+  sceneId: string,
+): Promise<void> {
+  await expect.poll(() => page.evaluate(() => (
+    (window as any).__H5_LESSON_PLAYER__?.getCurrentSceneId() ?? null
+  ))).toBe(sceneId)
+}
+
 test('V3 场景运行时、全局运行时和全局组件跨场景协作', async () => {
   mkdirSync(outputDirectory, { recursive: true })
   const playerBundle = readFileSync(
@@ -315,14 +324,14 @@ test('V3 场景运行时、全局运行时和全局组件跨场景协作', async
   page.on('pageerror', (error) => pageErrors.push(error.message))
   try {
     await page.goto(pathToFileURL(htmlPath).toString())
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('1 / 2')
+    await expectCurrentScene(page, 'scene-one')
     await expect(page.getByTestId('global-current-scene')).toHaveText('scene-one')
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentCreateCount)).toBe(1)
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentScope)).toBe('global')
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentScene)).toBe('scene-one')
 
     await clickLogicalPoint(page, 220, 160)
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('2 / 2')
+    await expectCurrentScene(page, 'scene-two')
     expect(await page.evaluate(() => (window as any).__v3NavigationGuardCalls)).toBeGreaterThan(0)
     await expect(page.getByTestId('global-current-scene')).toHaveText('scene-two')
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentScene)).toBe('scene-two')
@@ -334,13 +343,13 @@ test('V3 场景运行时、全局运行时和全局组件跨场景协作', async
     })
 
     await clickLogicalPoint(page, 1075, 640)
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('1 / 2')
+    await expectCurrentScene(page, 'scene-one')
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentClicks)).toBe(1)
     expect(await page.evaluate(() => (window as any).__v3LastComponentEvent)).toBe('navigate:previous')
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentCreateCount)).toBe(1)
 
     await page.getByTestId('global-next').click()
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('2 / 2')
+    await expectCurrentScene(page, 'scene-two')
 
     const stress = await page.evaluate(() => {
       const player = (window as any).__H5_LESSON_PLAYER__
@@ -354,7 +363,7 @@ test('V3 场景运行时、全局运行时和全局组件跨场景协作', async
         runtimeMounts: document.querySelectorAll('.lesson-runtime-mount').length,
       }
     })
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('2 / 2')
+    await expectCurrentScene(page, 'scene-two')
     expect(stress).toEqual({
       globalComponentCreates: 1,
       globalRuntimeCreates: 1,
@@ -362,7 +371,7 @@ test('V3 场景运行时、全局运行时和全局组件跨场景协作', async
     })
 
     await page.evaluate(() => (window as any).__H5_LESSON_PLAYER__.restartCourse())
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('1 / 2')
+    await expectCurrentScene(page, 'scene-one')
     expect(await page.evaluate(() => (window as any).__v3GlobalComponentCreateCount)).toBe(2)
     expect(await page.evaluate(() => (window as any).__v3GlobalRuntimeCreateCount)).toBe(2)
     expect(await page.evaluate(() => (window as any).__v3CourseVisit)).toBe(1)
@@ -430,10 +439,10 @@ test('PublishedLesson 网页包可通过 file 协议完整运行且仅有一份�
   })
   try {
     await page.goto(pathToFileURL(join(webDirectory, 'index.html')).toString())
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('1 / 2')
+    await expectCurrentScene(page, 'scene-one')
     await expect(page.getByTestId('global-current-scene')).toHaveText('scene-one')
     await clickLogicalPoint(page, 220, 160)
-    await expect(page.locator('.lesson-page-indicator')).toHaveText('2 / 2')
+    await expectCurrentScene(page, 'scene-two')
     await expect(page.getByTestId('global-current-scene')).toHaveText('scene-two')
     expect(pageErrors).toEqual([])
     expect(externalRequests).toEqual([])

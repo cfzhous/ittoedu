@@ -6,11 +6,11 @@ import {
   loadExportPayloadFromUrl,
   parseExportPayloadJson,
 } from '../../src/player/payload'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 const payload: ExportPayload = {
   project: {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: 'unicode-project',
     title: '中文课件 🎓',
     createdAt: '2026-07-20T00:00:00.000Z',
@@ -29,7 +29,7 @@ const payload: ExportPayload = {
     assets: {},
     componentPackages: {},
     globalLayer: [],
-    ...createProjectV5Fields(),
+    ...createProjectV8Fields(),
   },
   assets: {},
   components: {},
@@ -63,6 +63,17 @@ describe('Player Payload', () => {
 
     expect(parseExportPayloadJson(JSON.stringify(packagePayload))).toEqual(
       packagePayload,
+    )
+  })
+
+  it('明确拒绝旧 Project V7 Payload，而不是在播放器内迁移', () => {
+    const legacy = structuredClone(payload) as unknown as {
+      project: { schemaVersion: number }
+    }
+    legacy.project.schemaVersion = 7
+
+    expect(() => parseExportPayloadJson(JSON.stringify(legacy))).toThrow(
+      '版本不受支持',
     )
   })
 

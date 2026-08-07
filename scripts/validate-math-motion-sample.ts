@@ -141,8 +141,8 @@ async function main(): Promise<void> {
   const health = summarizeProjectHealth(collectProjectHealth(project))
   results.push(check(
     'project.schema-health',
-    project.schemaVersion === 7 && health.error === 0,
-    `Project V7 工程健康检查 errors=${health.error}`,
+    project.schemaVersion === 8 && health.error === 0,
+    `Project V8 工程健康检查 errors=${health.error}`,
   ))
   results.push(check(
     'project.scope',

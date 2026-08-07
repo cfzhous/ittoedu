@@ -1,8 +1,8 @@
 # 互动组件开发指南（V4）
 
-本文定义 Editor 1.7.0 / Project V7 使用的 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
+本文定义 Editor 1.0.0 / Project V8 使用的 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
-文档同步基线：**2026-08-05**。当前源码包版本为 1.7.0；组件包管理、专业“互动与动画 / 开发”、统一画布文字目标、PublishedLesson 发布边界和旗舰 V4 组件已按当前实现核对。
+文档同步基线：**2026-08-07**。当前源码包版本为 1.0.0 收敛分支；Project V8 边界已启用，Component API 1–3 的 Schema、宿主、UI 和测试删除尚未完成。
 
 编辑器兼容四代协议：
 
@@ -11,7 +11,7 @@
 - V3：增加场景/全局作用域，并默认递归暴露 `props.content` 中全部字符串；
 - V4：增加严格 `renderMode`、DOM/Phaser 分能力上下文、可见性/暂停生命周期和确定性捕获准备。
 
-新组件必须使用 V4。Project V7 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。Project V7 中，可枚举的场景节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions`；全局规则通过 `scene.in` 限定生效场景。一次性复杂场景互动或一次性跨场景规则不必做成组件，可分别使用 `scene.runtime` 和 `globalRuntime`。组件只用于高复用、需参数化、需版本化或便于教师反复配置的能力。V1–V6 Project 只作为迁移输入，新保存统一写 V7。
+新组件必须使用 V4。Project V8 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。Project V8 中，可枚举的场景节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions`；全局规则通过 `scene.in` 限定生效场景。一次性复杂场景互动或一次性跨场景规则不必做成组件，可分别使用 `scene.runtime` 和 `globalRuntime`。组件只用于高复用、需参数化、需版本化或便于教师反复配置的能力。旧 Project V1–V7 均明确拒绝；组件 API 1–3 只属于待删除历史实现，不能用于新组件。
 
 中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布。编辑状态由隔离 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过本文的显式文字目标向宿主描述“哪一段 Props 可在何处编辑”，不能访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。
 
@@ -359,7 +359,7 @@ ctx.presentation?.transitionTo('state_correct', {
 
 因此 DOM/hybrid 组件的 DOM 部分应按 overlay 内容设计。场景节点顺序或全局元素的 `layer: 'underlay'` 不能把这部分 DOM 压到 Canvas 后面；它们只对组件的 Phaser 代理/Phaser 部分保持 Canvas 内层级语义。必须位于原生节点背后的可复用视觉应使用 Phaser 组件，或把后景明确交给运行时 DOM underlay。
 
-编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Project V7 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、迁移、媒体管理和全部导出链路。
+编辑器核心和 Player 不内置 Three.js。需要可复用的地球、太阳系、立体几何等真 3D 组件时，在构建阶段把 Three.js 与所需 loader 打进组件自己的 `runtime.js`，使用 `renderMode: 'dom'` 并把 `WebGLRenderer.domElement` 挂到 `ctx.dom.root`；同时确需 Phaser 才使用 `hybrid`。3D 模型默认使用 GLB，并作为组件包内 manifest asset 交付；loader、纹理和解码器也必须离线，不得访问 CDN。当前 Project V8 没有一等 `model` 素材类型，不能用 `image` 属性伪装 GLB；若要让教师从工程“媒体”管理中独立替换模型，须先扩展 Project Schema、归档、媒体管理和全部导出链路。
 
 Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVisible(false)` / `suspend()` 停止 RAF 和昂贵更新，在 `prepareCapture()` 主动渲染确定帧，在 `destroy()` 释放 geometry、material、texture、render target、renderer、监听和 RAF。加载任务通过 `ctx.capture.waitUntil()` 登记，并提供可理解的缩略图与可捕获静态画面。这样 3D 成本只由使用该组件的工程承担，不成为编辑器核心依赖。
 
@@ -382,7 +382,7 @@ Three.js/WebGL 组件必须在 `resize()` 更新 renderer 与相机，在 `setVi
 - 隐藏时宿主关闭显示和输入，但不销毁内部状态。
 - 可通过 `ctx.scope === 'global'` 确认播放器挂载作用域，通过 `ctx.events` 订阅 `scene:enter` 更新常驻 HUD，通过 `ctx.courseState` 与场景运行时共享进度。
 
-全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Project V7 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
+全局组件适合确有复用价值的定制导航、定制教师工具、计时和积分 UI。普通上一页/下一页/场景目录/重播/重开/声音/全屏控制优先使用内置 `TeacherControllerNode`；常规音乐优先使用 Project V8 声音库和声道。只服务一个工程的复杂课程规则通常更适合 `globalRuntime`，可枚举的按钮映射优先使用 `interactions` / `globalInteractions`。
 
 若一个包声明同时支持两种作用域，其实现应根据可选 `ctx.scope` 正确适配两种生命周期；在字段缺失的编辑宿主中使用安全回退，不能直接解引用。
 
@@ -431,7 +431,7 @@ interface ComponentInstanceLifecycle {
 
 生命周期方法应可重复、安全调用。全局组件需特别防止把场景切换、隐藏或 suspend 误判为销毁或重新创建。宿主记录组件生命周期的首个失败并销毁失败挂载，后续捕获继续拒绝，不能因一次显隐或同步更新而“复活”为空白成功。`prepareCapture()` 抛错只使该组件实例产生可诊断占位，已经成功的组件快照继续保留，不应吞掉错误或让整批 PPTX 组件退化。
 
-组件自行创建的音频、视频或媒体流不会自动进入 Project V7 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
+组件自行创建的音频、视频或媒体流不会自动进入 Project V8 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
 
 场景状态切换不会销毁组件实例。宿主会在同一实例上调用 `resize()` 和 `updateProps()`，因此这两个方法必须真正刷新现有显示对象，不能要求通过重新执行 `create()` 才生效。
 
@@ -462,7 +462,7 @@ function loadProjectImage(assetId) {
 
 单 HTML 和网页包导出会把组件默认参数展平到实际实例 props，只发布运行必需的组件 ID、版本、API/渲染能力、编码执行逻辑和组件素材；组件包的 `manifest.json`、`editor.properties/pages`、变体、预设、说明、缩略图和独立原始 `runtime.js` 不进入发布物。执行逻辑在浏览器端仍可恢复和分析，这只是 [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 的轻量发布裁剪，不是代码加密或 DRM。
 
-外部组件节点与原生节点一样，可作为 Project V7 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
+外部组件节点与原生节点一样，可作为 Project V8 `node.enter` / `node.exit` 动作目标。宿主只对组件根容器执行立即、淡化、四向滑动或缩放，不重新执行 `create()`；时机由规则触发器决定，动作步骤可顺序、并行、延迟并以 `animation.completed` 接力。`playbackInitialVisibility: 'hidden'` 只在互动 Player 中等待入场；编辑、缩略图和静态导出仍显示组件的稳定作者画面。组件内部关键帧、循环或复杂动画仍由组件自己管理，不能与宿主动画重复叠加。
 
 内部点击、拖拽、动画状态推进和宿主动作只在 `preview` 生效。authoring 中即使组件代码创建了命中对象，宿主也会屏蔽输入并冻结动作；组件不得访问编辑器 DOM，也不得假定属性栏结构。
 
@@ -474,11 +474,11 @@ DOM 静态捕获支持常规背景、边框、文字、图片、表单值和 Can
 
 ## 13. 组件包管理与故障隔离
 
-Editor 1.7.0 在专业模式“元素”面板把组件包作为工程一等资源管理：显示包 ID、版本、场景实例数和全局实例数。仍有任一实例引用时禁止删除；只有引用数为 0 时可安全删除。
+Editor 1.0.0 在专业模式“元素”面板把组件包作为工程一等资源管理：显示包 ID、版本、场景实例数和全局实例数。仍有任一实例引用时禁止删除；只有引用数为 0 时可安全删除。
 
 “选择新包替换”只接受 manifest ID 相同的新包。替换前会校验新包的 `supportedScopes` 是否覆盖所有现有场景/全局实例；校验、解包或迁移失败时原工程保持不变，成功后所有实例版本统一更新。不同 ID 的组件不能借替换入口隐式迁移。
 
-专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Project V7 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
+专业“开发”工作台不会直接改写导入的第三方组件。选择“组件代码”任务后，Runtime 与 Manifest 通过二级标签一次显示一个。第三方包的 manifest/runtime 默认只读；用户必须先在场景“基础”或全局层对所选实例执行“创建可编辑副本”，得到新的工程内包 ID 和版本，原包保持不变，所选实例切换到副本。命名状态只允许覆盖 Props，不能改变组件包身份，因此必须先返回“基础”。可编辑资格由 Project V8 中持久化的 `editableCopy` 来源标记判断，不能靠包 ID 命名伪装。此后才能在受控代码框中修改副本 manifest/runtime；ID 和版本不可在代码框内改写，应用前复用组件包路径、入口、缩略图、素材、运行时 API 与现有实例作用域校验，成功修改进入正常撤销历史。
 
 “只读”只阻止直接覆盖原包，不阻止查看或复制已经交付的代码，也不替代许可证约束；创建副本前应确认组件授权允许修改和二次分发。可编辑副本是工程作者态能力，不是源码保密措施。`.h5lesson` 保存完整组件包；单 HTML/网页包虽会裁掉 manifest、编辑器字段和独立原始 `runtime.js`，浏览器仍需取得可恢复的执行逻辑。不要在组件或工程中存放密钥，并且不要把 PublishedLesson 裁剪描述为加密、不可逆向或 DRM。
 
@@ -498,7 +498,7 @@ Rename-Item global-controls.zip global-controls.h5component
 
 ### 14.1 旗舰 V4 组件参考
 
-[`examples/induction-lab-component/`](../examples/induction-lab-component/) 是推荐的完整 V4 场景组件参考：它使用 `renderMode: "dom"` 和离线素材复用同一套磁体—闭合线圈—检流计装置，把全部文案放入 `props.content`，通过语义事件连接 Project V7 命名状态，并完整实现 `updateProps`、`resize`、显隐、暂停/恢复、确定帧捕获和销毁。`scripts/build-induction-lesson.ts` 展示组件嵌入工程与离线导出，`scripts/validate-induction-lesson.ts` 展示交付门禁。
+[`examples/induction-lab-component/`](../examples/induction-lab-component/) 是待迁出核心仓库的完整 V4 场景组件参考：它使用 `renderMode: "dom"` 和离线素材复用同一套磁体—闭合线圈—检流计装置，把全部文案放入 `props.content`，通过语义事件连接 Project V8 命名状态，并完整实现 `updateProps`、`resize`、显隐、暂停/恢复、确定帧捕获和销毁。`scripts/build-induction-lesson.ts` 展示组件嵌入工程与离线导出，`scripts/validate-induction-lesson.ts` 展示交付门禁。
 
 API 3 兼容示例位于 [`examples/runtime-v3-complete/components/global-controls/`](../examples/runtime-v3-complete/components/global-controls/)。执行 `npx tsx scripts/build-runtime-v3-example.ts` 可生成组件包、示例工程和单 HTML；它用于回归 V3 兼容，不是新 V4 组件的上下文范本。V4 DOM 表格、V3 Phaser 兼容组件以及按内容内联 Three.js 的完整对照见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)，可用 `npm run build:render-benchmark` 重建。其 Playwright 压力段执行 25 轮、共 100 次定制场景切换和 25 次末页重播，并检查组件/运行时挂载、Canvas/WebGL、活动 RAF、控制台异常与外部请求。
 

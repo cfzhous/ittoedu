@@ -25,7 +25,7 @@ import {
   createShapeNode,
   createTextNode,
 } from '../../src/renderer/project/createProject'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nOQAAAAASUVORK5CYII='
@@ -80,9 +80,9 @@ function assetMeta(id: string) {
 
 function makeProject(): ProjectDocument {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: 'v5-export-project',
-    title: 'Project V5 / Runtime V3 四格式导出',
+    title: 'Project V8 / 过渡运行时四格式导出',
     createdAt: '2026-07-21T00:00:00.000Z',
     updatedAt: '2026-07-21T00:00:00.000Z',
     canvas: { width: 1280, height: 720 },
@@ -181,7 +181,7 @@ function makeProject(): ProjectDocument {
         },
       },
     ],
-    ...createProjectV5Fields(),
+    ...createProjectV8Fields(),
   }
 }
 
@@ -221,7 +221,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Project V5 / Runtime V3 网页导出', () => {
+describe('Project V8 / 过渡运行时网页导出', () => {
   it('单 HTML 原样保留全局/场景运行时、全局组件及全部依赖', () => {
     const payload = makePayload()
     const decoded = decodeStandalonePayload(

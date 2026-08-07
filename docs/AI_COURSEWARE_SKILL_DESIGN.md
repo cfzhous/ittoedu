@@ -1,5 +1,7 @@
 # AI 互动课件创作 Skill 设计草案
 
+> 历史归档说明：本文记录 Editor 1.7.0 / Project V7 的 Skill V1 设计，不是当前主干的实现入口。当前主干可继续使用编排阶段，但必须在 `implementation-ready` 后暂停，等待 Project V8 / Runtime API 2 / Component API 4 对应的新实现 Skill。
+
 > 状态：设计已批准，Skill V1 基线已实现；完整课例冷启动验收尚未执行
 >
 > 适用范围：当前已实现的 PPT 兼容固定画布课件

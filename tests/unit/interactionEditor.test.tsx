@@ -872,6 +872,14 @@ describe('SceneAutomationEditor', () => {
     })
   })
 
+  it('keeps presenter commands unavailable until the presenter input layer exists', () => {
+    renderAutomationEditor({ scene: makeScene([]) })
+
+    expect(screen.getByRole('option', {
+      name: '翻页笔命令（演示输入层尚未启用）',
+    })).toBeDisabled()
+  })
+
   it('edits state, audio, video, component, and scoped runtime-event triggers', () => {
     const scene = makeScene([
       automationRule('state-trigger', {

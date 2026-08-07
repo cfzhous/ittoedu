@@ -145,10 +145,9 @@
       } else if (message.initialStateId === null) {
         playerOptions.initialStateId = null
       }
-      // The editor's central Stage owns the full 1280 x 720 viewport. Suppress
-      // the legacy shell footer in both edit and run mode without disabling
-      // teacher-controller nodes authored directly on the canvas.
-      playerOptions.shellControls = false
+      // The editor's central Stage owns the full 1280 x 720 viewport. Project
+      // V8 has no outer shell footer; canvas-authored controllers stay inside
+      // the same fixed design surface.
       if (message.hostMode === 'authoring' || message.hostMode === 'playback') {
         playerOptions.hostMode = message.hostMode
       }

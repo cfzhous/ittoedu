@@ -941,7 +941,7 @@ async function main(): Promise<void> {
 
   const reopened = openProjectArchive(lessonArchive)
   projectDocumentSchema.parse(reopened.project)
-  if (reopened.project.schemaVersion !== 7) throw new Error('工程不是 Project V7')
+  if (reopened.project.schemaVersion !== 8) throw new Error('工程不是 Project V8')
   if (reopened.project.scenes.length !== 4) throw new Error('工程场景数量不是 4')
   const experimentScene = reopened.project.scenes.find((scene) => scene.id === 'scene_experiment')
   if (!experimentScene) throw new Error('缺少 3D 实验场景')

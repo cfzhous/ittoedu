@@ -33,7 +33,7 @@ function expectRectClose(
 }
 
 describe('stage viewport transform', () => {
-  it('uses the fixed Project V7 design size and editor zoom range', () => {
+  it('uses the fixed Project V8 Slide design size and editor zoom range', () => {
     expect(STAGE_VIEWPORT_WIDTH).toBe(1280)
     expect(STAGE_VIEWPORT_HEIGHT).toBe(720)
     expect(STAGE_VIEWPORT_MIN_ZOOM).toBe(0.5)

@@ -1,14 +1,14 @@
-# AI 互动课件创作与接入规范（Editor 1.7.0 / Project V7）
+# AI 互动课件创作与接入规范（Editor 1.0.0 / Project V8 断代中）
 
 > 读者：把已经批准的教学设计、教学内容规格、教学呈现脚本和视觉方向实现为课件的 AI。
 >
-> 前置规范：开始实现前必须完整执行 [AI 互动课件通用创作编排规范](AI_COURSEWARE_ORCHESTRATION.md)，取得文件路径、版本和哈希均有效的 `implementation-ready` 交接记录，再使用仓库权威 [build-project-v7-courseware Skill](../.agents/skills/build-project-v7-courseware/SKILL.md) 进入实现。教学设计、教学内容规格、关键不确定项或教学呈现脚本尚未确认时，不得进入本文的工程生成流程。
+> 前置规范：开始实现前必须完整执行 [AI 互动课件通用创作编排规范](AI_COURSEWARE_ORCHESTRATION.md)，取得文件路径、版本和哈希均有效的 `implementation-ready` 交接记录。当前主干已只接受 Project V8，而仓库中的 `build-project-v7-courseware` 仅适用于归档标签 `internal-prototype-1.7.0`；新的 V8 实现 Skill 尚未完成，因此新课例必须暂停在实现门禁，不能用旧 Skill 生成后再伪改版本号。
 >
 > 目标：依据已经批准的体验合同，一次产出可由本编辑器打开、轻改、预览和导出的完整 `.h5lesson`，不因编辑器面板能力而牺牲成品效果。
 
-> 文档同步基线：2026-08-06。当前源码包版本为 Editor 1.7.0；本规范已同步通用创作编排前置门禁、简洁/专业模式、统一“元素”入口、统一画布 authoring、媒体管理、“互动与动画”、受控“开发”工作台、原生文字显示能力、PublishedLesson V1 发布边界和旗舰课例。
+> 文档同步基线：2026-08-07。当前源码包版本为 Editor 1.0.0 收敛分支；Project V8 打开/保存/Player Payload 边界和 `playback.presenter` 已进入实现，Runtime API 1、Component API 1–3、历史夹具及 V8 实现 Skill 清理仍未完成。
 
-> 版本术语必须严格区分：新工程使用 Project `schemaVersion: 7`；新场景/全局自由运行时使用 `RuntimeDocument.runtimeApiVersion: 2`，API 1 继续兼容；新组件使用组件 `schemaVersion: 4` 与组件 `runtimeApiVersion: 4`，组件 API 1–3 继续兼容。文件名中的 “runtime-v3” 只表示历史播放器代际，不代表自由运行时 API 版本。
+> 版本术语必须严格区分：新工程使用 Project `schemaVersion: 8`；新场景/全局自由运行时只面向 `RuntimeDocument.runtimeApiVersion: 2`；新组件只面向组件 `schemaVersion: 4` 与 `runtimeApiVersion: 4`。旧 Project V1–V7 已由产品入口拒绝；旧运行时和组件兼容代码处于待删除状态，不能作为新内容合同。文件名中的 “runtime-v3” 只表示历史播放器代际，不代表自由运行时 API 版本。
 
 > 当前生成边界：本文只适用于已实现的固定 1280×720、可导出 PPTX 的课件模式。不得按未来规划伪造长文、无限画布、混合表面或其他未发布 Project 字段。
 
@@ -29,15 +29,15 @@
 
 本编辑器不是通用网页 IDE，也不试图可视化任意 JavaScript。它是：
 
-- Project V7 的统一工程容器；
+- Project V8 的统一工程容器；
 - 对场景、场景状态、文字、图片、图形、视频、组件公开参数、全局控制器和交互映射进行直接修改的宿主；
 - 预览及单 HTML、网页包、PDF、PPTX 的统一导出入口。
 
-Project V7 JSON 是唯一业务真相：它描述场景、命名状态、声明式交互、素材绑定、运行时文档、组件实例及公开参数。DOM、Phaser、Canvas、WebGL 和 Three.js 都只是执行这些数据的呈现/交互能力。架构不以 DOM 或 Phaser 为业务核心，也不承诺修改 `renderMode` 后自动转换实现代码。
+Project V8 JSON 是唯一业务真相：它描述场景、命名状态、声明式交互、素材绑定、运行时文档、组件实例及公开参数。DOM、Phaser、Canvas、WebGL 和 Three.js 都只是执行这些数据的呈现/交互能力。架构不以 DOM 或 Phaser 为业务核心，也不承诺修改 `renderMode` 后自动转换实现代码。
 
 中央工作区只有一个固定 1280×720 画布，不再分别维护编辑画面和运行画面。Player 是“编辑状态”和“当前位置试运行”的唯一视觉源：编辑状态使用隔离 authoring Player 合成原生节点、组件、场景/全局运行时，并在上方叠加透明 Phaser 原生交互层；该层只负责选择和几何变换。authoring Player 冻结学生输入、声明式互动、音视频、导航、状态推进和课程状态写入；切换到“当前位置试运行”后，同一画布位置才启用完整 playback 行为。
 
-编辑器提供“场景 + 场景状态 + 场景/全局声明式交互”创作模型。简洁模式右侧只保留“元素 / 图层 / 属性”，并提供原子化“出现动画”；专业模式追加“互动与动画 / 开发”，开放组件、运行时、完整规则和受控工程代码编辑。两种模式只改变工作入口和信息密度，不改变或降级 Project V7。简单的按钮点击、状态切换、场景跳转、声音播放和静音控制应优先写成 `SceneDocument.interactions` 或课程级 `globalInteractions`：专业模式在“属性”中维护节点基础点击，在“互动与动画”维护非点击触发；全局规则用 `scene.in` 限定生效场景。复杂判定、连续拖拽、粒子、时间轴式动画和算法行为仍由运行时或组件承担。AI 仍可在场景运行时、全局运行时和组件代码中使用 Phaser、DOM、SVG、Canvas、WebGL、Tween、程序音效和本地素材。
+编辑器提供“场景 + 场景状态 + 场景/全局声明式交互”创作模型。简洁模式右侧只保留“元素 / 图层 / 属性”，并提供原子化“出现动画”；专业模式追加“互动与动画 / 开发”，开放组件、运行时、完整规则和受控工程代码编辑。两种模式只改变工作入口和信息密度，不改变或降级 Project V8。简单的按钮点击、状态切换、场景跳转、声音播放和静音控制应优先写成 `SceneDocument.interactions` 或课程级 `globalInteractions`：专业模式在“属性”中维护节点基础点击，在“互动与动画”维护非点击触发；全局规则用 `scene.in` 限定生效场景。复杂判定、连续拖拽、粒子、时间轴式动画和算法行为仍由运行时或组件承担。AI 仍可在场景运行时、全局运行时和组件代码中使用 Phaser、DOM、SVG、Canvas、WebGL、Tween、程序音效和本地素材。
 
 编辑器提供事件驱动的元素入场/退场编排。动画不是从场景开始后独立计时，而是作为 `interactions` / `globalInteractions` 的动作，由点击、场景/状态进入、组件事件、运行时事件、音视频事件、节点激活或前一动画完成触发。动作步骤可顺序等待或与前一步同时开始，并可设置相对触发点的局部延迟。它仍不是关键帧、路径或通用时间轴；复杂连续运动继续由组件/运行时承担。
 
@@ -45,7 +45,7 @@ Project V7 JSON 是唯一业务真相：它描述场景、命名状态、声明�
 
 普通教师主要修改登记后的文案和公开属性。专业“开发”面板采用加宽的单任务工作台，通过“运行时 / 对象 JSON / 规则 JSON / 组件代码”切换并一次只呈现一类内容；可校验并修改当前工程承载的场景/全局运行时源码、所选对象 JSON、规则 JSON，以及用户创建的工程内可编辑组件副本。它不是通用网页 IDE，不提供文件系统、Shell、远程依赖、Node/Electron API 或编辑器自身源码。AI 或可复现生成脚本仍是批量生成和复杂实现的首选。
 
-Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调用。全部 AI 接入统一延后到 2.0 以后；当前只保留带协议版本、会话、revision、上下文和能力声明的 authoring 边界，使未来能力可以显式接入而不改变 Project V7 真相。AI 目前应在编辑器外按本文生成完整工程或可复现脚本，不得把现有手工 authoring 协议描述成已经接入的 AI 功能。
+Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调用。全部 AI 接入统一延后到 2.0 以后；当前只保留带协议版本、会话、revision、上下文和能力声明的 authoring 边界，使未来能力可以显式接入而不改变 Project V8 真相。AI 目前应在编辑器外按本文生成完整工程或可复现脚本，不得把现有手工 authoring 协议描述成已经接入的 AI 功能。
 
 稳定、可命名、会反复到达的视觉情况（例如题目、答错、答对、完成）必须优先由场景原生节点和 `scene.presentation.states` 表达。运行时负责判定、事件、过渡、临时粒子/拖拽轨迹、程序动画和无法合理声明为元素的效果，并通过 `ctx.presentation.setState()` 或 `transitionTo()` 切换稳定状态。不得把整页稳定 UI 全部重建在运行时中，仅留下一个无法在画布中查看和修改的空场景。
 
@@ -62,7 +62,7 @@ Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调�
         ↓
 内部技术映射：承载方式、状态、生命周期、编辑入口和验收路径
         ↓
-直接生成 Project V7 .h5lesson
+  直接生成 Project V8 .h5lesson
   ├─ 场景原生节点（文字、图片、图形、视频、组件）
   ├─ scene.presentation（同场景的命名视觉状态）
   ├─ scene.interactions（点击、状态、导航、声音等声明式映射）
@@ -103,11 +103,11 @@ Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调�
 - 全局组件不是复制到每个场景的组件，而是播放器启动时创建一次、普通翻页不销毁的实例；
 - V1/V2 组件保留兼容，但只能作为场景组件；V3 组件继续按既有作用域运行；新组件应使用 V4。
 
-## 5. Project V7 最小结构
+## 5. Project V8 最小结构
 
 ```ts
 interface ProjectDocument {
-  schemaVersion: 7
+  schemaVersion: 8
   id: string
   title: string
   createdAt: string
@@ -131,6 +131,19 @@ interface ProjectDocument {
   playback: {
     controls: 'canvas' | 'none'
     keyboardNavigation: boolean
+    presenter: {
+      enabled: boolean
+      strategy: 'scene-navigation' | 'authored-command'
+      additionalBindings: Array<{
+        id: string
+        command: 'next' | 'previous'
+        key: string
+        altKey: boolean
+        ctrlKey: boolean
+        shiftKey: boolean
+        metaKey: boolean
+      }>
+    }
   }
 }
 
@@ -195,7 +208,9 @@ interface TeacherControllerNode extends BaseNode {
 
 `.h5lesson` 是 ZIP。根目录是 `project.json`；工程素材位于登记过的 `assets/...`；嵌入组件位于 `components/<packageId>@<version>/...`。运行时源码内联在 `project.json` 的 `RuntimeDocument.source` 中，不要另造未登记代码目录。
 
-新创作必须直接写入 `schemaVersion: 7`，并显式包含 `globalLayer`、`globalInteractions`、每个场景的 `interactions`、`media.audio` 和 `playback`。即使暂时没有规则或全局元素，也要保留空数组/空对象及有效默认值。旧 V1–V6 结构只属于加载迁移输入；AI 不得在新工程或生成脚本中继续产出旧字段，也不得通过伪装旧版本来规避 Project V7 校验。
+新创作必须直接写入 `schemaVersion: 8`，并显式包含 `globalLayer`、`globalInteractions`、每个场景的 `interactions`、`media.audio`、`playback` 和 `playback.presenter`。即使暂时没有规则、全局元素或附加按键，也要保留空数组/空对象及有效默认值。旧 Project V1–V7 会被明确拒绝，不再是加载迁移输入；AI 不得在新工程或生成脚本中继续产出旧字段，也不得通过只改版本号来规避 Project V8 校验。
+
+当前边界切片只实现 `playback.presenter` 和 `presenter.command` 的 Schema、保存与发布承载。演示输入监听、PageUp/PageDown、附加按键检测/配置及规则分发仍属于里程碑 3；实现 Skill 恢复前不得把这些字段解释为当前成品已经支持翻页笔。
 
 ### 5.1 场景状态的基线与覆盖
 
@@ -225,7 +240,7 @@ interface TeacherControllerNode extends BaseNode {
 - 连续 `with-previous` 步骤组成并行动作组；下一项 `after-previous` 必须等整组完成。场景跳转、重播或重开会销毁当前作用域，必须作为最后一个独立动作组；
 - 映射必须引用稳定的场景、状态、节点和声音 ID。复制或删除对象后要通过编辑器校验映射，不能依赖显示名称或数组序号。
 
-Editor 1.7.0 的简洁模式选中场景节点后提供“出现动画”：选择效果时必须在同一次历史提交中写入当前场景/状态的 `node.activated → node.enter` 规则并设置 `playbackInitialVisibility: 'hidden'`；选择“无”时成对移除。已有重叠专业入场规则时不得静默覆盖。专业模式将完整规则分成两个职责入口：选中节点时，“属性”中的“交互”只维护该节点的 `node.click` 规则；右侧“互动与动画”维护进入场景/状态、节点激活、动画完成、声音结束、视频生命周期/时间点、组件事件和 `runtime.event` 等非点击规则，并以“当 / 如果 / 就”解释机制，提供自然语言摘要、搜索/筛选、常用模板和可读动作序列。进入全局层后，两处改为读写 `globalInteractions`，并提供“生效场景”编辑。运行时事件必须显式选择 `scene` 或 `global` 来源：场景来源校验当前场景 ID，全局来源可由当前场景或全局规则接收。两处共用 `scene.in` / `presentation.in` 条件及元素动画、状态、场景、声音、视频动作编辑器，不得让同一条点击规则同时出现在两个入口。
+Editor 1.0.0 的简洁模式选中场景节点后提供“出现动画”：选择效果时必须在同一次历史提交中写入当前场景/状态的 `node.activated → node.enter` 规则并设置 `playbackInitialVisibility: 'hidden'`；选择“无”时成对移除。已有重叠专业入场规则时不得静默覆盖。专业模式将完整规则分成两个职责入口：选中节点时，“属性”中的“交互”只维护该节点的 `node.click` 规则；右侧“互动与动画”维护进入场景/状态、节点激活、动画完成、声音结束、视频生命周期/时间点、组件事件和 `runtime.event` 等非点击规则，并以“当 / 如果 / 就”解释机制，提供自然语言摘要、搜索/筛选、常用模板和可读动作序列。`presenter.command` 选项在演示输入层完成前保持禁用。进入全局层后，两处改为读写 `globalInteractions`，并提供“生效场景”编辑。运行时事件必须显式选择 `scene` 或 `global` 来源：场景来源校验当前场景 ID，全局来源可由当前场景或全局规则接收。两处共用 `scene.in` / `presentation.in` 条件及元素动画、状态、场景、声音、视频动作编辑器，不得让同一条点击规则同时出现在两个入口。
 
 能在该模型中清楚表达的行为必须优先使用声明式规则，以便教师查看“点击哪个按钮会发生什么”。只有复杂算法、连续手势、程序动画、导航守卫或无法枚举的条件才进入运行时；运行时与声明式规则可协作，但不得让两者为同一触发器重复执行同一动作。
 
@@ -240,7 +255,7 @@ Editor 1.7.0 的简洁模式选中场景节点后提供“出现动画”：选�
 
 ## 6. 所有人工可见文字必须可编辑
 
-这是 Project V7 工程的强制要求，不是建议。
+这是 Project V8 工程的强制要求，不是建议。
 
 ### 6.1 登记位置
 
@@ -293,7 +308,7 @@ Editor 1.7.0 的简洁模式选中场景节点后提供“出现动画”：选�
 
 ### 6.5 原生文字、字体与透明度
 
-AI 直接生成 `TextNode` 时必须使用当前 Project V7 字段语义，不能照搬旧界面名称：
+AI 直接生成 `TextNode` 时必须使用当前 Project V8 字段语义，不能照搬旧界面名称：
 
 - 新文本的 `style.writingMode` 使用 `horizontal`、`vertical-rl` 或 `vertical-lr`；旧值 `vertical` 只作为载入迁移输入并映射为 `vertical-rl`，新工程不得继续生成；
 - 横排自动尺寸以宽度为作者可调轴并自动增高；竖排自动尺寸以高度为作者可调轴并自动增宽，因此竖排文本框可以纵向拉长；
@@ -476,7 +491,7 @@ API 2 运行时只可使用 `renderMode` 声明的能力：
 
 选择 Phaser 还是 DOM 取决于效果：粒子、碰撞、拖拽和程序视觉偏 Phaser；复杂排版、表格、表单和 HUD 偏 DOM；确需协作时使用 hybrid。运行时 DOM underlay 永远位于整个 Canvas 下，V4 DOM/hybrid 组件的 DOM 部分整体位于 Canvas 上，运行时 DOM overlay 再位于其上；要求逐对象精确交错时应使用同一渲染器，或拆成明确前后景。不要因为某种内容无法被编辑器拆解而删除效果。
 
-需要地球、太阳系、立体几何等真 3D 时，可在具体运行时或 V4 组件中把 Three.js 与 loader 预打包，并把 WebGL Canvas 挂到 DOM 能力根。编辑器核心和 Player 不导入、不全局提供 Three.js；没有 3D 的课件不承担其代码与资源成本。3D 模型默认使用离线 GLB：较大或可复用模型放入组件包 manifest asset，一次性小模型只能在 Runtime 2 MiB 上限内随构建产物嵌入。当前 Project V7 没有一等 `model` 素材类型，不得把 GLB 伪装成图片；需要教师从工程“媒体”管理中独立替换模型时，必须先扩展 Schema、归档、迁移、媒体管理和导出链路。实现必须支持 resize、显隐、suspend/resume、`prepareCapture()` 和完整 GPU 资源释放。
+需要地球、太阳系、立体几何等真 3D 时，可在具体运行时或 V4 组件中把 Three.js 与 loader 预打包，并把 WebGL Canvas 挂到 DOM 能力根。编辑器核心和 Player 不导入、不全局提供 Three.js；没有 3D 的课件不承担其代码与资源成本。3D 模型默认使用离线 GLB：较大或可复用模型放入组件包 manifest asset，一次性小模型只能在 Runtime 2 MiB 上限内随构建产物嵌入。当前 Project V8 没有一等 `model` 素材类型，不得把 GLB 伪装成图片；需要教师从工程“媒体”管理中独立替换模型时，必须先扩展 Schema、归档、媒体管理和导出链路。实现必须支持 resize、显隐、suspend/resume、`prepareCapture()` 和完整 GPU 资源释放。
 
 ## 10. 全局层、场景组件和全局组件
 
@@ -499,7 +514,7 @@ API 2 运行时只可使用 `renderMode` 声明的能力：
 
 - `supportedScopes` 必须明确声明；只有包含 `global` 的 V3/V4 组件能作为组件进入全局层；原生文字、图片和图形不受组件协议限制；
 - V4 `renderMode` 必须准确声明 `dom`、`phaser` 或 `hybrid`，宿主只提供声明能力；改字段不会转换组件源码；
-- V1/V2 组件继续兼容但只能放在场景；V3 继续使用历史顶层 Phaser 上下文；
+- V1–V3 组件属于断代清理中的历史实现，不能用于新课件；正式版只接受 V4；
 - 全局组件普通翻页时保留实例，只更新显示和输入；隐藏不等于销毁；
 - `visibility.mode` 可为 `all`、`include` 或 `exclude`，`sceneIds` 使用稳定 ID；
 - 全局组件可调用宿主动作、订阅课程事件、共享 `courseState`，并通过 `emit()` 上报语义化事件；复杂课程规则和导航守卫仍优先放在 `globalRuntime`；
@@ -557,7 +572,7 @@ API 2 运行时只可使用 `renderMode` 声明的能力：
 
 ## 14. 四种导出策略
 
-| 格式 | 互动 | 资源方式 | Project V7 行为 | 推荐用途 |
+| 格式 | 互动 | 资源方式 | Project V8 行为 | 推荐用途 |
 | --- | --- | --- | --- | --- |
 | 单 HTML | 保留 | 全部内联 | 使用同一 Player Runtime；事件驱动入场/退场、场景/全局交互、声音、视频、场景目录控制器、运行时和组件正常执行 | 小中型、单文件传递 |
 | 网页包 | 保留 | ZIP 内分离播放器、数据和素材 | 运行语义与单 HTML 相同；音视频资源改为相对 URL | 大型课件、含大视频或长期部署 |
@@ -566,7 +581,7 @@ API 2 运行时只可使用 `renderMode` 声明的能力：
 
 单 HTML 会把音视频转为内联数据，预计超过 50 MiB 时会警告并建议网页包；超过 256 MiB 时必须改用网页包。包含大视频时应优先交付网页包，以避免浏览器加载和内存压力。网页包必须完整解压和整体移动，不能只发送入口 HTML。
 
-单 HTML 与网页包在导出边界把 Project V7 单向编译为 [PublishedLesson V1](PUBLISHED_LESSON_V1.md)：保留 Player 执行所需场景、状态、互动、媒体、运行时和组件能力，但不主动交付工程时间、历史、编辑器字段、组件 manifest 或独立原始 `runtime.js`。网页包只保存一份 `course-data.js` 发布数据。可执行逻辑仍必须到达浏览器，因此该裁剪不构成加密或 DRM，成品也不得作为 `.h5lesson` 重新导入。
+单 HTML 与网页包在导出边界把 Project V8 单向编译为 [PublishedLesson V1](PUBLISHED_LESSON_V1.md)：保留 Player 执行所需场景、状态、互动、媒体、运行时和组件能力，但不主动交付工程时间、历史、编辑器字段、组件 manifest 或独立原始 `runtime.js`。网页包只保存一份 `course-data.js` 发布数据。可执行逻辑仍必须到达浏览器，因此该裁剪不构成加密或 DRM，成品也不得作为 `.h5lesson` 重新导入。
 
 静态导出只保留稳定视觉，不执行元素入场/退场、不应用 `playbackInitialVisibility: hidden`，也不尝试模拟播放中的媒体时间线：PDF 使用视频海报图（无法取得时显示带播放标记的黑色后备）；PPTX 使用标明视频文件名的占位对象。声音不会嵌入 PDF/PPTX。`TeacherControllerNode.includeInStaticExports` 默认为 `false`，只有静态文档确实需要展示该控制条时才设为 `true`；即使保留控制器，也不会展开场景目录。
 
@@ -596,14 +611,14 @@ PPTX 中：
 ## 15. 实现阶段的强制工作流
 
 1. 使用 `build-project-v7-courseware` 的交接校验器核对 `implementation-ready`：批准的教学设计、教学内容规格、教学呈现脚本、视觉方向、决策记录、权威内容、素材要求、可编辑要求、交付格式和验收证据必须齐全，文件路径、版本和 SHA-256 必须与批准记录一致。缺少必需项、哈希失效或仍有阻断项时返回编排层，不得自行补成最终方案。
-2. 在课例档案的 `06-traceability.json` 中，把教学呈现脚本逐项双向映射成场景/状态、操作、反馈、分支、可见文案、公式、结束状态和验收证据；每个学生可见实现对象必须能反查脚本依据或记录非教学排除理由。追踪记录属于外部创作制品，不得为此向 Project V7 伪造字段。
+2. 在课例档案的 `06-traceability.json` 中，把教学呈现脚本逐项双向映射成场景/状态、操作、反馈、分支、可见文案、公式、结束状态和验收证据；每个学生可见实现对象必须能反查脚本依据或记录非教学排除理由。追踪记录属于外部创作制品，不得为此向 Project V8 伪造字段。
 3. 先确定达到已批准成品效果的最短充分方案，再选择八种承载方式；逐项区分稳定视觉状态、声明式交互与瞬态运行效果，并为每个运行时和组件记录充分理由。仅“代码复杂”“视觉重要”或“以后可能复用”不能证明需要组件化。
 4. 建立“人工可见文字与公式清单”，为每项指定 `TextNode.text`、运行时 `content.values`、组件 `props.content` 或结构化公式绑定，并标出权威文案、Formula ID、专业排版和允许轻改的内容。
 5. 为跨场景行为定义稳定场景 ID、事件、`courseState` 键和重播/重开语义。
 6. 为每个场景列出基础、初始、缩略图及所有可达稳定状态；把差异写成元素覆盖，而不是运行时重建画面，并与呈现脚本中的静态审阅帧对应。
 7. 优先把场景节点和全局元素点击、状态/场景跳转、声音和视频控制写成 `scene.interactions` / `globalInteractions`；为全局规则设置准确的 `scene.in`；再为每个确有必要的运行时和组件选择最小 `renderMode`，定义创建、更新、resize、显隐、暂停/恢复、捕获准备和销毁责任。
 8. 常见的单元素入场优先使用简洁模式“出现动画”；更复杂、可枚举的入场/退场写成专业规则动作，明确触发事件、目标元素、顺序/并行关系、局部延迟和完成后的下一步；只有连续路径、关键帧或算法运动进入组件/运行时。
-9. 直接生成 Project V7、嵌入组件、素材和可复现脚本；确认新工程含 `globalLayer`、`globalInteractions`、`interactions`、`media.audio` 和 `playback`，且不产出历史结构。
+9. 在 V8 实现 Skill 恢复后直接生成 Project V8、嵌入组件、素材和可复现脚本；确认新工程含 `globalLayer`、`globalInteractions`、`interactions`、`media.audio`、`playback.presenter`，且不产出历史结构。
 10. 先完成高风险核心互动或代表性场景并与批准脚本、关键帧/样片对照；实际结果未达到 `art candidate` 或尚未取得要求的人类视觉/互动批准时停止批量扩展。需要改变教学内容规格、呈现脚本、授权、成本、性能或兼容导出预期时返回编排层请求批准。
 11. 在统一画布中逐个切换基础和命名状态，实际修改原生文字、组件显式文字目标、运行时显式 text/asset 目标、动画与几何；确认运行时内容提示“所有状态共享”，保存、重开，再用“当前位置试运行”从当前场景/状态核查局部行为，用“整课预览”从课程起点核查完整流程，并检查网页导出同步。
 12. 为可视组件提供缩略图，并验证组件包使用计数、安全替换/删除、场景缩略图状态、组件缩略图/名称后备、背景、全局元素、固定 DOM/Canvas 平面、持久化和静态导出结果；Three.js/GLB 如有使用，还要验证离线加载、低配设备、显存释放与确定帧捕获。
@@ -635,10 +650,10 @@ PPTX 中：
 
 ### 管线状态
 
-- Project V7 Schema、素材引用、场景/全局交互规则、动画动作步骤和组件包校验通过；新工程含 `globalLayer`、`globalInteractions`、每场景 `interactions`、`media.audio` 和 `playback`；V1–V6 可迁移并重新写为 V7；
+- Project V8 Schema、素材引用、场景/全局交互规则、动画动作步骤、Presenter 和组件包校验通过；新工程含 `globalLayer`、`globalInteractions`、每场景 `interactions`、`media.audio` 和 `playback.presenter`；Project V1–V7 均明确拒绝且不会产生半加载工程；
 - 简洁/专业模式切换不改变工程；简洁右栏为“元素 / 图层 / 属性”，专业追加“互动与动画 / 开发”；“元素”只有一个搜索/分类入口；简洁出现动画原子维护规则与初始隐藏、可整体撤销，并在已有重叠专业规则时拒绝覆盖；
-- `.h5lesson` 可异步打开、保存、重新打开，V1–V6 工程可迁移并重新写为 V7；保存期间的新修改仍保持未保存，自动恢复去重且可取消过期压缩，关闭窗口三选项正确；
-- Runtime API 2 与组件 API 4 的 `renderMode` 能力隔离、生命周期、粗粒度 DOM/Canvas 合成和确定性捕获通过；Runtime API 1 与组件 API 1–3 兼容回归通过；
+- `.h5lesson` 可异步打开、保存、重新打开；旧 Project V1–V7 和未来版本使用不同的可理解错误；保存期间的新修改仍保持未保存，自动恢复去重且可取消过期压缩，关闭窗口三选项正确；
+- Runtime API 2 与组件 API 4 的 `renderMode` 能力隔离、生命周期、粗粒度 DOM/Canvas 合成和确定性捕获通过；Runtime API 1 与组件 API 1–3 在导入或解析边界得到明确“不受支持”诊断，主程序中不再保留其适配、样例和专属测试；
 - 场景基础/状态覆盖、原生文字、运行时内容表和 V3/V4 `props.content` 修改后能持久化；组件 DOM `data-courseware-edit-key` 与 `ctx.editor.registerTextRegion()` 只在 authoring 编辑态命中，并正确写入基础/状态 Props；
 - Runtime Authoring V1 的 registered/DOM text 与 asset 目标只接受已登记键；场景目标修改后由该场景全部状态共享，全局目标由整课共享；未声明目标的旧运行时仍可见并可从属性面板修改；
 - 场景缩略图使用指定状态并显示背景、原生元素和组件；编辑状态与当前位置试运行使用同一 1280×720 Player 视觉与状态物化语义，透明 Phaser 层不造成位置偏差；authoring 冻结互动、媒体、导航和课程状态；当前位置试运行从当前场景/状态启动且失败可见、可重试，Blob 资源会释放；整课预览从课程起点启动；
@@ -661,9 +676,9 @@ PPTX 中：
 
 ## 18. 示例与边界
 
-新课件应优先参考《不是磁场，而是变化》及其生成脚本：它先从误概念诊断和教学证据链出发，再选择承载方式；把题面、反馈和完成画面落实为原生节点与命名状态，只把连续拖动、曲线和装置响应交给 V4 组件，并用 `component.event → presentation.set` 保持结果可查看、可修改。运行 `npm run build:induction` 重建课件，再运行 `npm run validate:induction` 核对 Project V7、组件 API 4、可编辑文字、状态可达性和离线导出。
+新课件工作流恢复后可参考《不是磁场，而是变化》及其生成脚本：它先从误概念诊断和教学证据链出发，再选择承载方式；把题面、反馈和完成画面落实为原生节点与命名状态，只把连续拖动、曲线和装置响应交给 V4 组件，并用 `component.event → presentation.set` 保持结果可查看、可修改。运行 `npm run build:induction` 重建课件，再运行 `npm run validate:induction` 核对 Project V8、组件 API 4、可编辑文字、状态可达性和离线导出。
 
-阅读并运行 [Project V7 + Runtime API 1 / 组件 API 3 兼容示例](../examples/runtime-v3-complete/README.md)。它展示旧运行时、全局组件、事件动画和生命周期兼容行为；其中也明确标出协议兼容演示与新课件推荐状态建模之间的边界。它不是 Runtime API 2 / 组件 API 4 新上下文范本：
+归档标签中的 Project V7 + Runtime API 1 / 组件 API 3 示例只用于恢复历史原型，不再是当前主干的开发入口。当前 `examples/runtime-v3-complete/` 将按处置清单删除；它不是 Runtime API 2 / 组件 API 4 新上下文范本：
 
 - 原生可编辑文字和图片；
 - 直接写入 `scene.runtime` 的一次性互动；
@@ -674,6 +689,6 @@ PPTX 中：
 
 该示例不是把稳定整页 UI 写入运行时的授权。新课件仍必须按本文要求把题目、反馈、完成等稳定画面放入 `scene.presentation.states`。
 
-新协议与渲染边界应同时运行 [Project V7 五路径渲染宿主基准](../examples/render-host-benchmark/README.md)。该基准覆盖原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + 内联 Three.js、Component API 4 DOM 表格和 Component API 3 Phaser 兼容组件；自动化压力段固定执行 25 轮，共 100 次切页和 25 次重播，并核对宿主资源与外部请求没有累积。
+新协议与渲染边界应同时运行 [Project V8 五路径渲染宿主过渡基准](../examples/render-host-benchmark/README.md)。当前基准仍包含一条待删除的 Component API 3 Phaser 兼容路径；完成协议断代后只保留 Runtime API 2 与 Component API 4 当前路径。自动化压力段固定执行 25 轮，共 100 次切页和 25 次重播，并核对宿主资源与外部请求没有累积。
 
-最终原则只有六句：Project V7 JSON 是业务真相；效果第一；所有人工可见文字可编辑；简单互动优先使用可视化声明式映射；母版式通用元素和成品控制器优先使用 `globalLayer`；组件化只在高复用、参数化或独立维护真正有价值时使用。
+最终原则只有六句：Project V8 JSON 是业务真相；效果第一；所有人工可见文字可编辑；简单互动优先使用可视化声明式映射；母版式通用元素和成品控制器优先使用 `globalLayer`；组件化只在高复用、参数化或独立维护真正有价值时使用。

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExportPayload } from '@/shared/componentTypes'
 import type { RuntimeHostOptions, RuntimeMountEnvironment } from '@/player/RuntimeHost'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 interface MockRuntimeHost {
   options: RuntimeHostOptions
@@ -45,7 +45,7 @@ function payload(): ExportPayload {
   }
   return {
     project: {
-      schemaVersion: 7,
+      schemaVersion: 8,
       id: 'project-runtime-lifecycle',
       title: '运行时生命周期测试',
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -65,7 +65,7 @@ function payload(): ExportPayload {
       componentPackages: {},
       globalLayer: [],
       globalRuntime,
-      ...createProjectV5Fields(),
+      ...createProjectV8Fields(),
     },
     assets: {},
     components: {},

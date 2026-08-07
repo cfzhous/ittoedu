@@ -27,6 +27,7 @@ export type InteractionTriggerV6 =
 export type InteractionTrigger = InteractionTriggerV6
   | { type: 'node.activated'; nodeId: string }
   | { type: 'animation.completed'; actionId: string }
+  | { type: 'presenter.command'; command: 'next' | 'previous' }
 
 /** Different conditions are ANDed. State ids inside one condition are ORed. */
 export type InteractionCondition =
@@ -112,7 +113,7 @@ export type NodeMotionAction = (
   | { type: 'node.exit' }
 ) & NodeMotionActionBase & NodeMotionDescriptor
 
-/** Payload family used by both sequential and parallel Project V7 action steps. */
+/** Payload family used by both sequential and parallel Project V8 action steps. */
 export type InteractionActionPayload =
   | {
       type: 'presentation.set'

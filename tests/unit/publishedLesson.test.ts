@@ -21,7 +21,7 @@ import { ComponentRegistry } from '../../src/player/ComponentRegistry'
 import { decodeExportPayload } from '../../src/player/payload'
 import { decodePublishedCode } from '../../src/player/publishedLesson'
 import { materializeScene } from '../../src/shared/presentation'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 const componentManifest: ComponentManifestV4 = {
   schemaVersion: 4,
@@ -97,7 +97,7 @@ function makePayload(): ExportPayload {
   })
   node.locked = true
   const project: ProjectDocument = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: 'authoring-project-id',
     title: 'PublishedLesson 测试',
     createdAt: '2026-07-29T00:00:00.000Z',
@@ -161,7 +161,7 @@ function makePayload(): ExportPayload {
       },
     },
     globalLayer: [],
-    ...createProjectV5Fields(),
+    ...createProjectV8Fields(),
   }
   Object.assign(project, {
     history: [{ operation: '作者历史不得发布' }],
@@ -256,6 +256,11 @@ describe('PublishedLesson V1', () => {
 
     expect(published.format).toBe('h5lesson-published')
     expect(published.formatVersion).toBe(1)
+    expect(published.playback.presenter).toEqual({
+      enabled: true,
+      strategy: 'scene-navigation',
+      additionalBindings: [],
+    })
     for (const key of forbiddenKeys) expect(keys.has(key), key).toBe(false)
 
     const node = published.scenes[0]!.nodes[0]!
@@ -289,6 +294,32 @@ describe('PublishedLesson V1', () => {
     )
 
     const loaded = decodeExportPayload(jsonToBase64(published))
+    expect(loaded.project.schemaVersion).toBe(8)
+    expect(loaded.project.playback.presenter).toEqual(
+      published.playback.presenter,
+    )
+
+    const legacyPublished = structuredClone(published) as unknown as {
+      playback: {
+        controls: string
+        keyboardNavigation: boolean
+        presenter?: unknown
+      }
+    }
+    legacyPublished.playback.controls = 'footer'
+    delete legacyPublished.playback.presenter
+    const legacyLoaded = decodeExportPayload(jsonToBase64(
+      legacyPublished as unknown as PublishedLessonPayload,
+    ))
+    expect(legacyLoaded.project.playback).toMatchObject({
+      controls: 'none',
+      keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
+    })
     expect(loaded.project.scenes[0]!.runtime?.source).toBe(sceneRuntime)
     expect(
       loaded.components['com.example.published@4.0.0']?.runtimeSource,

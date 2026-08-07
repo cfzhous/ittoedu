@@ -1,6 +1,6 @@
 {
   "name": "phaser-courseware-editor",
-  "version": "1.7.0",
+  "version": "1.0.0",
   "description": "专业互动课件编辑器",
   "main": "dist-electron/main/index.js",
   "author": "Alepha",

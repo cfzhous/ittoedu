@@ -698,7 +698,15 @@ function buildProject(
     sounds: {},
     narrationDucking: { enabled: false, musicVolume: 0, fadeMs: 0 },
   }
-  project.playback = { controls: 'canvas', keyboardNavigation: false }
+  project.playback = {
+    controls: 'canvas',
+    keyboardNavigation: false,
+    presenter: {
+      enabled: true,
+      strategy: 'authored-command',
+      additionalBindings: [],
+    },
+  }
   const controller = project.globalLayer.find((item) => item.node.type === 'teacher-controller')
   if (controller?.node.type === 'teacher-controller') {
     controller.node.id = 'math_motion_teacher_controller'
@@ -740,7 +748,7 @@ function assertMathTruth(): void {
 }
 
 function assertProject(project: ProjectDocument, manifest: ComponentManifest): void {
-  if (project.schemaVersion !== 7) throw new Error('整课工程不是 Project V7')
+  if (project.schemaVersion !== 8) throw new Error('整课工程不是 Project V8')
   if (project.canvas.width !== 1280 || project.canvas.height !== 720) throw new Error('整课画布不是 1280×720')
   if (project.scenes.length !== 7) throw new Error(`整课场景数错误：${project.scenes.length}`)
   if (project.playback.controls !== 'canvas' || project.playback.keyboardNavigation) {
@@ -1016,7 +1024,7 @@ async function main(): Promise<void> {
   const summary = {
     title: reopenedProject.title,
     scope: 'seven-scene-course',
-    format: 'Project V7 / Component API 4 DOM',
+    format: 'Project V8 / Component API 4 DOM',
     canvas: reopenedProject.canvas,
     sceneStates: Object.fromEntries(reopenedProject.scenes.map((scene) => [scene.id, scene.presentation?.states.map((state) => state.id) ?? []])),
     outputs: {

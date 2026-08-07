@@ -1,6 +1,6 @@
 import type { ExportPayload } from '../shared/componentTypes'
 import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
-import { migrateProjectDocument } from '../shared/projectSchema'
+import { projectDocumentSchema } from '../shared/projectSchema'
 import {
   isPublishedLessonPayload,
   publishedLessonToExportPayload,
@@ -20,7 +20,7 @@ export function assertExportPayload(
     throw new Error('课件 Payload 缺少必要数据或版本不受支持')
   }
   try {
-    value.project = migrateProjectDocument(value.project)
+    value.project = projectDocumentSchema.parse(value.project)
   } catch (cause) {
     throw new Error('课件 Payload 缺少必要数据或版本不受支持', {
       cause,

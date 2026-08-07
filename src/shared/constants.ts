@@ -1,8 +1,8 @@
 export const APP_NAME = 'Phaser 课件编辑器'
-export const APP_VERSION = '1.7.0'
+export const APP_VERSION = '1.0.0'
 export const CANVAS_WIDTH = 1280 as const
 export const CANVAS_HEIGHT = 720 as const
-export const PROJECT_SCHEMA_VERSION = 7 as const
+export const PROJECT_SCHEMA_VERSION = 8 as const
 export const COMPONENT_SCHEMA_VERSION = 4 as const
 export const COMPONENT_RUNTIME_API_VERSION = 4 as const
 export const MAX_HISTORY_STEPS = 50

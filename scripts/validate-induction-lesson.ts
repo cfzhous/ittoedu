@@ -280,15 +280,15 @@ function validateRawProjectShape(report: ValidationReport, rawProject: unknown):
   const details: string[] = []
   if (!isRecord(rawProject)) {
     addCheck(report, {
-      id: 'project.raw-v7',
-      title: '原始工程为显式 Project V7',
+      id: 'project.raw-v8',
+      title: '原始工程为显式 Project V8',
       status: 'failed',
       summary: 'project.json 根节点不是对象',
     })
     return
   }
 
-  if (rawProject.schemaVersion !== 7) details.push('schemaVersion 必须为 7')
+  if (rawProject.schemaVersion !== 8) details.push('schemaVersion 必须为 8')
   for (const key of ['globalLayer', 'globalInteractions', 'media', 'playback']) {
     if (!Object.prototype.hasOwnProperty.call(rawProject, key)) {
       details.push(`缺少显式字段 ${key}`)
@@ -300,11 +300,11 @@ function validateRawProjectShape(report: ValidationReport, rawProject: unknown):
     details.push('每个场景必须显式包含 interactions')
   }
   addCheck(report, {
-    id: 'project.raw-v7',
-    title: '原始工程为显式 Project V7',
+    id: 'project.raw-v8',
+    title: '原始工程为显式 Project V8',
     status: details.length === 0 ? 'passed' : 'failed',
     summary: details.length === 0
-      ? '未依赖打开时迁移，V7 必需字段完整'
+      ? '未依赖打开时迁移，V8 必需字段完整'
       : `发现 ${details.length} 项原始结构问题`,
     details,
   })
@@ -857,8 +857,8 @@ async function main(): Promise<void> {
     const project = projectDocumentSchema.parse(opened.project)
     addCheck(report, {
       id: 'project.schema',
-      title: 'Project V7 Schema',
-      status: project.schemaVersion === 7 ? 'passed' : 'failed',
+      title: 'Project V8 Schema',
+      status: project.schemaVersion === 8 ? 'passed' : 'failed',
       summary: `schemaVersion=${project.schemaVersion}，归档打开与 Schema 解析成功`,
     })
 

@@ -110,7 +110,7 @@ describe('Player authoring protocol', () => {
     expect(isPlayerAuthoringSnapshotAck(ack, movedBarrier)).toBe(false)
   })
 
-  it('accepts a complete materialized Project V7 node command', () => {
+  it('accepts a complete materialized Project V8 node command', () => {
     const result = parsePlayerAuthoringPatchCommand(command())
 
     expect(result.ok).toBe(true)

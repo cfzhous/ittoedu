@@ -22,7 +22,7 @@ import {
   createShapeNode,
   createTextNode,
 } from '../../src/renderer/project/createProject'
-import { createProjectV5Fields } from '../helpers/projectV5'
+import { createProjectV8Fields } from '../helpers/projectV8'
 
 const componentManifest: ComponentManifest = {
   schemaVersion: 1,
@@ -43,7 +43,7 @@ const componentManifest: ComponentManifest = {
 }
 
 const project: ProjectDocument = {
-  schemaVersion: 7,
+  schemaVersion: 8,
   id: 'project-1',
   title: '离线课件 </title><script>bad()</script>',
   createdAt: '2026-07-20T00:00:00.000Z',
@@ -145,7 +145,7 @@ const project: ProjectDocument = {
     },
   },
   globalLayer: [],
-  ...createProjectV5Fields(),
+  ...createProjectV8Fields(),
 }
 
 const runtimeSource =
