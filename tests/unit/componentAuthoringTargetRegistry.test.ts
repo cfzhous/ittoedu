@@ -359,4 +359,42 @@ describe('ComponentAuthoringTargetRegistry', () => {
     await flushTargets()
     expect(onTargetsChanged).toHaveBeenCalledTimes(callsBeforeDestroy)
   })
+
+  it('把编辑态中禁用的 DOM 按钮文字作为可编辑目标发布', async () => {
+    const root = document.createElement('div')
+    const button = document.createElement('button')
+    button.disabled = true
+    button.textContent = '锁定预测'
+    button.dataset.coursewareEditKey = 'content.title'
+    button.dataset.coursewareEditLabel = '按钮文字'
+    root.append(button)
+
+    vi.spyOn(root, 'getBoundingClientRect')
+      .mockReturnValue(rect(0, 0, 400, 200))
+    vi.spyOn(button, 'getBoundingClientRect')
+      .mockReturnValue(rect(20, 30, 160, 32))
+
+    const onTargetsChanged = vi.fn()
+    const registry = new ComponentAuthoringTargetRegistry({
+      manifest,
+      node: node({ x: 0, y: 0, rotation: 0 }),
+      scope: 'scene',
+      sceneId: 'scene-one',
+      domRoot: root,
+      onTargetsChanged,
+    })
+    await flushTargets()
+
+    expect(onTargetsChanged.mock.calls[0]?.[0]).toMatchObject({
+      targets: [{
+        kind: 'component-text',
+        key: 'content.title',
+        label: '按钮文字',
+        source: 'dom',
+        bounds: { x: 20, y: 30, width: 160, height: 32 },
+      }],
+    })
+
+    registry.destroy()
+  })
 })

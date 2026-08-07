@@ -404,6 +404,6 @@ API 2 运行时和 V4 组件使用同一生命周期语义：`setVisible(false)`
 - [互动组件开发指南](COMPONENT_AUTHORING.md)
 - [Project V7 + Runtime API 1 / 组件 API 3 兼容示例](../examples/runtime-v3-complete/README.md)
 
-Editor 1.7.0 当前采用根目录 `启动课件编辑器.cmd` 直接运行源码，不构建 Portable、目录版或安装包。提交前必须重新执行 `npm run typecheck`、全量 Vitest、Playwright Electron E2E、Player/Renderer/Electron 生产构建，并对双击入口做真实启动冒烟；入口只能补齐锁定依赖、运行 `build:desktop` 并启动 Electron，不能隐式调用 `electron-builder`。最近一次 1.6.0 Windows x64 制品只是历史记录，不代表当前 1.7.0 源码；当前源码回归为 Vitest **96 个文件 / 615 项**、Playwright **26/26**。
+Editor 1.7.0 当前采用根目录 `启动课件编辑器.cmd` 直接运行源码，不构建 Portable、目录版或安装包。提交前必须重新执行 `npm run typecheck`、全量 Vitest、Playwright Electron E2E、Player/Renderer/Electron 生产构建，并对双击入口做真实启动冒烟；入口只允许同步仓库权威 Skill、补齐锁定依赖、运行 `build:desktop` 并启动 Electron，不能隐式调用 `electron-builder`。最近一次 1.6.0 Windows x64 制品只是历史记录，不代表当前 1.7.0 源码；当前源码回归为 Vitest **96 个文件 / 616 项**、Playwright **26/26**。
 
 完整发布仍须同时报告“管线状态”和“成品效果状态”；测试通过不等于视觉与教学体验已验收。

@@ -515,7 +515,12 @@ globalThis.CoursewareComponent.define({
       controlContent.append(eyebrow, title, prompt, instruction)
     }
 
-    function makeButton(label: string, primary = false): HTMLButtonElement {
+    function makeButton(
+      label: string,
+      editKey: string,
+      editLabel: string,
+      primary = false,
+    ): HTMLButtonElement {
       const button = createElement('button', {
         minHeight: '34px',
         padding: '7px 10px',
@@ -532,6 +537,7 @@ globalThis.CoursewareComponent.define({
       })
       button.type = 'button'
       button.textContent = label
+      setEditableText(button, editKey, editLabel)
       button.disabled = !canInteract()
       return button
     }
@@ -577,10 +583,10 @@ globalThis.CoursewareComponent.define({
         ['hold', props.content.common.phaseHold],
         ['recede', props.content.common.phaseRecede],
       ]
-      const choiceLabels: Array<[PredictionDirection, string]> = [
-        ['left', content.choiceLeft],
-        ['zero', content.choiceZero],
-        ['right', content.choiceRight],
+      const choiceLabels: Array<[PredictionDirection, string, string, string]> = [
+        ['left', content.choiceLeft, 'content.prediction.choiceLeft', '预测选项：左'],
+        ['zero', content.choiceZero, 'content.prediction.choiceZero', '预测选项：零'],
+        ['right', content.choiceRight, 'content.prediction.choiceRight', '预测选项：右'],
       ]
       const predictionGrid = createElement('div', { display: 'grid', gap: '7px' })
       for (const [phaseId, phaseLabel] of phases) {
@@ -597,8 +603,8 @@ globalThis.CoursewareComponent.define({
         })
         label.textContent = phaseLabel
         row.append(label)
-        for (const [choiceId, choiceLabel] of choiceLabels) {
-          const button = makeButton(choiceLabel)
+        for (const [choiceId, choiceLabel, editKey, editLabel] of choiceLabels) {
+          const button = makeButton(choiceLabel, editKey, editLabel)
           button.style.minHeight = '28px'
           button.style.padding = '5px 6px'
           button.disabled = !canInteract() || predictionLocked
@@ -614,7 +620,12 @@ globalThis.CoursewareComponent.define({
         }
         predictionGrid.append(row)
       }
-      const lockButton = makeButton(content.lockLabel, true)
+      const lockButton = makeButton(
+        content.lockLabel,
+        'content.prediction.lockLabel',
+        '锁定预测按钮',
+        true,
+      )
       lockButton.disabled = !canInteract() || predictionLocked || Object.keys(predictions).length < 3
       lockButton.addEventListener('click', () => {
         if (!canInteract() || predictionLocked || Object.keys(predictions).length < 3) return
@@ -687,14 +698,14 @@ globalThis.CoursewareComponent.define({
         gridTemplateColumns: '1fr 1fr',
         gap: '7px',
       })
-      const actions: Array<[TrialKind, string]> = [
-        ['slow', content.slowApproach],
-        ['fast', content.fastApproach],
-        ['hold', content.holdNear],
-        ['recede', content.recede],
+      const actions: Array<[TrialKind, string, string, string]> = [
+        ['slow', content.slowApproach, 'content.lab.slowApproach', '慢速接近按钮'],
+        ['fast', content.fastApproach, 'content.lab.fastApproach', '快速接近按钮'],
+        ['hold', content.holdNear, 'content.lab.holdNear', '近处停住按钮'],
+        ['recede', content.recede, 'content.lab.recede', '远离线圈按钮'],
       ]
-      for (const [kind, label] of actions) {
-        const button = makeButton(label)
+      for (const [kind, label, editKey, editLabel] of actions) {
+        const button = makeButton(label, editKey, editLabel)
         if (trials.has(kind)) setButtonSelected(button, true)
         button.addEventListener('click', () => startTrial(kind))
         grid.append(button)
@@ -709,7 +720,11 @@ globalThis.CoursewareComponent.define({
       })
       const progressText = createElement('span')
       progressText.textContent = `${content.recordPrefix} ${trials.size} / ${content.recordSuffix}`
-      const resetButton = makeButton(content.resetLabel)
+      const resetButton = makeButton(
+        content.resetLabel,
+        'content.lab.resetLabel',
+        '重置证据按钮',
+      )
       resetButton.style.minHeight = '28px'
       resetButton.addEventListener('click', () => {
         if (!canInteract()) return
@@ -728,7 +743,12 @@ globalThis.CoursewareComponent.define({
         lineHeight: '1.4',
       })
       dragHint.textContent = content.dragHint
-      const compareButton = makeButton(content.compareLabel, true)
+      const compareButton = makeButton(
+        content.compareLabel,
+        'content.lab.compareLabel',
+        '对照预测按钮',
+        true,
+      )
       compareButton.disabled = !canInteract() || trials.size < 4
       compareButton.addEventListener('click', () => emit('prediction.compare', { trials: Array.from(trials) }))
       controlContent.append(grid, progress, dragHint, compareButton, makeStatus(statusText || content.readyStatus))
@@ -844,7 +864,12 @@ globalThis.CoursewareComponent.define({
       })
       callout.textContent = content.slopeCallout
       setEditableText(callout, 'content.model.slopeCallout', '模型核心句')
-      const verifyButton = makeButton(content.verifyLabel, true)
+      const verifyButton = makeButton(
+        content.verifyLabel,
+        'content.model.verifyLabel',
+        '验证关系按钮',
+        true,
+      )
       verifyButton.addEventListener('click', () => {
         if (!canInteract()) return
         if (!modelTimelineTouched || !modelParameterTouched) {
@@ -890,8 +915,11 @@ globalThis.CoursewareComponent.define({
         gridTemplateColumns: '1fr 1fr',
         gap: '7px',
       })
-      for (const [choice, label] of [['left', content.chooseLeft], ['right', content.chooseRight]] as const) {
-        const button = makeButton(label)
+      for (const [choice, label, editKey, editLabel] of [
+        ['left', content.chooseLeft, 'content.lenz.chooseLeft', '向左按钮'],
+        ['right', content.chooseRight, 'content.lenz.chooseRight', '向右按钮'],
+      ] as const) {
+        const button = makeButton(label, editKey, editLabel)
         setButtonSelected(button, lenzChoice === choice)
         button.addEventListener('click', () => {
           if (!canInteract()) return
@@ -906,7 +934,12 @@ globalThis.CoursewareComponent.define({
         })
         choiceGrid.append(button)
       }
-      const submit = makeButton(content.submitLabel, true)
+      const submit = makeButton(
+        content.submitLabel,
+        'content.lenz.submitLabel',
+        '检查方向按钮',
+        true,
+      )
       submit.disabled = !canInteract() || lenzChoice === null
       submit.addEventListener('click', () => {
         if (!canInteract() || lenzChoice === null) return
@@ -951,7 +984,12 @@ globalThis.CoursewareComponent.define({
         textAlign: 'center',
       })
       compactNote.textContent = props.content.model.formulaFlux
-      const check = makeButton(content.checkLabel, true)
+      const check = makeButton(
+        content.checkLabel,
+        'content.transfer.checkLabel',
+        '检查三组判断按钮',
+        true,
+      )
       check.disabled = !canInteract() || transferChoices.some((choice) => choice === null)
       check.addEventListener('click', () => {
         if (!canInteract()) return
@@ -973,7 +1011,11 @@ globalThis.CoursewareComponent.define({
         renderControls()
         drawAll()
       })
-      const summary = makeButton(content.summaryLabel)
+      const summary = makeButton(
+        content.summaryLabel,
+        'content.transfer.summaryLabel',
+        '完成概念重建按钮',
+      )
       summary.disabled = !canInteract() || !emittedTransferMastered
       summary.addEventListener('click', () => emit('transfer.summary', { mastered: true }))
       controlContent.append(compactNote, check, summary, makeStatus(statusText || content.incompleteStatus))
@@ -1027,8 +1069,11 @@ globalThis.CoursewareComponent.define({
           gridTemplateColumns: '1fr 1fr',
           gap: '6px',
         })
-        for (const [answer, label] of [[true, content.yesLabel], [false, content.noLabel]] as const) {
-          const button = makeButton(label)
+        for (const [answer, label, editKey, editLabel] of [
+          [true, content.yesLabel, 'content.transfer.yesLabel', '有感应按钮'],
+          [false, content.noLabel, 'content.transfer.noLabel', '无感应按钮'],
+        ] as const) {
+          const button = makeButton(label, editKey, editLabel)
           button.style.minHeight = '27px'
           setButtonSelected(button, transferChoices[index] === answer)
           button.addEventListener('click', () => {

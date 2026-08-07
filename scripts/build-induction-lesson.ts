@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { strToU8, zipSync } from 'fflate'
 import { build as viteBuild } from 'vite'
 import { componentManifestSchema } from '../src/shared/componentSchema'
+import { coursewareEvidenceManifestV1Schema } from '../src/shared/coursewareEvidence'
 import type {
   ComponentManifest,
   ComponentPackageData,
@@ -50,6 +52,7 @@ const standaloneHtmlPath = path.join(outputDirectory, '不是磁场，而是变�
 const projectJsonPath = path.join(outputDirectory, 'project.json')
 const healthReportPath = path.join(outputDirectory, 'project-health.json')
 const buildSummaryPath = path.join(outputDirectory, 'build-summary.json')
+const evidenceManifestPath = path.join(outputDirectory, 'evidence-manifest.json')
 const previewConfigPath = path.join(outputDirectory, 'preview-config.json')
 const previewScreenshotPath = path.join(outputDirectory, 'preview.png')
 const thirdPartyNoticesPath = path.join(outputDirectory, 'THIRD_PARTY_NOTICES.md')
@@ -1472,6 +1475,112 @@ function assertStandaloneOffline(html: string): void {
   }
 }
 
+function relativeRootPath(target: string): string {
+  return path.relative(root, target).replaceAll('\\', '/')
+}
+
+async function sha256File(filePath: string): Promise<string> {
+  return createHash('sha256').update(await fs.readFile(filePath)).digest('hex')
+}
+
+async function inductionEvidenceItem(
+  id: string,
+  kind: 'screenshot' | 'recording' | 'pptx-render' | 'comparison',
+  filePath: string,
+  required: boolean,
+  metadata: { sceneId?: string; stateId?: string; notes?: string } = {},
+) {
+  const present = await fs.stat(filePath).then((stat) => stat.isFile()).catch(() => false)
+  return {
+    id,
+    kind,
+    path: relativeRootPath(filePath),
+    required,
+    present,
+    ...(present ? { sha256: await sha256File(filePath) } : {}),
+    ...metadata,
+  }
+}
+
+async function writeInductionEvidenceManifest(
+  healthPassed: boolean,
+  experienceVersion: string,
+): Promise<void> {
+  const artifacts = await Promise.all([
+    { id: 'lesson', kind: 'h5lesson' as const, filePath: lessonArchivePath },
+    { id: 'standalone', kind: 'standalone-html' as const, filePath: standaloneHtmlPath },
+    { id: 'component', kind: 'component-package' as const, filePath: componentArchivePath },
+    { id: 'project', kind: 'project-json' as const, filePath: projectJsonPath },
+    { id: 'health', kind: 'report' as const, filePath: healthReportPath },
+  ].map(async ({ filePath, ...artifact }) => ({
+    ...artifact,
+    path: relativeRootPath(filePath),
+    sha256: await sha256File(filePath),
+  })))
+  const evidence = await Promise.all([
+    inductionEvidenceItem(
+      'prediction-initial',
+      'screenshot',
+      path.join(outputDirectory, 'preview-initial.png'),
+      true,
+      { sceneId: 'scene_prediction', stateId: 'predict_empty' },
+    ),
+    inductionEvidenceItem(
+      'model-complete',
+      'screenshot',
+      path.join(outputDirectory, 'qa', 'scene-3-model-final.png'),
+      true,
+      { sceneId: 'scene_model', stateId: 'model_mastered' },
+    ),
+    inductionEvidenceItem(
+      'transfer-complete',
+      'screenshot',
+      path.join(outputDirectory, 'qa', 'scene-5-transfer-mastered.png'),
+      true,
+      { sceneId: 'scene_transfer', stateId: 'transfer_mastered' },
+    ),
+    inductionEvidenceItem(
+      'core-interaction-recording',
+      'recording',
+      path.join(outputDirectory, 'qa', 'core-interaction.webm'),
+      true,
+      { notes: '没有真实录屏时不得接受视觉结果' },
+    ),
+    inductionEvidenceItem(
+      'pptx-render',
+      'pptx-render',
+      path.join(outputDirectory, 'qa', 'pptx-render.png'),
+      true,
+      { notes: '没有 PPTX 渲染截图时不得接受兼容导出结果' },
+    ),
+  ])
+  const manifest = coursewareEvidenceManifestV1Schema.parse({
+    schemaVersion: 1,
+    experienceId: 'induction-courseware',
+    experienceVersion,
+    scope: 'full-course',
+    generatedAt: new Date().toISOString(),
+    generatedBy: 'automation',
+    artifacts,
+    evidence,
+    pipeline: {
+      status: healthPassed ? 'passed' : 'failed',
+      reports: [
+        { id: 'project-health', path: relativeRootPath(healthReportPath), passed: healthPassed },
+        { id: 'build-summary', path: relativeRootPath(buildSummaryPath), passed: true },
+      ],
+    },
+    result: {
+      status: 'pending',
+      notes: [
+        '原构建脚本曾把 visualReview 写死为 passed；该结论已撤销。',
+        '自动构建不能代替真实证据和人工结果审阅。',
+      ],
+    },
+  })
+  await fs.writeFile(evidenceManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+}
+
 async function main(): Promise<void> {
   await fs.mkdir(outputDirectory, { recursive: true })
   const manifestText = await fs.readFile(path.join(componentDirectory, 'manifest.json'), 'utf8')
@@ -1575,6 +1684,7 @@ async function main(): Promise<void> {
       thirdPartyNotices: path.relative(root, thirdPartyNoticesPath).replaceAll('\\', '/'),
       previewConfig: path.relative(root, previewConfigPath).replaceAll('\\', '/'),
       previewScreenshot: path.relative(root, previewScreenshotPath).replaceAll('\\', '/'),
+      evidenceManifest: path.relative(root, evidenceManifestPath).replaceAll('\\', '/'),
     },
     component: {
       key: component.key,
@@ -1603,11 +1713,15 @@ async function main(): Promise<void> {
       runtimeRegistration: 'passed',
       runtimeIifeAndSize: 'passed',
       threeLicense: threePackageMetadata === null ? 'not-applicable' : 'passed',
-      visualReview: 'passed; see design-qa.md',
+      visualReview: {
+        status: 'pending',
+        evidenceManifest: path.relative(root, evidenceManifestPath).replaceAll('\\', '/'),
+      },
     },
     staticExportNote: 'PDF/PPTX preserve authored native states; live component gestures are captured or use the packaged thumbnail fallback.',
   }
   await fs.writeFile(buildSummaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
+  await writeInductionEvidenceManifest(healthSummary.error === 0, manifest.version)
 
   console.log(`组件包：${componentArchivePath}`)
   console.log(`互动课件：${lessonArchivePath}`)

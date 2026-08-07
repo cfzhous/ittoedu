@@ -1,0 +1,4 @@
+interface:
+  display_name: "互动课件创作编排"
+  short_description: "把教学主题编排成经过批准、能够恢复、能够追溯的互动课件体验合同"
+  default_prompt: "Use $orchestrate-courseware to turn this teaching topic into an approved, file-backed courseware implementation handoff."

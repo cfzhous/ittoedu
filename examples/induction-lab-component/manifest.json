@@ -7,7 +7,7 @@
   ],
   "id": "com.alepha.physics.induction-lab",
   "name": "电磁感应·磁通量实验台",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "用同一套磁体—闭合线圈—检流计装置，连续观察磁通量及其变化率",
   "entry": "runtime.js",
   "thumbnail": "thumbnail.png",

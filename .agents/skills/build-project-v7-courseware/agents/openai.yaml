@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project V7 课件实现"
+  short_description: "依据获批体验合同构建、验证、导出并追踪 Project V7 互动课件"
+  default_prompt: "Use $build-project-v7-courseware to implement this approved courseware case as a validated Project V7 lesson."

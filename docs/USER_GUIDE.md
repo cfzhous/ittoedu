@@ -2,7 +2,7 @@
 
 本指南适用于 **互动课件编辑器 V1.7.0（Windows x64）**，当前工程格式为 Project V7（`schemaVersion: 7`）。Project V7 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；一次性复杂互动使用场景/全局运行时，高复用且需教师反复配置的能力使用组件。
 
-文档同步基线：**2026-08-05**。当前源码包版本为 1.7.0；本指南描述的是统一画布、发布语义与旗舰课例工作流，不是 7 月 23 日的旧界面。
+文档同步基线：**2026-08-07**。当前源码包版本为 1.7.0；本指南描述的是统一画布、发布语义、Skill 安装与旗舰课例工作流，不是 7 月 23 日的旧界面。
 
 ## 1. 启动编辑器
 
@@ -12,7 +12,9 @@
 2. 拉取或解压完整源码目录；
 3. 双击根目录 `启动课件编辑器.cmd`。
 
-入口在首次缺少依赖时自动执行 `npm ci`，随后构建 Player、Renderer、Electron 并直接打开应用。之后每次双击都会按当前源码重新构建，不会调用 `electron-builder`，也不会生成 `release/`、Portable EXE 或安装程序。需要在终端启动时可使用 `npm start`。
+入口会先把仓库 `.agents/skills/` 中的两个权威课件 Skill 幂等同步到当前用户的 `%USERPROFILE%\.agents\skills`，首次缺少依赖时再自动执行 `npm ci`，随后构建 Player、Renderer、Electron 并直接打开应用。之后每次双击都会同步 Skill 并按当前源码重新构建，不会调用 `electron-builder`，也不会生成 `release/`、Portable EXE 或安装程序。需要在终端启动时可使用 `npm start`，它同样会自动执行 Skill 安装；也可只运行 `npm run install:courseware-skills`。
+
+Skill 安装器只管理 `orchestrate-courseware` 与 `build-project-v7-courseware`。目标内容未变化时不会重复复制；若用户目录已有非本项目管理的同名不同内容 Skill，安装器会拒绝覆盖并显示警告，编辑器仍可继续启动。安装过程不会删除旧的 `%USERPROFILE%\.codex\skills` 副本。Codex 未立即显示新版本时应重启 Codex。它们属于外部 AI 创作工作流，不代表 Editor 1.x 内置了 AI 生成功能。
 
 仓库中历史 1.6.0 便携版/目录版记录不包含 1.7.0 统一画布能力，不应作为当前版本启动入口或分发物。
 
@@ -585,8 +587,10 @@ Editor 1.7.0 不提供通用关键帧/路径时间轴、节点连线式状态机
 
 Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 以后。1.x 的统一画布只提供版本化、可校验的 authoring patch 与显式目标边界，不会调用模型、自动理解画面或替用户修改工程；AI 仍可在编辑器外通过规范和可复现脚本生成完整 `.h5lesson`。
 
+仓库提供的 `orchestrate-courseware` 与 `build-project-v7-courseware` 是编辑器外部 Codex Skill，不是 Editor 1.7.0 菜单功能。前者把教学设计、完整教学内容规格、呈现脚本、决策和批准哈希写入课例档案，后者只在有效 `implementation-ready` 后生成 Project V7，并检查脚本追踪、承载方式和公式排版。Skill 不能自动切换 Codex 会话模式；需要结构化选择而宿主不支持时会保存 Prompt 并暂停。
+
 PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；需要互动时请导出单 HTML 或网页包。统一全局层可直接编辑母版式原生元素、教师控制器和全局组件，但不会把任意运行时代码反向拆成可视化节点；稳定画面应主动创作为场景状态，瞬态效果仍在当前位置试运行中检查。
 
 开发者可使用 [Project V7 五路径渲染宿主基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js、Component API 4 DOM 表格与 Component API 3 Phaser 兼容组件。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 
-Editor 1.7.0 当前只交付源码启动入口。提交前必须重新执行类型检查、单元/集成测试、Electron 端到端流程和三个生产目录构建，并用根目录 `启动课件编辑器.cmd` 做真实启动冒烟。当前实测结果为 Vitest **96 个文件 / 615 项**、Playwright **26/26** 全部通过；没有生成 1.7.0 Portable、目录版或安装包，历史 1.6.0 二进制不得冒充当前源码版本。
+Editor 1.7.0 当前只交付源码启动入口。提交前必须重新执行类型检查、单元/集成测试、Electron 端到端流程和三个生产目录构建，并用根目录 `启动课件编辑器.cmd` 做真实启动冒烟。当前实测结果为 Vitest **96 个文件 / 616 项**、Playwright **26/26** 全部通过；没有生成 1.7.0 Portable、目录版或安装包，历史 1.6.0 二进制不得冒充当前源码版本。

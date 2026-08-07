@@ -29,6 +29,27 @@ const DEFAULT_LESSON_PATH = path.resolve(
 )
 const PLAYER_BUNDLE_PATH = path.resolve(process.cwd(), 'dist-player', 'player.iife.js')
 
+const INDUCTION_BUTTON_AUTHORING_KEYS = [
+  'content.prediction.choiceLeft',
+  'content.prediction.choiceZero',
+  'content.prediction.choiceRight',
+  'content.prediction.lockLabel',
+  'content.lab.slowApproach',
+  'content.lab.fastApproach',
+  'content.lab.holdNear',
+  'content.lab.recede',
+  'content.lab.resetLabel',
+  'content.lab.compareLabel',
+  'content.model.verifyLabel',
+  'content.lenz.chooseLeft',
+  'content.lenz.chooseRight',
+  'content.lenz.submitLabel',
+  'content.transfer.yesLabel',
+  'content.transfer.noLabel',
+  'content.transfer.checkLabel',
+  'content.transfer.summaryLabel',
+] as const
+
 const EXPECTED_SCENES = [
   {
     name: '先押一个答案',
@@ -549,6 +570,19 @@ function validateComponents(
     }
     if (!meta.thumbnailPath || !manifest.thumbnail || !component.files[manifest.thumbnail]) {
       details.push(`${recordKey} 缺少可用组件缩略图`)
+    }
+    if (manifest.id === 'com.alepha.physics.induction-lab') {
+      const missingButtonTargets = INDUCTION_BUTTON_AUTHORING_KEYS.filter(
+        (key) => !component.runtimeSource.includes(key),
+      )
+      if (!component.runtimeSource.includes('coursewareEditKey')) {
+        details.push(`${recordKey} runtime.js 未启用 DOM 画布文字登记`)
+      }
+      if (missingButtonTargets.length > 0) {
+        details.push(
+          `${recordKey} 有 ${missingButtonTargets.length} 个按钮文字未登记画布编辑目标：${missingButtonTargets.join(', ')}`,
+        )
+      }
     }
   })
 

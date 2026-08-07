@@ -18,3 +18,5 @@
 ## 构建
 
 主课程生成脚本使用 Vite library IIFE 模式把 `runtime.entry.ts` 打包为无 `import` / `export` / `require` 的 `runtime.js`。组件仅支持 `scene` 作用域，完整实现 `resize / updateProps / setVisible / suspend / resume / prepareCapture / destroy` 生命周期。
+
+版本 `1.0.1` 起，预测、实验、模型、方向和迁移环节中的所有 DOM 按钮都通过 `data-courseware-edit-key` 显式登记到对应的 `props.content` 字段。在编辑状态下可直接双击按钮文字修改；同一内容键在多个按钮中复用时，一次修改会同步更新这些按钮。试运行和导出仍保持原有按钮行为。

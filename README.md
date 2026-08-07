@@ -4,7 +4,7 @@
 
 当前源码版本：**1.7.0**
 
-文档同步基线：**2026-08-05**。当前源码包版本为 1.7.0；本文及 `docs/` 已按本轮简洁/专业工作流、统一“元素”入口、统一画布 authoring、媒体管理、“互动与动画”、受控“开发”工作台、文字显示改进、PublishedLesson 发布裁剪和旗舰课例重新核对。
+文档同步基线：**2026-08-07**。当前源码包版本为 1.7.0；本文及 `docs/` 已按本轮简洁/专业工作流、统一“元素”入口、统一画布 authoring、媒体管理、“互动与动画”、受控“开发”工作台、文字显示改进、PublishedLesson 发布裁剪和文件化 AI 创作编排 Skill 重新核对。
 
 当前架构基线：Editor 1.7.0、Project V7、RuntimeDocument API 2、V4 组件 API 4；Runtime API 1 与组件 API 1–3 继续兼容。Project V7 JSON 是业务真相，DOM、Phaser 和按内容打包的 Three.js 都是可替换的呈现/交互能力，而不是工程模型本身。编辑器定位为 AI-native 课件的轻量编辑与交付容器：手动模式覆盖高频、可解释的基础编辑与事件编排，一次性复杂互动使用场景/全局运行时，高复用且需参数化的能力使用组件。Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 以后；1.x 只保留带版本号、会话和能力声明的 authoring 边界，不提供隐式 AI 修改。当前 1.7.0 源码交付以根目录双击启动入口为准，不构建便携版或安装包；历史 1.6.0 Windows 制品仅保留为旧版本记录。
 
@@ -15,9 +15,9 @@
 - Windows 10/11 x64；
 - 已验证 Node.js 24.x、npm 11.x；建议使用当前 Node.js LTS；
 - 可双击运行 `.cmd` 的标准 Windows 环境；
-- 首次安装依赖需要访问 npm registry。
+- 首次安装依赖需要访问 npm registry；Skill 同步本身只读写本机文件，不需要联网。
 
-从 Git 拉取或源码 ZIP 解压后，直接双击根目录的 `启动课件编辑器.cmd`。启动入口会在缺少依赖时先执行锁定安装，然后构建 Player、Renderer 与 Electron 主进程并打开编辑器；它不会调用 `electron-builder`，也不会生成便携版、安装包或 `release/` 制品。
+从 Git 拉取或源码 ZIP 解压后，直接双击根目录的 `启动课件编辑器.cmd`。启动入口会先把仓库权威课件 Skill 同步到当前用户目录，在缺少依赖时执行锁定安装，然后构建 Player、Renderer 与 Electron 主进程并打开编辑器；它不会调用 `electron-builder`，也不会生成便携版、安装包或 `release/` 制品。Skill 同步失败会显示明确警告，但不会阻止编辑器继续启动。
 
 命令行等价方式：
 
@@ -26,7 +26,17 @@ npm ci
 npm start
 ```
 
-`npm ci` 会严格按 `package-lock.json` 安装依赖；`npm start` 构建生产模式所需的三个目录后直接运行源码版 Electron。需要热更新开发时再使用 `npm run dev`；开发服务器固定使用 `127.0.0.1:5173`，若端口被占用会直接报错。
+`npm ci` 会严格按 `package-lock.json` 安装依赖；`npm start` 会通过 `prestart` 自动同步 Skill，再构建生产模式所需的三个目录并直接运行源码版 Electron。需要热更新开发时再使用 `npm run dev`；开发服务器固定使用 `127.0.0.1:5173`，若端口被占用会直接报错。
+
+### Codex Skill 安装范围
+
+仓库中的 [`.agents/skills/`](.agents/skills/) 是两个课件 Skill 的权威源码，也是进入本仓库及其子目录时的项目级发现入口。双击启动或执行 `npm start` 时，[安装脚本](scripts/install-courseware-skills.ps1) 会把它们幂等同步到 `%USERPROFILE%\.agents\skills`，从而允许当前用户在其他工作区调用：
+
+```powershell
+npm run install:courseware-skills
+```
+
+安装器只管理 `orchestrate-courseware` 与 `build-project-v7-courseware`，内容未变时直接跳过；如果用户目录已有同名但并非本项目管理、且内容不同的 Skill，它会拒绝覆盖并要求人工处理。安装器不会删除或修改旧的 `%USERPROFILE%\.codex\skills` 副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 是外部 AI 创作工作流，不会把 AI 能力嵌入 Editor 1.x。
 
 开始修改前建议先建立基线：
 
@@ -65,13 +75,19 @@ npm test
 - 场景缩略图按 `thumbnailStateId` 绘制背景、原生元素和组件缩略图，并按层合成已启用场景/全局运行时登记的静态后备；组件未提供图片时显示带名称的后备框，已启用运行时未提供后备时显示“运行时”提示角标；
 - 大型课件缩略图延迟渲染、图片按场景加载和增量撤销历史。
 
-详细操作见 [用户指南](docs/USER_GUIDE.md)，本轮五个里程碑的目标、依赖、验收和实施状态见 [编辑器体验重构策划](docs/EDITOR_REDESIGN_MILESTONES.md)。AI 制作课件前必须阅读 [AI 创作规范](docs/AI_COURSEWARE_AUTHORING.md)；自由运行时和组件分别见 [自由运行时指南](docs/RUNTIME_V3_AUTHORING.md) 与 [组件开发指南](docs/COMPONENT_AUTHORING.md)。
+详细操作见 [用户指南](docs/USER_GUIDE.md)，本轮五个里程碑的目标、依赖、验收和实施状态见 [编辑器体验重构策划](docs/EDITOR_REDESIGN_MILESTONES.md)。AI 制作课件必须先使用 [`orchestrate-courseware`](.agents/skills/orchestrate-courseware/SKILL.md)，按 [通用创作编排规范](docs/AI_COURSEWARE_ORCHESTRATION.md) 把教学设计、教学内容规格、呈现脚本和批准哈希落入课例档案；取得有效 `implementation-ready` 后再使用 [`build-project-v7-courseware`](.agents/skills/build-project-v7-courseware/SKILL.md) 执行 [Project V7 创作与接入规范](docs/AI_COURSEWARE_AUTHORING.md)。聊天记录不充当唯一交接真相。自由运行时和组件分别见 [自由运行时指南](docs/RUNTIME_V3_AUTHORING.md) 与 [组件开发指南](docs/COMPONENT_AUTHORING.md)。
 
 ## 旗舰课例：不是磁场，而是变化
 
 仓库提供可复现的高中物理旗舰课例《不是磁场，而是变化》：用五幕“预测—证据—建模—方向—迁移”完成电磁感应概念重建。连续实验由 V4 DOM 组件承担，稳定反馈由 Project V7 命名状态和声明式规则承担，全部可见文案进入 `TextNode` 或 `props.content`。
 
 运行 `npm run build:induction` 生成 `.h5lesson`、离线 HTML 与组件包，再运行 `npm run validate:induction` 执行结构、教学语义和导出门禁。组件源码见 [`examples/induction-lab-component/`](examples/induction-lab-component/README.md)，生成与验收脚本见 [`scripts/build-induction-lesson.ts`](scripts/build-induction-lesson.ts) 和 [`scripts/validate-induction-lesson.ts`](scripts/validate-induction-lesson.ts)。
+
+## 流程失败案例 0：让运动变成函数
+
+现有高中数学七幕课《让运动变成函数——动点问题的五步建模法》被固定为“流程失败案例 0”，用于证明旧流程只对齐状态骨架、没有冻结完整教学内容规格和呈现语义，并出现内容量/难度不足、过度组件化与斜线分数等问题。它不是质量闭环成功案例、不是通用数学模板，也不得通过事后修补反向证明新工作流有效。
+
+原构建与验证命令继续保留为失败制品复现和诊断入口，不代表教学或视觉验收通过。新高中数学课例必须从原始主题和新 Skill 冷启动，先冻结首轮结果再评分；不得从现有生成脚本继续扩展。失败编排记录见 [`docs/courseware-pilots/math-motion/ORCHESTRATION_RECORD.md`](docs/courseware-pilots/math-motion/ORCHESTRATION_RECORD.md)，Skill 设计与当前验证状态见 [`docs/AI_COURSEWARE_SKILL_DESIGN.md`](docs/AI_COURSEWARE_SKILL_DESIGN.md)。
 
 ## 技术栈
 
@@ -264,8 +280,9 @@ PPTX 映射规则：
 
 | 命令 | 作用 |
 | --- | --- |
-| 双击 `启动课件编辑器.cmd` | 自动补齐依赖、构建并打开当前源码版编辑器，不生成安装包 |
-| `npm start` | 构建生产模式 Player、Renderer、Electron 后启动源码版应用 |
+| 双击 `启动课件编辑器.cmd` | 自动同步课件 Skill、补齐依赖、构建并打开当前源码版编辑器，不生成安装包 |
+| `npm run install:courseware-skills` | 将仓库权威课件 Skill 幂等同步到当前用户的 `.agents/skills` |
+| `npm start` | 自动同步课件 Skill，构建生产模式 Player、Renderer、Electron 后启动源码版应用 |
 | `npm run dev` | 启动开发版 Electron |
 | `npm run typecheck` | 检查 Renderer、Player、Main 和 Preload 类型 |
 | `npm test` | 运行 Vitest 单元与集成测试 |
@@ -279,6 +296,10 @@ PPTX 映射规则：
 | `npm run build:lesson-demo` | 生成三页光合作用最小回归课例 |
 | `npm run build:induction` | 生成《不是磁场，而是变化》旗舰课例、离线 HTML 与组件包 |
 | `npm run validate:induction` | 验证旗舰课例的结构、教学语义、状态可达性与离线导出 |
+| `npm run build:math-motion-course` | 生成高中数学动点问题七幕课、离线 HTML、网页包与组件包 |
+| `npm run validate:math-motion-course` | 验证七幕状态、数学真相、离线导出和 25 轮状态物化 |
+| `npm run export:math-motion-course` | 从真实浏览器初态帧生成七页 PDF 与对象级可编辑 PPTX |
+| `npm run validate:math-motion-static` | 检查 PDF/PPTX 页数、可编辑文字、组件快照、边界与回渲尺寸 |
 | `npm run build:render-benchmark` | 生成原生 / Phaser / DOM / Three.js / 旧组件五路径离线基准 |
 | `npm run build:icons` | 从源图标重新生成应用图标 |
 | `npm run verify` | 执行类型检查、测试、E2E 和完整构建 |
@@ -289,7 +310,7 @@ PPTX 映射规则：
 
 ## 当前源码启动与历史发布基线
 
-当前 1.7.0 交付不构建便携版或安装包。根目录 `启动课件编辑器.cmd` 是唯一面向当前源码工作区的双击入口；它只生成被 `.gitignore` 排除的 `dist-player/`、`dist-renderer/` 与 `dist-electron/`，然后直接使用项目锁定的 Electron 运行。拉取新提交后再次双击即可重建，不需要复用旧 `release/`。
+当前 1.7.0 交付不构建便携版或安装包。根目录 `启动课件编辑器.cmd` 是唯一面向当前源码工作区的双击入口；它先同步 `.agents/skills/` 中的两个课件 Skill，再生成被 `.gitignore` 排除的 `dist-player/`、`dist-renderer/` 与 `dist-electron/`，然后直接使用项目锁定的 Electron 运行。拉取新提交后再次双击即可同步和重建，不需要复用旧 `release/`。
 
 仓库仍保留历史打包配置和验证脚本，但根目录入口不会调用它们。最近一次已打包的 Editor 1.6.0 Windows x64 制品生成于 **2026-07-30（Asia/Shanghai）**，并于 **2026-08-01** 按当时源码与文档核对；它不是当前 1.7.0 源码的新制品：
 
@@ -310,7 +331,7 @@ PPTX 映射规则：
 
 源码 ZIP 的大小与 SHA-256 应在生成后随制品单独发布，不写入 ZIP 内部的 README，避免重新打包时出现自引用哈希失效。
 
-当前 1.7.0 源码回归结果：双 TypeScript 配置通过；Vitest **96 个文件 / 615 项**、Playwright **26/26** 全部通过；Player、Renderer、Electron 生产构建及根目录启动入口冒烟完成。没有生成 1.7.0 Portable、目录版或安装包，也不得把历史 1.6.0 二进制表述为当前版本。测试通过只表示管线状态，不代表真实课件的视觉与教学体验已经验收。
+当前 1.7.0 源码回归结果：双 TypeScript 配置通过；Vitest **96 个文件 / 616 项**、Playwright **26/26** 全部通过；Player、Renderer、Electron 生产构建及根目录启动入口冒烟完成。没有生成 1.7.0 Portable、目录版或安装包，也不得把历史 1.6.0 二进制表述为当前版本。测试通过只表示管线状态，不代表真实课件的视觉与教学体验已经验收。
 
 ## 测试与提交要求
 
@@ -363,7 +384,7 @@ npm run verify
 
 用于合作开发的源码 ZIP 应包含：
 
-- `src/`、`tests/`、`scripts/`；
+- `src/`、`tests/`、`scripts/`、`.agents/skills/`；
 - `docs/`、`examples/`、`resources/`；
 - `package.json`、`package-lock.json`；
 - TypeScript、Vite、Vitest、Playwright、Electron 配置与根目录 `启动课件编辑器.cmd`；
@@ -377,7 +398,7 @@ npm run verify
 - `artifacts/`、`output/`、`test-results/`、`tmp/`、日志和本机工具缓存；
 - `.git/`。
 
-合作伙伴解压后双击 `启动课件编辑器.cmd` 即可按锁文件恢复依赖、构建并打开当前源码。不要把 `node_modules/`、生产构建目录或历史 `release/` 产物混入源码包。
+合作伙伴解压后双击 `启动课件编辑器.cmd`，即可同步当前项目的课件 Skill、按锁文件恢复依赖、构建并打开当前源码。不要把 `node_modules/`、生产构建目录或历史 `release/` 产物混入源码包。
 
 ## 许可
 

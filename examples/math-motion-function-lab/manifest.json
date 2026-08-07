@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene"
+  ],
+  "id": "com.alepha.math.motion-function-lab",
+  "name": "动点问题·五步建模课",
+  "version": "0.2.0",
+  "description": "课程专用的预测、约束、建模、图式联动、定义域修复、迁移与总结互动",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.png",
+  "defaultSize": {
+    "width": 1140,
+    "height": 452
+  },
+  "minSize": {
+    "width": 820,
+    "height": 380
+  },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "mode": "linked-graph",
+    "phase": "explore",
+    "model": {
+      "rectangleWidth": 8,
+      "rectangleHeight": 6,
+      "pSpeed": 2,
+      "qSpeed": 1.5,
+      "tMin": 0,
+      "tMax": 4
+    },
+    "content": {
+      "ariaLabel": "动点位置、面积公式与函数图象联动实验",
+      "kicker": "同一时刻 · 三种表征",
+      "formulaHeading": "把运动翻译成式",
+      "geometryHeading": "位置与面积",
+      "graphHeading": "面积函数",
+      "areaRegionLabel": "目标面积 △APQ",
+      "timeLabel": "时间 t",
+      "areaLabel": "面积 S(t)",
+      "apLabel": "AP",
+      "bqLabel": "BQ",
+      "domainLabel": "运动范围",
+      "dragInstruction": "拖动 t，依次检查 0、2、4 三个关键时刻",
+      "keyboardHint": "聚焦滑杆后可用 ← → 微调 0.1",
+      "checkpointLabel": "关键时刻",
+      "checkpointPending": "待观察",
+      "checkpointSeen": "已观察",
+      "exploreStatus": "先看端点，再找图象最高处",
+      "endpointsStatus": "两个端点面积都是 0；现在寻找峰值",
+      "readyStatus": "三个关键时刻已观察，请把 t 调到峰值并确认",
+      "wrongPeakStatus": "当前点还不是最高点，比较它与 t = 2 的高度",
+      "confirmLabel": "确认这个最大值",
+      "confirmedLabel": "已证明：最大值为 6",
+      "provedStatus": "位置、表达式与图象给出同一结论：Smax = 6，t = 2",
+      "disabledHint": "编辑或静态捕获中保留确定画面，请在试运行中操作",
+      "suspendedHint": "联动实验已暂停",
+      "pointA": "A",
+      "pointB": "B",
+      "pointC": "C",
+      "pointD": "D",
+      "pointP": "P",
+      "pointQ": "Q",
+      "maximumLabel": "Smax = 6"
+    },
+    "palette": {
+      "paper": "#FBF8F1",
+      "ink": "#16191F",
+      "muted": "#74777C",
+      "line": "#C9CDD2",
+      "blue": "#145DCE",
+      "blueSoft": "#DCE9FF",
+      "red": "#E04424",
+      "redSoft": "#F8D9CF",
+      "focus": "#0A53BE"
+    },
+    "reducedMotion": false
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "mode",
+        "label": "互动模式",
+        "type": "select",
+        "options": [
+          {
+            "label": "预测",
+            "value": "prediction"
+          },
+          {
+            "label": "约束分类",
+            "value": "constraints"
+          },
+          {
+            "label": "函数建模",
+            "value": "model"
+          },
+          {
+            "label": "图式联动",
+            "value": "linked-graph"
+          },
+          {
+            "label": "定义域修复",
+            "value": "domain"
+          },
+          {
+            "label": "同构迁移",
+            "value": "transfer"
+          },
+          {
+            "label": "方法总结",
+            "value": "summary"
+          }
+        ]
+      },
+      {
+        "key": "content.dragInstruction",
+        "label": "操作指令",
+        "type": "textarea",
+        "maxLength": 100
+      },
+      {
+        "key": "content.confirmLabel",
+        "label": "确认按钮",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.provedStatus",
+        "label": "完成反馈",
+        "type": "textarea",
+        "maxLength": 120
+      },
+      {
+        "key": "palette.paper",
+        "label": "纸面色",
+        "type": "color"
+      },
+      {
+        "key": "palette.blue",
+        "label": "变量蓝",
+        "type": "color"
+      },
+      {
+        "key": "palette.red",
+        "label": "目标量红",
+        "type": "color"
+      },
+      {
+        "key": "reducedMotion",
+        "label": "强制减少动效",
+        "type": "boolean"
+      }
+    ]
+  }
+}

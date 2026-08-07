@@ -6,6 +6,13 @@ set "VITE_DEV_SERVER_URL="
 
 if not exist "package.json" goto invalid_root
 
+echo [Courseware Editor] Syncing courseware Skills for the current user...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\install-courseware-skills.ps1"
+if errorlevel 1 (
+  echo [Courseware Editor] WARNING: Skill installation failed; editor startup will continue.
+  echo Run "npm run install:courseware-skills" after resolving the message above.
+)
+
 where npm.cmd >nul 2>nul
 if errorlevel 1 goto missing_node
 
