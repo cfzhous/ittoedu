@@ -17,6 +17,7 @@
     "test": "vitest run",
     "pretest:e2e": "npm run build:player && npm run build:examples && npm run build:lesson-demo:fixture && npm run build:render-benchmark:fixture && npm run build:renderer && npm run build:electron",
     "test:e2e": "playwright test",
+    "test:e2e:visible": "cross-env COURSEWARE_E2E_BACKGROUND=0 npm run test:e2e",
     "build:player": "vite build --config vite.player.config.ts",
     "build:renderer": "vite build --config vite.renderer.config.ts",
     "build:electron": "tsc -p tsconfig.electron.json",

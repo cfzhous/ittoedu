@@ -593,4 +593,4 @@ PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放�
 
 开发者可使用 [Project V8 五路径渲染宿主过渡基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js、Component API 4 DOM 表格与尚待删除的 Component API 3 Phaser 兼容组件。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 
-Editor 1.0.0 收敛分支当前只交付源码启动入口。本轮 Project V8 边界切片已通过类型检查、100 个 Vitest 测试文件共 655 项测试、26 项 Playwright Electron/浏览器端到端测试和桌面生产构建；尚未执行根目录 `启动课件编辑器.cmd` 的人工启动冒烟。没有生成 1.0.0 Portable、目录版或安装包，历史 1.6.0 二进制不得冒充当前源码版本。自动回归只把当前切片提升到 `engineering candidate`，不等于视觉、教学或正式版结果已经接受。
+Editor 1.0.0 收敛分支当前只交付源码启动入口。本轮 Project V8 边界切片已通过类型检查、101 个 Vitest 测试文件共 657 项测试、26 项 Playwright Electron/浏览器端到端测试和桌面生产构建；尚未执行根目录 `启动课件编辑器.cmd` 的人工启动冒烟。Playwright Electron 默认使用透明离屏窗口，不会在桌面或任务栏显示、抢占焦点；需要观察调试时可执行 `npm run test:e2e:visible`。没有生成 1.0.0 Portable、目录版或安装包，历史 1.6.0 二进制不得冒充当前源码版本。自动回归只把当前切片提升到 `engineering candidate`，不等于视觉、教学或正式版结果已经接受。

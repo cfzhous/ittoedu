@@ -12,6 +12,16 @@ import {
   registerPrivilegedSchemes,
 } from './protocols'
 import { diagnosticLog } from './diagnosticLog'
+import {
+  BACKGROUND_E2E_CHROMIUM_SWITCHES,
+  shouldShowApplicationWindows,
+} from './windowVisibility'
+
+if (!shouldShowApplicationWindows()) {
+  BACKGROUND_E2E_CHROMIUM_SWITCHES.forEach((name) => {
+    app.commandLine.appendSwitch(name)
+  })
+}
 
 registerPrivilegedSchemes()
 

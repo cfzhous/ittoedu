@@ -12,6 +12,10 @@ import {
 } from './security'
 import { editorEntryUrl } from './protocols'
 import { clearRecoveryProject } from './projectPersistence'
+import {
+  BACKGROUND_E2E_WINDOW_ORIGIN,
+  shouldShowApplicationWindows,
+} from './windowVisibility'
 
 export interface MainWindowResult {
   window: BrowserWindow
@@ -101,8 +105,16 @@ export async function createMainWindow(
   const allowedNetworkOrigins = new Set<string>()
   if (developmentServerUrl) allowedNetworkOrigins.add(developmentServerUrl.origin)
   configureRestrictedSession(session.defaultSession, allowedNetworkOrigins)
+  const showApplicationWindows = shouldShowApplicationWindows()
 
   const window = new BrowserWindow({
+    ...(!showApplicationWindows
+      ? {
+          x: BACKGROUND_E2E_WINDOW_ORIGIN,
+          y: BACKGROUND_E2E_WINDOW_ORIGIN,
+          opacity: 0,
+        }
+      : {}),
     width: 1440,
     height: 900,
     minWidth: 1200,
@@ -111,6 +123,7 @@ export async function createMainWindow(
     backgroundColor: '#0b1020',
     icon: getIconPath(),
     show: false,
+    skipTaskbar: !showApplicationWindows,
     autoHideMenuBar: true,
     webPreferences: {
       preload: getPreloadPath(),
@@ -123,6 +136,7 @@ export async function createMainWindow(
       navigateOnDragDrop: false,
       spellcheck: false,
       devTools: !app.isPackaged,
+      backgroundThrottling: showApplicationWindows,
     },
   })
   let closeApproved = false
@@ -190,7 +204,9 @@ export async function createMainWindow(
   })
 
   window.once('ready-to-show', () => {
-    if (!window.isDestroyed()) window.show()
+    if (window.isDestroyed()) return
+    if (showApplicationWindows) window.show()
+    else window.showInactive()
   })
 
   if (developmentServerUrl) {

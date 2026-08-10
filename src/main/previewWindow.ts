@@ -18,6 +18,10 @@ import {
   registerPreviewDocument,
   releasePreviewDocument,
 } from './protocols'
+import {
+  BACKGROUND_E2E_WINDOW_ORIGIN,
+  shouldShowApplicationWindows,
+} from './windowVisibility'
 
 const PREVIEW_DIRECTORY_NAME = 'phaser-courseware-editor-preview'
 const previewWindows = new Set<BrowserWindowType>()
@@ -71,8 +75,16 @@ export async function openPreviewWindow(
   installPreviewProtocol(previewSession)
   const documentId = crypto.randomUUID()
   const entryUrl = registerPreviewDocument(documentId, html)
+  const showApplicationWindows = shouldShowApplicationWindows()
 
   const window = new BrowserWindow({
+    ...(!showApplicationWindows
+      ? {
+          x: BACKGROUND_E2E_WINDOW_ORIGIN,
+          y: BACKGROUND_E2E_WINDOW_ORIGIN,
+          opacity: 0,
+        }
+      : {}),
     width: 1280,
     height: 800,
     minWidth: 800,
@@ -83,6 +95,7 @@ export async function openPreviewWindow(
     backgroundColor: '#080b12',
     autoHideMenuBar: true,
     show: false,
+    skipTaskbar: !showApplicationWindows,
     webPreferences: {
       partition: 'courseware-preview',
       contextIsolation: true,
@@ -94,6 +107,7 @@ export async function openPreviewWindow(
       navigateOnDragDrop: false,
       devTools: !app.isPackaged,
       spellcheck: false,
+      backgroundThrottling: showApplicationWindows,
     },
   })
 
@@ -103,7 +117,9 @@ export async function openPreviewWindow(
   )
 
   window.once('ready-to-show', () => {
-    if (!window.isDestroyed()) window.show()
+    if (window.isDestroyed()) return
+    if (showApplicationWindows) window.show()
+    else window.showInactive()
   })
   window.on('closed', () => {
     previewWindows.delete(window)

@@ -523,7 +523,7 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 
 ### 里程碑 1：Project V8 与协议断代
 
-**状态：进行中。** 新建、保存、打开和原始 Player Payload 已切到严格 Project V8，旧 Project V1–V7 由产品入口明确拒绝；`playback.presenter` 合同和 `presenter.command` 触发器已进入 Schema但在演示输入层实现前保持 UI 禁用，旧外层 footer 控制器已从当前类型、Player、导出样式和测试中移除。本边界切片已通过类型检查、655 项 Vitest、26 项 Playwright 和桌面生产构建，管线状态为 `engineering candidate`。旧 Project 迁移实现目前仅作为未被产品入口引用的待删除代码保留；Runtime API 1、Component API 1–3 和历史夹具清理尚未完成。
+**状态：进行中。** 新建、保存、打开和原始 Player Payload 已切到严格 Project V8，旧 Project V1–V7 由产品入口明确拒绝；`playback.presenter` 合同和 `presenter.command` 触发器已进入 Schema但在演示输入层实现前保持 UI 禁用，旧外层 footer 控制器已从当前类型、Player、导出样式和测试中移除。本边界切片已通过类型检查、657 项 Vitest、26 项 Playwright 和桌面生产构建，管线状态为 `engineering candidate`。旧 Project 迁移实现目前仅作为未被产品入口引用的待删除代码保留；Runtime API 1、Component API 1–3 和历史夹具清理尚未完成。
 
 目标：在不重写已稳定 Slide Player 的前提下建立只支持当前协议的干净工程核心。
 

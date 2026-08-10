@@ -13,6 +13,10 @@ import { pathToFileURL } from 'node:url'
 import type { ElectronApplication, Page } from 'playwright'
 import sharp from 'sharp'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
+import {
+  BACKGROUND_E2E_ENV,
+  BACKGROUND_E2E_WINDOW_ORIGIN,
+} from '../../src/main/windowVisibility'
 
 const root = resolve(__dirname, '..', '..')
 const outputDir = join(tmpdir(), 'phaser-courseware-editor-e2e')
@@ -50,6 +54,7 @@ const replacementImagePath = join(
   'sample-counter-component',
   'thumbnail.png',
 )
+const backgroundE2e = process.env[BACKGROUND_E2E_ENV] ?? '1'
 
 interface LaunchedEditor {
   app: ElectronApplication
@@ -58,6 +63,23 @@ interface LaunchedEditor {
   consoleErrors: string[]
   consoleWarnings: string[]
   externalRequests: string[]
+}
+
+async function expectBackgroundWindowsIsolated(
+  app: ElectronApplication,
+): Promise<void> {
+  if (backgroundE2e !== '1') return
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, origin) => {
+    const windows = BrowserWindow.getAllWindows()
+    return windows.length > 0 && windows.every((window) => {
+      const bounds = window.getBounds()
+      return window.isVisible() &&
+        !window.isFocused() &&
+        window.getOpacity() === 0 &&
+        bounds.x === origin &&
+        bounds.y === origin
+    })
+  }, BACKGROUND_E2E_WINDOW_ORIGIN)).toBe(true)
 }
 
 async function launchEditor(options: {
@@ -70,6 +92,7 @@ async function launchEditor(options: {
     env: {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+      [BACKGROUND_E2E_ENV]: backgroundE2e,
     },
   })
   const page = await app.firstWindow()
@@ -86,6 +109,7 @@ async function launchEditor(options: {
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+  await expectBackgroundWindowsIsolated(app)
   const modeButton = page.getByRole('button', {
     name: options.mode === 'simple' ? '简洁' : '专业',
   })
@@ -1373,6 +1397,7 @@ test.describe.serial('Phaser 课件编辑器 1.0 / Project V8 收敛', () => {
       await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
       const preview = await previewPromise
       await expectCanvasPlayerScene(preview, 0)
+      await expectBackgroundWindowsIsolated(app)
       const previewCanvas = preview.locator('canvas')
       const previewBounds = await previewCanvas.boundingBox()
       if (!previewBounds) throw new Error('预览画布不可见')

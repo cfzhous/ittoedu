@@ -288,7 +288,8 @@ PPTX 映射规则：
 | `npm run dev` | 启动开发版 Electron |
 | `npm run typecheck` | 检查 Renderer、Player、Main 和 Preload 类型 |
 | `npm test` | 运行 Vitest 单元与集成测试 |
-| `npm run test:e2e` | 构建依赖并运行全部 Playwright Electron 测试 |
+| `npm run test:e2e` | 构建依赖并以透明离屏窗口运行全部 Playwright Electron 测试 |
+| `npm run test:e2e:visible` | 调试时显式显示 Electron 与预览窗口并运行同一套 E2E |
 | `npm run build:player` | 构建预览、单 HTML 和网页包共用的 Player IIFE |
 | `npm run build:renderer` | 构建 React 编辑器 |
 | `npm run build:electron` | 编译 Main 与 Preload |
@@ -305,6 +306,8 @@ PPTX 映射规则：
 | `npm run build:render-benchmark` | 生成原生 / Phaser / DOM / Three.js / 旧组件五路径离线基准 |
 | `npm run build:icons` | 从源图标重新生成应用图标 |
 | `npm run verify` | 执行类型检查、测试、E2E 和完整构建 |
+
+E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口和课件预览窗口以透明、离屏、跳过任务栏且不抢焦点的方式运行，同时关闭后台渲染节流以保持动画、拖拽和导出测试稳定。正常 `npm start`、开发启动和双击入口不读取该测试默认值，仍会照常显示窗口。只有需要观察自动化过程时才使用 `npm run test:e2e:visible`。
 
 架构与回归基准见 [`examples/render-host-benchmark/`](examples/render-host-benchmark/README.md)。当前切片已把工程升级为 Project V8；API 3 Phaser 兼容组件仍只用于断代前的过渡回归，完成 Component API 4 清理后会由当前协议夹具替代。
 
@@ -333,7 +336,7 @@ PPTX 映射规则：
 
 源码 ZIP 的大小与 SHA-256 应在生成后随制品单独发布，不写入 ZIP 内部的 README，避免重新打包时出现自引用哈希失效。
 
-当前 Project V8 边界切片已通过类型检查、100 个 Vitest 测试文件共 655 项测试、26 项 Playwright 端到端测试和桌面生产构建；旧 1.7.0 基线则为 100 个测试文件、641 项测试。尚未执行根目录启动脚本的人工冒烟，也没有生成 1.0.0 Portable、目录版或安装包；历史 1.6.0 二进制不得冒充当前版本。当前管线状态为 `engineering candidate`，不代表真实课件的视觉与教学体验已经验收。
+当前 Project V8 边界切片已通过类型检查、101 个 Vitest 测试文件共 657 项测试、26 项 Playwright 端到端测试和桌面生产构建；旧 1.7.0 基线则为 100 个测试文件、641 项测试。尚未执行根目录启动脚本的人工冒烟，也没有生成 1.0.0 Portable、目录版或安装包；历史 1.6.0 二进制不得冒充当前版本。当前管线状态为 `engineering candidate`，不代表真实课件的视觉与教学体验已经验收。
 
 ## 测试与提交要求
 
