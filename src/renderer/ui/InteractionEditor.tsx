@@ -92,8 +92,7 @@ const AUTOMATION_TRIGGER_OPTIONS: AutomationTriggerOption[] = [
   { value: 'runtime.event', label: '运行时发出事件' },
   {
     value: 'presenter.command',
-    label: '翻页笔命令（演示输入层尚未启用）',
-    disabled: true,
+    label: '翻页笔命令',
   },
 ]
 

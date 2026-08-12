@@ -5,7 +5,7 @@ import type {
 } from '../../shared/componentTypes'
 import type { ProjectDocument } from '../../shared/projectTypes'
 import { bytesToDataUrl } from './base64'
-import { assertV3ExportDependencies } from './v3ExportSupport'
+import { assertExportPayloadDependencies } from './exportPayloadSupport'
 
 export interface BinaryExportAsset {
   bytes: Uint8Array
@@ -286,6 +286,6 @@ export function buildExportPayload(
     assets: exportedAssets,
     components: exportedComponents,
   }
-  assertV3ExportDependencies(payload)
+  assertExportPayloadDependencies(payload)
   return payload
 }

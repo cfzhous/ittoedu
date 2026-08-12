@@ -5,10 +5,53 @@ export const MAX_SCENE_INTERACTIONS = 1_000
 export const MAX_INTERACTION_CONDITIONS = 16
 export const MAX_INTERACTION_ACTIONS = 32
 
+/** Runtime-visible discriminators shared by Schema and generated AI contracts. */
+export const INTERACTION_TRIGGER_TYPES = [
+  'node.click',
+  'scene.enter',
+  'presentation.enter',
+  'component.event',
+  'runtime.event',
+  'audio.ended',
+  'video.started',
+  'video.paused',
+  'video.ended',
+  'video.time',
+  'node.activated',
+  'animation.completed',
+  'presenter.command',
+] as const
+
+export const INTERACTION_CONDITION_TYPES = [
+  'presentation.in',
+  'scene.in',
+] as const
+
+export const INTERACTION_ACTION_TYPES = [
+  'presentation.set',
+  'scene.go',
+  'scene.next',
+  'scene.previous',
+  'scene.replay',
+  'course.restart',
+  'audio.play',
+  'audio.pause',
+  'audio.resume',
+  'audio.stop',
+  'audio.toggle-mute',
+  'video.play',
+  'video.pause',
+  'video.restart',
+  'video.stop',
+  'video.toggle',
+  'video.seek',
+  'node.enter',
+  'node.exit',
+] as const
+
 export type AudioChannel = 'music' | 'narration' | 'sfx' | 'ui'
 
-/** Project V6 trigger family retained exclusively for migration/parsing. */
-export type InteractionTriggerV6 =
+export type InteractionTrigger =
   | { type: 'node.click'; nodeId: string }
   | { type: 'scene.enter' }
   | { type: 'presentation.enter'; stateId: string }
@@ -23,8 +66,6 @@ export type InteractionTriggerV6 =
   | { type: 'video.paused'; nodeId: string }
   | { type: 'video.ended'; nodeId: string }
   | { type: 'video.time'; nodeId: string; seconds: number }
-
-export type InteractionTrigger = InteractionTriggerV6
   | { type: 'node.activated'; nodeId: string }
   | { type: 'animation.completed'; actionId: string }
   | { type: 'presenter.command'; command: 'next' | 'previous' }
@@ -39,6 +80,21 @@ export type InteractionCondition =
       type: 'scene.in'
       sceneIds: string[]
     }
+
+type AssertExactly<Left, Right> =
+  [Exclude<Left, Right>, Exclude<Right, Left>] extends [never, never]
+    ? true
+    : never
+
+const triggerTypesMatchContract: AssertExactly<
+  InteractionTrigger['type'],
+  (typeof INTERACTION_TRIGGER_TYPES)[number]
+> = true
+
+const conditionTypesMatchContract: AssertExactly<
+  InteractionCondition['type'],
+  (typeof INTERACTION_CONDITION_TYPES)[number]
+> = true
 
 export type AudioActionTarget =
   | { kind: 'sound'; soundId: string }
@@ -134,11 +190,17 @@ export type InteractionActionPayload =
   | VideoInteractionAction
   | NodeMotionAction
 
-/** Compatibility name: in V7 an InteractionAction is the step payload. */
+/** Action payload carried by a Project V8 interaction step. */
 export type InteractionAction = InteractionActionPayload
 
-/** Project V6 had raw payload arrays and did not contain node motion actions. */
-export type InteractionActionV6 = Exclude<InteractionActionPayload, NodeMotionAction>
+const actionTypesMatchContract: AssertExactly<
+  InteractionActionPayload['type'],
+  (typeof INTERACTION_ACTION_TYPES)[number]
+> = true
+
+void triggerTypesMatchContract
+void conditionTypesMatchContract
+void actionTypesMatchContract
 
 export interface InteractionActionStep {
   /** Stable within one scene/global interaction scope; completion triggers reference it. */
@@ -147,15 +209,6 @@ export interface InteractionActionStep {
   /** Relative to the triggering event or previous completed action group. */
   delayMs: number
   action: InteractionActionPayload
-}
-
-export interface InteractionRuleV6 {
-  id: string
-  name?: string
-  enabled: boolean
-  trigger: InteractionTriggerV6
-  conditions: InteractionCondition[]
-  actions: InteractionActionV6[]
 }
 
 export interface InteractionRule {

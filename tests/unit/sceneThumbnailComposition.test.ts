@@ -17,10 +17,10 @@ function runtime(
   enabled = true,
 ): RuntimeDocument {
   return {
-    runtimeApiVersion: 1,
+    runtimeApiVersion: 2,
     enabled,
     renderMode: 'hybrid',
-    source: 'CoursewareRuntime.define({runtimeApiVersion:1,create(){return{destroy(){}}}})',
+    source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
     content: { values: {} },
     assets: {},
     ...(assetId

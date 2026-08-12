@@ -102,6 +102,10 @@ export function applySceneNodeOverride(
   delete sanitized.type
   if (baseNode.type === 'external-component') delete sanitized.component
   const merged = mergeValue(baseNode, sanitized) as SceneNode
+  if (baseNode.type === 'formula' && Object.hasOwn(sanitized, 'ast')) {
+    const formula = merged as Extract<SceneNode, { type: 'formula' }>
+    formula.ast = structuredClone(sanitized.ast) as typeof formula.ast
+  }
   merged.id = baseNode.id
   merged.type = baseNode.type
   return merged

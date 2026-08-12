@@ -119,7 +119,6 @@ export async function openPreviewWindow(
   window.once('ready-to-show', () => {
     if (window.isDestroyed()) return
     if (showApplicationWindows) window.show()
-    else window.showInactive()
   })
   window.on('closed', () => {
     previewWindows.delete(window)

@@ -1,30 +1,29 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
-import type {
-  ComponentManifestV2,
-  ComponentManifestV3,
-} from '@/shared/componentTypes'
+import type { ComponentManifestV4 } from '@/shared/componentTypes'
 import type { AssetMeta, ExternalComponentNode } from '@/shared/projectTypes'
 import { ComponentPropertiesEditor } from '@/renderer/ui/ComponentPropertiesEditor'
-import { ElementsTab } from '@/renderer/ui/ElementsTab'
+import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import {
   selectActiveScene,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
-const manifest: ComponentManifestV2 = {
-  schemaVersion: 2,
-  runtimeApiVersion: 2,
+const manifest: ComponentManifestV4 = {
+  schemaVersion: 4,
+  runtimeApiVersion: 4,
   id: 'com.example.editor',
   name: '属性组件',
-  version: '2.0.0',
+  version: '4.0.0',
   entry: 'runtime.js',
   defaultSize: { width: 400, height: 240 },
   minSize: { width: 100, height: 80 },
   preserveAspectRatio: false,
   assets: {},
   defaultProps: {},
+  supportedScopes: ['scene', 'global'],
+  renderMode: 'phaser',
   editor: {
     properties: [
       { key: 'title', label: '标题', type: 'text' },
@@ -91,13 +90,14 @@ const baseNode: ExternalComponentNode = {
   },
 }
 
-const v3Manifest: ComponentManifestV3 = {
-  schemaVersion: 3,
-  runtimeApiVersion: 3,
+const nestedManifest: ComponentManifestV4 = {
+  schemaVersion: 4,
+  runtimeApiVersion: 4,
   supportedScopes: ['scene', 'global'],
-  id: 'com.example.editor-v3',
-  name: 'V3 属性组件',
-  version: '3.0.0',
+  renderMode: 'dom',
+  id: 'com.example.editor-nested',
+  name: '嵌套内容属性组件',
+  version: '4.0.0',
   entry: 'runtime.js',
   defaultSize: { width: 400, height: 240 },
   minSize: { width: 100, height: 80 },
@@ -129,11 +129,11 @@ const v3Manifest: ComponentManifestV3 = {
   }],
 }
 
-const v3Node: ExternalComponentNode = {
+const nestedNode: ExternalComponentNode = {
   ...baseNode,
-  id: 'component-v3',
-  name: v3Manifest.name,
-  component: { packageId: v3Manifest.id, version: v3Manifest.version },
+  id: 'component-nested',
+  name: nestedManifest.name,
+  component: { packageId: nestedManifest.id, version: nestedManifest.version },
   props: { content: { title: '实例标题' } },
 }
 
@@ -152,17 +152,17 @@ function Harness() {
   )
 }
 
-function V3Harness() {
-  const [node, setNode] = useState(v3Node)
+function NestedContentHarness() {
+  const [node, setNode] = useState(nestedNode)
   return (
     <>
       <ComponentPropertiesEditor
-        manifest={v3Manifest}
+        manifest={nestedManifest}
         node={node}
         assets={{}}
         onChange={(props) => setNode((current) => ({ ...current, props }))}
       />
-      <output data-testid="v3-props-value">{JSON.stringify(node.props)}</output>
+      <output data-testid="nested-props-value">{JSON.stringify(node.props)}</output>
     </>
   )
 }
@@ -211,15 +211,15 @@ describe('ComponentPropertiesEditor', () => {
     expect(screen.getByTestId('props-value').textContent).toContain('"title":"预设标题"')
   })
 
-  it('auto-renders and persists every nested V3 content string with explicit overrides', () => {
-    render(<V3Harness />)
+  it('auto-renders and persists every nested content string with explicit overrides', () => {
+    render(<NestedContentHarness />)
 
     const editor = screen.getByTestId('component-properties-editor')
     const textControls = within(editor).getAllByRole('textbox')
     expect(textControls.map((control) => control.getAttribute('id'))).toEqual([
-      'component-prop-component-v3-content-actions-start',
-      'component-prop-component-v3-content-title',
-      'component-prop-component-v3-content-details-hint',
+      'component-prop-component-nested-content-actions-start',
+      'component-prop-component-nested-content-title',
+      'component-prop-component-nested-content-details-hint',
     ])
     expect(screen.getAllByLabelText('主标题')).toHaveLength(1)
     expect(screen.getByLabelText('主标题')).toHaveValue('实例标题')
@@ -231,7 +231,7 @@ describe('ComponentPropertiesEditor', () => {
     fireEvent.change(screen.getByRole('textbox', { name: /开始按钮/ }), {
       target: { value: '立即开始' },
     })
-    expect(screen.getByTestId('v3-props-value').textContent).toContain(
+    expect(screen.getByTestId('nested-props-value').textContent).toContain(
       '"actions":{"start":"立即开始"}',
     )
     expect(screen.getByLabelText('主标题')).toHaveValue('实例标题')
@@ -239,23 +239,21 @@ describe('ComponentPropertiesEditor', () => {
   })
 })
 
-describe('ElementsTab component presets', () => {
+describe('ComponentsTab component presets', () => {
   it('shows presets as independent add choices and applies their props', () => {
     useEditorStore.getState().createNewProject()
     useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().importComponentPackage({
       manifest,
-      runtimeSource: 'window.CoursewareComponent.define({})',
+      runtimeSource: 'window.CoursewareComponent.define({id:"com.example.editor",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})',
       files: {},
     })
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
-      render(<ElementsTab onAddImage={() => undefined} />)
-      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
-      fireEvent.click(
-        screen.getByTestId(`component-${manifest.id}-preset-ready`),
-      )
+      const historyLengthBeforeInsert = useEditorStore.getState().history.past.length
+      render(<ComponentsTab />)
+      fireEvent.click(within(screen.getByLabelText('属性组件预设')).getByRole('button', { name: '即用' }))
 
       const node = selectActiveScene(useEditorStore.getState()).nodes[0]
       expect(node).toMatchObject({
@@ -263,7 +261,7 @@ describe('ElementsTab component presets', () => {
         name: '属性组件 · 即用',
         props: { title: '预设标题' },
       })
-      expect(useEditorStore.getState().history.past).toHaveLength(1)
+      expect(useEditorStore.getState().history.past).toHaveLength(historyLengthBeforeInsert + 1)
       useEditorStore.getState().undo()
       expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
     } finally {
@@ -271,27 +269,24 @@ describe('ElementsTab component presets', () => {
     }
   })
 
-  it('keeps V3 presets available for scene component instances', () => {
+  it('keeps nested-content presets available for scene component instances', () => {
     useEditorStore.getState().createNewProject()
     useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().importComponentPackage({
-      manifest: v3Manifest,
-      runtimeSource: 'window.CoursewareComponent.define({})',
+      manifest: nestedManifest,
+      runtimeSource: 'window.CoursewareComponent.define({id:"com.example.editor-nested",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})',
       files: {},
     })
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
-      render(<ElementsTab onAddImage={() => undefined} />)
-      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
-      fireEvent.click(
-        screen.getByTestId(`component-${v3Manifest.id}-preset-ready`),
-      )
+      render(<ComponentsTab />)
+      fireEvent.click(within(screen.getByLabelText('嵌套内容属性组件预设')).getByRole('button', { name: '即用' }))
 
       const node = selectActiveScene(useEditorStore.getState()).nodes[0]
       expect(node).toMatchObject({
         type: 'external-component',
-        name: 'V3 属性组件 · 即用',
+        name: '嵌套内容属性组件 · 即用',
         props: {
           content: {
             title: '预设标题',

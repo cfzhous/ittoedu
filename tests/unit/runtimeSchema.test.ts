@@ -7,11 +7,11 @@ import type { RuntimeDocument } from '@/shared/runtimeTypes'
 
 function validRuntime(): RuntimeDocument {
   return {
-    runtimeApiVersion: 1,
+    runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'hybrid',
     source: `CoursewareRuntime.define({
-      runtimeApiVersion: 1,
+      runtimeApiVersion: 2,
       create() { return { destroy() {} } }
     })`,
     content: {
@@ -41,15 +41,15 @@ describe('runtimeDocumentSchema', () => {
     expect(runtimeDocumentSchema.parse(runtime)).toEqual(runtime)
   })
 
-  it('接受 API 2，并拒绝空源码、未来 API 版本和未知渲染模式', () => {
+  it('只接受 API 2，并拒绝旧版、未来版本、空源码和未知渲染模式', () => {
     expect(runtimeDocumentSchema.safeParse({
       ...validRuntime(),
       source: '  \n ',
     }).success).toBe(false)
     expect(runtimeDocumentSchema.safeParse({
       ...validRuntime(),
-      runtimeApiVersion: 2,
-    }).success).toBe(true)
+      runtimeApiVersion: 1,
+    }).success).toBe(false)
     expect(runtimeDocumentSchema.safeParse({
       ...validRuntime(),
       runtimeApiVersion: 3,

@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import type { RuntimeDocument } from './runtimeTypes'
+import { RUNTIME_API_VERSION } from './constants'
+import {
+  RUNTIME_RENDER_MODES,
+  type RuntimeDocument,
+} from './runtimeTypes'
 
 export const MAX_RUNTIME_SOURCE_BYTES = 2 * 1024 * 1024
 export const MAX_RUNTIME_CONTENT_ENTRIES = 10_000
@@ -90,7 +94,7 @@ const runtimeSourceSchema = z
 
 const runtimeDocumentBaseShape = {
   enabled: z.boolean(),
-  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
+  renderMode: z.enum(RUNTIME_RENDER_MODES),
   source: runtimeSourceSchema,
   content: editableTextContentSchema,
   assets: z.record(safeRecordKeySchema, runtimeAssetBindingSchema),
@@ -118,17 +122,7 @@ function validateRuntimeLimits(
   }
 }
 
-export const runtimeDocumentV1Schema = z.object({
-  runtimeApiVersion: z.literal(1),
+export const runtimeDocumentSchema = z.object({
+  runtimeApiVersion: z.literal(RUNTIME_API_VERSION),
   ...runtimeDocumentBaseShape,
-}).strict().superRefine(validateRuntimeLimits)
-
-export const runtimeDocumentV2Schema = z.object({
-  runtimeApiVersion: z.literal(2),
-  ...runtimeDocumentBaseShape,
-}).strict().superRefine(validateRuntimeLimits)
-
-export const runtimeDocumentSchema = z.discriminatedUnion('runtimeApiVersion', [
-  runtimeDocumentV1Schema,
-  runtimeDocumentV2Schema,
-]) satisfies z.ZodType<RuntimeDocument>
+}).strict().superRefine(validateRuntimeLimits) satisfies z.ZodType<RuntimeDocument>

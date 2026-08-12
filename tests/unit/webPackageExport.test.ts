@@ -23,8 +23,8 @@ const assetId = '../../asset:hero'
 const componentKey = '../../component:key'
 
 const componentManifest: ComponentManifest = {
-  schemaVersion: 1,
-  runtimeApiVersion: 1,
+  schemaVersion: 4,
+  runtimeApiVersion: 4,
   id: '../com.example/unsafe',
   name: '离线组件',
   version: '1.0.0',
@@ -39,6 +39,8 @@ const componentManifest: ComponentManifest = {
   defaultProps: {
     label: '本地互动',
   },
+  supportedScopes: ['scene'],
+  renderMode: 'phaser',
 }
 
 const motionWebNode = createShapeNode('rectangle', {
@@ -117,7 +119,7 @@ const project: ProjectDocument = {
 
 const imageBytes = new Uint8Array(512 * 1024).map((_, index) => index % 251)
 const runtimeSource =
-  "window.CoursewareComponent.define({id:'../com.example/unsafe',runtimeApiVersion:1,create(){return{destroy(){}}}})"
+  "window.CoursewareComponent.define({id:'../com.example/unsafe',runtimeApiVersion:4,create(){return{destroy(){}}}})"
 
 function makePayload(): ExportPayload {
   return {

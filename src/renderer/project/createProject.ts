@@ -7,6 +7,8 @@ import {
 import { isStrokeOnlyShapeType } from '@/shared/projectTypes'
 import type {
   ExternalComponentNode,
+  FormulaAstNode,
+  FormulaNode,
   ImageNode,
   ProjectDocument,
   ShapeNode,
@@ -42,6 +44,12 @@ export interface CreateSceneOptions {
 type TextNodeOptions = Partial<Omit<TextNode, 'id' | 'type' | 'style'>> & {
   id?: string
   style?: Partial<TextNode['style']>
+  idFactory?: IdFactory
+}
+
+type FormulaNodeOptions = Partial<Omit<FormulaNode, 'id' | 'type' | 'style'>> & {
+  id?: string
+  style?: Partial<FormulaNode['style']>
   idFactory?: IdFactory
 }
 
@@ -133,6 +141,18 @@ export function createProject(options: CreateProjectOptions = {}): ProjectDocume
         }]
       : [],
     globalInteractions: [],
+    designTokens: {
+      fonts: [{
+        id: 'body',
+        label: '正文',
+        fontFamily: DEFAULT_FONT_FAMILY,
+      }],
+      colors: [
+        { id: 'background', label: '背景', color: '#ffffff' },
+        { id: 'text', label: '正文', color: '#1f2937' },
+        { id: 'accent', label: '强调', color: '#2563eb' },
+      ],
+    },
     media: {
       audio: {
         defaultMuted: false,
@@ -200,6 +220,7 @@ export function createTextNode(
       italic: options.style?.italic ?? false,
       underline: options.style?.underline ?? false,
       strike: options.style?.strike ?? false,
+      emphasis: options.style?.emphasis ?? false,
       highlightColor: options.style?.highlightColor ?? null,
       align: options.style?.align ?? 'left',
       verticalAlign: options.style?.verticalAlign ?? 'top',
@@ -211,6 +232,62 @@ export function createTextNode(
       backgroundColor: options.style?.backgroundColor ?? '#ffffff',
       backgroundOpacity: options.style?.backgroundOpacity ?? 0,
       cornerRadius: options.style?.cornerRadius ?? 0,
+    },
+  }
+}
+
+export function createDefaultFormulaAst(): FormulaAstNode {
+  return {
+    type: 'row',
+    children: [
+      {
+        type: 'script',
+        base: { type: 'token', value: 'x' },
+        superscript: { type: 'token', value: '2' },
+      },
+      { type: 'operator', value: '+' },
+      {
+        type: 'fraction',
+        numerator: { type: 'token', value: '1' },
+        denominator: { type: 'token', value: '2' },
+      },
+    ],
+  }
+}
+
+export function createFormulaNode(options?: FormulaNodeOptions): FormulaNode
+export function createFormulaNode(x?: number, y?: number): FormulaNode
+export function createFormulaNode(
+  optionsOrX?: FormulaNodeOptions | number,
+  legacyY?: number,
+): FormulaNode {
+  const options: FormulaNodeOptions = typeof optionsOrX === 'number'
+    ? { x: optionsOrX, y: legacyY }
+    : (optionsOrX ?? (legacyY === undefined ? {} : { y: legacyY }))
+  const idFactory = options.idFactory ?? nanoid
+  const width = options.width ?? 420
+  const height = options.height ?? 160
+  const nodeId = nextId('formula', options.id, idFactory)
+  return {
+    id: nodeId,
+    name: options.name ?? '公式',
+    type: 'formula',
+    x: options.x ?? (CANVAS_WIDTH - width) / 2,
+    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    width,
+    height,
+    rotation: options.rotation ?? 0,
+    opacity: options.opacity ?? 1,
+    visible: options.visible ?? true,
+    locked: options.locked ?? false,
+    playbackInitialVisibility: options.playbackInitialVisibility ?? 'inherit',
+    formulaId: options.formulaId ?? `formula:${nodeId}`,
+    accessibleText: options.accessibleText ?? 'x 的平方加二分之一',
+    ast: structuredClone(options.ast ?? createDefaultFormulaAst()),
+    style: {
+      fontSize: options.style?.fontSize ?? 48,
+      color: options.style?.color ?? '#1f2937',
+      align: options.style?.align ?? 'center',
     },
   }
 }
@@ -278,6 +355,7 @@ export function createImageNode(
     flipY: options.flipY ?? false,
     cornerRadius: options.cornerRadius ?? 0,
     feather: options.feather ?? { amount: 0, mode: 'rectangle' },
+    safeAreas: structuredClone(options.safeAreas ?? []),
   }
 }
 

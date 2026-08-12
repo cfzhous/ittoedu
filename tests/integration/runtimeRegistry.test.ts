@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeRegistry } from '@/player/RuntimeRegistry'
 import type {
-  RuntimeCreateContextV1,
+  RuntimeCreateContext,
   RuntimeInstanceLifecycle,
 } from '@/shared/runtimeTypes'
 
@@ -10,11 +10,11 @@ describe('RuntimeRegistry', () => {
     delete window.CoursewareRuntime
   })
 
-  it('执行离线普通 JavaScript，并通过裸全局 API 同步注册 API 1 定义', () => {
+  it('执行离线普通 JavaScript，并通过裸全局 API 同步注册 API 2 定义', () => {
     const registry = new RuntimeRegistry()
     const definition = registry.executeRuntime(`
       CoursewareRuntime.define({
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         create() {
           return {
             destroyed: false,
@@ -24,9 +24,8 @@ describe('RuntimeRegistry', () => {
       })
     `, '场景 1')
 
-    expect(definition.runtimeApiVersion).toBe(1)
-    if (definition.runtimeApiVersion !== 1) throw new Error('期望 API 1 定义')
-    const lifecycle = definition.create({} as RuntimeCreateContextV1) as
+    expect(definition.runtimeApiVersion).toBe(2)
+    const lifecycle = definition.create({} as RuntimeCreateContext) as
       RuntimeInstanceLifecycle & { destroyed: boolean }
     expect(lifecycle.destroyed).toBe(false)
     lifecycle.destroy()
@@ -38,7 +37,7 @@ describe('RuntimeRegistry', () => {
     const registry = new RuntimeRegistry()
     const definition = registry.executeRuntime(`
       window.CoursewareRuntime.define({
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         create() { return { destroy() {} } }
       })
     `)
@@ -49,7 +48,7 @@ describe('RuntimeRegistry', () => {
   it('拒绝重复 define、未调用 define 和空 define', () => {
     const registry = new RuntimeRegistry()
     const validDefinition = `{
-      runtimeApiVersion: 1,
+      runtimeApiVersion: 2,
       create() { return { destroy() {} } }
     }`
 
@@ -66,7 +65,7 @@ describe('RuntimeRegistry', () => {
     registry.dispose()
   })
 
-  it('支持 API 2，并校验文档与源码声明的 API 版本一致', () => {
+  it('只支持 API 2，并明确拒绝旧运行时定义', () => {
     const registry = new RuntimeRegistry()
     const definition = registry.executeRuntime(`
       CoursewareRuntime.define({
@@ -81,7 +80,7 @@ describe('RuntimeRegistry', () => {
         runtimeApiVersion: 1,
         create() { return { destroy() {} } }
       })
-    `, '版本不匹配', 2)).toThrow('文档为 2，源码为 1')
+    `, '旧版运行时', 2)).toThrow('只支持 runtimeApiVersion 2')
     registry.dispose()
   })
 
@@ -110,9 +109,9 @@ describe('RuntimeRegistry', () => {
     const registry = new RuntimeRegistry()
     expect(() => registry.executeRuntime(`
       CoursewareRuntime.define({ runtimeApiVersion: 3, create() {} })
-    `, '未来版本')).toThrow('runtimeApiVersion 1/2')
+    `, '未来版本')).toThrow('只支持 runtimeApiVersion 2')
     expect(() => registry.executeRuntime(`
-      CoursewareRuntime.define({ runtimeApiVersion: 1 })
+      CoursewareRuntime.define({ runtimeApiVersion: 2 })
     `, '缺少创建器')).toThrow('create()')
     expect(() => registry.executeRuntime(`throw new Error('boom')`, '异常源码'))
       .toThrow('boom')
@@ -137,7 +136,7 @@ describe('RuntimeRegistry', () => {
       // import value from './dep.js'
       const help = 'do not call require("x") or export default'
       CoursewareRuntime.define({
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         create() { return { destroy() {}, help } }
       })
     `)).not.toThrow()
@@ -149,7 +148,7 @@ describe('RuntimeRegistry', () => {
     expect(() => registry.executeRuntime(`
       const moduleWord = /require\\s*\\(|import\\s*\\(/
       CoursewareRuntime.define({
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         create() { return { destroy() {}, moduleWord } }
       })
     `)).not.toThrow()

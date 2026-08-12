@@ -119,6 +119,30 @@ describe('basic text property semantics', () => {
     expect(screen.getByText(/高度可直接输入或拖动画布上下边缘调整/))
       .toBeInTheDocument()
   })
+
+  it('toggles node-level emphasis through the normal undoable property command', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
+    store.updateNode(nodeId, { style: { overflow: 'fixed' } })
+    const historyBefore = useEditorStore.getState().history.past.length
+
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const emphasis = screen.getByRole('checkbox', { name: '文字着重号' })
+    expect(emphasis).not.toBeChecked()
+    fireEvent.click(emphasis)
+
+    expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
+      type: 'text',
+      style: { emphasis: true },
+    })
+    expect(useEditorStore.getState().history.past).toHaveLength(historyBefore + 1)
+    useEditorStore.getState().undo()
+    expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
+      type: 'text',
+      style: { emphasis: false },
+    })
+  })
 })
 
 describe('event-driven motion authoring entry point', () => {
@@ -152,12 +176,16 @@ describe('elements panel', () => {
       () => null as never,
     )
 
+    const onImportImage = vi.fn()
+    const onImportAudio = vi.fn()
+    const onImportVideo = vi.fn()
     render(
       <ElementsTab
         onAddImage={() => undefined}
         onAddVideo={() => undefined}
-        onImportAudio={() => undefined}
-        onImportVideo={() => undefined}
+        onImportImage={onImportImage}
+        onImportAudio={onImportAudio}
+        onImportVideo={onImportVideo}
       />,
     )
 
@@ -188,10 +216,12 @@ describe('elements panel', () => {
     expect(screen.queryByTestId('add-image')).not.toBeInTheDocument()
     expect(screen.queryByTestId('add-video')).not.toBeInTheDocument()
     expect(screen.queryByTestId('import-audio')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '导入声音' }))
-      .not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '导入视频' }))
-      .not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '导入图片' }))
+    fireEvent.click(screen.getByRole('button', { name: '导入声音' }))
+    fireEvent.click(screen.getByRole('button', { name: '导入视频' }))
+    expect(onImportImage).toHaveBeenCalledTimes(1)
+    expect(onImportAudio).toHaveBeenCalledTimes(1)
+    expect(onImportVideo).toHaveBeenCalledTimes(1)
     expect(screen.getByText('声音库')).toBeInTheDocument()
     expect(screen.getByText('视频素材')).toBeInTheDocument()
     expect(screen.getByText('图片素材')).toBeInTheDocument()
@@ -259,6 +289,7 @@ describe('rich text editing UI', () => {
         italic: true,
         underline: true,
         strike: true,
+        emphasis: true,
         highlightColor: '#fff3a3',
       },
       runs: [{
@@ -269,6 +300,7 @@ describe('rich text editing UI', () => {
           italic: false,
           underline: false,
           strike: false,
+          emphasis: false,
           highlightColor: null,
         },
       }],
@@ -278,7 +310,64 @@ describe('rich text editing UI', () => {
     expect(html).toContain('font-weight:400')
     expect(html).toContain('font-style:normal')
     expect(html).toContain('text-decoration-line:none')
+    expect(html).toContain('text-emphasis-style:none')
     expect(html).toContain('background-color:transparent')
+  })
+
+  it('keeps the exact rich-text selection while the emphasis toolbar button is pressed', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    const workspace = document.createElement('div')
+    const canvas = document.createElement('canvas')
+    workspace.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 720,
+      width: 1280, height: 720, toJSON: () => ({}),
+    })
+    canvas.getBoundingClientRect = workspace.getBoundingClientRect
+    const onPreview = vi.fn()
+    const onCommit = vi.fn()
+    render(
+      <TextEditOverlay
+        node={createTextNode({ text: '春风唤醒江南的大地', style: { overflow: 'fixed' } })}
+        workspace={workspace}
+        canvas={canvas}
+        onPreview={onPreview}
+        onCommit={onCommit}
+        onCancel={() => undefined}
+      />,
+    )
+    const editor = screen.getByTestId('text-edit-overlay')
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+    const text = editor.firstChild
+    if (!text) throw new Error('Expected editable text')
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 4)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    expect(selection?.toString()).toBe('春风唤醒')
+
+    const emphasisButton = screen.getByRole('button', { name: '局部着重号' })
+    fireEvent.pointerDown(emphasisButton)
+    const churnedRange = document.createRange()
+    churnedRange.selectNodeContents(editor)
+    selection?.removeAllRanges()
+    selection?.addRange(churnedRange)
+    fireEvent.mouseDown(emphasisButton)
+    fireEvent.click(emphasisButton)
+
+    expect(onPreview).toHaveBeenLastCalledWith('春风唤醒江南的大地', [
+      { start: 0, end: 4, style: { emphasis: true } },
+    ])
+    expect(selection?.toString()).toBe('春风唤醒')
+
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+    expect(onCommit).toHaveBeenCalledWith('春风唤醒江南的大地', [
+      { start: 0, end: 4, style: { emphasis: true } },
+    ])
   })
 
   it('does not rewrite an in-progress contentEditable value when the node resizes', () => {

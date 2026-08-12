@@ -3,30 +3,35 @@
 
   window.CoursewareComponent.define({
     id: 'com.example.sample-counter',
-    runtimeApiVersion: 2,
+    runtimeApiVersion: 4,
 
     create: function (ctx) {
+      if (ctx.renderMode !== 'phaser') {
+        throw new Error('示例计数器需要 Component API 4 Phaser 渲染面')
+      }
+      var scene = ctx.phaser.scene
+      var root = ctx.phaser.root
       var mode = ctx.mode
       var value = normaliseValue(ctx.props.initialValue)
       var currentWidth = ctx.width
       var currentHeight = ctx.height
 
-      var shadow = ctx.scene.add
+      var shadow = scene.add
         .rectangle(6, 8, currentWidth - 12, currentHeight - 12, 0x0f172a, 0.16)
         .setOrigin(0)
         .setRounded(18)
 
-      var background = ctx.scene.add
+      var background = scene.add
         .rectangle(0, 0, currentWidth - 12, currentHeight - 12, 0xf8fafc)
         .setOrigin(0)
         .setRounded(18)
         .setStrokeStyle(2, 0xcbd5e1)
 
-      var accent = ctx.scene.add
+      var accent = scene.add
         .rectangle(0, 0, 10, currentHeight - 12, 0x2563eb)
         .setOrigin(0)
 
-      var title = ctx.scene.add
+      var title = scene.add
         .text(30, 22, normaliseText(ctx.props.title, '课堂计数器'), {
           fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
           fontSize: '24px',
@@ -35,7 +40,7 @@
         })
         .setOrigin(0)
 
-      var hint = ctx.scene.add
+      var hint = scene.add
         .text(30, 58, normaliseText(ctx.props.hint, '点击按钮改变数值'), {
           fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
           fontSize: '15px',
@@ -64,7 +69,7 @@
           })
         : function () {}
 
-      var valueText = ctx.scene.add
+      var valueText = scene.add
         .text(currentWidth / 2, currentHeight / 2 - 6, String(value), {
           fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
           fontSize: '66px',
@@ -73,9 +78,9 @@
         })
         .setOrigin(0.5)
 
-      var minusButton = makeButton(ctx, 0xef4444, '−')
-      var resetButton = makeButton(ctx, 0x475569, '归零')
-      var plusButton = makeButton(ctx, 0x2563eb, '+')
+      var minusButton = makeButton(scene, 0xef4444, '−')
+      var resetButton = makeButton(scene, 0x475569, '归零')
+      var plusButton = makeButton(scene, 0x2563eb, '+')
 
       function normaliseValue(input) {
         var number = Number(input)
@@ -116,7 +121,7 @@
       resetButton.background.on('pointerdown', resetValue)
       plusButton.background.on('pointerdown', onPlus)
 
-      ctx.root.add([
+      root.add([
         shadow,
         background,
         accent,
@@ -194,14 +199,14 @@
     }
   })
 
-  function makeButton(ctx, colour, text) {
-    var background = ctx.scene.add
+  function makeButton(scene, colour, text) {
+    var background = scene.add
       .rectangle(0, 0, 96, 42, colour)
       .setOrigin(0.5)
       .setRounded(10)
       .setInteractive({ useHandCursor: true })
 
-    var label = ctx.scene.add
+    var label = scene.add
       .text(0, 0, text, {
         fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
         fontSize: text.length > 1 ? '16px' : '28px',

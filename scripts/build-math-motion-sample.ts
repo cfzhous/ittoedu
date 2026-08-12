@@ -740,7 +740,7 @@ async function main(): Promise<void> {
   console.log(`离线预览：${standaloneHtmlPath}`)
   console.log(`证据清单：${evidenceManifestPath}`)
   console.log(`工程检查：errors=${health.error}, warnings=${health.warning}, info=${health.info}`)
-  console.log('结果状态：pending（自动构建不写入人工签署；门禁记录见 design-qa.md）')
+  console.log('生成物状态：pending（脚本不改写人工结论）；当前课例最终结果为 rejected，见 docs/courseware-pilots/math-motion/ORCHESTRATION_RECORD.md')
 }
 
 main().catch((error: unknown) => {

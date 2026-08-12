@@ -5,13 +5,12 @@ import { PlayerApp } from '../../player/PlayerApp'
 import {
   capturePlayerStage,
   createHiddenPlayerRoot,
-  playerSupportsRuntimeCapture,
   settleCaptureFrames,
   sizeHiddenPlayerStage,
   waitForPlayerCaptureReady,
   waitForPlayerScene,
 } from './playerCapture'
-import { runtimeSnapshotKey } from './v3ExportSupport'
+import { runtimeSnapshotKey } from './exportPayloadSupport'
 
 export interface PptxRuntimeSnapshotFailure {
   /** Runtime-level key used when prepare/create/navigation fails. */
@@ -50,8 +49,8 @@ function isolatedPayload(
         ...component,
         // Keep an authentic external-component node/root for runtime bindings,
         // but never execute the authored component while isolating a runtime
-        // snapshot. The no-op definition deliberately matches every legacy/V4
-        // manifest version and renderMode.
+        // snapshot. The no-op definition preserves the current V4 identity
+        // and renderMode while avoiding authored side effects.
         runtimeSource: `CoursewareComponent.define({id:${JSON.stringify(
           component.manifest.id,
         )},runtimeApiVersion:${component.manifest.runtimeApiVersion},create:function(){return{destroy:function(){}}}});`,
@@ -205,9 +204,6 @@ async function captureScope(
         mode: 'capture',
       })
       sizeHiddenPlayerStage(root, width, height)
-      if (!playerSupportsRuntimeCapture(player)) {
-        throw new Error('Player Runtime 尚未提供静态捕获就绪接口')
-      }
     } catch (error) {
       reportAllEnabled(error)
       return snapshots

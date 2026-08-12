@@ -16,6 +16,10 @@ import {
 } from '@/shared/interactionTypes'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import {
+  analyzeProjectAssetReferences,
+  type ComponentAssetReferenceContext,
+} from '@/shared/assetReferences'
+import {
   assertSafeArchivePath,
   componentArchiveRoot,
   componentPackageKey,
@@ -210,7 +214,11 @@ function validateEmbeddedMetadata(
   }
 }
 
-function validateProjectReferences(project: ProjectDocument, opening: boolean): void {
+function validateProjectReferences(
+  project: ProjectDocument,
+  opening: boolean,
+  componentPackages?: Readonly<Record<string, ComponentAssetReferenceContext>>,
+): void {
   const fail = (message: string): never => {
     throw opening ? projectOpenError(message) : projectSaveError(message)
   }
@@ -218,6 +226,23 @@ function validateProjectReferences(project: ProjectDocument, opening: boolean): 
     Object.values(project.componentPackages).some(
       (meta) => meta.packageId === packageId && meta.version === version,
     )
+  const assetReferenceAnalysis = analyzeProjectAssetReferences(project, {
+    componentPackages,
+  })
+  for (const [assetId, references] of assetReferenceAnalysis.graph) {
+    if (hasOwn(project.assets, assetId)) continue
+    // Existing typed node/runtime validators below retain their precise,
+    // author-facing messages. The shared graph closes the component image
+    // property gap that cannot be validated without package context.
+    const direct = references.find((reference) => (
+      reference.certainty === 'direct' &&
+      (reference.kind === 'component-prop' ||
+        reference.kind === 'component-manifest-default')
+    ))
+    if (direct) {
+      fail(`工程位置“${direct.path.join('.')}”引用了不存在的素材“${assetId}”。`)
+    }
+  }
   const validateRuntime = (
     runtime: RuntimeDocument | undefined,
     owner: string,
@@ -537,7 +562,20 @@ function createProjectArchiveFiles(
   data: ProjectArchiveData,
 ): Record<string, Uint8Array> {
   const project = validateProjectForSave(data.project)
-  validateProjectReferences(project, false)
+  const componentReferenceContexts: Record<string, ComponentAssetReferenceContext> = {}
+  for (const [recordKey, meta] of Object.entries(project.componentPackages)) {
+    const files = getComponentFilesForMetadata(data.componentFiles, recordKey, meta)
+    if (!files) continue
+    const parsed = parseComponentPackageFiles(files, {
+      expectedId: meta.packageId,
+      expectedVersion: meta.version,
+    })
+    componentReferenceContexts[recordKey] = {
+      manifest: parsed.manifest,
+      runtimeSource: parsed.runtimeSource,
+    }
+  }
+  validateProjectReferences(project, false, componentReferenceContexts)
   const archiveFiles: Record<string, Uint8Array> = Object.create(null) as Record<
     string,
     Uint8Array
@@ -624,7 +662,6 @@ function parseProjectArchiveFiles(
     throw projectOpenError('工程包缺少根目录下的 project.json。')
   }
   const project = readProjectDocument(projectBytes)
-  validateProjectReferences(project, true)
 
   const assetFiles: Record<string, Uint8Array> = Object.create(null) as Record<
     string,
@@ -689,6 +726,21 @@ function parseProjectArchiveFiles(
       throw projectOpenError(`工程包包含未登记文件“${archivePath}”。`)
     }
   }
+
+  const componentReferenceContexts: Record<string, ComponentAssetReferenceContext> = {}
+  for (const [recordKey, meta] of Object.entries(project.componentPackages)) {
+    const files = getComponentFilesForMetadata(componentFiles, recordKey, meta)
+    if (!files) continue
+    const parsed = parseComponentPackageFiles(files, {
+      expectedId: meta.packageId,
+      expectedVersion: meta.version,
+    })
+    componentReferenceContexts[recordKey] = {
+      manifest: parsed.manifest,
+      runtimeSource: parsed.runtimeSource,
+    }
+  }
+  validateProjectReferences(project, true, componentReferenceContexts)
 
   return { project, assetFiles, componentFiles }
 }

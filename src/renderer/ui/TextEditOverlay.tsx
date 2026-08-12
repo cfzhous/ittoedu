@@ -1,6 +1,7 @@
 import { Bold, Eraser, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { TextNode, TextRun, TextRunStyle } from '../../shared/projectTypes'
+import { toggleTextRunEmphasis } from '../../shared/textRuns'
 
 interface TextEditOverlayProps {
   node: TextNode
@@ -48,6 +49,7 @@ export function buildInitialRichTextHtml(node: TextNode): string {
     const highlightColor = style.highlightColor === undefined
       ? node.style.highlightColor
       : style.highlightColor
+    const effectiveEmphasis = style.emphasis ?? node.style.emphasis
     const css = [
       style.color !== undefined ? `color:${style.color}` : '',
       style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
@@ -58,6 +60,14 @@ export function buildInitialRichTextHtml(node: TextNode): string {
       highlightColor === null && node.style.highlightColor
         ? 'background-color:transparent'
         : '',
+      style.emphasis !== undefined
+        ? `text-emphasis-style:${effectiveEmphasis ? 'filled circle' : 'none'}`
+        : '',
+      style.emphasis !== undefined
+        ? `-webkit-text-emphasis-style:${effectiveEmphasis ? 'filled circle' : 'none'}`
+        : '',
+      style.emphasis !== undefined ? 'text-emphasis-position:under right' : '',
+      style.emphasis !== undefined ? '-webkit-text-emphasis-position:under right' : '',
     ].filter(Boolean).join(';')
     return css ? `<span style="${css}">${escapeHtml(character)}</span>` : escapeHtml(character)
   }).join('')
@@ -100,12 +110,16 @@ function extractEditor(root: HTMLElement, node: TextNode): { text: string; runs:
       const authoredBackground = authoredBackgroundColor(parent, root)
       const background = authoredBackground ? rgbToHex(authoredBackground) : null
       const decoration = computed.textDecorationLine
+      const emphasisStyle = computed.getPropertyValue('text-emphasis-style') ||
+        computed.getPropertyValue('-webkit-text-emphasis-style')
+      const emphasis = emphasisStyle !== '' && emphasisStyle !== 'none'
       const style: TextRunStyle = {
         ...(color && color !== node.style.color.toLowerCase() ? { color } : {}),
         ...(Number.parseInt(computed.fontWeight, 10) >= 600 !== node.style.bold ? { bold: Number.parseInt(computed.fontWeight, 10) >= 600 } : {}),
         ...((computed.fontStyle === 'italic') !== node.style.italic ? { italic: computed.fontStyle === 'italic' } : {}),
         ...(decoration.includes('underline') !== node.style.underline ? { underline: decoration.includes('underline') } : {}),
         ...(decoration.includes('line-through') !== node.style.strike ? { strike: decoration.includes('line-through') } : {}),
+        ...(emphasis !== node.style.emphasis ? { emphasis } : {}),
         ...(authoredBackground && isTransparentColor(authoredBackground) && node.style.highlightColor
           ? { highlightColor: null }
           : background && background !== node.style.highlightColor
@@ -142,6 +156,105 @@ function extractEditor(root: HTMLElement, node: TextNode): { text: string; runs:
   return { text, runs }
 }
 
+function logicalText(root: Node): string {
+  const characters: string[] = []
+  const visit = (current: Node): void => {
+    if (current.nodeType === Node.TEXT_NODE) {
+      characters.push(...Array.from(current.textContent ?? ''))
+      return
+    }
+    if (current instanceof HTMLBRElement) {
+      characters.push('\n')
+      return
+    }
+    const block = current instanceof HTMLElement && ['DIV', 'P'].includes(current.tagName)
+    if (block && characters.length > 0 && characters.at(-1) !== '\n') {
+      characters.push('\n')
+    }
+    current.childNodes.forEach(visit)
+  }
+  root.childNodes.forEach(visit)
+  while (characters.at(-1) === '\n') characters.pop()
+  return characters.join('')
+}
+
+function logicalSelectionOffsets(
+  root: HTMLElement,
+): { start: number; end: number } | null {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+  const range = selection.getRangeAt(0)
+  if (
+    !(range.startContainer === root || root.contains(range.startContainer)) ||
+    !(range.endContainer === root || root.contains(range.endContainer))
+  ) {
+    return null
+  }
+  const offsetTo = (container: Node, offset: number): number => {
+    const prefix = document.createRange()
+    prefix.selectNodeContents(root)
+    prefix.setEnd(container, offset)
+    const holder = document.createElement('div')
+    holder.append(prefix.cloneContents())
+    return Array.from(logicalText(holder)).length
+  }
+  const start = offsetTo(range.startContainer, range.startOffset)
+  const end = offsetTo(range.endContainer, range.endOffset)
+  return start <= end ? { start, end } : { start: end, end: start }
+}
+
+interface DomPoint {
+  node: Node
+  offset: number
+}
+
+function domPointAtLogicalOffset(root: HTMLElement, target: number): DomPoint {
+  let remaining = Math.max(0, target)
+  const visit = (current: Node): DomPoint | null => {
+    if (current.nodeType === Node.TEXT_NODE) {
+      const values = Array.from(current.textContent ?? '')
+      if (remaining <= values.length) {
+        return {
+          node: current,
+          offset: values.slice(0, remaining).join('').length,
+        }
+      }
+      remaining -= values.length
+      return null
+    }
+    if (current instanceof HTMLBRElement) {
+      const parent = current.parentNode
+      if (!parent) return null
+      const index = Array.prototype.indexOf.call(parent.childNodes, current) as number
+      if (remaining === 0) return { node: parent, offset: index }
+      remaining -= 1
+      if (remaining === 0) return { node: parent, offset: index + 1 }
+      return null
+    }
+    for (const child of Array.from(current.childNodes)) {
+      const point = visit(child)
+      if (point) return point
+    }
+    return null
+  }
+  return visit(root) ?? { node: root, offset: root.childNodes.length }
+}
+
+function restoreLogicalSelection(
+  root: HTMLElement,
+  start: number,
+  end: number,
+): void {
+  const range = document.createRange()
+  const startPoint = domPointAtLogicalOffset(root, start)
+  const endPoint = domPointAtLogicalOffset(root, end)
+  range.setStart(startPoint.node, startPoint.offset)
+  range.setEnd(endPoint.node, endPoint.offset)
+  const selection = window.getSelection()
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+}
+
 export function TextEditOverlay({
   node,
   workspace,
@@ -161,6 +274,7 @@ export function TextEditOverlay({
   const blurReadyRef = useRef(false)
   const focusTimerRef = useRef<number | null>(null)
   const finishTimerRef = useRef<number | null>(null)
+  const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
   nodeRef.current = node
 
   const read = () => editorRef.current
@@ -287,11 +401,47 @@ export function TextEditOverlay({
   }, [])
 
   if (!metrics) return null
+  const captureToolbarSelection = () => {
+    if (toolbarSelectionRef.current) return
+    const editor = editorRef.current
+    if (!editor) return
+    toolbarSelectionRef.current = logicalSelectionOffsets(editor)
+  }
+  const takeToolbarSelection = (editor: HTMLElement) => {
+    const offsets = toolbarSelectionRef.current ?? logicalSelectionOffsets(editor)
+    toolbarSelectionRef.current = null
+    return offsets
+  }
   const command = (name: string, value?: string) => {
-    editorRef.current?.focus()
+    const editor = editorRef.current
+    if (!editor) return
+    const offsets = takeToolbarSelection(editor)
+    editor.focus({ preventScroll: true })
+    if (offsets) restoreLogicalSelection(editor, offsets.start, offsets.end)
     document.execCommand(name, false, value)
     const result = read()
     onPreview(result.text, result.runs)
+  }
+  const toggleSelectionEmphasis = () => {
+    const editor = editorRef.current
+    if (!editor) return
+    const offsets = takeToolbarSelection(editor)
+    if (!offsets || offsets.end <= offsets.start) return
+    const value = extractEditor(editor, nodeRef.current)
+    const runs = toggleTextRunEmphasis(
+      value.text,
+      value.runs,
+      offsets.start,
+      offsets.end,
+      nodeRef.current.style.emphasis,
+    )
+    editor.innerHTML = buildInitialRichTextHtml({
+      ...nodeRef.current,
+      text: value.text,
+      runs,
+    })
+    restoreLogicalSelection(editor, offsets.start, offsets.end)
+    onPreview(value.text, runs)
   }
 
   return (
@@ -299,7 +449,9 @@ export function TextEditOverlay({
       <div
         className="text-edit-toolbar"
         style={{ left: metrics.left, top: Math.max(4, metrics.top - 40) }}
+        onPointerDownCapture={captureToolbarSelection}
         onMouseDown={(event) => {
+          captureToolbarSelection()
           event.preventDefault()
           event.stopPropagation()
         }}
@@ -308,6 +460,7 @@ export function TextEditOverlay({
         <button type="button" title="局部斜体" aria-label="局部斜体" onClick={() => command('italic')}><Italic size={14} /></button>
         <button type="button" title="局部下划线" aria-label="局部下划线" onClick={() => command('underline')}><Underline size={14} /></button>
         <button type="button" title="局部删除线" aria-label="局部删除线" onClick={() => command('strikeThrough')}><Strikethrough size={14} /></button>
+        <button type="button" title="局部着重号" aria-label="局部着重号" onClick={toggleSelectionEmphasis}><span aria-hidden="true">•</span></button>
         <button type="button" title="局部高亮" aria-label="局部高亮" onClick={() => command('hiliteColor', '#fff3a3')}><Highlighter size={14} /></button>
         <button type="button" title="取消局部高亮" aria-label="取消局部高亮" onClick={() => command('hiliteColor', 'transparent')}><Highlighter size={14} opacity={0.45} /></button>
         <button type="button" title="清除局部格式" aria-label="清除局部格式" onClick={() => command('removeFormat')}><Eraser size={14} /></button>
@@ -339,6 +492,10 @@ export function TextEditOverlay({
           fontWeight: node.style.bold ? 700 : 400,
           fontStyle: node.style.italic ? 'italic' : 'normal',
           textDecoration: `${node.style.underline ? 'underline ' : ''}${node.style.strike ? 'line-through' : ''}`.trim(),
+          textEmphasisStyle: node.style.emphasis ? 'filled circle' : 'none',
+          textEmphasisPosition: 'under right',
+          WebkitTextEmphasisStyle: node.style.emphasis ? 'filled circle' : 'none',
+          WebkitTextEmphasisPosition: 'under right',
           lineHeight: `${metrics.lineHeight}px`,
           letterSpacing: node.style.letterSpacing * (metrics.width / node.width),
           color: node.style.color,

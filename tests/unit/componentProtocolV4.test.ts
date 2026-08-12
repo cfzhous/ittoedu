@@ -13,7 +13,6 @@ import {
 import type {
   ComponentCreateContextV4,
   ComponentDefinitionV4,
-  ComponentManifestV1,
   ComponentManifestV4,
 } from '@/shared/componentTypes'
 
@@ -53,20 +52,6 @@ const v4: ComponentManifestV4 = {
   }],
 }
 
-const v1: ComponentManifestV1 = {
-  schemaVersion: 1,
-  runtimeApiVersion: 1,
-  id: 'com.example.v1-legacy',
-  name: 'V1 组件',
-  version: '1.0.0',
-  entry: 'runtime.js',
-  defaultSize: { width: 320, height: 180 },
-  minSize: { width: 160, height: 90 },
-  preserveAspectRatio: true,
-  assets: {},
-  defaultProps: {},
-}
-
 describe('component protocol V4', () => {
   it('requires an explicit supported render mode and matching API version', () => {
     expect(componentManifestSchema.parse(v4)).toEqual(v4)
@@ -86,9 +71,16 @@ describe('component protocol V4', () => {
       ...v4,
       supportedScopes: [],
     }).success).toBe(false)
+    for (const legacyVersion of [1, 2, 3]) {
+      expect(componentManifestSchema.safeParse({
+        ...v4,
+        schemaVersion: legacyVersion,
+        runtimeApiVersion: legacyVersion,
+      }).success).toBe(false)
+    }
   })
 
-  it('inherits V3 recursive content merge and editor discovery semantics', () => {
+  it('recursively merges content and discovers editable fields', () => {
     expect(mergeComponentProps(v4, {
       content: { title: '实例标题' },
     })).toMatchObject({
@@ -123,12 +115,7 @@ describe('component protocol V4', () => {
       ])
   })
 
-  it('centralizes legacy and V4 capability semantics', () => {
-    expect(componentRenderMode(v1)).toBe('phaser')
-    expect(componentSupportsScope(v1, 'scene')).toBe(true)
-    expect(componentSupportsScope(v1, 'global')).toBe(false)
-    expect(componentUsesRecursiveContent(v1)).toBe(false)
-
+  it('reads capabilities directly from the current manifest', () => {
     expect(componentRenderMode(v4)).toBe('dom')
     expect(componentSupportsScope(v4, 'global')).toBe(true)
     expect(componentUsesRecursiveContent(v4)).toBe(true)

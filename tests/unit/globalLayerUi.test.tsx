@@ -3,23 +3,25 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { RuntimeDocument } from '@/shared/runtimeTypes'
+import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { useEditorStore } from '@/renderer/store/editorStore'
 
-function v3Package(
+function componentPackage(
   id: string,
   scopes: Array<'scene' | 'global'>,
 ): ComponentPackageData {
   return {
     manifest: {
-      schemaVersion: 3,
-      runtimeApiVersion: 3,
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
       supportedScopes: scopes,
+      renderMode: 'phaser',
       id,
       name: id.endsWith('global') ? '全局导航' : '场景组件',
-      version: '3.0.0',
+      version: '4.0.0',
       entry: 'runtime.js',
       defaultSize: { width: 600, height: 100 },
       minSize: { width: 200, height: 60 },
@@ -45,10 +47,10 @@ function v3Package(
 
 function runtime(label: string, value: string): RuntimeDocument {
   return {
-    runtimeApiVersion: 1,
+    runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'dom',
-    source: `CoursewareRuntime.define({create(){return{destroy(){}}}})/*${value}*/`,
+    source: `CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})/*${value}*/`,
     content: {
       values: {
         title: value,
@@ -86,9 +88,9 @@ describe('Project V8 global-layer editor UI', () => {
     expect(useEditorStore.getState().editingScope).toBe('scene')
   })
 
-  it('shows native elements and only global-compatible component packages', () => {
-    const globalPackage = v3Package('com.example.global', ['scene', 'global'])
-    const scenePackage = v3Package('com.example.scene', ['scene'])
+  it('shows native elements and only enables global-compatible component packages', () => {
+    const globalPackage = componentPackage('com.example.global', ['scene', 'global'])
+    const scenePackage = componentPackage('com.example.scene', ['scene'])
     const store = useEditorStore.getState()
     store.importComponentPackage(globalPackage)
     store.importComponentPackage(scenePackage)
@@ -99,13 +101,15 @@ describe('Project V8 global-layer editor UI', () => {
     expect(screen.getByTestId('add-text')).toBeInTheDocument()
     expect(screen.getByTestId('global-elements-notice')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('add-text'))
-    fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
+    cleanup()
+
+    render(<ComponentsTab />)
     expect(
       screen.getByTestId(`component-${globalPackage.manifest.id}`),
-    ).toBeInTheDocument()
+    ).toBeEnabled()
     expect(
-      screen.queryByTestId(`component-${scenePackage.manifest.id}`),
-    ).not.toBeInTheDocument()
+      screen.getByTestId(`component-${scenePackage.manifest.id}`),
+    ).toBeDisabled()
 
     fireEvent.click(
       screen.getByTestId(`component-${globalPackage.manifest.id}`),
@@ -117,7 +121,7 @@ describe('Project V8 global-layer editor UI', () => {
   })
 
   it('edits global placement, every component copy field, and both runtime content tables', () => {
-    const globalPackage = v3Package('com.example.global', ['global'])
+    const globalPackage = componentPackage('com.example.global', ['global'])
     const store = useEditorStore.getState()
     store.importComponentPackage(globalPackage)
     store.addScene()

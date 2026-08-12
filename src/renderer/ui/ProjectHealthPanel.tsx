@@ -7,6 +7,8 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo } from 'react'
+import { analyzeInformationRelease } from '../../shared/informationRelease'
+import { analyzeVisualDensity } from '../../shared/visualDensity'
 import {
   collectProjectHealth,
   summarizeProjectHealth,
@@ -39,8 +41,17 @@ export function ProjectHealthPanel({
   onExportDiagnostics,
 }: ProjectHealthPanelProps) {
   const project = useEditorStore((state) => state.project)
-  const diagnostics = useMemo(() => collectProjectHealth(project), [project])
+  const componentPackages = useEditorStore((state) => state.componentPackages)
+  const diagnostics = useMemo(
+    () => collectProjectHealth(project, componentPackages),
+    [project, componentPackages],
+  )
   const summary = useMemo(() => summarizeProjectHealth(diagnostics), [diagnostics])
+  const informationRelease = useMemo(
+    () => analyzeInformationRelease(project),
+    [project],
+  )
+  const visualDensity = useMemo(() => analyzeVisualDensity(project), [project])
 
   if (!open) return null
 
@@ -82,6 +93,47 @@ export function ProjectHealthPanel({
           <span className="is-warning"><AlertTriangle size={15} />{summary.warning} 个提醒</span>
           <span className="is-info"><Info size={15} />{summary.info} 个建议</span>
         </div>
+
+        <details className="information-release-summary">
+          <summary>
+            信息释放（只读） · {informationRelease.summary.stateCount} 个状态，
+            {informationRelease.summary.revealedCount} 个分步显示，
+            {informationRelease.summary.hiddenWithoutRevealCount} 个未连通隐藏节点
+          </summary>
+          <p>按现有场景、状态和交互规则分析可能的显示路径；运行时、媒体和组件事件只按“可能发生”计算，不模拟真实授课。</p>
+          <div className="information-release-grid" role="table" aria-label="信息释放状态概览">
+            {informationRelease.states.map((state) => (
+              <div className="information-release-row" role="row" key={`${state.sceneId}:${state.stateId}`}>
+                <strong role="cell">{state.sceneName} / {state.stateName}</strong>
+                <span role="cell">初始可见 {state.initialVisibleNodeIds.length}</span>
+                <span role="cell">分步显示 {state.revealSteps.length}</span>
+                <span role="cell" className={state.hiddenWithoutRevealNodeIds.length > 0 ? 'is-warning' : ''}>
+                  未连通 {state.hiddenWithoutRevealNodeIds.length}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="information-release-summary visual-density-summary">
+          <summary>
+            视觉密度（启发式） · 最高 {visualDensity.summary.maximumScore}/100，
+            {visualDensity.summary.denseStateCount} 个高密度状态
+          </summary>
+          <p>分数只汇总对象数量、文字量、面积占用和明显重叠，不判断教学重点或视觉质量，也不会阻断导出。</p>
+          <div className="information-release-grid" role="table" aria-label="视觉密度状态概览">
+            {visualDensity.states.map((state) => (
+              <div className="information-release-row visual-density-row" role="row" key={`${state.sceneId}:${state.stateId}`}>
+                <strong role="cell">{state.sceneName} / {state.stateName}</strong>
+                <span role="cell">对象 {state.visibleNodeCount}</span>
+                <span role="cell">文字 {state.textCharacterCount}</span>
+                <span role="cell" className={state.band === 'dense' ? 'is-warning' : ''}>
+                  {state.score}/100 · {state.band === 'dense' ? '高' : state.band === 'balanced' ? '中' : '低'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
 
         <div className="project-health-panel__body">
           {diagnostics.length === 0 ? (

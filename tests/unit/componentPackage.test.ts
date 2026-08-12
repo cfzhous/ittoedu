@@ -1,9 +1,6 @@
 import { strToU8, zipSync } from 'fflate'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  ComponentManifest,
-  ComponentManifestV1,
-} from '@/shared/componentTypes'
+import type { ComponentManifest } from '@/shared/componentTypes'
 import { UserFacingError } from '@/shared/errors'
 import {
   importComponentPackage,
@@ -21,13 +18,13 @@ import {
 } from '@/renderer/components/componentPackageStore'
 import { createProject } from '@/renderer/project/createProject'
 
-function manifest(overrides: Partial<ComponentManifestV1> = {}): ComponentManifestV1 {
+function manifest(overrides: Partial<ComponentManifest> = {}): ComponentManifest {
   return {
-    schemaVersion: 1,
-    runtimeApiVersion: 1,
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
     id: 'com.example.counter',
     name: '示例计数器',
-    version: '1.0.0',
+    version: '4.0.0',
     description: '测试组件',
     entry: 'runtime.js',
     thumbnail: 'thumbnail.png',
@@ -36,6 +33,8 @@ function manifest(overrides: Partial<ComponentManifestV1> = {}): ComponentManife
     preserveAspectRatio: true,
     assets: { icon: 'assets/icon.png' },
     defaultProps: { initialValue: 0 },
+    supportedScopes: ['scene'],
+    renderMode: 'phaser',
     ...overrides,
   }
 }
@@ -64,16 +63,16 @@ describe('component package import', () => {
     const sourceFiles = filesFor()
     const imported = importComponentPackage(zipSync(sourceFiles))
 
-    expect(imported.key).toBe('com.example.counter@1.0.0')
+    expect(imported.key).toBe('com.example.counter@4.0.0')
     expect(imported.manifest).toEqual(manifest())
     expect(imported.runtimeSource).toContain('CoursewareComponent.define')
     expect(imported.metadata).toEqual({
       packageId: 'com.example.counter',
-      version: '1.0.0',
+      version: '4.0.0',
       name: '示例计数器',
-      manifestPath: 'components/com.example.counter@1.0.0/manifest.json',
-      runtimePath: 'components/com.example.counter@1.0.0/runtime.js',
-      thumbnailPath: 'components/com.example.counter@1.0.0/thumbnail.png',
+      manifestPath: 'components/com.example.counter@4.0.0/manifest.json',
+      runtimePath: 'components/com.example.counter@4.0.0/runtime.js',
+      thumbnailPath: 'components/com.example.counter@4.0.0/thumbnail.png',
     })
     for (const [path, bytes] of Object.entries(sourceFiles)) {
       expect([...imported.files[path]!]).toEqual([...bytes])
@@ -188,34 +187,18 @@ describe('component package import', () => {
     )
   })
 
-  it('imports a V2 package while retaining V1 compatibility', () => {
-    const v2: ComponentManifest = {
+  it.each([1, 2, 3])('rejects legacy Component API %s packages', (legacyVersion) => {
+    const legacy = {
       ...manifest(),
-      schemaVersion: 2,
-      runtimeApiVersion: 2,
-      editor: {
-        properties: [
-          { key: 'title', label: '标题', type: 'text' },
-          { key: 'coverAssetId', label: '封面', type: 'image' },
-        ],
-      },
-      variants: [{ id: 'compact', label: '紧凑', props: { compact: true } }],
-      presets: [{
-        id: 'starter',
-        label: '入门',
-        variantId: 'compact',
-        props: { title: '开始' },
-      }],
+      schemaVersion: legacyVersion,
+      runtimeApiVersion: legacyVersion,
     }
-    const imported = importComponentPackage(zipSync(filesFor(v2)))
-
-    expect(imported.manifest.schemaVersion).toBe(2)
-    expect(imported.manifest.runtimeApiVersion).toBe(2)
-    if (imported.manifest.schemaVersion !== 2) {
-      throw new Error('Expected a V2 component manifest')
-    }
-    expect(imported.manifest.presets?.[0]?.id).toBe('starter')
-    expect(importComponentPackage(zipSync(filesFor())).manifest.schemaVersion).toBe(1)
+    expect(() => importComponentPackage(zipSync({
+      ...filesFor(),
+      'manifest.json': strToU8(JSON.stringify(legacy)),
+    }))).toThrowError(expect.objectContaining({
+      title: '旧组件格式不受支持',
+    }))
   })
 
   it('rejects module runtimes that cannot execute offline as a plain script', () => {
@@ -231,7 +214,7 @@ describe('component runtime registry', () => {
   const validRuntime = `
     window.CoursewareComponent.define({
       id: 'com.example.counter',
-      runtimeApiVersion: 1,
+      runtimeApiVersion: 4,
       create: function () {
         return { destroy: function () {} }
       }
@@ -309,11 +292,11 @@ describe('ComponentPackageStore', () => {
     const imported = store.import(archive)
     imported.files['runtime.js']![0] = 0
 
-    const stored = store.get('com.example.counter@1.0.0')
+    const stored = store.get('com.example.counter@4.0.0')
     expect(stored).toBeDefined()
     expect(stored!.runtimeSource.charCodeAt(0)).not.toBe(0)
-    expect(store.toArchiveFiles()['com.example.counter@1.0.0']).toBeDefined()
-    expect(store.toMetadataRecord()['com.example.counter@1.0.0']).toEqual(
+    expect(store.toArchiveFiles()['com.example.counter@4.0.0']).toBeDefined()
+    expect(store.toMetadataRecord()['com.example.counter@4.0.0']).toEqual(
       imported.metadata,
     )
   })
@@ -344,7 +327,7 @@ describe('ComponentPackageStore', () => {
       archiveFiles,
     )
 
-    expect(Object.keys(archiveFiles)).toEqual(['com.example.counter@1.0.0'])
+    expect(Object.keys(archiveFiles)).toEqual(['com.example.counter@4.0.0'])
     expect(packages['com.example.counter']?.manifest).toEqual(parsed.manifest)
     expect([
       ...packages['com.example.counter']!.files['assets/icon.png']!,

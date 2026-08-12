@@ -114,6 +114,32 @@ function actionSteps(id: string, actions: InteractionAction[]): InteractionRule[
 }
 
 describe('InteractionEngine', () => {
+  it('routes presenter commands from the shared course event bus', () => {
+    const events = new CourseEventBus()
+    const presentation = presentationHarness(events)
+    const actions = hostActions()
+    const engine = new InteractionEngine({
+      sceneId: 'scene_one',
+      rules: [{
+        id: 'presenter-next',
+        enabled: true,
+        trigger: { type: 'presenter.command', command: 'next' },
+        conditions: [{ type: 'presentation.in', stateIds: ['question'] }],
+        actions: actionSteps('presenter-next', [{ type: 'scene.next' }]),
+      }],
+      events,
+      presentation: presentation.api,
+      hostActions: actions,
+    })
+
+    events.emit('presenter:command', { command: 'previous' })
+    events.emit('presenter:command', { command: 'next' })
+
+    expect(actions.previousScene).not.toHaveBeenCalled()
+    expect(actions.nextScene).toHaveBeenCalledTimes(1)
+    engine.destroy()
+  })
+
   it('uses the trigger-time state snapshot and preserves rule/action order', async () => {
     const events = new CourseEventBus()
     const presentation = presentationHarness(events)

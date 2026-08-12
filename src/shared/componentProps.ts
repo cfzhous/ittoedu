@@ -52,7 +52,7 @@ function mergeContentValue(base: unknown, override: unknown): unknown {
 }
 
 /**
- * V3+ reserves props.content for editable copy. Merge it recursively so changing
+ * Component API 4 reserves props.content for editable copy. Merge it recursively so changing
  * one string does not replace sibling copy inherited from defaults/variants.
  * Other props retain the established top-level replacement semantics.
  */
@@ -179,7 +179,6 @@ export function findComponentVariant(
   manifest: ComponentManifest,
   props: Readonly<Record<string, unknown>>,
 ): ComponentVariant | undefined {
-  if (manifest.schemaVersion === 1) return undefined
   return manifest.variants?.find((variant) => (
     componentUsesRecursiveContent(manifest)
       ? propsDeepContain(props, variant.props)
@@ -202,7 +201,6 @@ export function resolveComponentEditorState(
   manifest: ComponentManifest,
   props: Readonly<Record<string, unknown>>,
 ): ComponentEditorState {
-  if (manifest.schemaVersion === 1) return {}
   const effectiveProps = mergeComponentProps(manifest, props)
   const state: ComponentEditorState = {}
   const variant = findComponentVariant(manifest, effectiveProps)
@@ -294,17 +292,14 @@ function discoverContentTextProperties(content: unknown): ComponentEditorPropert
 }
 
 /**
- * Returns the fields shown by the component inspector. V1 has no content
- * schema, V2 remains explicitly schema-driven, and V3+ always adds every string
- * recursively found below effective props.content.
+ * Returns explicitly declared fields plus every editable string recursively
+ * found below effective V4 props.content.
  */
 export function resolveComponentEditorProperties(
   manifest: ComponentManifest,
   instanceProps: Readonly<Record<string, unknown>>,
 ): ComponentEditorProperty[] {
-  if (manifest.schemaVersion === 1) return []
   const explicit = manifest.editor?.properties ?? []
-  if (manifest.schemaVersion === 2) return explicit
 
   const effectiveProps = mergeComponentProps(manifest, instanceProps)
   const automatic = discoverContentTextProperties(effectiveProps.content)

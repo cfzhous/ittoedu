@@ -7,15 +7,20 @@
 
   window.CoursewareComponent.define({
     id: 'com.alepha.photosynthesis-lab',
-    runtimeApiVersion: 1,
+    runtimeApiVersion: 4,
 
     create: function (ctx) {
+      if (ctx.renderMode !== 'phaser') {
+        throw new Error('光合作用互动实验室需要 Component API 4 Phaser 渲染面')
+      }
+      var scene = ctx.phaser.scene
+      var root = ctx.phaser.root
       var mode = ctx.mode
       var page = normalisePage(ctx.props.page)
-      var stage = ctx.scene.add.container(0, 0)
+      var stage = scene.add.container(0, 0)
       var disposers = []
       var ownedTweens = []
-      ctx.root.add(stage)
+      root.add(stage)
 
       function add(object) {
         stage.add(object)
@@ -28,7 +33,7 @@
       }
 
       function tween(config) {
-        var value = ctx.scene.tweens.add(config)
+        var value = scene.tweens.add(config)
         ownedTweens.push(value)
         return value
       }
@@ -40,14 +45,14 @@
       }
 
       function panel(x, y, width, height, colour, alpha, radius, stroke, strokeAlpha) {
-        var shape = ctx.scene.add.rectangle(x, y, width, height, colour, alpha).setOrigin(0)
+        var shape = scene.add.rectangle(x, y, width, height, colour, alpha).setOrigin(0)
         if (radius) shape.setRounded(radius)
         if (stroke !== undefined) shape.setStrokeStyle(1, stroke, strokeAlpha === undefined ? 1 : strokeAlpha)
         return add(shape)
       }
 
       function label(x, y, value, size, colour, bold, originX, originY) {
-        return add(ctx.scene.add.text(x, y, value, {
+        return add(scene.add.text(x, y, value, {
           fontFamily: FONT,
           fontSize: size + 'px',
           fontStyle: bold ? 'bold' : 'normal',
@@ -74,8 +79,8 @@
       }
 
       function glowDot(x, y, colour) {
-        var outer = add(ctx.scene.add.circle(x, y, 12, colour, 0.12))
-        var inner = add(ctx.scene.add.circle(x, y, 5, colour, 0.9))
+        var outer = add(scene.add.circle(x, y, 12, colour, 0.12))
+        var inner = add(scene.add.circle(x, y, 5, colour, 0.9))
         tween({ targets: outer, scale: 1.8, alpha: 0, duration: 1300, repeat: -1, ease: 'Sine.easeOut' })
         return { outer: outer, inner: inner }
       }
@@ -110,7 +115,7 @@
           var icon = label(76, item.y, item.icon, item.key === 'co2' ? 15 : 23, colourString(item.colour), true, 0.5, 0.5)
           var name = label(103, item.y - 15, item.name, 17, '#f4fbff', true)
           var desc = label(103, item.y + 8, item.desc, 11, '#7da0b4', false)
-          var dot = add(ctx.scene.add.circle(236, item.y, 5, 0x335267, 1))
+          var dot = add(scene.add.circle(236, item.y, 5, 0x335267, 1))
           chips.push({ bg: bg, icon: icon, name: name, desc: desc })
           dots.push(dot)
           listen(bg, 'pointerover', function () { if (mode === 'preview' && !active[item.key]) bg.setFillStyle(0x19435a) })
@@ -119,15 +124,15 @@
         })
 
         panel(302, 92, 464, 330, 0x0a2130, 0.72, 22, 0x22c55e, 0.15)
-        var halo = add(ctx.scene.add.circle(534, 254, 126, 0x22c55e, 0.045))
-        add(ctx.scene.add.circle(534, 254, 92, 0x22c55e, 0.055))
+        var halo = add(scene.add.circle(534, 254, 126, 0x22c55e, 0.045))
+        add(scene.add.circle(534, 254, 92, 0x22c55e, 0.055))
         tween({ targets: halo, scale: 1.08, alpha: 0.09, yoyo: true, repeat: -1, duration: 1800, ease: 'Sine.easeInOut' })
         var stem = panel(529, 253, 10, 112, 0x34d399, 1, 5)
         stem.setRotation(-0.02)
-        var leafLeft = add(ctx.scene.add.ellipse(483, 252, 118, 68, 0x16a765, 1).setRotation(-0.42).setStrokeStyle(2, 0x6ee7b7, 0.55))
-        var leafRight = add(ctx.scene.add.ellipse(585, 235, 132, 76, 0x22c973, 1).setRotation(0.38).setStrokeStyle(2, 0x86efac, 0.55))
-        add(ctx.scene.add.line(0, 0, 449, 269, 537, 249, 0xa7f3d0, 0.58).setOrigin(0))
-        add(ctx.scene.add.line(0, 0, 537, 249, 635, 252, 0xa7f3d0, 0.58).setOrigin(0))
+        var leafLeft = add(scene.add.ellipse(483, 252, 118, 68, 0x16a765, 1).setRotation(-0.42).setStrokeStyle(2, 0x6ee7b7, 0.55))
+        var leafRight = add(scene.add.ellipse(585, 235, 132, 76, 0x22c973, 1).setRotation(0.38).setStrokeStyle(2, 0x86efac, 0.55))
+        add(scene.add.line(0, 0, 449, 269, 537, 249, 0xa7f3d0, 0.58).setOrigin(0))
+        add(scene.add.line(0, 0, 537, 249, 635, 252, 0xa7f3d0, 0.58).setOrigin(0))
         label(534, 376, '叶绿体 · 能量转换中心', 13, '#8ed9b8', true, 0.5, 0.5)
         var reaction = label(534, 116, '等待输入…', 14, '#65899c', true, 0.5, 0.5)
 
@@ -150,7 +155,7 @@
           dots[index].setFillStyle(item.colour).setScale(1.35)
           chips[index].desc.setColor(colourString(item.colour))
           reaction.setText('正在吸收' + item.name + '…').setColor(colourString(item.colour))
-          var particle = add(ctx.scene.add.circle(258, item.y, 8, item.colour, 0.96))
+          var particle = add(scene.add.circle(258, item.y, 8, item.colour, 0.96))
           tween({
             targets: particle,
             x: 520,
@@ -178,7 +183,7 @@
           sugarIcon.setColor('#fcd34d'); sugarLabel.setColor('#fff6cb'); sugarDesc.setColor('#d5bd78')
           success.setColor('#6ee7b7')
           for (var i = 0; i < 8; i += 1) {
-            var bubble = add(ctx.scene.add.circle(820 + (i % 4) * 32, 250 - (i % 3) * 7, 4 + (i % 3), 0x7dd3fc, 0.76))
+            var bubble = add(scene.add.circle(820 + (i % 4) * 32, 250 - (i % 3) * 7, 4 + (i % 3), 0x7dd3fc, 0.76))
             tween({ targets: bubble, y: 120 - (i % 2) * 18, alpha: 0, duration: 1300 + i * 95, repeat: -1, delay: i * 110 })
           }
           tween({ targets: halo, alpha: 0.2, scale: 1.24, duration: 500, yoyo: true })
@@ -213,20 +218,20 @@
         panel(442, 92, 610, 330, 0x091f2e, 0.9, 22, 0x22c55e, 0.14)
         label(468, 112, '实时观测舱', 14, '#86a9bc', true)
         var chamber = panel(470, 150, 330, 238, 0x0c2e3b, 0.72, 24, 0x67e8f9, 0.18)
-        var sun = add(ctx.scene.add.circle(525, 204, 28, 0xfbbf24, 0.9))
-        var sunHalo = add(ctx.scene.add.circle(525, 204, 44, 0xfbbf24, 0.08))
+        var sun = add(scene.add.circle(525, 204, 28, 0xfbbf24, 0.9))
+        var sunHalo = add(scene.add.circle(525, 204, 44, 0xfbbf24, 0.08))
         tween({ targets: sunHalo, scale: 1.2, alpha: 0.02, yoyo: true, repeat: -1, duration: 1200 })
         panel(490, 348, 288, 19, 0x214e3d, 1, 9)
         panel(622, 269, 9, 90, 0x42d392, 1, 4)
-        var leafA = add(ctx.scene.add.ellipse(586, 286, 94, 51, 0x20b96c).setRotation(-0.38))
-        var leafB = add(ctx.scene.add.ellipse(665, 271, 105, 57, 0x32d17e).setRotation(0.36))
+        var leafA = add(scene.add.ellipse(586, 286, 94, 51, 0x20b96c).setRotation(-0.38))
+        var leafB = add(scene.add.ellipse(665, 271, 105, 57, 0x32d17e).setRotation(0.36))
         var bubbles = []
         for (var b = 0; b < 14; b += 1) {
-          var bubble = add(ctx.scene.add.circle(687 + (b % 4) * 20, 330 - (b % 5) * 16, 4 + (b % 3), 0x7dd3fc, 0))
+          var bubble = add(scene.add.circle(687 + (b % 4) * 20, 330 - (b % 5) * 16, 4 + (b % 3), 0x7dd3fc, 0))
           bubbles.push(bubble)
           tween({ targets: bubble, y: 165 + (b % 4) * 12, duration: 1500 + b * 90, repeat: -1, delay: b * 95 })
         }
-        var rateRing = add(ctx.scene.add.circle(922, 238, 82, 0x102f40, 1).setStrokeStyle(11, 0x1c4960, 1))
+        var rateRing = add(scene.add.circle(922, 238, 82, 0x102f40, 1).setStrokeStyle(11, 0x1c4960, 1))
         var rate = label(922, 227, '0', 52, '#69f0ae', true, 0.5, 0.5)
         label(922, 276, '光合效率', 13, '#7d9bad', true, 0.5, 0.5)
         var verdict = panel(832, 337, 180, 38, 0x17394d, 1, 19, 0x60a5fa, 0.18)
@@ -310,17 +315,17 @@
         ]
         var startXs = [114, 284, 454, 624, 794, 964]
         cards.forEach(function (data, index) {
-          var card = ctx.scene.add.container(startXs[index], 344)
-          var shadow = ctx.scene.add.rectangle(4, 6, 150, 72, 0x000000, 0.22).setRounded(16)
-          var bg = ctx.scene.add.rectangle(0, 0, 150, 72, 0x15364a, 1).setRounded(16).setStrokeStyle(2, data.colour, 0.42)
-          var text = ctx.scene.add.text(0, 0, data.text, { fontFamily: FONT, fontSize: '15px', fontStyle: 'bold', color: '#f4fbff' }).setOrigin(0.5)
+          var card = scene.add.container(startXs[index], 344)
+          var shadow = scene.add.rectangle(4, 6, 150, 72, 0x000000, 0.22).setRounded(16)
+          var bg = scene.add.rectangle(0, 0, 150, 72, 0x15364a, 1).setRounded(16).setStrokeStyle(2, data.colour, 0.42)
+          var text = scene.add.text(0, 0, data.text, { fontFamily: FONT, fontSize: '15px', fontStyle: 'bold', color: '#f4fbff' }).setOrigin(0.5)
           card.add([shadow, bg, text])
           card.setSize(150, 72).setInteractive({ useHandCursor: true, draggable: true })
           card.setData('meta', data)
           card.setData('homeX', startXs[index])
           card.setData('homeY', 344)
           add(card)
-          ctx.scene.input.setDraggable(card)
+          scene.input.setDraggable(card)
           listen(card, 'pointerdown', function () {
             if (mode !== 'preview' || completed[data.id]) return
             if (selected && selected !== card) selectCard(selected, false)

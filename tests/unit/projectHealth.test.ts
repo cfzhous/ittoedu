@@ -9,6 +9,7 @@ import {
   createProject,
   createRectangleNode,
   createScene,
+  createTextNode,
   createVideoNode,
 } from '../../src/renderer/project/createProject'
 import type { InteractionActionPayload } from '../../src/shared/interactionTypes'
@@ -27,6 +28,52 @@ function codes(project: ReturnType<typeof createProject>) {
 }
 
 describe('工程健康检查', () => {
+  it('reports unused assets with an addressable asset location', () => {
+    const project = createProject({ includeDefaultController: false })
+    project.assets.unused = {
+      id: 'unused', filename: 'unused.png', mimeType: 'image/png',
+      kind: 'image', path: 'assets/unused.png', byteLength: 42,
+    }
+
+    expect(collectProjectHealth(project)).toContainEqual(expect.objectContaining({
+      severity: 'info',
+      code: 'asset-unused',
+      scope: 'asset',
+      path: ['assets', 'unused'],
+      assetId: 'unused',
+    }))
+  })
+
+  it('reports a missing asset from an explicit component image property', () => {
+    const project = createProject({ includeDefaultController: false })
+    const node = createExternalComponentNode({
+      component: { packageId: 'com.test.image', version: '4.0.0' },
+      props: { cover: 'missing-cover' },
+    })
+    project.scenes[0]!.nodes.push(node)
+    const components = {
+      recordKey: {
+        manifest: {
+          schemaVersion: 4 as const, runtimeApiVersion: 4 as const,
+          id: 'com.test.image', name: 'Image', version: '4.0.0', entry: 'runtime.js',
+          defaultSize: { width: 100, height: 100 }, minSize: { width: 10, height: 10 },
+          preserveAspectRatio: false, assets: {}, defaultProps: {},
+          supportedScopes: ['scene' as const], renderMode: 'dom' as const,
+          editor: { properties: [{ key: 'cover', label: 'Cover', type: 'image' as const }] },
+        },
+        runtimeSource: '', files: {},
+      },
+    }
+
+    expect(collectProjectHealth(project, components)).toContainEqual(expect.objectContaining({
+      code: 'asset-reference-missing',
+      severity: 'error',
+      assetId: 'missing-cover',
+      nodeId: node.id,
+      packageId: 'com.test.image',
+    }))
+  })
+
   it('检查场景状态、节点、素材与运行时引用，并携带定位字段', () => {
     const project = createProject({
       id: 'health-invalid',
@@ -39,7 +86,7 @@ describe('工程健康检查', () => {
     scene.presentation!.thumbnailStateId = 'state-missing'
     scene.presentation!.states[0]!.nodeOverrides['node-missing'] = { visible: false }
     scene.runtime = {
-      runtimeApiVersion: 1,
+      runtimeApiVersion: 2,
       enabled: true,
       renderMode: 'phaser',
       source: '',
@@ -303,5 +350,50 @@ describe('工程健康检查', () => {
         nodeId: node.id,
       }),
     ]))
+  })
+
+  it('检查作者命令翻页笔是否有可执行规则', () => {
+    const project = createProject({ includeDefaultController: false })
+    project.playback.presenter = {
+      enabled: true,
+      strategy: 'authored-command',
+      additionalBindings: [],
+    }
+    project.scenes[0]!.interactions.push({
+      id: 'next-only',
+      enabled: true,
+      trigger: { type: 'presenter.command', command: 'next' },
+      conditions: [],
+      actions: [actionStep('next-scene', { type: 'scene.next' })],
+    })
+
+    const diagnostics = collectProjectHealth(project)
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      code: 'presenter-command-unhandled',
+      severity: 'warning',
+      message: expect.stringContaining('上一步'),
+    }))
+    expect(diagnostics).not.toContainEqual(expect.objectContaining({
+      code: 'presenter-command-unhandled',
+      message: expect.stringContaining('下一步'),
+    }))
+  })
+
+  it('把无法到达的初始隐藏节点纳入只读信息释放诊断', () => {
+    const project = createProject({ includeDefaultController: false })
+    const hidden = createTextNode({
+      id: 'hidden-copy',
+      name: '隐藏结论',
+      playbackInitialVisibility: 'hidden',
+    })
+    project.scenes[0]!.nodes.push(hidden)
+
+    expect(collectProjectHealth(project)).toContainEqual(expect.objectContaining({
+      code: 'information-release-hidden-unreachable',
+      severity: 'warning',
+      sceneId: project.scenes[0]!.id,
+      stateId: project.scenes[0]!.presentation!.initialStateId,
+      nodeId: hidden.id,
+    }))
   })
 })

@@ -3,18 +3,6 @@ import { bytesToBase64 } from './base64'
 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 10_000
 
-interface CaptureAwarePlayer {
-  waitForCaptureReady?(timeoutMs?: number): Promise<void>
-  getPreparedCanvasSnapshot?(
-    source: HTMLCanvasElement,
-  ): HTMLCanvasElement | undefined
-}
-
-export function playerSupportsRuntimeCapture(player: PlayerApp): boolean {
-  return typeof (player as unknown as CaptureAwarePlayer).waitForCaptureReady ===
-    'function'
-}
-
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -89,8 +77,8 @@ export function settleCaptureFrames(milliseconds = 120): Promise<void> {
 
 /**
  * PlayerApp exposes waitForCaptureReady() after runtime and component capture
- * hooks plus ctx.capture.waitUntil() promises settle. Feature detection keeps
- * this exporter compatible with older Player bundles during migration.
+ * hooks plus ctx.capture.waitUntil() promises settle. Export and preview use
+ * the same current PlayerApp contract.
  */
 export async function waitForPlayerCaptureReady(
   player: PlayerApp,
@@ -102,14 +90,11 @@ export async function waitForPlayerCaptureReady(
   // prepareCapture() could clear or overwrite a WebGL canvas created with
   // preserveDrawingBuffer=false.
   await settleCaptureFrames()
-  const captureAware = player as unknown as CaptureAwarePlayer
-  if (typeof captureAware.waitForCaptureReady === 'function') {
-    await withTimeout(
-      captureAware.waitForCaptureReady(timeoutMs),
-      timeoutMs,
-      '自由运行时静态捕获等待超时',
-    )
-  }
+  await withTimeout(
+    player.waitForCaptureReady(),
+    timeoutMs,
+    '自由运行时静态捕获等待超时',
+  )
 }
 
 interface DomCaptureContext {
@@ -771,8 +756,9 @@ export async function capturePlayerStage(
       // Three/WebGL renderer with preserveDrawingBuffer=false to clear again.
       canvasCache: snapshotDomCanvases(
         stage,
-        (player as unknown as CaptureAwarePlayer).getPreparedCanvasSnapshot
-          ?.bind(player),
+        typeof player.getPreparedCanvasSnapshot === 'function'
+          ? player.getPreparedCanvasSnapshot.bind(player)
+          : undefined,
       ),
     }
     const stageStyle = initialStageStyle

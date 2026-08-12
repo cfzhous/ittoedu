@@ -19,6 +19,7 @@ import {
 } from '../store/editorStore'
 
 export interface MediaTabProps {
+  onImportImage?(): void
   onImportAudio(): void
   onImportVideo(): void
   embedded?: boolean
@@ -377,6 +378,7 @@ function GlobalAudioSettings({ settings, onUpdate }: GlobalAudioSettingsProps) {
 }
 
 export function MediaTab({
+  onImportImage,
   onImportAudio,
   onImportVideo,
   embedded = false,
@@ -432,8 +434,13 @@ export function MediaTab({
       className={`media-tab${embedded ? ' media-tab--embedded' : ''}`}
       data-testid="media-tab"
     >
-      {!embedded && (
-        <div className="media-toolbar" aria-label="导入媒体">
+      <div className="media-toolbar" aria-label="导入媒体">
+          {onImportImage && (
+            <button type="button" className="media-import-button" onClick={onImportImage}>
+              <Upload size={15} />
+              导入图片
+            </button>
+          )}
           <button type="button" className="media-import-button" onClick={onImportAudio}>
             <Upload size={15} />
             导入声音
@@ -442,8 +449,7 @@ export function MediaTab({
             <Upload size={15} />
             导入视频
           </button>
-        </div>
-      )}
+      </div>
 
       {showAdvancedAudioSettings && (
         <GlobalAudioSettings

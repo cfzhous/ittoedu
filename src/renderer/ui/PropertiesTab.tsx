@@ -30,6 +30,7 @@ import {
   Globe2,
   Shapes,
   SlidersHorizontal,
+  Sigma,
   Strikethrough,
   Trash2,
   Type,
@@ -39,7 +40,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   findPresentationState,
   isNodeOverriddenInState,
@@ -49,8 +50,10 @@ import type {
   ArrowHead,
   DeepPartial,
   FeatherMode,
+  FormulaNode,
   GlobalLayerVisibility,
   ImageFit,
+  ImageNode,
   ProjectDocument,
   SceneDocument,
   SceneNode,
@@ -66,6 +69,7 @@ import type {
   VerticalAlign,
   WritingMode,
 } from '../../shared/projectTypes'
+import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import type {
   RuntimeDocument,
   RuntimeLayer,
@@ -93,7 +97,10 @@ import { ColorInput } from './ColorInput'
 import { ComponentPropertiesEditor } from './ComponentPropertiesEditor'
 import { RuntimeContentEditor } from './RuntimeContentEditor'
 import { InteractionEditor } from './InteractionEditor'
+import { PresenterSettingsEditor } from './PresenterSettingsEditor'
+import { DesignTokensEditor } from './DesignTokensEditor'
 import { SimpleEntranceAnimationEditor } from './SimpleEntranceAnimationEditor'
+import { FormulaAuthoringEditor } from './FormulaAuthoringEditor'
 
 interface BufferedInputProps {
   label: string
@@ -119,7 +126,7 @@ function BufferedInput({
   onCommit,
 }: BufferedInputProps) {
   const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
+  useLayoutEffect(() => setDraft(String(value)), [value])
   const commit = () => {
     if (draft === String(value)) return
     if (type === 'number') {
@@ -770,6 +777,14 @@ function TextProperties({ node, update }: {
           {style.highlightColor && <ColorInput id="text-highlight" label="高亮颜色" value={style.highlightColor} onChange={(highlightColor) => update({ style: { highlightColor } })} />}
         </div>
       </div>
+      <ToggleRow
+        label="文字着重号"
+        checked={style.emphasis}
+        onChange={(emphasis) => update({ style: { emphasis } })}
+      />
+      <p className="property-hint">
+        横排显示在字下，竖排显示在字右；局部内容可在画布文字编辑器中单独设置。
+      </p>
       <div className="form-field">
         <label>水平对齐</label>
         <div className="segmented-control">
@@ -822,11 +837,110 @@ function TextProperties({ node, update }: {
   )
 }
 
+function FormulaProperties({ node, update }: {
+  node: FormulaNode
+  update(patch: DeepPartial<SceneNode>): void
+}) {
+  const generatedAccessibleText = formulaAstToAccessibleText(node.ast)
+  const normalizeAccessibleText = (value: string) => value.replace(/\s+/gu, '')
+  const accessibilityAutomatic = normalizeAccessibleText(node.accessibleText) ===
+    normalizeAccessibleText(generatedAccessibleText)
+
+  return (
+    <section className="property-section" data-testid="formula-properties">
+      <h3 className="property-title"><Sigma size={14} />公式</h3>
+      <FormulaAuthoringEditor
+        node={node}
+        onCommit={(ast, accessibleText) => update({
+          ast,
+          accessibleText,
+        } as DeepPartial<SceneNode>)}
+      />
+      <BufferedInput
+        label="无障碍描述"
+        value={node.accessibleText}
+        onCommit={(accessibleText) => update({ accessibleText } as DeepPartial<SceneNode>)}
+      />
+      <div className="formula-accessibility-status">
+        <span className={accessibilityAutomatic
+          ? 'formula-accessibility-status__automatic'
+          : 'formula-accessibility-status__custom'}>
+          {accessibilityAutomatic ? '随公式自动更新' : '使用自定义描述'}
+        </span>
+        {!accessibilityAutomatic && (
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => update({
+              accessibleText: generatedAccessibleText,
+            } as DeepPartial<SceneNode>)}
+          >
+            恢复自动描述
+          </button>
+        )}
+      </div>
+      <p className="property-hint">
+        {accessibilityAutomatic
+          ? '当公式结构改变时，读屏和检索描述会在同一次提交中更新。'
+          : '自定义描述不会被覆盖；修改公式后请复核它是否仍然准确。'}
+      </p>
+      <BufferedInput
+        label="公式字号"
+        type="number"
+        min={12}
+        max={200}
+        value={node.style.fontSize}
+        onCommit={(fontSize) => update({
+          style: { fontSize: Number(fontSize) },
+        } as DeepPartial<SceneNode>)}
+      />
+      <ColorInput
+        id="formula-color"
+        label="公式颜色"
+        value={node.style.color}
+        onChange={(color) => update({ style: { color } } as DeepPartial<SceneNode>)}
+      />
+      <div className="form-field">
+        <label>水平对齐</label>
+        <div className="segmented-control">
+          {([
+            ['left', '左对齐', AlignLeft],
+            ['center', '居中', AlignCenter],
+            ['right', '右对齐', AlignRight],
+          ] as Array<[TextAlign, string, typeof AlignLeft]>).map(([value, label, Icon]) => (
+            <button
+              type="button"
+              key={value}
+              aria-label={`公式${label}`}
+              title={label}
+              className={`segment-button${node.style.align === value ? ' segment-button--active' : ''}`}
+              onClick={() => update({ style: { align: value } } as DeepPartial<SceneNode>)}
+            >
+              <Icon size={15} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="property-hint">
+        PPTX 会按当前共享渲染结果静态化，Formula ID 和无障碍描述仍会保留。
+      </p>
+    </section>
+  )
+}
+
 function ImageProperties({ node, update, onReplaceImage }: {
   node: Extract<SceneNode, { type: 'image' }>
   update(patch: DeepPartial<SceneNode>): void
   onReplaceImage(): void
 }) {
+  const replaceSafeArea = (
+    index: number,
+    patch: Partial<ImageNode['safeAreas'][number]>,
+  ) => update({
+    safeAreas: node.safeAreas.map((area, areaIndex) => (
+      areaIndex === index ? { ...area, ...patch } : area
+    )),
+  })
   return (
     <section className="property-section">
       <h3 className="property-title"><ImageIcon size={14} />图片</h3>
@@ -860,6 +974,54 @@ function ImageProperties({ node, update, onReplaceImage }: {
       <RangeField label="圆角" value={node.cornerRadius} min={0} max={Math.min(node.width, node.height) / 2} suffix="px" onChange={(cornerRadius) => update({ cornerRadius })} />
       <SelectField<FeatherMode> label="羽化形状" value={node.feather.mode} options={[{ value: 'rectangle', label: '矩形边缘' }, { value: 'ellipse', label: '椭圆/径向' }]} onChange={(mode) => update({ feather: { mode } })} />
       <RangeField label="羽化强度" value={node.feather.amount} min={0} max={100} suffix="%" onChange={(amount) => update({ feather: { amount } })} />
+      <div className="property-subsection-header">
+        <div>
+          <strong>图片安全区</strong>
+          <small>只在编辑器中显示，不进入成品画面</small>
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={node.safeAreas.length >= 16}
+          onClick={() => update({
+            safeAreas: [...node.safeAreas, {
+              id: `safe_area_${nanoid(10)}`,
+              label: `安全区 ${node.safeAreas.length + 1}`,
+              x: 0.1,
+              y: 0.1,
+              width: 0.8,
+              height: 0.8,
+            }],
+          })}
+        >
+          添加安全区
+        </button>
+      </div>
+      {node.safeAreas.map((area, index) => (
+        <div className="safe-area-card" key={area.id}>
+          <div className="safe-area-card__header">
+            <BufferedInput
+              label={`安全区 ${index + 1} 名称`}
+              value={area.label}
+              onCommit={(label) => replaceSafeArea(index, { label })}
+            />
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`删除安全区 ${area.label}`}
+              onClick={() => update({
+                safeAreas: node.safeAreas.filter((_, areaIndex) => areaIndex !== index),
+              })}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+          <RangeField label="左侧位置" value={area.x * 100} min={0} max={(1 - area.width) * 100} suffix="%" onChange={(x) => replaceSafeArea(index, { x: x / 100 })} />
+          <RangeField label="顶部位置" value={area.y * 100} min={0} max={(1 - area.height) * 100} suffix="%" onChange={(y) => replaceSafeArea(index, { y: y / 100 })} />
+          <RangeField label="安全区宽度" value={area.width * 100} min={1} max={(1 - area.x) * 100} suffix="%" onChange={(width) => replaceSafeArea(index, { width: width / 100 })} />
+          <RangeField label="安全区高度" value={area.height * 100} min={1} max={(1 - area.y) * 100} suffix="%" onChange={(height) => replaceSafeArea(index, { height: height / 100 })} />
+        </div>
+      ))}
     </section>
   )
 }
@@ -1345,9 +1507,7 @@ function RuntimeInspector({
         onChange={(enabled) => onChange({ enabled })}
       />
       <SelectField<RuntimeRenderMode>
-        label={runtime.runtimeApiVersion === 1
-          ? '渲染模式（兼容摘要）'
-          : '渲染能力声明'}
+        label="渲染能力声明"
         value={runtime.renderMode}
         options={[
           { value: 'phaser', label: 'Phaser 画布' },
@@ -1357,9 +1517,7 @@ function RuntimeInspector({
         onChange={(renderMode) => onChange({ renderMode })}
       />
       <p className="property-hint">
-        {runtime.runtimeApiVersion === 1
-          ? 'Runtime API 1 始终同时提供 DOM 与 Phaser；该字段仅用于旧工程摘要。'
-          : 'Runtime API 2 会按此字段只挂载并暴露声明的能力。修改字段不会转换源码，请确认源码支持新模式。'}
+        Runtime API 2 会按此字段只挂载并暴露声明的能力。修改字段不会转换源码，请确认源码支持新模式。
       </p>
       <div className="runtime-summary-grid" aria-label="运行时摘要">
         <span><small>运行时协议</small>API {runtime.runtimeApiVersion}</span>
@@ -1524,6 +1682,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const updateGlobalInteractionRule = useEditorStore((state) => state.updateGlobalInteractionRule)
   const deleteGlobalInteractionRule = useEditorStore((state) => state.deleteGlobalInteractionRule)
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
+  const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
   const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
@@ -1576,10 +1735,20 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
                 }}
               />
               <ToggleRow label="键盘左右键翻页" checked={project.playback.keyboardNavigation} onChange={(keyboardNavigation) => updatePlayback({ keyboardNavigation })} />
+              <PresenterSettingsEditor
+                value={project.playback.presenter}
+                onChange={(presenter) => updatePlayback({ presenter })}
+              />
               <button type="button" className="secondary-button" onClick={ensureTeacherController}>
                 <SlidersHorizontal size={14} />添加或定位教师控制器
               </button>
             </section>
+            {editorMode === 'professional' && (
+              <DesignTokensEditor
+                value={project.designTokens}
+                onChange={updateDesignTokens}
+              />
+            )}
             {editorMode === 'professional' && (
               <RuntimeInspector
                 scope="global"
@@ -1708,6 +1877,12 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
         <GlobalLayerSettings nodeId={node.id} />
       )}
       {node.type === 'text' && <TextProperties node={node} update={update} />}
+      {node.type === 'formula' && (
+        <FormulaProperties
+          node={node}
+          update={update}
+        />
+      )}
       {node.type === 'image' && <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />}
       {node.type === 'video' && (
         <VideoProperties
@@ -1760,9 +1935,6 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
             <div className="form-field"><label>组件名称</label><div className="readonly-value">{components[node.component.packageId]?.manifest.name ?? node.name}</div></div>
             <div className="form-field"><label>组件 ID</label><div className="readonly-value">{node.component.packageId}</div></div>
             <div className="form-field"><label>版本</label><div className="readonly-value">{node.component.version}</div></div>
-            {components[node.component.packageId]?.manifest.schemaVersion === 1 && (
-              <p className="property-hint">该 V1 组件未声明可编辑内容，只能调整组件整体位置和尺寸。</p>
-            )}
           </section>
           {components[node.component.packageId] && (
             <ComponentPropertiesEditor

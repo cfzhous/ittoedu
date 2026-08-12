@@ -1,13 +1,10 @@
 import { componentRenderMode } from '../../shared/componentCapabilities'
-import {
-  getComponentPropValue,
-  mergeComponentProps,
-} from '../../shared/componentProps'
+import { mergeComponentProps } from '../../shared/componentProps'
 import type {
   ComponentManifest,
   ExportPayload,
 } from '../../shared/componentTypes'
-import { materializeScene } from '../../shared/presentation'
+import { collectReferencedProjectAssetIds } from '../../shared/assetReferences'
 import type {
   AssetMeta,
   SceneNode,
@@ -24,7 +21,7 @@ import {
 } from '../../shared/publishedLessonTypes'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import { bytesToBase64 } from './base64'
-import { assertV3ExportDependencies } from './v3ExportSupport'
+import { assertExportPayloadDependencies } from './exportPayloadSupport'
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -84,192 +81,6 @@ function findComponent(
   return component
 }
 
-function addAssetId(target: Set<string>, assetId: string | null | undefined): void {
-  if (assetId) target.add(assetId)
-}
-
-function decodeSourceEscape(source: string, index: number): {
-  value: string
-  nextIndex: number
-} {
-  const escaped = source[index + 1]
-  if (escaped === undefined) return { value: '', nextIndex: index + 1 }
-  const simple: Readonly<Record<string, string>> = {
-    b: '\b',
-    f: '\f',
-    n: '\n',
-    r: '\r',
-    t: '\t',
-    v: '\v',
-    0: '\0',
-  }
-  if (escaped in simple) {
-    return { value: simple[escaped]!, nextIndex: index + 2 }
-  }
-  if (escaped === '\n') return { value: '', nextIndex: index + 2 }
-  if (escaped === '\r') {
-    return {
-      value: '',
-      nextIndex: source[index + 2] === '\n' ? index + 3 : index + 2,
-    }
-  }
-  if (escaped === 'x') {
-    const hex = source.slice(index + 2, index + 4)
-    if (/^[\da-f]{2}$/i.test(hex)) {
-      return {
-        value: String.fromCharCode(Number.parseInt(hex, 16)),
-        nextIndex: index + 4,
-      }
-    }
-  }
-  if (escaped === 'u') {
-    const hex = source.slice(index + 2, index + 6)
-    if (/^[\da-f]{4}$/i.test(hex)) {
-      return {
-        value: String.fromCharCode(Number.parseInt(hex, 16)),
-        nextIndex: index + 6,
-      }
-    }
-  }
-  return { value: escaped, nextIndex: index + 2 }
-}
-
-/**
- * Conservative compatibility pass for legacy projectUrl/projectAssetUrl calls.
- * It scans quoted literals once, avoiding an O(asset-count × source-size) pass.
- */
-function addSourceAssetLiteralIds(
-  source: string,
-  knownAssetIds: ReadonlySet<string>,
-  target: Set<string>,
-): void {
-  let index = 0
-  while (index < source.length) {
-    const quote = source[index]
-    if (quote !== "'" && quote !== '"' && quote !== '`') {
-      index += 1
-      continue
-    }
-    let value = ''
-    index += 1
-    while (index < source.length) {
-      const character = source[index]!
-      if (character === quote) {
-        index += 1
-        if (knownAssetIds.has(value)) target.add(value)
-        break
-      }
-      if (character === '\\') {
-        const decoded = decodeSourceEscape(source, index)
-        value += decoded.value
-        index = decoded.nextIndex
-        continue
-      }
-      value += character
-      index += 1
-    }
-  }
-}
-
-function addKnownAssetValues(
-  value: unknown,
-  knownAssetIds: ReadonlySet<string>,
-  target: Set<string>,
-): void {
-  if (typeof value === 'string') {
-    if (knownAssetIds.has(value)) target.add(value)
-    return
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item) => addKnownAssetValues(item, knownAssetIds, target))
-    return
-  }
-  if (typeof value !== 'object' || value === null) return
-  Object.values(value).forEach((item) =>
-    addKnownAssetValues(item, knownAssetIds, target),
-  )
-}
-
-function addRuntimeAssetIds(
-  target: Set<string>,
-  runtime: RuntimeDocument | undefined,
-  knownAssetIds: ReadonlySet<string>,
-): void {
-  if (!runtime?.enabled) return
-  for (const binding of Object.values(runtime.assets)) {
-    addAssetId(target, binding.assetId)
-  }
-  addAssetId(target, runtime.staticFallback?.assetId)
-  addKnownAssetValues(runtime.content.values, knownAssetIds, target)
-  addSourceAssetLiteralIds(runtime.source, knownAssetIds, target)
-}
-
-function addComponentProjectAssetIds(
-  payload: ExportPayload,
-  node: Extract<SceneNode, { type: 'external-component' }>,
-  target: Set<string>,
-  knownAssetIds: ReadonlySet<string>,
-  componentSourceAssets: Map<string, ReadonlySet<string>>,
-): void {
-  const component = findComponent(
-    payload,
-    node.component.packageId,
-    node.component.version,
-  )
-  const effectiveProps = mergeComponentProps(component.manifest, node.props)
-  addKnownAssetValues(effectiveProps, knownAssetIds, target)
-  if (component.manifest.schemaVersion !== 1) {
-    for (const property of component.manifest.editor?.properties ?? []) {
-      if (property.type !== 'image') continue
-      const value = getComponentPropValue(effectiveProps, property.key)
-      if (typeof value === 'string') addAssetId(target, value)
-    }
-  }
-  const key = componentKey(
-    node.component.packageId,
-    node.component.version,
-  )
-  let sourceAssets = componentSourceAssets.get(key)
-  if (!sourceAssets) {
-    const collected = new Set<string>()
-    addSourceAssetLiteralIds(
-      component.runtimeSource,
-      knownAssetIds,
-      collected,
-    )
-    sourceAssets = collected
-    componentSourceAssets.set(key, sourceAssets)
-  }
-  sourceAssets.forEach((assetId) => target.add(assetId))
-}
-
-function addNodeAssetIds(
-  payload: ExportPayload,
-  node: SceneNode,
-  target: Set<string>,
-  knownAssetIds: ReadonlySet<string>,
-  componentSourceAssets: Map<string, ReadonlySet<string>>,
-): void {
-  if (node.type === 'image') {
-    addAssetId(target, node.assetId)
-    return
-  }
-  if (node.type === 'video') {
-    addAssetId(target, node.assetId)
-    if (node.poster.mode === 'image') addAssetId(target, node.poster.assetId)
-    return
-  }
-  if (node.type === 'external-component') {
-    addComponentProjectAssetIds(
-      payload,
-      node,
-      target,
-      knownAssetIds,
-      componentSourceAssets,
-    )
-  }
-}
-
 /**
  * Runtime project-asset closure for PublishedLesson. Component package assets
  * are handled separately and remain scoped to each used component.
@@ -277,55 +88,10 @@ function addNodeAssetIds(
 export function collectPublishedProjectAssetIds(
   payload: ExportPayload,
 ): Set<string> {
-  const assetIds = new Set<string>()
-  const { project } = payload
-  const knownAssetIds = new Set(
-    Object.values(project.assets).map((asset) => asset.id),
-  )
-  const componentSourceAssets = new Map<string, ReadonlySet<string>>()
-
-  addRuntimeAssetIds(assetIds, project.globalRuntime, knownAssetIds)
-  for (const sound of Object.values(project.media.audio.sounds)) {
-    addAssetId(assetIds, sound.assetId)
-  }
-  for (const item of project.globalLayer) {
-    addNodeAssetIds(
-      payload,
-      item.node,
-      assetIds,
-      knownAssetIds,
-      componentSourceAssets,
-    )
-  }
-
-  for (const scene of project.scenes) {
-    addAssetId(assetIds, scene.backgroundAssetId)
-    scene.nodes.forEach((node) =>
-      addNodeAssetIds(
-        payload,
-        node,
-        assetIds,
-        knownAssetIds,
-        componentSourceAssets,
-      ),
-    )
-    addRuntimeAssetIds(assetIds, scene.runtime, knownAssetIds)
-    for (const state of scene.presentation?.states ?? []) {
-      const materialized = materializeScene(scene, state.id)
-      addAssetId(assetIds, materialized.backgroundAssetId)
-      materialized.nodes.forEach((node) =>
-        addNodeAssetIds(
-          payload,
-          node,
-          assetIds,
-          knownAssetIds,
-          componentSourceAssets,
-        ),
-      )
-    }
-  }
-
-  return assetIds
+  return new Set(collectReferencedProjectAssetIds(payload.project, {
+    componentPackages: payload.components,
+    includeDisabledRuntimes: false,
+  }))
 }
 
 function findProjectAssetEntry(
@@ -398,12 +164,6 @@ function publishOverride(
   return override as unknown as SceneNodeOverride
 }
 
-function componentScopes(manifest: ComponentManifest): PublishedComponent['scopes'] {
-  return manifest.schemaVersion === 1 || manifest.schemaVersion === 2
-    ? ['scene']
-    : cloneJson(manifest.supportedScopes)
-}
-
 function publishComponent(
   component: ExportPayload['components'][string],
 ): PublishedComponent {
@@ -412,7 +172,7 @@ function publishComponent(
     name: component.manifest.name,
     version: component.manifest.version,
     apiVersion: component.manifest.runtimeApiVersion,
-    scopes: componentScopes(component.manifest),
+    scopes: cloneJson(component.manifest.supportedScopes),
     renderMode: componentRenderMode(component.manifest),
     code: encodePublishedCode(component.runtimeSource),
     assets: Object.fromEntries(
@@ -445,7 +205,7 @@ export function collectPublishedComponentKeys(
 export function buildPublishedLessonPayload(
   payload: ExportPayload,
 ): PublishedLessonPayload {
-  assertV3ExportDependencies(payload, {
+  assertExportPayloadDependencies(payload, {
     requireAllProjectResources: false,
     includeDisabledRuntimes: false,
   })

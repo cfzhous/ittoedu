@@ -91,6 +91,10 @@ vi.mock('../../src/player/PlayerApp', () => ({
       return true
     }
 
+    waitForCaptureReady(): Promise<void> {
+      return Promise.resolve()
+    }
+
     destroy(): void {
       if (this.destroyed) return
       this.destroyed = true

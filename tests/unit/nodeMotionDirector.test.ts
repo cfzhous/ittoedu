@@ -201,6 +201,118 @@ describe('NodeMotionDirector', () => {
     expect(root).toMatchObject({ visible: true, alpha: 0.75 })
   })
 
+  it('隐藏窗口不推进 Phaser tween 时由预览 watchdog 恢复稳定帧', async () => {
+    vi.useFakeTimers()
+    const { scene, tweens, killTweensOf } = sceneHarness()
+    const root = new FakeRoot()
+    const director = new NodeMotionDirector({
+      scene,
+      scope: 'scene',
+      mode: 'capture',
+      events: new CourseEventBus(),
+      sceneId: 'scene_one',
+      prefersReducedMotion: () => false,
+    })
+    director.register(handle(root), node())
+
+    expect(director.preview(action('node.enter', 'fade'))).toBe(true)
+    expect(root.alpha).toBe(0)
+    expect(tweens).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(801)
+    expect(root).toMatchObject({ visible: true, alpha: 0.75 })
+    expect(killTweensOf).toHaveBeenCalled()
+
+    // A late Phaser callback belongs to the cancelled token and cannot move
+    // the already restored authoring frame again.
+    tweens[0]!.onComplete()
+    await Promise.resolve()
+    expect(root).toMatchObject({ visible: true, alpha: 0.75 })
+  })
+
+  it('退场 tween 完成但场景时钟不推进时仍保留停留后再恢复', async () => {
+    vi.useFakeTimers()
+    const { scene, tweens, delayedCalls } = sceneHarness()
+    const root = new FakeRoot()
+    const director = new NodeMotionDirector({
+      scene,
+      scope: 'scene',
+      mode: 'capture',
+      events: new CourseEventBus(),
+      sceneId: 'scene_one',
+      prefersReducedMotion: () => false,
+    })
+    director.register(handle(root), node())
+
+    expect(director.preview(action('node.exit', 'fade'))).toBe(true)
+    tweens[0]!.onComplete()
+    await Promise.resolve()
+    expect(root.visible).toBe(false)
+    expect(delayedCalls.at(-1)?.delay).toBe(180)
+
+    await vi.advanceTimersByTimeAsync(981)
+    expect(root).toMatchObject({ visible: true, alpha: 0.75 })
+  })
+
+  it('旧预览 watchdog 不会提前恢复新的同节点预览', async () => {
+    vi.useFakeTimers()
+    const { scene } = sceneHarness()
+    const root = new FakeRoot()
+    const director = new NodeMotionDirector({
+      scene,
+      scope: 'scene',
+      mode: 'capture',
+      events: new CourseEventBus(),
+      sceneId: 'scene_one',
+      prefersReducedMotion: () => false,
+    })
+    director.register(handle(root), node())
+
+    expect(director.preview(action('node.enter', 'fade'))).toBe(true)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(director.preview(action('node.enter', 'fade'))).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(701)
+    expect(root.alpha).toBe(0)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(root.alpha).toBe(0.75)
+  })
+
+  it('注销或销毁节点会清理未完成的预览 watchdog', () => {
+    vi.useFakeTimers()
+    const firstHarness = sceneHarness()
+    const firstRoot = new FakeRoot()
+    const firstDirector = new NodeMotionDirector({
+      scene: firstHarness.scene,
+      scope: 'scene',
+      mode: 'capture',
+      events: new CourseEventBus(),
+      sceneId: 'scene_one',
+      prefersReducedMotion: () => false,
+    })
+    firstDirector.register(handle(firstRoot), node())
+    expect(firstDirector.preview(action('node.enter', 'fade'))).toBe(true)
+    expect(vi.getTimerCount()).toBe(1)
+    firstDirector.unregister('result-card')
+    expect(vi.getTimerCount()).toBe(0)
+
+    const secondHarness = sceneHarness()
+    const secondRoot = new FakeRoot()
+    const secondDirector = new NodeMotionDirector({
+      scene: secondHarness.scene,
+      scope: 'scene',
+      mode: 'capture',
+      events: new CourseEventBus(),
+      sceneId: 'scene_one',
+      prefersReducedMotion: () => false,
+    })
+    secondDirector.register(handle(secondRoot), node())
+    expect(secondDirector.preview(action('node.enter', 'fade'))).toBe(true)
+    expect(vi.getTimerCount()).toBe(1)
+    secondDirector.clear()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('isolates playback motion from an in-flight authored presentation frame', async () => {
     const { scene, tweens, killTweensOf } = sceneHarness()
     const director = new NodeMotionDirector({

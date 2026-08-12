@@ -14,16 +14,16 @@ const projectRoot = path.resolve(testDirectory, '..', '..')
 const exampleDirectory = path.join(projectRoot, 'examples', 'render-host-benchmark')
 const runtimeDirectory = path.join(exampleDirectory, 'runtimes')
 const tableDirectory = path.join(exampleDirectory, 'components', 'editable-table')
-const legacyDirectory = path.join(exampleDirectory, 'components', 'legacy-phaser')
+const phaserMeterDirectory = path.join(exampleDirectory, 'components', 'phaser-meter')
 const MAX_RUNTIME_BYTES = 2 * 1024 * 1024
 
 let project: ProjectDocument
 let threeBundle = ''
 let phaserRuntime = ''
 let tableManifest: ComponentManifest
-let legacyManifest: ComponentManifest
+let phaserMeterManifest: ComponentManifest
 let tableRuntime = ''
-let legacyRuntime = ''
+let phaserMeterRuntime = ''
 let declaredThreeVersion = ''
 
 async function readJson(filePath: string): Promise<unknown> {
@@ -146,27 +146,27 @@ beforeAll(async () => {
     threeSource,
     phaserSource,
     tableManifestValue,
-    legacyManifestValue,
+    phaserMeterManifestValue,
     tableSource,
-    legacySource,
+    phaserMeterSource,
     rootPackageValue,
   ] = await Promise.all([
     readJson(path.join(exampleDirectory, 'project.json')),
     fs.readFile(path.join(runtimeDirectory, 'three-runtime.js'), 'utf8'),
     fs.readFile(path.join(runtimeDirectory, 'phaser-runtime.js'), 'utf8'),
     readJson(path.join(tableDirectory, 'manifest.json')),
-    readJson(path.join(legacyDirectory, 'manifest.json')),
+    readJson(path.join(phaserMeterDirectory, 'manifest.json')),
     fs.readFile(path.join(tableDirectory, 'runtime.js'), 'utf8'),
-    fs.readFile(path.join(legacyDirectory, 'runtime.js'), 'utf8'),
+    fs.readFile(path.join(phaserMeterDirectory, 'runtime.js'), 'utf8'),
     readJson(path.join(projectRoot, 'package.json')),
   ])
   project = projectDocumentSchema.parse(projectValue)
   threeBundle = threeSource
   phaserRuntime = phaserSource
   tableManifest = componentManifestSchema.parse(tableManifestValue)
-  legacyManifest = componentManifestSchema.parse(legacyManifestValue)
+  phaserMeterManifest = componentManifestSchema.parse(phaserMeterManifestValue)
   tableRuntime = tableSource
-  legacyRuntime = legacySource
+  phaserMeterRuntime = phaserMeterSource
   declaredThreeVersion = readDeclaredThreeVersion(rootPackageValue)
 })
 
@@ -178,7 +178,7 @@ describe('render host benchmark fixture', () => {
       'scene_runtime_phaser',
       'scene_runtime_three',
       'scene_component_v4_dom',
-      'scene_component_v3_legacy',
+      'scene_component_v4_phaser',
     ])
     expect(project.globalLayer).toHaveLength(1)
     expect(project.globalInteractions).toEqual([])
@@ -193,7 +193,7 @@ describe('render host benchmark fixture', () => {
     })
     expect(project.scenes.every((scene) => Array.isArray(scene.interactions))).toBe(true)
 
-    const [nativeScene, phaserScene, threeScene, tableScene, legacyScene] = project.scenes
+    const [nativeScene, phaserScene, threeScene, tableScene, phaserComponentScene] = project.scenes
     expect(nativeScene?.runtime).toBeUndefined()
     expect(nativeScene?.nodes.some((node) => node.type === 'external-component')).toBe(false)
     expect(phaserScene?.runtime).toMatchObject({ runtimeApiVersion: 2, renderMode: 'phaser' })
@@ -203,9 +203,9 @@ describe('render host benchmark fixture', () => {
       type: 'external-component',
       component: { packageId: tableManifest.id, version: tableManifest.version },
     }))
-    expect(legacyScene?.nodes).toContainEqual(expect.objectContaining({
+    expect(phaserComponentScene?.nodes).toContainEqual(expect.objectContaining({
       type: 'external-component',
-      component: { packageId: legacyManifest.id, version: legacyManifest.version },
+      component: { packageId: phaserMeterManifest.id, version: phaserMeterManifest.version },
     }))
 
     expect(Object.values(project.assets).every(({ kind }) => kind === 'image')).toBe(true)
@@ -269,7 +269,7 @@ describe('render host benchmark fixture', () => {
     expect(references).toEqual([])
   })
 
-  it('contains a V4 DOM table and an unchanged V3 Phaser compatibility component', () => {
+  it('contains V4 DOM and Phaser components on their declared surfaces', () => {
     expect(tableManifest).toMatchObject({
       schemaVersion: 4,
       runtimeApiVersion: 4,
@@ -282,38 +282,38 @@ describe('render host benchmark fixture', () => {
     expect(tableRuntime).toContain('prepareCapture')
     expect(tableRuntime).toContain('removeEventListener')
 
-    expect(legacyManifest).toMatchObject({
-      schemaVersion: 3,
-      runtimeApiVersion: 3,
+    expect(phaserMeterManifest).toMatchObject({
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
       supportedScopes: ['scene'],
+      renderMode: 'phaser',
     })
-    expect(legacyManifest).not.toHaveProperty('renderMode')
-    expect(legacyRuntime).toContain('ctx.scene.add')
-    expect(legacyRuntime).toContain('ctx.root.add')
+    expect(phaserMeterRuntime).toContain('ctx.phaser.scene')
+    expect(phaserMeterRuntime).toContain('ctx.phaser.root')
 
     expect(executeComponentRegistration(tableRuntime)).toMatchObject({
       id: tableManifest.id,
       runtimeApiVersion: 4,
       create: expect.any(Function),
     })
-    expect(executeComponentRegistration(legacyRuntime)).toMatchObject({
-      id: legacyManifest.id,
-      runtimeApiVersion: 3,
+    expect(executeComponentRegistration(phaserMeterRuntime)).toMatchObject({
+      id: phaserMeterManifest.id,
+      runtimeApiVersion: 4,
       create: expect.any(Function),
     })
   })
 
   it('reopens the lesson and both component archives with current import paths', async () => {
-    const [lessonBytes, tableBytes, legacyBytes] = await Promise.all([
+    const [lessonBytes, tableBytes, phaserMeterBytes] = await Promise.all([
       fs.readFile(path.join(exampleDirectory, 'render-host-benchmark.h5lesson')),
       fs.readFile(path.join(exampleDirectory, 'render-host-editable-table.h5component')),
-      fs.readFile(path.join(exampleDirectory, 'render-host-legacy-phaser.h5component')),
+      fs.readFile(path.join(exampleDirectory, 'render-host-phaser-meter.h5component')),
     ])
     const reopened = openProjectArchive(lessonBytes)
     expect(reopened.project.scenes).toHaveLength(5)
     expect(Object.keys(reopened.componentFiles)).toHaveLength(2)
     expect(importComponentPackage(tableBytes).manifest.schemaVersion).toBe(4)
-    expect(importComponentPackage(legacyBytes).manifest.schemaVersion).toBe(3)
+    expect(importComponentPackage(phaserMeterBytes).manifest.schemaVersion).toBe(4)
   })
 
   it('ships an offline standalone player and the Three.js MIT notice beside it', async () => {

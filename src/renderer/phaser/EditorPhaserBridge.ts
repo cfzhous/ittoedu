@@ -1,12 +1,9 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type {
-  RuntimeAssetMap,
   SceneDocument,
   SceneNode,
-  TextRun,
 } from '../../shared/projectTypes'
 import type { EditorScene } from './EditorScene'
-import type { ComponentCanvasTextTarget } from './adapters/ExternalComponentNodeAdapter'
 
 export interface NodeMoveEndEvent {
   nodeId: string
@@ -55,7 +52,6 @@ export class EditorPhaserBridge {
   private pending:
     | {
         document: SceneDocument
-        assets: RuntimeAssetMap
         components: Record<string, ComponentPackageData>
       }
     | undefined
@@ -69,43 +65,39 @@ export class EditorPhaserBridge {
   private readonly transformPreviewHandlers =
     new Set<Handler<NodesTransformPreviewEvent>>()
   private readonly doubleClickHandlers = new Set<Handler<string>>()
-  private readonly componentTextDoubleClickHandlers =
-    new Set<Handler<ComponentCanvasTextTarget>>()
+  private readonly formulaDoubleClickHandlers = new Set<Handler<string>>()
   attach(scene: EditorScene): void {
     this.scene = scene
     if (this.pending) {
-      const { document, assets, components } = this.pending
-      void this.loadDocument(scene, document, assets, components)
+      const { document, components } = this.pending
+      this.loadDocument(scene, document, components)
       this.pending = undefined
     }
   }
 
-  private async loadDocument(
+  private loadDocument(
     scene: EditorScene,
     document: SceneDocument,
-    assets: RuntimeAssetMap,
     components: Record<string, ComponentPackageData>,
-  ): Promise<void> {
-    await scene.loadDocument(document, assets, components)
+  ): void {
+    scene.loadDocument(document, components)
     if (this.scene !== scene) return
 
-    // Loading a document recreates every adapter and intentionally clears the
-    // Phaser-side selection. Restore the latest UI state after the async load;
-    // it may have changed while component packages were registering.
+    // Loading a document recreates every proxy and intentionally clears the
+    // Phaser-side selection. Restore the latest UI state immediately.
     scene.selectNodes(this.selectedNodeIds)
     scene.setTextEditing(this.editingTextNodeId)
   }
 
   loadScene(
     document: SceneDocument,
-    assets: RuntimeAssetMap,
     components: Record<string, ComponentPackageData>,
   ): void {
     if (!this.scene) {
-      this.pending = { document, assets, components }
+      this.pending = { document, components }
       return
     }
-    void this.loadDocument(this.scene, document, assets, components)
+    this.loadDocument(this.scene, document, components)
   }
 
   applyNode(node: SceneNode): void {
@@ -120,9 +112,6 @@ export class EditorPhaserBridge {
   reorderNodes(nodeIds: string[]): void {
     this.scene?.reorderNodes(nodeIds)
   }
-  setBackground(color: string): void {
-    this.scene?.setBackground(color)
-  }
   selectNode(nodeId: string | null): void {
     this.selectNodes(nodeId ? [nodeId] : [])
   }
@@ -133,9 +122,6 @@ export class EditorPhaserBridge {
   setTextEditing(nodeId: string | null): void {
     this.editingTextNodeId = nodeId
     this.scene?.setTextEditing(nodeId)
-  }
-  previewText(nodeId: string, text: string, runs: TextRun[]): void {
-    this.scene?.previewText(nodeId, text, runs)
   }
   previewNodeMotion(
     action: import('../../shared/interactionTypes').NodeMotionAction,
@@ -183,11 +169,9 @@ export class EditorPhaserBridge {
     this.doubleClickHandlers.add(handler)
     return () => this.doubleClickHandlers.delete(handler)
   }
-  onComponentTextDoubleClick(
-    handler: Handler<ComponentCanvasTextTarget>,
-  ): () => void {
-    this.componentTextDoubleClickHandlers.add(handler)
-    return () => this.componentTextDoubleClickHandlers.delete(handler)
+  onFormulaDoubleClick(handler: Handler<string>): () => void {
+    this.formulaDoubleClickHandlers.add(handler)
+    return () => this.formulaDoubleClickHandlers.delete(handler)
   }
 
   emitSelected(nodeId: string | null, additive = false): void {
@@ -217,8 +201,8 @@ export class EditorPhaserBridge {
   emitTextDoubleClick(nodeId: string): void {
     this.doubleClickHandlers.forEach((handler) => handler(nodeId))
   }
-  emitComponentTextDoubleClick(event: ComponentCanvasTextTarget): void {
-    this.componentTextDoubleClickHandlers.forEach((handler) => handler(event))
+  emitFormulaDoubleClick(nodeId: string): void {
+    this.formulaDoubleClickHandlers.forEach((handler) => handler(nodeId))
   }
 
   detach(scene: EditorScene): void {

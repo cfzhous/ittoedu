@@ -225,7 +225,7 @@ describe('RuntimeHost API 2', () => {
     registry.dispose()
   })
 
-  it('不向未声明扩展的旧 Runtime 暴露 authoring，即使宿主有接收器', async () => {
+  it('不向未声明扩展的 Runtime 暴露 authoring，即使宿主有接收器', async () => {
     const onTargetsChanged = vi.fn()
     const { host, registry } = createHost(
       runtime(2, 'dom'),
@@ -244,7 +244,7 @@ describe('RuntimeHost API 2', () => {
   it('宿主未启用画布编辑时，声明扩展的 Runtime 仍按普通预览运行', () => {
     const source = `
       CoursewareRuntime.define({
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         authoringApiVersion: 1,
         create(ctx) {
           window.__runtimeHostContext = ctx
@@ -252,29 +252,9 @@ describe('RuntimeHost API 2', () => {
         }
       })
     `
-    const { host, registry } = createHost(runtime(1, 'dom', source))
+    const { host, registry } = createHost(runtime(2, 'dom', source))
 
     expect(capturedContext()).not.toHaveProperty('authoring')
-
-    host.destroy()
-    registry.dispose()
-  })
-
-  it('API 1 不受 renderMode 裁剪，继续同时暴露 Phaser、DOM 和节点能力', () => {
-    const { host, testEnvironment, registry } = createHost(runtime(1, 'dom'))
-    const context = capturedContext()
-
-    expect(context.runtimeApiVersion).toBe(1)
-    expect(context).not.toHaveProperty('renderMode')
-    expect(context).toHaveProperty('Phaser')
-    expect(context).toHaveProperty('phaser')
-    expect(context).toHaveProperty('domRoot')
-    expect(context).toHaveProperty('dom')
-    expect(context).toHaveProperty('nodes')
-    expect(testEnvironment.phaserUnderlay.children).toHaveLength(1)
-    expect(testEnvironment.phaserOverlay.children).toHaveLength(1)
-    expect(testEnvironment.domUnderlay.children).toHaveLength(1)
-    expect(testEnvironment.domOverlay.children).toHaveLength(1)
 
     host.destroy()
     registry.dispose()
@@ -437,7 +417,7 @@ describe('RuntimeHost API 2', () => {
     expect(Reflect.has(window, '__runtimeHostContext')).toBe(false)
     const errorHost = testEnvironment.domOverlay.firstElementChild as HTMLElement
     expect(errorHost.shadowRoot?.textContent).toContain(
-      '文档为 2，源码为 1',
+      '只支持 runtimeApiVersion 2',
     )
     expect(error).toHaveBeenCalled()
     await expect(host.waitForCaptureReady()).rejects.toThrow(

@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <rect width="1280" height="720" fill="#1e1b4b"/>
-  <text x="640" y="112" text-anchor="middle" fill="#ede9fe" font-family="Microsoft YaHei,sans-serif" font-size="34" font-weight="700">场景运行时：无需强制组件化</text>
-  <rect x="155" y="150" width="970" height="390" rx="30" fill="#2e1065" stroke="#c4b5fd"/>
-  <foreignObject x="205" y="184" width="870" height="94"><div xmlns="http://www.w3.org/1999/xhtml" style="color:#f5f3ff;text-align:center;font:700 28px/1.45 Microsoft YaHei,sans-serif">哪一种实现最适合“只在当前场景使用一次、但效果很复杂”的互动？</div></foreignObject>
-  <g><rect x="205" y="300" width="270" height="108" rx="18" fill="#4c1d95" stroke="#c4b5fd"/><foreignObject x="220" y="320" width="240" height="68"><div xmlns="http://www.w3.org/1999/xhtml" style="color:#f5f3ff;text-align:center;font:700 18px/1.45 Microsoft YaHei,sans-serif">强制制作成全局组件</div></foreignObject></g><g><rect x="495" y="300" width="270" height="108" rx="18" fill="#4c1d95" stroke="#c4b5fd"/><foreignObject x="510" y="320" width="240" height="68"><div xmlns="http://www.w3.org/1999/xhtml" style="color:#f5f3ff;text-align:center;font:700 18px/1.45 Microsoft YaHei,sans-serif">直接写入 scene.runtime</div></foreignObject></g><g><rect x="785" y="300" width="270" height="108" rx="18" fill="#4c1d95" stroke="#c4b5fd"/><foreignObject x="800" y="320" width="240" height="68"><div xmlns="http://www.w3.org/1999/xhtml" style="color:#f5f3ff;text-align:center;font:700 18px/1.45 Microsoft YaHei,sans-serif">降级成静态图片</div></foreignObject></g>
-  <text x="640" y="480" text-anchor="middle" fill="#ddd6fe" font-family="Microsoft YaHei,sans-serif" font-size="17">请选择一个方案。全局控制条“下一页”会经过导航守卫。</text>
-</svg>

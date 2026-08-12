@@ -3,9 +3,14 @@ import { createTextNode } from '@/renderer/project/createProject'
 import { renderTextNodeCanvas } from '@/shared/textLayout'
 
 type FillTextCall = [text: string, x: number, y: number]
+type ArcCall = [x: number, y: number, radius: number, start: number, end: number]
 
-function canvasContext(fillTextCalls: FillTextCall[]): CanvasRenderingContext2D {
+function canvasContext(
+  fillTextCalls: FillTextCall[],
+  arcCalls: ArcCall[] = [],
+): CanvasRenderingContext2D {
   return {
+    arc: vi.fn((...args: ArcCall) => arcCalls.push(args)),
     beginPath: vi.fn(),
     closePath: vi.fn(),
     clip: vi.fn(),
@@ -91,4 +96,73 @@ describe('direction-aware text layout', () => {
     const nextLeftColumn = leftToRightCalls.find(([text]) => text === '丁')!
     expect(firstLeft[1]).toBeLessThan(nextLeftColumn[1])
   })
+
+  it('reserves line height and draws only run-level horizontal emphasis dots', () => {
+    const plainCalls: FillTextCall[] = []
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      canvasContext(plainCalls),
+    )
+    const plain = createTextNode({
+      width: 200,
+      text: '重点 文本',
+      style: {
+        writingMode: 'horizontal',
+        overflow: 'auto-height',
+        fontSize: 20,
+        lineSpacing: 0,
+        letterSpacing: 0,
+        padding: 0,
+      },
+    })
+    const plainRendered = renderTextNodeCanvas(plain)
+
+    vi.restoreAllMocks()
+    const emphasizedCalls: FillTextCall[] = []
+    const arcCalls: ArcCall[] = []
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      canvasContext(emphasizedCalls, arcCalls),
+    )
+    const rendered = renderTextNodeCanvas({
+      ...plain,
+      runs: [{ start: 0, end: 2, style: { emphasis: true } }],
+    })
+
+    expect(rendered.height).toBeGreaterThan(plainRendered.height)
+    expect(arcCalls).toHaveLength(2)
+    expect(arcCalls[0]![1]).toBeGreaterThan(
+      emphasizedCalls.find(([text]) => text === '重')![2],
+    )
+  })
+
+  it.each(['vertical-rl', 'vertical-lr'] as const)(
+    'reserves column width and draws %s emphasis on the character right',
+    (writingMode) => {
+      const fillTextCalls: FillTextCall[] = []
+      const arcCalls: ArcCall[] = []
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+        canvasContext(fillTextCalls, arcCalls),
+      )
+      const node = createTextNode({
+        height: 80,
+        text: '甲乙',
+        runs: [{ start: 1, end: 2, style: { emphasis: false } }],
+        style: {
+          writingMode,
+          overflow: 'auto-height',
+          fontSize: 20,
+          lineSpacing: 0,
+          letterSpacing: 0,
+          padding: 0,
+          emphasis: true,
+        },
+      })
+
+      const rendered = renderTextNodeCanvas(node)
+      const firstCharacter = fillTextCalls.find(([text]) => text === '甲')!
+
+      expect(rendered.width).toBeGreaterThan(20)
+      expect(arcCalls).toHaveLength(1)
+      expect(arcCalls[0]![0]).toBeGreaterThan(firstCharacter[1])
+    },
+  )
 })

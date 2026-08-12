@@ -1,15 +1,10 @@
 import * as Phaser from 'phaser'
-import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type {
   MotionDirection,
   MotionEasing,
   NodeMotionAction,
 } from '../../../shared/interactionTypes'
-import type {
-  RuntimeAssetMap,
-  SceneNode,
-} from '../../../shared/projectTypes'
-import type { ComponentRegistry } from '../ComponentRegistry'
+import type { SceneNode } from '../../../shared/projectTypes'
 
 const MOTION_SLIDE_DISTANCE = 48
 const MOTION_SCALE_MULTIPLIER = 0.84
@@ -35,12 +30,6 @@ function previewSlideOffset(direction: MotionDirection | undefined): {
     case 'left':
     default: return { x: -MOTION_SLIDE_DISTANCE, y: 0 }
   }
-}
-
-export interface AdapterContext {
-  assets: RuntimeAssetMap
-  components: Record<string, ComponentPackageData>
-  componentRegistry: ComponentRegistry
 }
 
 export interface AdapterBounds {

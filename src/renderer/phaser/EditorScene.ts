@@ -8,22 +8,13 @@ import {
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { NodeMotionAction } from '../../shared/interactionTypes'
 import type {
-  RuntimeAssetMap,
   SceneDocument,
   SceneNode,
-  TextRun,
 } from '../../shared/projectTypes'
-import { ComponentRegistry } from './ComponentRegistry'
 import type { EditorPhaserBridge } from './EditorPhaserBridge'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
-import { ExternalComponentNodeAdapter } from './adapters/ExternalComponentNodeAdapter'
-import { ImageNodeAdapter } from './adapters/ImageNodeAdapter'
 import { ProxyNodeAdapter } from './adapters/ProxyNodeAdapter'
-import { VideoNodeAdapter } from './adapters/VideoNodeAdapter'
-import { TeacherControllerNodeAdapter } from './adapters/TeacherControllerNodeAdapter'
 import type { AdapterBounds, NodeAdapter } from './adapters/NodeAdapter'
-import { ShapeNodeAdapter } from './adapters/RectangleNodeAdapter'
-import { TextNodeAdapter } from './adapters/TextNodeAdapter'
 
 const SNAP_DISTANCE = 7
 
@@ -89,17 +80,13 @@ function intersects(a: AxisBounds, b: AxisBounds): boolean {
 
 export class EditorScene extends Phaser.Scene {
   private readonly adapters = new Map<string, NodeAdapter>()
-  private readonly componentRegistry = new ComponentRegistry()
   private selectionOverlay!: SelectionOverlay
   private marqueeGraphics!: Phaser.GameObjects.Graphics
   private guideGraphics!: Phaser.GameObjects.Graphics
   private selectedNodeIds: string[] = []
   private editingTextNodeId: string | null = null
   private document: SceneDocument | null = null
-  private assets: RuntimeAssetMap = {}
   private components: Record<string, ComponentPackageData> = {}
-  private backgroundImage: Phaser.GameObjects.Image | null = null
-  private documentLoadGeneration = 0
   private lastClick = { nodeId: '', time: 0 }
   private marqueeStart: (Point & { additive: boolean }) | null = null
   private dragStart: {
@@ -120,10 +107,7 @@ export class EditorScene extends Phaser.Scene {
     nodes: TransformSnapshot[]
   } | null = null
 
-  constructor(
-    private readonly bridge: EditorPhaserBridge,
-    private readonly interactionOnly = false,
-  ) {
+  constructor(private readonly bridge: EditorPhaserBridge) {
     super({ key: 'EditorScene' })
   }
 
@@ -138,30 +122,14 @@ export class EditorScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.cleanup())
   }
 
-  async loadDocument(
+  loadDocument(
     document: SceneDocument,
-    assets: RuntimeAssetMap,
     components: Record<string, ComponentPackageData>,
-  ): Promise<void> {
-    const generation = ++this.documentLoadGeneration
+  ): void {
     this.clearAdapters()
     this.document = structuredClone(document)
-    this.assets = assets
     this.components = components
-    this.cameras.main.setBackgroundColor(
-      this.interactionOnly ? 'rgba(0,0,0,0)' : document.backgroundColor,
-    )
-    this.backgroundImage?.destroy()
-    this.backgroundImage = null
-    if (!this.interactionOnly) {
-      await Promise.all([
-        this.loadBackground(document, generation),
-        this.componentRegistry.loadPackages(components).catch((error) => {
-          console.error('组件注册失败', error)
-        }),
-      ])
-    }
-    if (!this.scene.isActive() || generation !== this.documentLoadGeneration) return
+    this.cameras.main.setBackgroundColor('rgba(0,0,0,0)')
     document.nodes.forEach((node) => this.mountAdapter(node))
     this.reorderNodes(document.nodes.map((node) => node.id))
     this.selectNodes([])
@@ -212,40 +180,6 @@ export class EditorScene extends Phaser.Scene {
     this.showCurrentSelection()
   }
 
-  setBackground(color: string): void {
-    this.cameras.main.setBackgroundColor(
-      this.interactionOnly ? 'rgba(0,0,0,0)' : color,
-    )
-    if (this.document) this.document.backgroundColor = color
-  }
-
-  private async loadBackground(
-    document: SceneDocument,
-    generation: number,
-  ): Promise<void> {
-    const assetId = document.backgroundAssetId
-    const asset = assetId ? this.assets[assetId] : undefined
-    if (!asset) return
-    const image = new Image()
-    const loaded = new Promise<boolean>((resolve) => {
-      image.onload = () => resolve(true)
-      image.onerror = () => resolve(false)
-    })
-    image.src = asset.url
-    if (!await loaded || generation !== this.documentLoadGeneration) return
-    const textureKey = `asset-${assetId}`
-    if (!this.textures.exists(textureKey)) this.textures.addImage(textureKey, image)
-    if (!this.scene.isActive() || generation !== this.documentLoadGeneration) return
-    const scale = Math.max(
-      CANVAS_WIDTH / Math.max(1, image.naturalWidth),
-      CANVAS_HEIGHT / Math.max(1, image.naturalHeight),
-    )
-    this.backgroundImage = this.add
-      .image(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, textureKey)
-      .setDisplaySize(image.naturalWidth * scale, image.naturalHeight * scale)
-      .setDepth(-1_000_000)
-  }
-
   selectNode(nodeId: string | null): void {
     this.selectNodes(nodeId ? [nodeId] : [])
   }
@@ -276,11 +210,6 @@ export class EditorScene extends Phaser.Scene {
       adapter?.setEditMode(true)
       if (adapter) this.input.setDraggable(adapter.interactionTarget, false)
     }
-  }
-
-  previewText(nodeId: string, text: string, runs: TextRun[]): void {
-    const adapter = this.adapters.get(nodeId)
-    if (adapter instanceof TextNodeAdapter) adapter.previewText(text, runs)
   }
 
   previewNodeMotion(action: NodeMotionAction, delayMs = 0): boolean {
@@ -339,40 +268,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private mountAdapter(node: SceneNode): void {
-    let adapter: NodeAdapter
-    if (this.interactionOnly) {
-      adapter = new ProxyNodeAdapter(this, node)
-      this.adapters.set(node.id, adapter)
-      this.configureAdapterInput(adapter)
-      return
-    }
-    switch (node.type) {
-      case 'text':
-        adapter = new TextNodeAdapter(this, node)
-        break
-      case 'image':
-        adapter = new ImageNodeAdapter(this, node, this.assets)
-        break
-      case 'video':
-        adapter = new VideoNodeAdapter(this, node, this.assets)
-        break
-      case 'shape':
-        adapter = new ShapeNodeAdapter(this, node)
-        break
-      case 'teacher-controller':
-        adapter = new TeacherControllerNodeAdapter(this, node)
-        break
-      case 'external-component':
-        adapter = new ExternalComponentNodeAdapter(
-          this,
-          node,
-          this.components[node.component.packageId],
-          this.componentRegistry,
-          this.assets,
-          this.document?.id === '__editor_global_layer__' ? 'global' : 'scene',
-        )
-        break
-    }
+    const adapter = new ProxyNodeAdapter(this, node)
     this.adapters.set(node.id, adapter)
     this.configureAdapterInput(adapter)
   }
@@ -401,7 +297,7 @@ export class EditorScene extends Phaser.Scene {
     )
     target.on(
       Phaser.Input.Events.GAMEOBJECT_POINTER_UP,
-      (pointer: Phaser.Input.Pointer) => {
+      () => {
         const now = performance.now()
         if (
           this.lastClick.nodeId === adapter.nodeId &&
@@ -412,12 +308,8 @@ export class EditorScene extends Phaser.Scene {
             // finished. Mounting/focusing the overlay during pointerdown lets
             // the browser's default canvas focus immediately blur it again.
             this.bridge.emitTextDoubleClick(adapter.nodeId)
-          } else if (adapter instanceof ExternalComponentNodeAdapter) {
-            const target = adapter.findEditableTextAt(
-              pointer.worldX,
-              pointer.worldY,
-            )
-            if (target) this.bridge.emitComponentTextDoubleClick(target)
+          } else if (adapter.getNode().type === 'formula') {
+            this.bridge.emitFormulaDoubleClick(adapter.nodeId)
           }
         }
         this.lastClick = { nodeId: adapter.nodeId, time: now }
@@ -824,9 +716,6 @@ export class EditorScene extends Phaser.Scene {
 
   private cleanup(): void {
     this.clearAdapters()
-    this.backgroundImage?.destroy()
-    this.backgroundImage = null
-    this.componentRegistry.dispose()
     this.selectionOverlay?.destroy()
     this.marqueeGraphics?.destroy()
     this.guideGraphics?.destroy()

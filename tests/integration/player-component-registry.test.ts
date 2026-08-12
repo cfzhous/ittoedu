@@ -3,17 +3,19 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { ComponentRegistry } from '../../src/player/ComponentRegistry'
 
 const manifest: ComponentManifest = {
-  schemaVersion: 1,
-  runtimeApiVersion: 1,
+  schemaVersion: 4,
+  runtimeApiVersion: 4,
   id: 'com.example.counter',
   name: '计数器',
-  version: '1.0.0',
+  version: '4.0.0',
   entry: 'runtime.js',
   defaultSize: { width: 320, height: 180 },
   minSize: { width: 160, height: 90 },
   preserveAspectRatio: true,
   assets: {},
   defaultProps: {},
+  supportedScopes: ['scene'],
+  renderMode: 'phaser',
 }
 
 describe('ComponentRegistry', () => {
@@ -27,7 +29,7 @@ describe('ComponentRegistry', () => {
       manifest,
       `window.CoursewareComponent.define({
         id: 'com.example.counter',
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 4,
         create() { return { destroy() {} } }
       })`,
     )
@@ -46,7 +48,7 @@ describe('ComponentRegistry', () => {
         manifest,
         `window.CoursewareComponent.define({
           id: 'com.example.wrong',
-          runtimeApiVersion: 1,
+          runtimeApiVersion: 4,
           create() { return { destroy() {} } }
         })`,
       ),
@@ -61,47 +63,34 @@ describe('ComponentRegistry', () => {
     registry.dispose()
   })
 
-  it('注册 V2 runtime 并拒绝 manifest/runtime API 不匹配', () => {
+  it('拒绝旧 Component API 1–3 runtime，并保留已注册的 V4 定义', () => {
     const registry = new ComponentRegistry()
-    const v2Manifest: ComponentManifest = {
-      ...manifest,
-      schemaVersion: 2,
-      runtimeApiVersion: 2,
-      editor: {
-        properties: [{ key: 'title', label: '标题', type: 'text' }],
-      },
+    const definition = registry.executeRuntime(
+      manifest,
+      `window.CoursewareComponent.define({
+        id: 'com.example.counter',
+        runtimeApiVersion: 4,
+        create() { return { destroy() {} } }
+      })`,
+    )
+
+    for (const legacyVersion of [1, 2, 3]) {
+      expect(() => registry.executeRuntime(
+        manifest,
+        `window.CoursewareComponent.define({
+          id: 'com.example.counter',
+          runtimeApiVersion: ${legacyVersion},
+          create() { return { destroy() {} } }
+        })`,
+      )).toThrow('只支持 Component API 4')
+      expect(registry.get(manifest.id)).toBe(definition)
     }
-
-    expect(registry.executeRuntime(
-      v2Manifest,
-      `window.CoursewareComponent.define({
-        id: 'com.example.counter',
-        runtimeApiVersion: 2,
-        create() { return { destroy() {} } }
-      })`,
-    ).runtimeApiVersion).toBe(2)
-
-    expect(() => registry.executeRuntime(
-      v2Manifest,
-      `window.CoursewareComponent.define({
-        id: 'com.example.counter',
-        runtimeApiVersion: 1,
-        create() { return { destroy() {} } }
-      })`,
-    )).toThrow('运行时 API 不匹配')
     registry.dispose()
   })
 
   it('注册 Component API 4 runtime，并以 V4 manifest 校验版本一致性', () => {
     const registry = new ComponentRegistry()
-    const v4Manifest: ComponentManifest = {
-      ...manifest,
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      version: '4.0.0',
-      supportedScopes: ['scene'],
-      renderMode: 'dom',
-    }
+    const v4Manifest: ComponentManifest = { ...manifest, renderMode: 'dom' }
 
     const definition = registry.executeRuntime(
       v4Manifest,
@@ -121,7 +110,7 @@ describe('ComponentRegistry', () => {
         runtimeApiVersion: 3,
         create() { return { destroy() {} } }
       })`,
-    )).toThrow('manifest 为 4，runtime 为 3')
+    )).toThrow('只支持 Component API 4')
 
     // A rejected reload must retain the last known-good V4 definition.
     expect(registry.get(v4Manifest.id)).toBe(definition)

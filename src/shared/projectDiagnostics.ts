@@ -9,10 +9,12 @@ import type {
   ProjectDocument,
   VideoNode,
 } from './projectTypes'
+import type { ProjectHealthCode } from './diagnosticCodes'
 
-export type ProjectDiagnosticCode =
-  | 'video-click-interaction-conflict'
-  | 'looping-video-ended-unreachable'
+export type ProjectDiagnosticCode = Extract<
+  ProjectHealthCode,
+  'video-click-interaction-conflict' | 'looping-video-ended-unreachable'
+>
 
 export interface ProjectDiagnostic {
   severity: 'warning'

@@ -20,6 +20,16 @@ import {
   SCENE_PICKER_OPEN_EVENT,
   TEACHER_CONTROLLER_COLLAPSE_EVENT,
 } from './ScenePickerOverlay'
+import {
+  constrainTeacherControllerOffset,
+  logicalDragDelta,
+  teacherControllerGestureOutcome,
+  TEACHER_CONTROLLER_KEYBOARD_FINE_STEP,
+  TEACHER_CONTROLLER_KEYBOARD_STEP,
+  TEACHER_CONTROLLER_MOUSE_DRAG_THRESHOLD_PX,
+  TEACHER_CONTROLLER_TOUCH_DRAG_THRESHOLD_PX,
+  type TeacherControllerSessionOffset,
+} from './teacherControllerRuntimeSession'
 
 const FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
 
@@ -40,6 +50,17 @@ interface ButtonControl {
   zone: Phaser.GameObjects.Zone
   text: Phaser.GameObjects.Text
   activate(): void
+  beginGesture(pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData): void
+}
+
+interface DragCandidate {
+  pointerId: number
+  domPointerId: number | null
+  start: { x: number; y: number }
+  startOffset: TeacherControllerSessionOffset
+  threshold: number
+  dragging: boolean
+  activate?: () => void
 }
 
 type PreviewAwareRenderContext = RenderNodeContext & {
@@ -49,6 +70,27 @@ type PreviewAwareRenderContext = RenderNodeContext & {
 function isPreviewContext(context: RenderNodeContext): boolean {
   return (context as PreviewAwareRenderContext).mode !== 'capture' &&
     context.authoring !== true
+}
+
+function pointerEvent(pointer: Phaser.Input.Pointer): PointerEvent | null {
+  const event = pointer.event
+  return typeof PointerEvent !== 'undefined' && event instanceof PointerEvent
+    ? event
+    : null
+}
+
+function pointerScreenPosition(pointer: Phaser.Input.Pointer): { x: number; y: number } {
+  const event = pointer.event as Event & { clientX?: number; clientY?: number }
+  return typeof event.clientX === 'number' && typeof event.clientY === 'number'
+    ? { x: event.clientX, y: event.clientY }
+    : { x: pointer.x, y: pointer.y }
+}
+
+function pointerDragThreshold(pointer: Phaser.Input.Pointer): number {
+  const event = pointerEvent(pointer)
+  return event?.pointerType === 'touch'
+    ? TEACHER_CONTROLLER_TOUCH_DRAG_THRESHOLD_PX
+    : TEACHER_CONTROLLER_MOUSE_DRAG_THRESHOLD_PX
 }
 
 async function toggleDocumentFullscreen(): Promise<void> {
@@ -104,10 +146,11 @@ function applyNodeFrame(
   scene: Phaser.Scene,
   node: TeacherControllerNode,
   root: Phaser.GameObjects.Container,
+  offset: TeacherControllerSessionOffset,
   transition?: Parameters<RenderedNodeHandle['update']>[1],
 ): void {
-  const x = node.x + node.width / 2
-  const y = node.y + node.height / 2
+  const x = node.x + node.width / 2 + offset.dx
+  const y = node.y + node.height / 2 + offset.dy
   const duration = Math.max(0, Math.min(10_000, transition?.duration ?? 0))
   scene.tweens.killTweensOf(root)
   root.setSize(node.width, node.height)
@@ -147,6 +190,8 @@ export function renderTeacherController(
   let hostVisible = true
   let motionVisible = true
   let collapsed = initialNode.collapsible && initialNode.defaultCollapsed
+  let sessionOffset: TeacherControllerSessionOffset = { dx: 0, dy: 0 }
+  let dragCandidate: DragCandidate | null = null
   const controllerVisible = (): boolean => {
     if (!node.visible || !hostVisible || !motionVisible) return false
     if (context.mode === 'capture') return node.includeInStaticExports
@@ -161,6 +206,7 @@ export function renderTeacherController(
   const scenes = context.payload.project.scenes.map(({ id, name }) => ({ id, name }))
   const eventDisposers: RuntimeEventDisposer[] = []
   const buttonControls: ButtonControl[] = []
+  const accessibleButtons = new Map<string, HTMLButtonElement>()
 
   const root = scene.add
     .container(node.x + node.width / 2, node.y + node.height / 2)
@@ -173,6 +219,7 @@ export function renderTeacherController(
   context.parentRoot?.add(root)
 
   const content = scene.add.container(-node.width / 2, -node.height / 2)
+  const dragZone = scene.add.zone(0, 0, 1, 1).setOrigin(0.5)
   const graphics = scene.add.graphics()
   const titleText = scene.add.text(0, 0, '', {
     fontFamily: FONT_FAMILY,
@@ -187,6 +234,216 @@ export function renderTeacherController(
     fontStyle: 'bold',
     align: 'center',
   }).setOrigin(0.5)
+  const accessibilityGroup = isPreviewContext(context) && context.accessibilityRoot
+    ? document.createElement('div')
+    : null
+  const accessibilityAnnouncement = accessibilityGroup
+    ? document.createElement('span')
+    : null
+  const accessibleCollapseButton = accessibilityGroup
+    ? document.createElement('button')
+    : null
+
+  if (accessibilityGroup) {
+    accessibilityGroup.className = 'lesson-teacher-controller-accessibility'
+    accessibilityGroup.tabIndex = 0
+    accessibilityGroup.setAttribute('role', 'group')
+    accessibilityGroup.setAttribute('aria-label', `${node.title}，可使用 Alt 加方向键移动`)
+    accessibilityGroup.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight')
+    Object.assign(accessibilityGroup.style, {
+      position: 'absolute',
+      pointerEvents: 'none',
+      transformOrigin: '50% 50%',
+      outline: '2px solid transparent',
+      outlineOffset: '2px',
+    })
+    accessibilityGroup.addEventListener('focus', () => {
+      accessibilityGroup.style.outlineColor = '#f4c45c'
+    })
+    accessibilityGroup.addEventListener('blur', (event) => {
+      if (!accessibilityGroup.contains(event.relatedTarget as Node | null)) {
+        accessibilityGroup.style.outlineColor = 'transparent'
+      }
+    })
+    accessibilityGroup.addEventListener('keydown', handleAccessibilityKeyDown)
+
+    if (accessibilityAnnouncement) {
+      accessibilityAnnouncement.setAttribute('role', 'status')
+      accessibilityAnnouncement.setAttribute('aria-live', 'polite')
+      Object.assign(accessibilityAnnouncement.style, {
+        position: 'absolute',
+        width: '1px',
+        height: '1px',
+        overflow: 'hidden',
+        clipPath: 'inset(50%)',
+      })
+      accessibilityGroup.append(accessibilityAnnouncement)
+    }
+    if (accessibleCollapseButton) {
+      accessibleCollapseButton.type = 'button'
+      accessibleCollapseButton.style.position = 'absolute'
+      accessibleCollapseButton.style.pointerEvents = 'none'
+      accessibleCollapseButton.style.color = 'transparent'
+      accessibleCollapseButton.style.background = 'transparent'
+      accessibleCollapseButton.style.border = '1px solid transparent'
+      accessibleCollapseButton.addEventListener('focus', () => {
+        accessibleCollapseButton.style.boxShadow = '0 0 0 3px #f4c45c'
+      })
+      accessibleCollapseButton.addEventListener('blur', () => {
+        accessibleCollapseButton.style.boxShadow = 'none'
+      })
+      accessibilityGroup.append(accessibleCollapseButton)
+    }
+    context.accessibilityRoot?.append(accessibilityGroup)
+  }
+
+  function announceSession(message: string): void {
+    if (accessibilityAnnouncement) accessibilityAnnouncement.textContent = message
+    context.events?.emit('player:teacher-controller:session-change', {
+      nodeId: node.id,
+      dx: sessionOffset.dx,
+      dy: sessionOffset.dy,
+      collapsed,
+      message,
+    })
+  }
+
+  function applySessionPosition(): void {
+    root.setPosition(
+      node.x + node.width / 2 + sessionOffset.dx,
+      node.y + node.height / 2 + sessionOffset.dy,
+    )
+  }
+
+  function beginGesture(
+    pointer: Phaser.Input.Pointer,
+    event: Phaser.Types.Input.EventData,
+    activate?: () => void,
+  ): void {
+    if (
+      destroyed ||
+      dragCandidate ||
+      !controllerVisible() ||
+      !isPreviewContext(context)
+    ) return
+    event.stopPropagation()
+    const domEvent = pointerEvent(pointer)
+    domEvent?.preventDefault()
+    const domPointerId = domEvent?.pointerId ?? null
+    if (domPointerId !== null) {
+      try {
+        scene.game.canvas.setPointerCapture(domPointerId)
+      } catch {
+        // Pointer capture is best-effort; Phaser still delivers scene-level moves.
+      }
+    }
+    dragCandidate = {
+      pointerId: pointer.id,
+      domPointerId,
+      start: pointerScreenPosition(pointer),
+      startOffset: { ...sessionOffset },
+      threshold: pointerDragThreshold(pointer),
+      dragging: false,
+      ...(activate ? { activate } : {}),
+    }
+  }
+
+  function cancelGesture(): void {
+    const candidate = dragCandidate
+    dragCandidate = null
+    if (candidate?.domPointerId !== null && candidate?.domPointerId !== undefined) {
+      try {
+        scene.game.canvas.releasePointerCapture(candidate.domPointerId)
+      } catch {
+        // The browser may already have released capture after pointercancel.
+      }
+    }
+  }
+
+  function handlePointerMove(pointer: Phaser.Input.Pointer): void {
+    const candidate = dragCandidate
+    if (!candidate || candidate.pointerId !== pointer.id) return
+    const current = pointerScreenPosition(pointer)
+    const screenDistance = Math.hypot(
+      current.x - candidate.start.x,
+      current.y - candidate.start.y,
+    )
+    if (!candidate.dragging && screenDistance < candidate.threshold) return
+    candidate.dragging = true
+    const bounds = scene.game.canvas.getBoundingClientRect()
+    const delta = logicalDragDelta(
+      candidate.start,
+      current,
+      { width: bounds.width, height: bounds.height },
+      context.payload.project.canvas,
+    )
+    sessionOffset = constrainTeacherControllerOffset(
+      node,
+      {
+        dx: candidate.startOffset.dx + delta.dx,
+        dy: candidate.startOffset.dy + delta.dy,
+      },
+      collapsed,
+      context.payload.project.canvas,
+    )
+    applySessionPosition()
+    syncAccessibility()
+  }
+
+  function finishGesture(pointer: Phaser.Input.Pointer, cancelled = false): void {
+    const candidate = dragCandidate
+    if (!candidate || candidate.pointerId !== pointer.id) return
+    const outcome = teacherControllerGestureOutcome(candidate.dragging, cancelled)
+    const activate = candidate.activate
+    cancelGesture()
+    if (outcome === 'activate') activate?.()
+    else if (outcome === 'moved') {
+      announceSession(
+        `控制器已移动到 ${Math.round(node.x + sessionOffset.dx)}，${Math.round(node.y + sessionOffset.dy)}`,
+      )
+    }
+  }
+
+  // Phaser's pointerup second argument is the currently-over object array. It
+  // must never be forwarded as the `cancelled` flag (an empty array is truthy).
+  const handlePointerUp = (pointer: Phaser.Input.Pointer): void => {
+    finishGesture(pointer, false)
+  }
+  const handlePointerUpOutside = (pointer: Phaser.Input.Pointer): void => {
+    finishGesture(pointer, true)
+  }
+
+  function handleAccessibilityKeyDown(event: KeyboardEvent): void {
+    if (
+      !event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)
+    ) return
+    event.preventDefault()
+    event.stopPropagation()
+    const step = event.shiftKey
+      ? TEACHER_CONTROLLER_KEYBOARD_FINE_STEP
+      : TEACHER_CONTROLLER_KEYBOARD_STEP
+    const proposed = { ...sessionOffset }
+    if (event.key === 'ArrowLeft') proposed.dx -= step
+    if (event.key === 'ArrowRight') proposed.dx += step
+    if (event.key === 'ArrowUp') proposed.dy -= step
+    if (event.key === 'ArrowDown') proposed.dy += step
+    sessionOffset = constrainTeacherControllerOffset(
+      node,
+      proposed,
+      collapsed,
+      context.payload.project.canvas,
+      false,
+    )
+    applySessionPosition()
+    syncAccessibility()
+    announceSession(
+      `控制器已移动到 ${Math.round(node.x + sessionOffset.dx)}，${Math.round(node.y + sessionOffset.dy)}`,
+    )
+  }
+
   const toggleCollapsed = (): void => {
     if (
       destroyed ||
@@ -195,6 +452,13 @@ export function renderTeacherController(
       !isPreviewContext(context)
     ) return
     collapsed = !collapsed
+    sessionOffset = constrainTeacherControllerOffset(
+      node,
+      sessionOffset,
+      collapsed,
+      context.payload.project.canvas,
+    )
+    applySessionPosition()
     redraw()
     context.events?.emit(TEACHER_CONTROLLER_COLLAPSE_EVENT, {
       nodeId: node.id,
@@ -203,8 +467,29 @@ export function renderTeacherController(
   }
   collapseZone
     .setInteractive({ useHandCursor: true })
-    .on('pointerup', toggleCollapsed)
-  content.add([graphics, titleText, progressText, collapseZone, collapseText])
+    .on('pointerdown', (
+      pointer: Phaser.Input.Pointer,
+      x: number,
+      y: number,
+      event: Phaser.Types.Input.EventData,
+    ) => beginGesture(pointer, event, toggleCollapsed))
+  dragZone
+    .setInteractive({ useHandCursor: false })
+    .on('pointerdown', (
+      pointer: Phaser.Input.Pointer,
+      x: number,
+      y: number,
+      event: Phaser.Types.Input.EventData,
+    ) => beginGesture(pointer, event))
+  accessibleCollapseButton?.addEventListener('click', toggleCollapsed)
+  content.add([
+    dragZone,
+    graphics,
+    titleText,
+    progressText,
+    collapseZone,
+    collapseText,
+  ])
   root.add(content)
 
   const stateName = (stateId: string | null): string | null => {
@@ -216,7 +501,7 @@ export function renderTeacherController(
   const removeLastButton = (): void => {
     const control = buttonControls.pop()
     if (!control) return
-    control.zone.off('pointerup', control.activate)
+    control.zone.off('pointerdown', control.beginGesture)
     control.zone.destroy()
     control.text.destroy()
   }
@@ -248,10 +533,13 @@ export function renderTeacherController(
           }
           invokeControllerAction(control.action, context)
         },
+        beginGesture: (pointer, _x, _y, event) => {
+          beginGesture(pointer, event, control.activate)
+        },
       }
       zone
         .setInteractive({ useHandCursor: true })
-        .on('pointerup', control.activate)
+        .on('pointerdown', control.beginGesture)
       buttonControls.push(control)
       content.add([zone, text])
     }
@@ -284,6 +572,90 @@ export function renderTeacherController(
     })
   }
 
+  function syncAccessibility(
+    suppliedLayout?: ReturnType<typeof createTeacherControllerLayout>,
+  ): void {
+    if (!accessibilityGroup) return
+    const layout = suppliedLayout ??
+      createTeacherControllerLayout(node, node.width, node.height)
+    const visible = controllerVisible() && isPreviewContext(context)
+    accessibilityGroup.hidden = !visible
+    accessibilityGroup.setAttribute(
+      'aria-label',
+      `${node.title}${collapsed ? '，已收起' : ''}，可使用 Alt 加方向键移动`,
+    )
+    Object.assign(accessibilityGroup.style, {
+      left: `${node.x + sessionOffset.dx}px`,
+      top: `${node.y + sessionOffset.dy}px`,
+      width: `${node.width}px`,
+      height: `${node.height}px`,
+      transform: `rotate(${node.rotation}deg)`,
+    })
+
+    if (accessibleCollapseButton) {
+      const collapse = layout.collapse
+      accessibleCollapseButton.hidden = !visible || !collapse
+      accessibleCollapseButton.setAttribute(
+        'aria-label',
+        collapsed ? '展开教师控制器' : '收起教师控制器',
+      )
+      if (collapse) {
+        Object.assign(accessibleCollapseButton.style, {
+          left: `${collapse.x}px`,
+          top: `${collapse.y}px`,
+          width: `${collapse.width}px`,
+          height: `${collapse.height}px`,
+        })
+      }
+    }
+
+    const activeIds = new Set<string>()
+    for (const button of layout.buttons) {
+      activeIds.add(button.id)
+      let element = accessibleButtons.get(button.id)
+      if (!element) {
+        element = document.createElement('button')
+        element.type = 'button'
+        element.style.position = 'absolute'
+        element.style.pointerEvents = 'none'
+        element.style.color = 'transparent'
+        element.style.background = 'transparent'
+        element.style.border = '1px solid transparent'
+        element.addEventListener('focus', () => {
+          if (element) element.style.boxShadow = '0 0 0 3px #f4c45c'
+        })
+        element.addEventListener('blur', () => {
+          if (element) element.style.boxShadow = 'none'
+        })
+        accessibilityGroup.append(element)
+        accessibleButtons.set(button.id, element)
+      }
+      element.hidden = !visible || collapsed
+      element.setAttribute(
+        'aria-label',
+        teacherControllerButtonDisplayLabel(button, status),
+      )
+      element.onclick = () => {
+        const current = createTeacherControllerLayout(node, node.width, node.height)
+          .buttons.find((candidate) => candidate.id === button.id)
+        if (current && controllerVisible() && isPreviewContext(context)) {
+          invokeControllerAction(current.action, context)
+        }
+      }
+      Object.assign(element.style, {
+        left: `${button.x}px`,
+        top: `${button.y}px`,
+        width: `${button.width}px`,
+        height: `${button.height}px`,
+      })
+    }
+    for (const [id, element] of [...accessibleButtons]) {
+      if (activeIds.has(id)) continue
+      element.remove()
+      accessibleButtons.delete(id)
+    }
+  }
+
   const drawButton = (
     button: TeacherControllerButtonLayout,
     palette: ReturnType<typeof createTeacherControllerLayout>['palette'],
@@ -312,6 +684,19 @@ export function renderTeacherController(
     const layout = createTeacherControllerLayout(node, node.width, node.height)
     const { palette } = layout
     content.setPosition(-node.width / 2, -node.height / 2)
+    dragZone
+      .setPosition(layout.width / 2, layout.height / 2)
+      .setSize(layout.width, layout.height)
+      .setVisible(controllerVisible() && !collapsed)
+    if (dragZone.input) {
+      dragZone.input.enabled = controllerVisible() &&
+        !collapsed &&
+        isPreviewContext(context)
+      const hitArea = dragZone.input.hitArea
+      if (hitArea instanceof Phaser.Geom.Rectangle) {
+        hitArea.setSize(layout.width, layout.height)
+      }
+    }
 
     graphics.clear()
     if (!collapsed) {
@@ -414,6 +799,7 @@ export function renderTeacherController(
     }
 
     syncButtonControls(layout.buttons, layout.buttonFontSize, palette.textCss)
+    syncAccessibility(layout)
   }
 
   const onFullscreenChange = (): void => {
@@ -421,6 +807,12 @@ export function renderTeacherController(
     redraw()
   }
   document.addEventListener('fullscreenchange', onFullscreenChange)
+  scene.input.on('pointermove', handlePointerMove)
+  scene.input.on('pointerup', handlePointerUp)
+  scene.input.on('pointerupoutside', handlePointerUpOutside)
+  scene.input.on('gameout', cancelGesture)
+  window.addEventListener('blur', cancelGesture)
+  scene.game.canvas.addEventListener('pointercancel', cancelGesture)
 
   if (context.events) {
     eventDisposers.push(
@@ -469,21 +861,39 @@ export function renderTeacherController(
       }
       node = nextNode
       if (!node.collapsible) collapsed = false
+      sessionOffset = constrainTeacherControllerOffset(
+        node,
+        sessionOffset,
+        collapsed,
+        context.payload.project.canvas,
+      )
       redraw()
       applyNodeFrame(
         scene,
         controllerVisible() ? node : { ...node, visible: false },
         root,
+        sessionOffset,
         transition,
       )
     },
     destroy(): void {
       if (destroyed) return
       destroyed = true
+      cancelGesture()
       document.removeEventListener('fullscreenchange', onFullscreenChange)
+      scene.input.off('pointermove', handlePointerMove)
+      scene.input.off('pointerup', handlePointerUp)
+      scene.input.off('pointerupoutside', handlePointerUpOutside)
+      scene.input.off('gameout', cancelGesture)
+      window.removeEventListener('blur', cancelGesture)
+      scene.game.canvas.removeEventListener('pointercancel', cancelGesture)
       eventDisposers.splice(0).forEach((dispose) => dispose())
-      collapseZone.off('pointerup', toggleCollapsed)
+      collapseZone.removeAllListeners()
+      dragZone.removeAllListeners()
       while (buttonControls.length > 0) removeLastButton()
+      accessibleCollapseButton?.removeEventListener('click', toggleCollapsed)
+      accessibleButtons.clear()
+      accessibilityGroup?.remove()
       scene.tweens.killTweensOf(root)
       if (root.active) root.destroy(true)
     },

@@ -9,7 +9,7 @@ import {
   pptxComponentSnapshotKey,
   pptxGlobalComponentSnapshotKey,
 } from './pptxShared'
-import { isGlobalLayerItemVisibleForScene } from './v3ExportSupport'
+import { isGlobalLayerItemVisibleForScene } from './exportPayloadSupport'
 import { materializeScene } from '../../shared/presentation'
 import {
   capturePlayerStage,

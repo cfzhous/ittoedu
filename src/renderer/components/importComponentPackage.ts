@@ -23,6 +23,7 @@ export interface ParseComponentPackageOptions {
   expectedId?: string
   expectedVersion?: string
   blobUrlRegistry?: BlobUrlRegistry
+  provenance?: NonNullable<ComponentPackageData['provenance']>
 }
 
 function componentArchiveFilter(): {
@@ -71,6 +72,13 @@ function readManifest(bytes: Uint8Array): ComponentManifest {
 
   if (typeof value === 'object' && value !== null) {
     const schemaVersion = Reflect.get(value, 'schemaVersion')
+    if (typeof schemaVersion === 'number' && schemaVersion < COMPONENT_SCHEMA_VERSION) {
+      throw new UserFacingError(
+        '旧组件格式不受支持',
+        `该组件使用格式版本 ${schemaVersion}，当前编辑器只接受版本 ${COMPONENT_SCHEMA_VERSION}。`,
+        '请让组件作者迁移到 Component API 4；历史包仅能使用归档版编辑器打开。',
+      )
+    }
     if (typeof schemaVersion === 'number' && schemaVersion > COMPONENT_SCHEMA_VERSION) {
       throw new UserFacingError(
         '组件格式版本不支持',
@@ -79,6 +87,16 @@ function readManifest(bytes: Uint8Array): ComponentManifest {
       )
     }
     const runtimeApiVersion = Reflect.get(value, 'runtimeApiVersion')
+    if (
+      typeof runtimeApiVersion === 'number' &&
+      runtimeApiVersion < COMPONENT_RUNTIME_API_VERSION
+    ) {
+      throw new UserFacingError(
+        '旧组件运行时不受支持',
+        `该组件使用运行时 API ${runtimeApiVersion}，当前编辑器只接受 API ${COMPONENT_RUNTIME_API_VERSION}。`,
+        '请让组件作者迁移渲染能力、生命周期与捕获逻辑后重新打包。',
+      )
+    }
     if (
       typeof runtimeApiVersion === 'number' &&
       runtimeApiVersion > COMPONENT_RUNTIME_API_VERSION
@@ -254,6 +272,7 @@ export function parseComponentPackageFiles(
     ...(manifest.thumbnail === undefined
       ? {}
       : { thumbnailPath: `${archiveRoot}/${manifest.thumbnail}` }),
+    ...(options.provenance === undefined ? {} : options.provenance),
   }
 
   return {
@@ -263,6 +282,9 @@ export function parseComponentPackageFiles(
     runtimeSource,
     files,
     ...(thumbnailUrl === undefined ? {} : { thumbnailUrl }),
+    ...(options.provenance === undefined
+      ? {}
+      : { provenance: { ...options.provenance } }),
   }
 }
 
@@ -314,4 +336,12 @@ export async function importComponentPackageAsync(
     }
   })
   return parseComponentPackageFiles(files, options)
+}
+
+export async function componentPackageSha256(bytes: Uint8Array): Promise<string> {
+  const stableBytes = Uint8Array.from(bytes)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', stableBytes.buffer)
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('')
 }

@@ -11,6 +11,7 @@ import type {
   InteractionTrigger,
 } from './interactionTypes'
 import { isTerminalNavigationAction } from './interactionTypes'
+import { analyzeInformationRelease } from './informationRelease'
 import type {
   AssetKind,
   ExternalComponentNode,
@@ -20,6 +21,11 @@ import type {
   TeacherControllerNode,
 } from './projectTypes'
 import type { RuntimeDocument } from './runtimeTypes'
+import type { ComponentPackageData } from './componentTypes'
+import {
+  analyzeProjectAssetReferences,
+} from './assetReferences'
+import type { ProjectHealthCode } from './diagnosticCodes'
 
 export type ProjectHealthSeverity = 'error' | 'warning' | 'info'
 export type ProjectHealthScope =
@@ -49,7 +55,7 @@ export interface ProjectHealthLocation {
 
 export interface ProjectHealthDiagnostic extends ProjectHealthLocation {
   severity: ProjectHealthSeverity
-  code: string
+  code: ProjectHealthCode
   message: string
 }
 
@@ -66,7 +72,7 @@ interface HealthCollector {
   keys: Set<string>
   add(
     severity: ProjectHealthSeverity,
-    code: string,
+    code: ProjectHealthCode,
     message: string,
     location: ProjectHealthLocation,
   ): void
@@ -859,6 +865,22 @@ function checkPackages(project: ProjectDocument, collector: HealthCollector): vo
         { ...location, path: [...location.path, 'thumbnailPath'] },
       )
     }
+    if (!meta.sha256) {
+      collector.add(
+        'warning',
+        'component-package-hash-missing',
+        `组件包“${meta.name}”没有锁定 SHA-256；无法证明导出时执行的仍是导入时审阅的字节。`,
+        { ...location, path: [...location.path, 'sha256'] },
+      )
+    }
+    if (!meta.sourceLabel) {
+      collector.add(
+        'info',
+        'component-package-source-missing',
+        `组件包“${meta.name}”没有可读来源记录，后续审阅和更新难以追溯。`,
+        { ...location, path: [...location.path, 'sourceLabel'] },
+      )
+    }
   }
   collectComponentPackageUsages(project)
     .filter((usage) => usage.packageKeys.length > 0 && usage.totalInstanceCount === 0)
@@ -875,12 +897,100 @@ function checkPackages(project: ProjectDocument, collector: HealthCollector): vo
     ))
 }
 
+function checkPresenter(project: ProjectDocument, collector: HealthCollector): void {
+  const presenter = project.playback.presenter
+  const presenterRules = [
+    ...project.globalInteractions,
+    ...project.scenes.flatMap((scene) => scene.interactions),
+  ].filter((rule) => rule.enabled && rule.trigger.type === 'presenter.command')
+  const commandRules = new Set(presenterRules.map((rule) => (
+    rule.trigger.type === 'presenter.command' ? rule.trigger.command : null
+  )))
+
+  if (!presenter.enabled && presenterRules.length > 0) {
+    collector.add(
+      'warning',
+      'presenter-rules-disabled',
+      `工程含有 ${presenterRules.length} 条演示命令规则，但翻页笔输入已关闭，这些规则不会由演示按键触发。`,
+      { scope: 'project', path: ['playback', 'presenter', 'enabled'] },
+    )
+  }
+  if (presenter.enabled && presenter.strategy === 'authored-command') {
+    ;(['next', 'previous'] as const).forEach((command) => {
+      if (commandRules.has(command)) return
+      collector.add(
+        'warning',
+        'presenter-command-unhandled',
+        `翻页笔使用“作者命令”模式，但没有启用的“${command === 'next' ? '下一步' : '上一步'}”规则；对应按键会给出未处理提示。`,
+        { scope: 'project', path: ['playback', 'presenter', 'strategy'] },
+      )
+    })
+  }
+  if (presenter.enabled && presenter.strategy === 'scene-navigation' && presenterRules.length > 0) {
+    collector.add(
+      'info',
+      'presenter-rules-bypassed',
+      '翻页笔当前使用“直接切换场景”模式，presenter.command 规则不会由翻页笔触发。',
+      { scope: 'project', path: ['playback', 'presenter', 'strategy'] },
+    )
+  }
+  presenter.additionalBindings.forEach((binding, index) => {
+    if (binding.key !== 'F5') return
+    collector.add(
+      'warning',
+      'presenter-f5-browser-reserved',
+      'F5 通常由浏览器或系统用于刷新，发布环境可能先截获该按键；建议改用翻页笔实际发送的其他键。',
+      {
+        scope: 'project',
+        path: ['playback', 'presenter', 'additionalBindings', index, 'key'],
+      },
+    )
+  })
+}
+
+function checkInformationRelease(
+  project: ProjectDocument,
+  collector: HealthCollector,
+): void {
+  const report = analyzeInformationRelease(project)
+  report.states.forEach((state) => {
+    const sceneIndex = project.scenes.findIndex(({ id }) => id === state.sceneId)
+    const scene = project.scenes[sceneIndex]
+    if (!scene) return
+    state.hiddenWithoutRevealNodeIds.forEach((nodeId) => {
+      const nodeIndex = scene.nodes.findIndex((node) => node.id === nodeId)
+      const node = scene.nodes[nodeIndex]
+      if (!node) return
+      const selfTriggered = state.hiddenSelfTriggeredNodeIds.includes(nodeId)
+      collector.add(
+        'warning',
+        selfTriggered
+          ? 'information-release-hidden-self-trigger'
+          : 'information-release-hidden-unreachable',
+        selfTriggered
+          ? `状态“${state.stateName}”中的节点“${node.name}”初始隐藏，却只能通过点击自身显示；运行时无法完成这次点击。`
+          : `状态“${state.stateName}”中的节点“${node.name}”初始隐藏，但没有从当前可达触发器通向它的显示动作。`,
+        {
+          scope: 'node',
+          path: ['scenes', sceneIndex, 'nodes', nodeIndex, 'playbackInitialVisibility'],
+          sceneId: scene.id,
+          stateId: state.stateId,
+          nodeId,
+        },
+      )
+    })
+  })
+}
+
 /**
  * Performs non-mutating, author-facing integrity checks on an already loaded
  * project. Unlike schema parsing, every issue is retained and carries enough
  * location data for an editor to navigate to the affected object.
  */
-export function collectProjectHealth(project: ProjectDocument): ProjectHealthDiagnostic[] {
+export function collectProjectHealth(
+  project: ProjectDocument,
+  componentPackages?: Readonly<Record<string, ComponentPackageData>>,
+): ProjectHealthDiagnostic[] {
   const collector = createCollector()
   const sceneIds = new Set(project.scenes.map((scene) => scene.id))
   for (const duplicate of duplicateValues(project.scenes.map((scene) => scene.id))) {
@@ -973,7 +1083,61 @@ export function collectProjectHealth(project: ProjectDocument): ProjectHealthDia
     })
   }
 
+  const assetReferenceAnalysis = analyzeProjectAssetReferences(project, {
+    componentPackages,
+  })
+  for (const [assetId, references] of assetReferenceAnalysis.graph) {
+    if (project.assets[assetId] || Object.values(project.assets).some((asset) => asset.id === assetId)) {
+      continue
+    }
+    references
+      .filter((reference) => reference.certainty === 'direct')
+      .forEach((reference) => collector.add(
+        'error',
+        'asset-reference-missing',
+        `组件或运行位置引用了不存在的素材“${assetId}”。`,
+        {
+          scope: reference.packageId ? 'component-package' : 'asset',
+          path: reference.path,
+          assetId,
+          ...(reference.sceneId ? { sceneId: reference.sceneId } : {}),
+          ...(reference.stateId ? { stateId: reference.stateId } : {}),
+          ...(reference.nodeId ? { nodeId: reference.nodeId } : {}),
+          ...(reference.packageId ? { packageId: reference.packageId } : {}),
+        },
+      ))
+  }
+  assetReferenceAnalysis.missingComponentContexts.forEach((missing) => collector.add(
+    'warning',
+    'asset-reference-analysis-incomplete',
+    `组件“${missing.packageId}@${missing.version}”缺少可执行包上下文；素材引用分析已保守降级，删除不会因此放行。`,
+    {
+      scope: 'component-package',
+      path: missing.path,
+      packageId: missing.packageId,
+      nodeId: missing.nodeId,
+      ...(missing.sceneId ? { sceneId: missing.sceneId } : {}),
+      ...(missing.stateId ? { stateId: missing.stateId } : {}),
+    },
+  ))
+  const referencedAssetIds = new Set(assetReferenceAnalysis.graph.keys())
+  for (const [assetKey, asset] of Object.entries(project.assets)) {
+    if (referencedAssetIds.has(assetKey) || referencedAssetIds.has(asset.id)) continue
+    collector.add(
+      'info',
+      'asset-unused',
+      `素材“${asset.filename}”当前没有任何工程引用（${asset.byteLength} 字节）。`,
+      {
+        scope: 'asset',
+        path: ['assets', assetKey],
+        assetId: asset.id,
+      },
+    )
+  }
+
   checkPackages(project, collector)
+  checkPresenter(project, collector)
+  checkInformationRelease(project, collector)
   collectProjectDiagnostics(project).forEach((diagnostic) => collector.add(
     'warning',
     diagnostic.code,

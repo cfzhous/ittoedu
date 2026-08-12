@@ -29,20 +29,22 @@ const imageMeta: AssetMeta = {
 function sampleComponent(): ComponentPackageData {
   return {
     manifest: {
-      schemaVersion: 1,
-      runtimeApiVersion: 1,
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
       id: 'com.example.counter',
       name: '计数器',
-      version: '1.0.0',
+      version: '4.0.0',
       entry: 'runtime.js',
       defaultSize: { width: 480, height: 280 },
       minSize: { width: 160, height: 100 },
       preserveAspectRatio: true,
       assets: {},
       defaultProps: { initialValue: 3 },
+      supportedScopes: ['scene'],
+      renderMode: 'phaser',
     },
     runtimeSource:
-      "window.CoursewareComponent.define({id:'com.example.counter',runtimeApiVersion:1,create:function(){return {destroy:function(){}}}})",
+      "window.CoursewareComponent.define({id:'com.example.counter',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})",
     files: {
       'manifest.json': new Uint8Array([1]),
       'runtime.js': new Uint8Array([2]),
@@ -187,10 +189,10 @@ describe('scene operations', () => {
           ? {
               ...scene,
               runtime: {
-                runtimeApiVersion: 1,
+                runtimeApiVersion: 2,
                 enabled: true,
                 renderMode: 'phaser',
-                source: 'CoursewareRuntime.define({runtimeApiVersion:1,create(){return{destroy(){}}}})',
+                source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
                 content: { values: {} },
                 assets: {},
                 nodeBindings: { titleTarget: sourceTextId },
@@ -683,22 +685,69 @@ describe('node operations', () => {
     ])
   })
 
-  it('keeps imported image bytes and metadata when adding its node is undone', () => {
+  it('rolls back and restores a new image node, metadata, and bytes atomically', () => {
     const store = useEditorStore.getState()
     store.addImageNode(imageMeta, new Uint8Array([1, 2, 3, 4]))
     store.undo()
 
-    const state = useEditorStore.getState()
     expect(activeScene().nodes).toHaveLength(0)
-    expect(state.project.assets[imageMeta.id]).toEqual(imageMeta)
-    expect([...state.assetFiles[imageMeta.id]!]).toEqual([1, 2, 3, 4])
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(useEditorStore.getState().assetFiles[imageMeta.id]).toBeUndefined()
+
+    store.redo()
+    expect(activeScene().nodes).toHaveLength(1)
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect([...useEditorStore.getState().assetFiles[imageMeta.id]!]).toEqual([1, 2, 3, 4])
   })
 
-  it('imports an external component outside history and makes node addition undoable', () => {
+  it('undoes a reused asset node without deleting pre-existing bytes', () => {
+    const store = useEditorStore.getState()
+    const bytes = new Uint8Array([1, 2, 3, 4])
+    store.importAsset(imageMeta, bytes)
+    store.addImageNode(imageMeta, bytes)
+    store.undo()
+
+    expect(activeScene().nodes).toHaveLength(0)
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect([...useEditorStore.getState().assetFiles[imageMeta.id]!]).toEqual([...bytes])
+  })
+
+  it('deletes an unused asset through history and restores its bytes on undo', () => {
+    const store = useEditorStore.getState()
+    const bytes = new Uint8Array([1, 2, 3, 4])
+    store.importAsset(imageMeta, bytes)
+    expect(store.deleteAsset(imageMeta.id)).toBe(true)
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(useEditorStore.getState().assetFiles[imageMeta.id]).toBeUndefined()
+
+    store.undo()
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect([...useEditorStore.getState().assetFiles[imageMeta.id]!]).toEqual([...bytes])
+    store.redo()
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(useEditorStore.getState().assetFiles[imageMeta.id]).toBeUndefined()
+  })
+
+  it('undoes and redoes an asset imported only into the media library', () => {
+    const store = useEditorStore.getState()
+    const bytes = new Uint8Array([1, 2, 3, 4])
+    store.importAsset(imageMeta, bytes)
+    expect(store.project.scenes[0]!.nodes).toHaveLength(0)
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+
+    store.undo()
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toBeUndefined()
+    expect(useEditorStore.getState().assetFiles[imageMeta.id]).toBeUndefined()
+    store.redo()
+    expect(useEditorStore.getState().project.assets[imageMeta.id]).toEqual(imageMeta)
+    expect([...useEditorStore.getState().assetFiles[imageMeta.id]!]).toEqual([...bytes])
+  })
+
+  it('keeps component import and later node placement as separate undo steps', () => {
     const store = useEditorStore.getState()
     const component = sampleComponent()
     store.importComponentPackage(component)
-    expect(useEditorStore.getState().history.past).toHaveLength(0)
+    expect(useEditorStore.getState().history.past).toHaveLength(1)
 
     store.addExternalComponentNode(component.manifest.id, 350, 210)
     const node = activeScene().nodes[0]
@@ -710,7 +759,7 @@ describe('node operations', () => {
       height: 280,
       component: {
         packageId: 'com.example.counter',
-        version: '1.0.0',
+        version: '4.0.0',
       },
       props: { initialValue: 3 },
     })
@@ -723,6 +772,14 @@ describe('node operations', () => {
     expect(
       useEditorStore.getState().componentPackages['com.example.counter'],
     ).toBeDefined()
+
+    store.undo()
+    expect(
+      useEditorStore.getState().project.componentPackages['com.example.counter'],
+    ).toBeUndefined()
+    expect(
+      useEditorStore.getState().componentPackages['com.example.counter'],
+    ).toBeUndefined()
   })
 
   it('rejects a second version of the same component ID without corrupting references', () => {
@@ -734,15 +791,15 @@ describe('node operations', () => {
     const second = sampleComponent()
     second.manifest.version = '2.0.0'
     expect(() => store.importComponentPackage(second)).toThrow(
-      '不能再导入同 ID',
+      '不能再加入同 ID',
     )
 
     const state = useEditorStore.getState()
     expect(state.componentPackages[first.manifest.id]?.manifest.version).toBe(
-      '1.0.0',
+      '4.0.0',
     )
     expect(activeScene().nodes[0]).toMatchObject({
-      component: { packageId: first.manifest.id, version: '1.0.0' },
+      component: { packageId: first.manifest.id, version: '4.0.0' },
     })
   })
 })

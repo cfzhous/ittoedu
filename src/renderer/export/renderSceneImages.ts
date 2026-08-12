@@ -1,5 +1,6 @@
 import type { ProjectDocument, SceneDocument, SceneNode } from '../../shared/projectTypes'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
+import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import type { ExportPayload } from '../../shared/componentTypes'
@@ -8,16 +9,15 @@ import { PlayerApp } from '../../player/PlayerApp'
 import {
   capturePlayerStage,
   createHiddenPlayerRoot,
-  playerSupportsRuntimeCapture,
   sizeHiddenPlayerStage,
   waitForPlayerCaptureReady,
   waitForPlayerScene,
 } from './playerCapture'
 import {
-  assertV3ExportDependencies,
+  assertExportPayloadDependencies,
   runtimeEntriesForScene,
   visibleGlobalLayerItemsForScene,
-} from './v3ExportSupport'
+} from './exportPayloadSupport'
 
 interface LoadedImage {
   image: HTMLImageElement
@@ -136,8 +136,16 @@ export async function renderSceneCanvas(
       const renderedText = node.type === 'text'
         ? renderTextNodeCanvas(node, node.width, resolution)
         : null
-      const visualWidth = renderedText?.width ?? node.width
-      const visualHeight = renderedText?.height ?? node.height
+      const renderedFormula = node.type === 'formula'
+        ? renderFormulaNodeCanvas(
+            node,
+            node.width,
+            node.height,
+            resolution,
+          )
+        : null
+      const visualWidth = renderedText?.width ?? renderedFormula?.width ?? node.width
+      const visualHeight = renderedText?.height ?? renderedFormula?.height ?? node.height
       context.save()
       context.translate(
         node.x + visualWidth / 2,
@@ -152,6 +160,14 @@ export async function renderSceneCanvas(
           -renderedText!.height / 2,
           renderedText!.width,
           renderedText!.height,
+        )
+      } else if (node.type === 'formula') {
+        context.drawImage(
+          renderedFormula!.canvas,
+          -renderedFormula!.width / 2,
+          -renderedFormula!.height / 2,
+          renderedFormula!.width,
+          renderedFormula!.height,
         )
       } else if (node.type === 'shape') {
         context.translate(-node.width / 2, -node.height / 2)
@@ -330,7 +346,7 @@ export async function renderProjectSceneImagesWithRuntime(
   payload: ExportPayload,
   fallbackAssetFiles: Record<string, Uint8Array>,
 ): Promise<string[]> {
-  assertV3ExportDependencies(payload)
+  assertExportPayloadDependencies(payload)
   const width = payload.project.canvas.width
   const height = payload.project.canvas.height
   const root = createHiddenPlayerRoot(width, height)
@@ -343,11 +359,6 @@ export async function renderProjectSceneImagesWithRuntime(
       mode: 'capture',
     })
     sizeHiddenPlayerStage(root, width, height)
-    const hasEnabledRuntimes = payload.project.globalRuntime?.enabled === true ||
-      payload.project.scenes.some((scene) => scene.runtime?.enabled)
-    if (hasEnabledRuntimes && !playerSupportsRuntimeCapture(player)) {
-      throw new Error('Player 尚未提供 Canvas+DOM 捕获就绪接口')
-    }
     await waitForPlayerScene(player, 0)
     const images: string[] = []
     for (let index = 0; index < payload.project.scenes.length; index += 1) {

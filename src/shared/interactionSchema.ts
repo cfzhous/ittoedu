@@ -5,7 +5,6 @@ import {
   MAX_SCENE_INTERACTIONS,
   isTerminalNavigationAction,
   type InteractionRule,
-  type InteractionRuleV6,
 } from './interactionTypes'
 
 const stableIdSchema = z.string().trim().min(1).max(200)
@@ -14,7 +13,7 @@ const millisecondsSchema = z.number().finite().min(0).max(60_000)
 const mediaSecondsSchema = z.number().finite().min(0).max(604_800)
 const audioChannelSchema = z.enum(['music', 'narration', 'sfx', 'ui'])
 
-const v6TriggerSchemas = [
+const triggerSchemas = [
   z.object({
     type: z.literal('node.click'),
     nodeId: stableIdSchema,
@@ -59,13 +58,8 @@ const v6TriggerSchemas = [
   }).strict(),
 ] as const
 
-export const interactionTriggerV6Schema = z.discriminatedUnion(
-  'type',
-  v6TriggerSchemas,
-)
-
 export const interactionTriggerSchema = z.discriminatedUnion('type', [
-  ...v6TriggerSchemas,
+  ...triggerSchemas,
   z.object({
     type: z.literal('node.activated'),
     nodeId: stableIdSchema,
@@ -165,7 +159,7 @@ const audioActionSchemas = [
   }).strict(),
 ] as const
 
-const v6ActionSchemas = [
+const baseActionSchemas = [
   presentationActionSchema,
   z.object({
     type: z.literal('scene.go'),
@@ -204,11 +198,6 @@ const v6ActionSchemas = [
   }).strict(),
 ] as const
 
-export const interactionActionV6Schema = z.discriminatedUnion(
-  'type',
-  v6ActionSchemas,
-)
-
 const motionCommonFields = {
   nodeId: stableIdSchema,
   durationMs: millisecondsSchema,
@@ -237,7 +226,7 @@ export const nodeMotionActionSchema = z.union([
 ])
 
 export const interactionActionSchema = z.union([
-  interactionActionV6Schema,
+  z.discriminatedUnion('type', baseActionSchemas),
   nodeMotionActionSchema,
 ])
 
@@ -247,27 +236,6 @@ export const interactionActionStepSchema = z.object({
   delayMs: millisecondsSchema,
   action: interactionActionSchema,
 }).strict()
-
-export const interactionRuleV6Schema: z.ZodType<InteractionRuleV6> = z.object({
-  id: stableIdSchema,
-  name: z.string().trim().min(1).max(80).optional(),
-  enabled: z.boolean(),
-  trigger: interactionTriggerV6Schema,
-  conditions: z.array(interactionConditionSchema)
-    .max(MAX_INTERACTION_CONDITIONS),
-  actions: z.array(interactionActionV6Schema)
-    .min(1)
-    .max(MAX_INTERACTION_ACTIONS),
-}).strict().superRefine((rule, context) => {
-  for (let index = 0; index < rule.actions.length - 1; index += 1) {
-    if (!isTerminalNavigationAction(rule.actions[index]!)) continue
-    context.addIssue({
-      code: 'custom',
-      path: ['actions', index],
-      message: '场景导航、重播或重开动作必须是规则的最后一个动作',
-    })
-  }
-})
 
 export const interactionRuleSchema: z.ZodType<InteractionRule> = z.object({
   id: stableIdSchema,

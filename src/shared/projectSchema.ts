@@ -6,27 +6,15 @@ import {
   MAX_SCENE_PRESENTATION_STATES,
   MAX_SCENE_NODES,
 } from './constants'
-import { SHAPE_TYPES, type ProjectDocument, type SceneNode } from './projectTypes'
-import { ELEMENT_ENTRANCE_PRESETS } from './elementAnimation'
 import {
-  interactionRuleV6Schema,
-  sceneInteractionsSchema,
-} from './interactionSchema'
-import type {
-  InteractionActionPayload,
-  InteractionActionStep,
-  InteractionRule,
-  InteractionRuleV6,
-  MotionDirection,
-} from './interactionTypes'
-import {
-  applySceneNodeOverride,
-  createDefaultScenePresentation,
-} from './presentation'
-import {
-  runtimeDocumentSchema,
-  runtimeDocumentV1Schema,
-} from './runtimeSchema'
+  SHAPE_TYPES,
+  type FormulaAstNode,
+  type ProjectDocument,
+  type SceneNode,
+} from './projectTypes'
+import { sceneInteractionsSchema } from './interactionSchema'
+import { applySceneNodeOverride } from './presentation'
+import { runtimeDocumentSchema } from './runtimeSchema'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const finiteNumber = z.number().finite()
@@ -57,10 +45,13 @@ function findUnsupportedNodeOverridePath(
     if (baseNode.type === 'external-component' && path[0] === 'props') {
       return undefined
     }
+    // Formula AST branches are discriminated recursive records. A state may
+    // replace one valid branch with another (for example row -> token), so
+    // field compatibility must be checked by formulaAstSchema after merge.
+    if (baseNode.type === 'formula' && path[0] === 'ast') {
+      return undefined
+    }
     for (const [key, value] of Object.entries(current)) {
-      // Optional V6 animation may be introduced by a named-state override even
-      // when the canonical base node does not own the optional field yet.
-      if (path.length === 0 && key === 'animation') continue
       if (!Object.prototype.hasOwnProperty.call(base, key)) {
         return [...path, key].join('.')
       }
@@ -104,7 +95,7 @@ function findFieldStrippedByNodeSchema(
   return undefined
 }
 
-const v1BaseNodeSchema = z.object({
+const baseNodeSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   x: finiteNumber,
@@ -112,34 +103,9 @@ const v1BaseNodeSchema = z.object({
   width: positiveSize,
   height: positiveSize,
   visible: z.boolean(),
-})
-
-const v1TextNodeSchema = v1BaseNodeSchema.extend({
-  type: z.literal('text'),
-  text: z.string(),
-  style: z.object({
-    fontFamily: z.string().min(1),
-    fontSize: finiteNumber.min(8).max(400),
-    color: colorSchema,
-    align: z.enum(['left', 'center', 'right']),
-    lineSpacing: finiteNumber.min(0).max(200),
-  }),
-})
-
-const v1ImageNodeSchema = v1BaseNodeSchema.extend({
-  type: z.literal('image'),
-  assetId: z.string().min(1),
-  preserveAspectRatio: z.boolean(),
-})
-
-const v1RectangleNodeSchema = v1BaseNodeSchema.extend({
-  type: z.literal('rectangle'),
-  style: z.object({
-    fillColor: colorSchema,
-    borderColor: colorSchema,
-    borderWidth: finiteNumber.min(0).max(100),
-    cornerRadius: finiteNumber.min(0).max(500),
-  }),
+  rotation: finiteNumber.min(-36000).max(36000),
+  opacity: unitInterval,
+  locked: z.boolean(),
 })
 
 const componentReferenceSchema = z.object({
@@ -147,13 +113,7 @@ const componentReferenceSchema = z.object({
   version: z.string().min(1),
 })
 
-const v1ExternalComponentNodeSchema = v1BaseNodeSchema.extend({
-  type: z.literal('external-component'),
-  component: componentReferenceSchema,
-  props: z.record(z.string(), z.unknown()),
-})
-
-const assetMetaV4Schema = z.object({
+const assetMetaSchema = z.object({
   id: z.string().min(1),
   filename: z.string().min(1),
   mimeType: z.string().min(1),
@@ -163,9 +123,6 @@ const assetMetaV4Schema = z.object({
   byteLength: z.number().int().nonnegative(),
   width: finiteNumber.positive().optional(),
   height: finiteNumber.positive().optional(),
-})
-
-const assetMetaSchema = assetMetaV4Schema.extend({
   kind: z.enum(['image', 'audio', 'video']),
   duration: finiteNumber.nonnegative().optional(),
 })
@@ -177,39 +134,21 @@ const embeddedComponentPackageMetaSchema = z.object({
   manifestPath: z.string().min(1),
   runtimePath: z.string().min(1),
   thumbnailPath: z.string().min(1).optional(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/, '组件包哈希必须是小写 SHA-256').optional(),
+  importedAt: z.string().datetime().optional(),
+  sourceLabel: z.string().min(1).max(200).optional(),
   editableCopy: z.boolean().optional(),
   sourcePackageId: z.string().min(1).optional(),
-})
-
-export const projectDocumentV1Schema = z.object({
-  schemaVersion: z.literal(1),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  canvas: z.object({
-    width: z.literal(CANVAS_WIDTH),
-    height: z.literal(CANVAS_HEIGHT),
-  }),
-  scenes: z.array(z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    backgroundColor: colorSchema,
-    nodes: z.array(z.discriminatedUnion('type', [
-      v1TextNodeSchema,
-      v1ImageNodeSchema,
-      v1RectangleNodeSchema,
-      v1ExternalComponentNodeSchema,
-    ])).max(MAX_SCENE_NODES),
-  })).min(1).max(MAX_PROJECT_SCENES),
-  assets: z.record(z.string(), assetMetaV4Schema),
-  componentPackages: z.record(z.string(), embeddedComponentPackageMetaSchema),
-})
-
-const baseNodeSchema = v1BaseNodeSchema.extend({
-  rotation: finiteNumber.min(-36000).max(36000),
-  opacity: unitInterval,
-  locked: z.boolean(),
+}).superRefine((metadata, context) => {
+  const provenanceValues = [metadata.sha256, metadata.importedAt, metadata.sourceLabel]
+  const presentCount = provenanceValues.filter((value) => value !== undefined).length
+  if (presentCount > 0 && presentCount < provenanceValues.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['sha256'],
+      message: '组件来源元数据必须同时包含 sha256、importedAt 和 sourceLabel',
+    })
+  }
 })
 
 const textRunStyleSchema = z.object({
@@ -218,10 +157,11 @@ const textRunStyleSchema = z.object({
   italic: z.boolean().optional(),
   underline: z.boolean().optional(),
   strike: z.boolean().optional(),
+  emphasis: z.boolean().optional(),
   highlightColor: colorSchema.nullable().optional(),
 })
 
-const textNodeV5Schema = baseNodeSchema.extend({
+const textNodeCoreSchema = baseNodeSchema.extend({
   type: z.literal('text'),
   text: z.string(),
   runs: z.array(z.object({
@@ -237,13 +177,11 @@ const textNodeV5Schema = baseNodeSchema.extend({
     italic: z.boolean(),
     underline: z.boolean(),
     strike: z.boolean(),
+    emphasis: z.boolean().default(false),
     highlightColor: colorSchema.nullable(),
     align: z.enum(['left', 'center', 'right']),
     verticalAlign: z.enum(['top', 'middle', 'bottom']),
-    writingMode: z.preprocess(
-      (value) => value === 'vertical' ? 'vertical-rl' : value,
-      z.enum(['horizontal', 'vertical-rl', 'vertical-lr']),
-    ),
+    writingMode: z.enum(['horizontal', 'vertical-rl', 'vertical-lr']),
     lineSpacing: finiteNumber.min(0).max(200),
     letterSpacing: finiteNumber.min(-20).max(100),
     padding: finiteNumber.min(0).max(200),
@@ -265,7 +203,120 @@ const textNodeV5Schema = baseNodeSchema.extend({
   }
 })
 
-const imageNodeV5Schema = baseNodeSchema.extend({
+const formulaAstNodeSchema: z.ZodType<FormulaAstNode> = z.lazy(() =>
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('row'),
+      children: z.array(formulaAstNodeSchema).min(1).max(128),
+    }).strict(),
+    z.object({
+      type: z.literal('token'),
+      value: z.string().min(1).max(128),
+    }).strict(),
+    z.object({
+      type: z.literal('operator'),
+      value: z.string().min(1).max(16),
+    }).strict(),
+    z.object({
+      type: z.literal('fraction'),
+      numerator: formulaAstNodeSchema,
+      denominator: formulaAstNodeSchema,
+    }).strict(),
+    z.object({
+      type: z.literal('root'),
+      radicand: formulaAstNodeSchema,
+      index: formulaAstNodeSchema.optional(),
+    }).strict(),
+    z.object({
+      type: z.literal('script'),
+      base: formulaAstNodeSchema,
+      superscript: formulaAstNodeSchema.optional(),
+      subscript: formulaAstNodeSchema.optional(),
+    }).strict(),
+    z.object({
+      type: z.literal('fenced'),
+      open: z.string().min(1).max(4),
+      close: z.string().min(1).max(4),
+      body: formulaAstNodeSchema,
+    }).strict(),
+  ]),
+) as z.ZodType<FormulaAstNode>
+
+function formulaAstComplexity(root: FormulaAstNode): {
+  nodes: number
+  depth: number
+  emptyScript: boolean
+} {
+  const pending: Array<{ node: FormulaAstNode; depth: number }> = [{ node: root, depth: 1 }]
+  let nodes = 0
+  let depth = 0
+  let emptyScript = false
+  while (pending.length > 0) {
+    const current = pending.pop()!
+    nodes += 1
+    depth = Math.max(depth, current.depth)
+    const push = (...children: Array<FormulaAstNode | undefined>): void => {
+      children.forEach((child) => {
+        if (child) pending.push({ node: child, depth: current.depth + 1 })
+      })
+    }
+    switch (current.node.type) {
+      case 'row': push(...current.node.children); break
+      case 'fraction': push(current.node.numerator, current.node.denominator); break
+      case 'root': push(current.node.radicand, current.node.index); break
+      case 'script':
+        if (!current.node.superscript && !current.node.subscript) emptyScript = true
+        push(current.node.base, current.node.superscript, current.node.subscript)
+        break
+      case 'fenced': push(current.node.body); break
+      case 'token':
+      case 'operator':
+        break
+    }
+  }
+  return { nodes, depth, emptyScript }
+}
+
+export const formulaAstSchema: z.ZodType<FormulaAstNode> = formulaAstNodeSchema
+  .superRefine((ast, context) => {
+    const complexity = formulaAstComplexity(ast)
+    if (complexity.nodes > 512) {
+      context.addIssue({
+        code: 'custom',
+        message: '公式 AST 最多包含 512 个节点',
+      })
+    }
+    if (complexity.depth > 24) {
+      context.addIssue({
+        code: 'custom',
+        message: '公式 AST 递归深度最多为 24 层',
+      })
+    }
+    if (complexity.emptyScript) {
+      context.addIssue({
+        code: 'custom',
+        message: 'script 必须包含 superscript 或 subscript',
+      })
+    }
+  })
+
+const formulaNodeCoreSchema = baseNodeSchema.extend({
+  type: z.literal('formula'),
+  formulaId: z.string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, 'Formula ID 只能包含字母、数字、点、下划线、冒号和连字符'),
+  accessibleText: z.string().trim().min(1).max(1_000),
+  ast: formulaAstSchema,
+  style: z.object({
+    fontSize: finiteNumber.min(12).max(200),
+    color: colorSchema,
+    align: z.enum(['left', 'center', 'right']),
+  }).strict(),
+})
+
+const imageNodeCoreSchema = baseNodeSchema.extend({
   type: z.literal('image'),
   assetId: z.string().min(1),
   preserveAspectRatio: z.boolean(),
@@ -285,6 +336,14 @@ const imageNodeV5Schema = baseNodeSchema.extend({
     amount: finiteNumber.min(0).max(100),
     mode: z.enum(['rectangle', 'ellipse']),
   }),
+  safeAreas: z.array(z.object({
+    id: z.string().trim().min(1).max(100),
+    label: z.string().trim().min(1).max(80),
+    x: unitInterval,
+    y: unitInterval,
+    width: finiteNumber.positive().max(1),
+    height: finiteNumber.positive().max(1),
+  }).strict()).max(16).default([]),
 }).superRefine((node, context) => {
   if (node.crop.left + node.crop.right >= 0.99) {
     context.addIssue({
@@ -300,9 +359,27 @@ const imageNodeV5Schema = baseNodeSchema.extend({
       message: '图片上下裁剪总量必须小于 99%',
     })
   }
+  const safeAreaIds = new Set<string>()
+  node.safeAreas.forEach((area, index) => {
+    if (safeAreaIds.has(area.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['safeAreas', index, 'id'],
+        message: '同一图片的安全区 ID 不能重复',
+      })
+    }
+    safeAreaIds.add(area.id)
+    if (area.x + area.width > 1.000001 || area.y + area.height > 1.000001) {
+      context.addIssue({
+        code: 'custom',
+        path: ['safeAreas', index],
+        message: '图片安全区必须完整位于图片节点内',
+      })
+    }
+  })
 })
 
-const videoNodeV5Schema = baseNodeSchema.extend({
+const videoNodeCoreSchema = baseNodeSchema.extend({
   type: z.literal('video'),
   assetId: z.string().min(1),
   fit: z.enum(['contain', 'cover', 'stretch']),
@@ -338,7 +415,7 @@ const videoNodeV5Schema = baseNodeSchema.extend({
   }
 })
 
-const shapeNodeV5Schema = baseNodeSchema.extend({
+const shapeNodeCoreSchema = baseNodeSchema.extend({
   type: z.literal('shape'),
   shapeType: z.enum(SHAPE_TYPES),
   style: z.object({
@@ -354,84 +431,26 @@ const shapeNodeV5Schema = baseNodeSchema.extend({
   }),
 })
 
-const externalComponentNodeV5Schema = baseNodeSchema.extend({
+const externalComponentNodeCoreSchema = baseNodeSchema.extend({
   type: z.literal('external-component'),
   component: componentReferenceSchema,
   props: z.record(z.string(), z.unknown()),
-})
-
-const teacherControllerNodeV5Schema = baseNodeSchema.extend({
-  type: z.literal('teacher-controller'),
-  title: z.string().max(80),
-  showSceneProgress: z.boolean(),
-  compact: z.boolean(),
-  buttons: z.array(z.object({
-    action: z.enum(['previous', 'next', 'replay', 'restart', 'sound', 'fullscreen']),
-    label: z.string().min(1).max(20),
-    visible: z.boolean(),
-  })).min(1).max(6).superRefine((buttons, context) => {
-    const actions = buttons.map((button) => button.action)
-    if (new Set(actions).size !== actions.length) {
-      context.addIssue({ code: 'custom', message: '控制器按钮动作不能重复' })
-    }
-  }),
-  style: z.object({
-    backgroundColor: colorSchema,
-    backgroundOpacity: unitInterval,
-    accentColor: colorSchema,
-    textColor: colorSchema,
-    cornerRadius: finiteNumber.min(0).max(100),
-  }),
-  includeInStaticExports: z.boolean(),
-})
-
-const sceneNodeV4Schema = z.discriminatedUnion('type', [
-  textNodeV5Schema,
-  imageNodeV5Schema,
-  shapeNodeV5Schema,
-  externalComponentNodeV5Schema,
-])
-
-const sceneNodeV5Schema = z.discriminatedUnion('type', [
-  textNodeV5Schema,
-  imageNodeV5Schema,
-  videoNodeV5Schema,
-  shapeNodeV5Schema,
-  teacherControllerNodeV5Schema,
-  externalComponentNodeV5Schema,
-])
-
-const elementEntranceAnimationSchema = z.object({
-  preset: z.enum(ELEMENT_ENTRANCE_PRESETS),
-  durationMs: finiteNumber.min(80).max(4_000),
-  delayMs: finiteNumber.min(0).max(10_000),
-}).strict()
-
-const animationFieldsSchema = z.object({
-  animation: elementEntranceAnimationSchema.optional(),
 })
 
 const playbackFieldsSchema = z.object({
   playbackInitialVisibility: z.enum(['inherit', 'hidden']),
 })
 
-const textNodeV6Schema = textNodeV5Schema.and(animationFieldsSchema)
-const imageNodeV6Schema = imageNodeV5Schema.and(animationFieldsSchema)
-const videoNodeV6Schema = videoNodeV5Schema.and(animationFieldsSchema)
-const shapeNodeV6Schema = shapeNodeV5Schema.and(animationFieldsSchema)
-const externalComponentNodeV6Schema = externalComponentNodeV5Schema.and(
-  animationFieldsSchema,
-)
-
-export const textNodeSchema = textNodeV5Schema.and(playbackFieldsSchema)
-export const imageNodeSchema = imageNodeV5Schema.and(playbackFieldsSchema)
-export const videoNodeSchema = videoNodeV5Schema.and(playbackFieldsSchema)
-export const shapeNodeSchema = shapeNodeV5Schema.and(playbackFieldsSchema)
-export const externalComponentNodeSchema = externalComponentNodeV5Schema.and(
+export const textNodeSchema = textNodeCoreSchema.and(playbackFieldsSchema)
+export const formulaNodeSchema = formulaNodeCoreSchema.and(playbackFieldsSchema)
+export const imageNodeSchema = imageNodeCoreSchema.and(playbackFieldsSchema)
+export const videoNodeSchema = videoNodeCoreSchema.and(playbackFieldsSchema)
+export const shapeNodeSchema = shapeNodeCoreSchema.and(playbackFieldsSchema)
+export const externalComponentNodeSchema = externalComponentNodeCoreSchema.and(
   playbackFieldsSchema,
 )
 
-const teacherControllerActionV6Schemas = [
+const teacherControllerActionSchemas = [
   z.object({ type: z.literal('scene.previous') }).strict(),
   z.object({ type: z.literal('scene.next') }).strict(),
   z.object({ type: z.literal('scene.replay') }).strict(),
@@ -443,49 +462,13 @@ const teacherControllerActionV6Schemas = [
   }).strict(),
   z.object({ type: z.literal('audio.toggle-mute') }).strict(),
   z.object({ type: z.literal('player.fullscreen.toggle') }).strict(),
+  z.object({ type: z.literal('scene.open-picker') }).strict(),
 ] as const
 
-const teacherControllerActionV6Schema = z.discriminatedUnion(
+const teacherControllerActionSchema = z.discriminatedUnion(
   'type',
-  teacherControllerActionV6Schemas,
+  teacherControllerActionSchemas,
 )
-
-const teacherControllerActionSchema = z.discriminatedUnion('type', [
-  ...teacherControllerActionV6Schemas,
-  z.object({ type: z.literal('scene.open-picker') }).strict(),
-])
-
-const teacherControllerFieldsV6Schema = z.object({
-  type: z.literal('teacher-controller'),
-  title: z.string().max(80),
-  showSceneProgress: z.boolean(),
-  compact: z.boolean(),
-  collapsible: z.boolean(),
-  defaultCollapsed: z.boolean(),
-  buttons: z.array(z.object({
-    id: z.string().trim().min(1).max(200),
-    action: teacherControllerActionV6Schema,
-    label: z.string().min(1).max(20),
-    visible: z.boolean(),
-  }).strict()).min(1).max(12).superRefine((buttons, context) => {
-    const ids = buttons.map((button) => button.id)
-    if (new Set(ids).size !== ids.length) {
-      context.addIssue({ code: 'custom', message: '控制器按钮 ID 不能重复' })
-    }
-  }),
-  style: z.object({
-    backgroundColor: colorSchema,
-    backgroundOpacity: unitInterval,
-    accentColor: colorSchema,
-    textColor: colorSchema,
-    cornerRadius: finiteNumber.min(0).max(100),
-  }),
-  includeInStaticExports: z.boolean(),
-})
-
-const teacherControllerNodeV6Schema = baseNodeSchema
-  .and(animationFieldsSchema)
-  .and(teacherControllerFieldsV6Schema)
 
 export const teacherControllerNodeSchema = baseNodeSchema
   .and(playbackFieldsSchema)
@@ -517,17 +500,9 @@ export const teacherControllerNodeSchema = baseNodeSchema
     includeInStaticExports: z.boolean(),
   }))
 
-const sceneNodeV6Schema = z.union([
-  textNodeV6Schema,
-  imageNodeV6Schema,
-  videoNodeV6Schema,
-  shapeNodeV6Schema,
-  teacherControllerNodeV6Schema,
-  externalComponentNodeV6Schema,
-])
-
 export const sceneNodeSchema = z.union([
   textNodeSchema,
+  formulaNodeSchema,
   imageNodeSchema,
   videoNodeSchema,
   shapeNodeSchema,
@@ -544,19 +519,7 @@ const sceneNodeOverrideSchema = z.record(z.string(), z.unknown()).superRefine(
       })
     }
   },
-).transform((override) => {
-  const style = override.style
-  if (!isPlainRecord(style) || style.writingMode !== 'vertical') {
-    return override
-  }
-  return {
-    ...override,
-    style: {
-      ...style,
-      writingMode: 'vertical-rl',
-    },
-  }
-})
+)
 
 export const scenePresentationStateSchema = z.object({
   id: z.string().min(1),
@@ -602,206 +565,6 @@ export const scenePresentationSchema = z.object({
   }
 })
 
-const sceneDocumentV2Schema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  backgroundColor: colorSchema,
-  backgroundAssetId: z.string().min(1).nullable().optional(),
-  nodes: z.array(sceneNodeV4Schema).max(MAX_SCENE_NODES),
-})
-
-export const projectDocumentV2Schema = z.object({
-  schemaVersion: z.literal(2),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  canvas: z.object({
-    width: z.literal(CANVAS_WIDTH),
-    height: z.literal(CANVAS_HEIGHT),
-  }),
-  scenes: z.array(sceneDocumentV2Schema).min(1).max(MAX_PROJECT_SCENES),
-  assets: z.record(z.string(), assetMetaV4Schema),
-  componentPackages: z.record(z.string(), embeddedComponentPackageMetaSchema),
-})
-
-const sceneDocumentV4Schema = sceneDocumentV2Schema.extend({
-  presentation: scenePresentationSchema.optional(),
-  runtime: runtimeDocumentV1Schema.optional(),
-}).superRefine((scene, context) => {
-  const nodeIds = scene.nodes.map((node) => node.id)
-  if (new Set(nodeIds).size !== nodeIds.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['nodes'],
-      message: '同一场景中的节点 ID 不能重复',
-    })
-  }
-  if (!scene.presentation) return
-  const nodesById = new Map(scene.nodes.map((node) => [node.id, node]))
-  for (const [stateIndex, state] of scene.presentation.states.entries()) {
-    if (state.nodeOrder) {
-      if (new Set(state.nodeOrder).size !== state.nodeOrder.length) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOrder'],
-          message: '状态节点层级不能包含重复 ID',
-        })
-      }
-      for (const nodeId of state.nodeOrder) {
-        if (!nodesById.has(nodeId)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['presentation', 'states', stateIndex, 'nodeOrder'],
-            message: `状态节点层级引用了不存在的节点：${nodeId}`,
-          })
-        }
-      }
-    }
-    for (const [nodeId, override] of Object.entries(state.nodeOverrides)) {
-      const baseNode = nodesById.get(nodeId)
-      if (!baseNode) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖引用了不存在的节点：${nodeId}`,
-        })
-        continue
-      }
-      const unsupportedPath = findUnsupportedNodeOverridePath(
-        baseNode as unknown as SceneNode,
-        override,
-      )
-      if (unsupportedPath) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖包含不适用于该节点的字段：${unsupportedPath}`,
-        })
-        continue
-      }
-      const materializedNode = applySceneNodeOverride(
-        baseNode as unknown as SceneNode,
-        override,
-      )
-      const result = sceneNodeV4Schema.safeParse(materializedNode)
-      if (!result.success) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖生成了无效节点：${result.error.issues[0]?.message ?? nodeId}`,
-        })
-      } else {
-        const strippedPath = findFieldStrippedByNodeSchema(
-          materializedNode,
-          result.data,
-        )
-        if (strippedPath) {
-          context.addIssue({
-            code: 'custom',
-            path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-            message: `状态覆盖包含未知字段：${strippedPath}`,
-          })
-        }
-      }
-    }
-  }
-})
-
-const sceneDocumentV5Schema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  backgroundColor: colorSchema,
-  backgroundAssetId: z.string().min(1).nullable().optional(),
-  nodes: z.array(sceneNodeV5Schema).max(MAX_SCENE_NODES),
-  presentation: scenePresentationSchema.optional(),
-  runtime: runtimeDocumentV1Schema.optional(),
-  interactions: z.array(interactionRuleV6Schema).max(2_000),
-}).superRefine((scene, context) => {
-  const nodeIds = scene.nodes.map((node) => node.id)
-  if (new Set(nodeIds).size !== nodeIds.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['nodes'],
-      message: '同一场景中的节点 ID 不能重复',
-    })
-  }
-  const ruleIds = scene.interactions.map((rule) => rule.id)
-  if (new Set(ruleIds).size !== ruleIds.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['interactions'],
-      message: '同一场景中的交互规则 ID 不能重复',
-    })
-  }
-  if (!scene.presentation) return
-  const nodesById = new Map(scene.nodes.map((node) => [node.id, node]))
-  for (const [stateIndex, state] of scene.presentation.states.entries()) {
-    if (state.nodeOrder) {
-      if (new Set(state.nodeOrder).size !== state.nodeOrder.length) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOrder'],
-          message: '状态节点层级不能包含重复 ID',
-        })
-      }
-      for (const nodeId of state.nodeOrder) {
-        if (!nodesById.has(nodeId)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['presentation', 'states', stateIndex, 'nodeOrder'],
-            message: `状态节点层级引用了不存在的节点：${nodeId}`,
-          })
-        }
-      }
-    }
-    for (const [nodeId, override] of Object.entries(state.nodeOverrides)) {
-      const baseNode = nodesById.get(nodeId)
-      if (!baseNode) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖引用了不存在的节点：${nodeId}`,
-        })
-        continue
-      }
-      const unsupportedPath = findUnsupportedNodeOverridePath(
-        baseNode as unknown as SceneNode,
-        override,
-      )
-      if (unsupportedPath) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖包含不适用于该节点的字段：${unsupportedPath}`,
-        })
-        continue
-      }
-      const materializedNode = applySceneNodeOverride(
-        baseNode as unknown as SceneNode,
-        override,
-      )
-      const result = sceneNodeV5Schema.safeParse(materializedNode)
-      if (!result.success) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖生成了无效节点：${result.error.issues[0]?.message ?? nodeId}`,
-        })
-      } else {
-        const strippedPath = findFieldStrippedByNodeSchema(materializedNode, result.data)
-        if (strippedPath) {
-          context.addIssue({
-            code: 'custom',
-            path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-            message: `状态覆盖包含未知字段：${strippedPath}`,
-          })
-        }
-      }
-    }
-  }
-})
-
 export const globalLayerVisibilitySchema = z.object({
   mode: z.enum(['all', 'include', 'exclude']),
   sceneIds: z.array(z.string().min(1)).max(MAX_PROJECT_SCENES),
@@ -822,56 +585,10 @@ export const globalLayerVisibilitySchema = z.object({
   }
 })
 
-export const globalComponentInstanceSchema = z.object({
-  node: externalComponentNodeV5Schema,
-  layer: z.enum(['underlay', 'overlay']),
-  visibility: globalLayerVisibilitySchema,
-})
-
-export const projectDocumentV3Schema = z.object({
-  schemaVersion: z.literal(3),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  canvas: z.object({
-    width: z.literal(CANVAS_WIDTH),
-    height: z.literal(CANVAS_HEIGHT),
-  }),
-  scenes: z.array(sceneDocumentV4Schema).min(1).max(MAX_PROJECT_SCENES),
-  assets: z.record(z.string(), assetMetaV4Schema),
-  componentPackages: z.record(z.string(), embeddedComponentPackageMetaSchema),
-  globalRuntime: runtimeDocumentV1Schema.optional(),
-  globalComponents: z.array(globalComponentInstanceSchema).max(MAX_SCENE_NODES),
-})
-
-const globalLayerItemV4Schema = z.object({
-  node: sceneNodeV4Schema,
-  layer: z.enum(['underlay', 'overlay']),
-  visibility: globalLayerVisibilitySchema,
-})
-
 export const globalLayerItemSchema = z.object({
   node: sceneNodeSchema,
   layer: z.enum(['underlay', 'overlay']),
   visibility: globalLayerVisibilitySchema,
-})
-
-export const projectDocumentV4Schema = z.object({
-  schemaVersion: z.literal(4),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  canvas: z.object({
-    width: z.literal(CANVAS_WIDTH),
-    height: z.literal(CANVAS_HEIGHT),
-  }),
-  scenes: z.array(sceneDocumentV4Schema).min(1).max(MAX_PROJECT_SCENES),
-  assets: z.record(z.string(), assetMetaV4Schema),
-  componentPackages: z.record(z.string(), embeddedComponentPackageMetaSchema),
-  globalRuntime: runtimeDocumentV1Schema.optional(),
-  globalLayer: z.array(globalLayerItemV4Schema).max(MAX_SCENE_NODES),
 })
 
 const audioChannelVolumesSchema = z.object({
@@ -903,161 +620,48 @@ const projectMediaSettingsSchema = z.object({
   }),
 })
 
-export const projectDocumentV5Schema = z.object({
-  schemaVersion: z.literal(5),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  canvas: z.object({
-    width: z.literal(CANVAS_WIDTH),
-    height: z.literal(CANVAS_HEIGHT),
-  }),
-  scenes: z.array(sceneDocumentV5Schema).min(1).max(MAX_PROJECT_SCENES),
-  assets: z.record(z.string(), assetMetaSchema),
-  componentPackages: z.record(z.string(), embeddedComponentPackageMetaSchema),
-  globalRuntime: runtimeDocumentV1Schema.optional(),
-  globalLayer: z.array(z.object({
-    node: sceneNodeV5Schema,
-    layer: z.enum(['underlay', 'overlay']),
-    visibility: globalLayerVisibilitySchema,
-  })).max(MAX_SCENE_NODES),
-  media: projectMediaSettingsSchema,
-  playback: z.object({
-    controls: z.enum(['canvas', 'footer', 'none']),
-    keyboardNavigation: z.boolean(),
-  }),
-})
+const designTokenIdSchema = z.string()
+  .trim()
+  .min(1)
+  .max(80)
+  .regex(/^[a-z][a-z0-9._-]*$/, 'Token ID 必须以小写字母开头，并只含小写字母、数字、点、横线或下划线')
 
-const sceneDocumentV6Schema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  backgroundColor: colorSchema,
-  backgroundAssetId: z.string().min(1).nullable().optional(),
-  nodes: z.array(sceneNodeV6Schema).max(MAX_SCENE_NODES),
-  presentation: scenePresentationSchema.optional(),
-  runtime: runtimeDocumentV1Schema.optional(),
-  interactions: z.array(interactionRuleV6Schema).max(2_000),
-}).superRefine((scene, context) => {
-  const nodeIds = scene.nodes.map((node) => node.id)
-  if (new Set(nodeIds).size !== nodeIds.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['nodes'],
-      message: '同一场景中的节点 ID 不能重复',
+const projectDesignTokensSchema = z.object({
+  fonts: z.array(z.object({
+    id: designTokenIdSchema,
+    label: z.string().trim().min(1).max(80),
+    fontFamily: z.string().trim().min(1).max(300),
+  }).strict()).max(16),
+  colors: z.array(z.object({
+    id: designTokenIdSchema,
+    label: z.string().trim().min(1).max(80),
+    color: colorSchema,
+  }).strict()).max(32),
+}).strict().superRefine((tokens, context) => {
+  ;(['fonts', 'colors'] as const).forEach((kind) => {
+    const ids = new Set<string>()
+    tokens[kind].forEach((token, index) => {
+      if (ids.has(token.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: [kind, index, 'id'],
+          message: '同类设计 Token 的 ID 不能重复',
+        })
+      }
+      ids.add(token.id)
     })
-  }
-  const ruleIds = scene.interactions.map((rule) => rule.id)
-  if (new Set(ruleIds).size !== ruleIds.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['interactions'],
-      message: '同一场景中的交互规则 ID 不能重复',
-    })
-  }
-  if (!scene.presentation) return
-  const nodesById = new Map(scene.nodes.map((node) => [node.id, node]))
-  for (const [stateIndex, state] of scene.presentation.states.entries()) {
-    if (state.nodeOrder) {
-      if (new Set(state.nodeOrder).size !== state.nodeOrder.length) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOrder'],
-          message: '状态节点层级不能包含重复 ID',
-        })
-      }
-      for (const nodeId of state.nodeOrder) {
-        if (!nodesById.has(nodeId)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['presentation', 'states', stateIndex, 'nodeOrder'],
-            message: `状态节点层级引用了不存在的节点：${nodeId}`,
-          })
-        }
-      }
-    }
-    for (const [nodeId, override] of Object.entries(state.nodeOverrides)) {
-      const baseNode = nodesById.get(nodeId)
-      if (!baseNode) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖引用了不存在的节点：${nodeId}`,
-        })
-        continue
-      }
-      const unsupportedPath = findUnsupportedNodeOverridePath(
-        baseNode as unknown as SceneNode,
-        override,
-      )
-      if (unsupportedPath) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖包含不适用于该节点的字段：${unsupportedPath}`,
-        })
-        continue
-      }
-      const materializedNode = applySceneNodeOverride(
-        baseNode as unknown as SceneNode,
-        override,
-      )
-      const result = sceneNodeV6Schema.safeParse(materializedNode)
-      if (!result.success) {
-        context.addIssue({
-          code: 'custom',
-          path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-          message: `状态覆盖生成了无效节点：${result.error.issues[0]?.message ?? nodeId}`,
-        })
-      } else {
-        const strippedPath = findFieldStrippedByNodeSchema(materializedNode, result.data)
-        if (strippedPath) {
-          context.addIssue({
-            code: 'custom',
-            path: ['presentation', 'states', stateIndex, 'nodeOverrides', nodeId],
-            message: `状态覆盖包含未知字段：${strippedPath}`,
-          })
-        }
-      }
-    }
-  }
-})
-
-/** Strict Project V6 parser retained so V6 archives can be migrated losslessly. */
-export const projectDocumentV6Schema = z.object({
-  schemaVersion: z.literal(6),
-  id: z.string().min(1),
-  title: z.string().min(1),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-  canvas: z.object({
-    width: z.literal(CANVAS_WIDTH),
-    height: z.literal(CANVAS_HEIGHT),
-  }),
-  scenes: z.array(sceneDocumentV6Schema).min(1).max(MAX_PROJECT_SCENES),
-  assets: z.record(z.string(), assetMetaSchema),
-  componentPackages: z.record(z.string(), embeddedComponentPackageMetaSchema),
-  globalRuntime: runtimeDocumentV1Schema.optional(),
-  globalLayer: z.array(z.object({
-    node: sceneNodeV6Schema,
-    layer: z.enum(['underlay', 'overlay']),
-    visibility: globalLayerVisibilitySchema,
-  })).max(MAX_SCENE_NODES),
-  globalInteractions: z.array(interactionRuleV6Schema).max(2_000),
-  media: projectMediaSettingsSchema,
-  playback: z.object({
-    controls: z.enum(['canvas', 'footer', 'none']),
-    keyboardNavigation: z.boolean(),
-  }),
-}).superRefine((project, context) => {
-  const ruleIds = project.globalInteractions.map((rule) => rule.id)
-  if (new Set(ruleIds).size !== ruleIds.length) {
-    context.addIssue({
-      code: 'custom',
-      path: ['globalInteractions'],
-      message: '全局交互规则 ID 不能重复',
-    })
-  }
+  })
+}).default({
+  fonts: [{
+    id: 'body',
+    label: '正文',
+    fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+  }],
+  colors: [
+    { id: 'background', label: '背景', color: '#ffffff' },
+    { id: 'text', label: '正文', color: '#1f2937' },
+    { id: 'accent', label: '强调', color: '#2563eb' },
+  ],
 })
 
 export const sceneDocumentSchema = z.object({
@@ -1174,7 +778,13 @@ const projectPresenterSettingsSchema = z.object({
 
   const signatures = new Map<string, number>()
   presenter.additionalBindings.forEach((binding, index) => {
-    if (binding.key === 'PageDown' || binding.key === 'PageUp') {
+    const isUnmodifiedStandardBinding =
+      (binding.key === 'PageDown' || binding.key === 'PageUp') &&
+      !binding.altKey &&
+      !binding.ctrlKey &&
+      !binding.shiftKey &&
+      !binding.metaKey
+    if (isUnmodifiedStandardBinding) {
       context.addIssue({
         code: 'custom',
         path: ['additionalBindings', index, 'key'],
@@ -1217,6 +827,7 @@ export const projectDocumentSchema = z.object({
   globalRuntime: runtimeDocumentSchema.optional(),
   globalLayer: z.array(globalLayerItemSchema).max(MAX_SCENE_NODES),
   globalInteractions: sceneInteractionsSchema,
+  designTokens: projectDesignTokensSchema,
   media: projectMediaSettingsSchema,
   playback: z.object({
     controls: z.enum(['canvas', 'none']),
@@ -1233,585 +844,3 @@ export const projectDocumentSchema = z.object({
     })
   }
 })
-
-type ProjectDocumentV1 = z.infer<typeof projectDocumentV1Schema>
-export type ProjectDocumentV2 = z.infer<typeof projectDocumentV2Schema>
-export type ProjectDocumentV3 = z.infer<typeof projectDocumentV3Schema>
-export type ProjectDocumentV4 = z.infer<typeof projectDocumentV4Schema>
-export type ProjectDocumentV5 = z.infer<typeof projectDocumentV5Schema>
-export type ProjectDocumentV6 = z.infer<typeof projectDocumentV6Schema>
-
-const baseV2 = <T extends ProjectDocumentV1['scenes'][number]['nodes'][number]>(node: T) => ({
-  id: node.id,
-  name: node.name,
-  x: node.x,
-  y: node.y,
-  width: node.width,
-  height: node.height,
-  rotation: 0,
-  opacity: 1,
-  visible: node.visible,
-  locked: false,
-})
-
-export function migrateProjectV1ToV2(project: ProjectDocumentV1): ProjectDocumentV2 {
-  return {
-    ...project,
-    schemaVersion: 2,
-    scenes: project.scenes.map((scene) => ({
-      ...scene,
-      nodes: scene.nodes.map((node) => {
-        switch (node.type) {
-          case 'text':
-            return {
-              ...baseV2(node),
-              type: 'text' as const,
-              text: node.text,
-              runs: [],
-              style: {
-                ...node.style,
-                bold: false,
-                italic: false,
-                underline: false,
-                strike: false,
-                highlightColor: null,
-                verticalAlign: 'top' as const,
-                writingMode: 'horizontal' as const,
-                letterSpacing: 0,
-                padding: 0,
-                overflow: 'auto-height' as const,
-                backgroundColor: '#ffffff',
-                backgroundOpacity: 0,
-                cornerRadius: 0,
-              },
-            }
-          case 'image':
-            return {
-              ...baseV2(node),
-              type: 'image' as const,
-              assetId: node.assetId,
-              preserveAspectRatio: node.preserveAspectRatio,
-              fit: 'stretch' as const,
-              crop: { left: 0, top: 0, right: 0, bottom: 0 },
-              cropX: 0.5,
-              cropY: 0.5,
-              flipX: false,
-              flipY: false,
-              cornerRadius: 0,
-              feather: { amount: 0, mode: 'rectangle' as const },
-            }
-          case 'rectangle':
-            return {
-              ...baseV2(node),
-              type: 'shape' as const,
-              shapeType: node.style.cornerRadius > 0
-                ? ('rounded-rectangle' as const)
-                : ('rectangle' as const),
-              style: {
-                fillColor: node.style.fillColor,
-                fillOpacity: 1,
-                borderColor: node.style.borderColor,
-                borderOpacity: 1,
-                borderWidth: node.style.borderWidth,
-                lineStyle: 'solid' as const,
-                cornerRadius: node.style.cornerRadius,
-                startArrow: 'none' as const,
-                endArrow: 'none' as const,
-              },
-            }
-          case 'external-component':
-            return {
-              ...baseV2(node),
-              type: 'external-component' as const,
-              component: { ...node.component },
-              props: structuredClone(node.props),
-            }
-        }
-      }),
-    })),
-  }
-}
-
-export function migrateProjectV2ToV3(project: ProjectDocumentV2): ProjectDocumentV3 {
-  return {
-    ...project,
-    schemaVersion: 3,
-    scenes: project.scenes.map((scene) => ({
-      ...scene,
-      nodes: scene.nodes.map((node) => structuredClone(node)),
-      presentation: createDefaultScenePresentation(),
-    })),
-    globalComponents: [],
-  }
-}
-
-export function migrateProjectV3ToV4(project: ProjectDocumentV3): ProjectDocumentV4 {
-  const { globalComponents, ...rest } = project
-  return {
-    ...rest,
-    schemaVersion: 4,
-    globalLayer: globalComponents.map((instance) => structuredClone(instance)),
-  }
-}
-
-function inferAssetKind(mimeType: string): 'image' | 'audio' | 'video' {
-  if (mimeType.startsWith('audio/')) return 'audio'
-  if (mimeType.startsWith('video/')) return 'video'
-  return 'image'
-}
-
-export function migrateProjectV4ToV5(project: ProjectDocumentV4): ProjectDocumentV5 {
-  return {
-    ...project,
-    schemaVersion: 5,
-    scenes: project.scenes.map((scene) => ({
-      ...structuredClone(scene),
-      interactions: [],
-    })),
-    assets: Object.fromEntries(
-      Object.entries(project.assets).map(([id, asset]) => [
-        id,
-        { ...structuredClone(asset), kind: inferAssetKind(asset.mimeType) },
-      ]),
-    ),
-    globalLayer: project.globalLayer.map((item) => structuredClone(item)),
-    media: {
-      audio: {
-        defaultMuted: false,
-        masterVolume: 1,
-        channelVolumes: {
-          music: 1,
-          narration: 1,
-          sfx: 1,
-          ui: 1,
-          video: 1,
-        },
-        sounds: {},
-        narrationDucking: {
-          enabled: true,
-          musicVolume: 0.3,
-          fadeMs: 250,
-        },
-      },
-    },
-    playback: {
-      controls: 'footer',
-      keyboardNavigation: true,
-    },
-  }
-}
-
-function migrateTeacherControllerAction(
-  action: z.infer<typeof teacherControllerNodeV5Schema>['buttons'][number]['action'],
-): z.infer<typeof teacherControllerActionV6Schema> {
-  switch (action) {
-    case 'previous': return { type: 'scene.previous' }
-    case 'next': return { type: 'scene.next' }
-    case 'replay': return { type: 'scene.replay' }
-    case 'restart': return { type: 'course.restart' }
-    case 'sound': return { type: 'audio.toggle-mute' }
-    case 'fullscreen': return { type: 'player.fullscreen.toggle' }
-  }
-}
-
-type SceneNodeV6 = z.infer<typeof sceneNodeV6Schema>
-type SceneDocumentV6 = ProjectDocumentV6['scenes'][number]
-type ElementEntranceAnimationV6 = z.infer<typeof elementEntranceAnimationSchema>
-
-function migrateSceneNodeV5ToV6(
-  node: z.infer<typeof sceneNodeV5Schema>,
-): SceneNodeV6 {
-  if (node.type !== 'teacher-controller') {
-    return structuredClone(node) as SceneNodeV6
-  }
-  return {
-    ...structuredClone(node),
-    collapsible: false,
-    defaultCollapsed: false,
-    buttons: node.buttons.map((button, index) => ({
-      id: `${node.id}_button_${index + 1}`,
-      label: button.label,
-      visible: button.visible,
-      action: migrateTeacherControllerAction(button.action),
-    })),
-  }
-}
-
-export function migrateProjectV5ToV6(project: ProjectDocumentV5): ProjectDocumentV6 {
-  return {
-    ...structuredClone(project),
-    schemaVersion: 6,
-    scenes: project.scenes.map((scene) => ({
-      ...structuredClone(scene),
-      nodes: scene.nodes.map(migrateSceneNodeV5ToV6),
-    })),
-    globalLayer: project.globalLayer.map((item) => ({
-      ...structuredClone(item),
-      node: migrateSceneNodeV5ToV6(item.node),
-    })),
-    globalInteractions: [],
-  }
-}
-
-function deterministicMigrationHash(value: string): string {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(36).padStart(7, '0')
-}
-
-function allocateMigrationId(
-  prefix: string,
-  identity: string,
-  used: Set<string>,
-): string {
-  const base = `${prefix}_${deterministicMigrationHash(identity)}`
-  let id = base
-  let suffix = 2
-  while (used.has(id)) {
-    id = `${base}_${suffix}`
-    suffix += 1
-  }
-  used.add(id)
-  return id
-}
-
-interface MigratedInteractionScope {
-  scopeKey: string
-  rules: InteractionRule[]
-  ruleIds: Set<string>
-  actionIds: Set<string>
-}
-
-function migrateInteractionScopeV6(
-  rules: readonly InteractionRuleV6[],
-  scopeKey: string,
-): MigratedInteractionScope {
-  const ruleIds = new Set(rules.map((rule) => rule.id))
-  const actionIds = new Set<string>()
-  const migratedRules = rules.map((rule): InteractionRule => ({
-    ...structuredClone(rule),
-    trigger: structuredClone(rule.trigger),
-    conditions: structuredClone(rule.conditions),
-    actions: rule.actions.map((action, actionIndex): InteractionActionStep => ({
-      id: allocateMigrationId(
-        'v7_action',
-        `${scopeKey}\0${rule.id}\0${actionIndex}`,
-        actionIds,
-      ),
-      start: 'after-previous',
-      delayMs: 0,
-      action: structuredClone(action) as InteractionActionPayload,
-    })),
-  }))
-  return { scopeKey, rules: migratedRules, ruleIds, actionIds }
-}
-
-function animationKey(animation: ElementEntranceAnimationV6): string {
-  return `${animation.preset}\0${animation.durationMs}\0${animation.delayMs}`
-}
-
-function legacyNodeAnimation(node: SceneNodeV6): ElementEntranceAnimationV6 | undefined {
-  return node.animation
-}
-
-function legacyAnimationPlaybackVisibility(
-  animation: ElementEntranceAnimationV6 | undefined,
-): 'inherit' | 'hidden' {
-  return animation && animation.preset !== 'none' ? 'hidden' : 'inherit'
-}
-
-function legacyAnimationAction(
-  nodeId: string,
-  animation: ElementEntranceAnimationV6,
-): InteractionActionPayload {
-  const common = {
-    type: 'node.enter' as const,
-    nodeId,
-    durationMs: animation.durationMs,
-    easing: 'ease-out' as const,
-  }
-  if (animation.preset.startsWith('slide-')) {
-    return {
-      ...common,
-      effect: 'slide',
-      direction: animation.preset.slice('slide-'.length) as MotionDirection,
-    }
-  }
-  return {
-    ...common,
-    effect: animation.preset as 'none' | 'fade' | 'scale',
-  }
-}
-
-function appendMigratedAnimationRule(
-  scope: MigratedInteractionScope,
-  node: SceneNodeV6,
-  animation: ElementEntranceAnimationV6,
-  stateIds: readonly string[] | undefined,
-): void {
-  if (animation.preset === 'none') return
-  const identity = [
-    scope.scopeKey,
-    node.id,
-    animationKey(animation),
-    ...(stateIds ?? []),
-  ].join('\0')
-  const ruleId = allocateMigrationId('v7_enter_rule', identity, scope.ruleIds)
-  const actionId = allocateMigrationId('v7_enter_action', identity, scope.actionIds)
-  scope.rules.push({
-    id: ruleId,
-    name: `${node.name} · 迁移入场`.slice(0, 80),
-    enabled: true,
-    trigger: { type: 'node.activated', nodeId: node.id },
-    conditions: stateIds
-      ? [{ type: 'presentation.in', stateIds: [...stateIds] }]
-      : [],
-    actions: [{
-      id: actionId,
-      start: 'after-previous',
-      delayMs: animation.delayMs,
-      action: legacyAnimationAction(node.id, animation),
-    }],
-  })
-}
-
-function appendSceneAnimationRules(
-  scene: SceneDocumentV6,
-  scope: MigratedInteractionScope,
-): void {
-  for (const node of scene.nodes) {
-    if (!scene.presentation) {
-      const animation = legacyNodeAnimation(node)
-      if (animation) appendMigratedAnimationRule(scope, node, animation, undefined)
-      continue
-    }
-
-    const groups = new Map<string, {
-      animation: ElementEntranceAnimationV6
-      stateIds: string[]
-    }>()
-    for (const state of scene.presentation.states) {
-      const effectiveNode = applySceneNodeOverride(
-        node as unknown as SceneNode,
-        state.nodeOverrides[node.id],
-      ) as unknown as SceneNodeV6
-      const animation = legacyNodeAnimation(effectiveNode)
-      if (!animation || animation.preset === 'none') continue
-      const key = animationKey(animation)
-      const group = groups.get(key)
-      if (group) {
-        group.stateIds.push(state.id)
-      } else {
-        groups.set(key, { animation, stateIds: [state.id] })
-      }
-    }
-    for (const group of groups.values()) {
-      appendMigratedAnimationRule(scope, node, group.animation, group.stateIds)
-    }
-  }
-}
-
-function isLegacyDefaultTeacherController(node: SceneNodeV6): boolean {
-  if (node.type !== 'teacher-controller') return false
-  const expectedButtons = [
-    ['scene.previous', '上一场景', true],
-    ['scene.next', '下一场景', true],
-    ['scene.replay', '重播', true],
-    ['course.restart', '重新开始', false],
-    ['audio.toggle-mute', '声音', true],
-    ['player.fullscreen.toggle', '全屏', true],
-  ] as const
-  return node.name === '教师控制器' &&
-    node.title === '教师控制台' &&
-    node.showSceneProgress &&
-    !node.compact &&
-    !node.defaultCollapsed &&
-    !node.includeInStaticExports &&
-    node.animation === undefined &&
-    node.style.backgroundColor === '#172033' &&
-    node.style.backgroundOpacity === 0.94 &&
-    node.style.accentColor === '#e7b85c' &&
-    node.style.textColor === '#f8fafc' &&
-    node.style.cornerRadius === 16 &&
-    node.buttons.length === expectedButtons.length &&
-    node.buttons.every((button, index) => {
-      const expected = expectedButtons[index]!
-      return button.action.type === expected[0] &&
-        button.label === expected[1] &&
-        button.visible === expected[2]
-    })
-}
-
-function migrateSceneNodeV6ToV7(node: SceneNodeV6): SceneNode {
-  const migrated = structuredClone(node) as unknown as Record<string, unknown>
-  delete migrated.animation
-  // A migrated node.enter must start from a transiently hidden frame. Keeping
-  // the authored node visible while setting this playback-only field preserves
-  // thumbnails/static exports and prevents the action from completing as a
-  // no-op merely because the node was already visible.
-  migrated.playbackInitialVisibility = legacyAnimationPlaybackVisibility(
-    legacyNodeAnimation(node),
-  )
-  if (isLegacyDefaultTeacherController(node) && node.type === 'teacher-controller') {
-    const buttons = structuredClone(node.buttons) as Array<{
-      id: string
-      action: z.infer<typeof teacherControllerActionSchema>
-      label: string
-      visible: boolean
-    }>
-    const buttonIds = new Set(buttons.map((button) => button.id))
-    buttons.splice(2, 0, {
-      id: allocateMigrationId('v7_picker_button', node.id, buttonIds),
-      action: { type: 'scene.open-picker' },
-      label: '场景目录',
-      visible: true,
-    })
-    migrated.buttons = buttons
-  }
-  return migrated as unknown as SceneNode
-}
-
-function migratePresentationV6ToV7(
-  presentation: SceneDocumentV6['presentation'],
-  nodes: readonly SceneNodeV6[],
-): SceneDocumentV6['presentation'] {
-  if (!presentation) return undefined
-  return {
-    ...structuredClone(presentation),
-    states: presentation.states.map((state) => {
-      const nodeOverrides = Object.fromEntries(
-        Object.entries(state.nodeOverrides).flatMap(([nodeId, override]) => {
-          const migrated = structuredClone(override)
-          delete migrated.animation
-          return Object.keys(migrated).length > 0 ? [[nodeId, migrated]] : []
-        }),
-      ) as Record<string, Record<string, unknown>>
-
-      for (const node of nodes) {
-        const effectiveNode = applySceneNodeOverride(
-          node as unknown as SceneNode,
-          state.nodeOverrides[node.id],
-        ) as unknown as SceneNodeV6
-        const baseVisibility = legacyAnimationPlaybackVisibility(
-          legacyNodeAnimation(node),
-        )
-        const stateVisibility = legacyAnimationPlaybackVisibility(
-          legacyNodeAnimation(effectiveNode),
-        )
-        if (stateVisibility === baseVisibility) continue
-        nodeOverrides[node.id] = {
-          ...(nodeOverrides[node.id] ?? {}),
-          playbackInitialVisibility: stateVisibility,
-        }
-      }
-
-      return {
-        ...structuredClone(state),
-        nodeOverrides,
-      }
-    }),
-  }
-}
-
-function migrateSceneV6ToV7(scene: SceneDocumentV6): ProjectDocument['scenes'][number] {
-  const scope = migrateInteractionScopeV6(
-    scene.interactions,
-    `scene\0${scene.id}`,
-  )
-  appendSceneAnimationRules(scene, scope)
-  return {
-    ...structuredClone(scene),
-    nodes: scene.nodes.map(migrateSceneNodeV6ToV7),
-    presentation: migratePresentationV6ToV7(scene.presentation, scene.nodes),
-    interactions: scope.rules,
-  }
-}
-
-export function migrateProjectV6ToV7(project: ProjectDocumentV6): ProjectDocument {
-  const globalScope = migrateInteractionScopeV6(
-    project.globalInteractions,
-    `global\0${project.id}`,
-  )
-  project.globalLayer.forEach((item) => {
-    const animation = legacyNodeAnimation(item.node)
-    if (animation) {
-      appendMigratedAnimationRule(globalScope, item.node, animation, undefined)
-    }
-  })
-  return projectDocumentSchema.parse({
-    ...structuredClone(project),
-    schemaVersion: 8,
-    scenes: project.scenes.map(migrateSceneV6ToV7),
-    globalLayer: project.globalLayer.map((item) => ({
-      ...structuredClone(item),
-      node: migrateSceneNodeV6ToV7(item.node),
-    })),
-    globalInteractions: globalScope.rules,
-    playback: {
-      controls: project.playback.controls === 'footer'
-        ? 'none'
-        : project.playback.controls,
-      keyboardNavigation: project.playback.keyboardNavigation,
-      presenter: {
-        enabled: true,
-        strategy: 'scene-navigation',
-        additionalBindings: [],
-      },
-    },
-  })
-}
-
-export function migrateProjectDocument(value: unknown): ProjectDocument {
-  const version = typeof value === 'object' && value !== null
-    ? Reflect.get(value, 'schemaVersion')
-    : undefined
-  if (version === 1) {
-    return migrateProjectV6ToV7(
-      migrateProjectV5ToV6(migrateProjectV4ToV5(
-        migrateProjectV3ToV4(
-          migrateProjectV2ToV3(
-            migrateProjectV1ToV2(projectDocumentV1Schema.parse(value)),
-          ),
-        ),
-      )),
-    )
-  }
-  if (version === 2) {
-    return migrateProjectV6ToV7(
-      migrateProjectV5ToV6(migrateProjectV4ToV5(
-        migrateProjectV3ToV4(
-          migrateProjectV2ToV3(projectDocumentV2Schema.parse(value)),
-        ),
-      )),
-    )
-  }
-  if (version === 3) {
-    return migrateProjectV6ToV7(
-      migrateProjectV5ToV6(migrateProjectV4ToV5(
-        migrateProjectV3ToV4(projectDocumentV3Schema.parse(value)),
-      )),
-    )
-  }
-  if (version === 4) {
-    return migrateProjectV6ToV7(
-      migrateProjectV5ToV6(migrateProjectV4ToV5(projectDocumentV4Schema.parse(value))),
-    )
-  }
-  if (version === 5) {
-    return migrateProjectV6ToV7(
-      migrateProjectV5ToV6(projectDocumentV5Schema.parse(value)),
-    )
-  }
-  if (version === 6) {
-    return migrateProjectV6ToV7(projectDocumentV6Schema.parse(value))
-  }
-  return projectDocumentSchema.parse(value)
-}
-
-/** @deprecated Project V3 compatibility export. */
-export const globalComponentVisibilitySchema = globalLayerVisibilitySchema
-
-export { assetMetaSchema, embeddedComponentPackageMetaSchema }

@@ -51,6 +51,18 @@ describe('Project V8 schema boundary', () => {
     expect(projectDocumentSchema.safeParse(project).success).toBe(false)
   })
 
+  it.each([1, 2, 3, 4, 5, 6, 7])(
+    'rejects Project V%s instead of migrating it',
+    (schemaVersion) => {
+      const project = structuredClone(createProject()) as unknown as {
+        schemaVersion: number
+      }
+      project.schemaVersion = schemaVersion
+
+      expect(projectDocumentSchema.safeParse(project).success).toBe(false)
+    },
+  )
+
   it.each(['PageDown', 'PageUp'])(
     'rejects duplicate configuration of the built-in %s binding',
     (key) => {

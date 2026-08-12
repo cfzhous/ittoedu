@@ -1,5 +1,5 @@
 import { UserFacingError } from '@/shared/errors'
-import type { ComponentDefinition } from '@/shared/componentTypes'
+import type { ComponentDefinitionV4 } from '@/shared/componentTypes'
 import { ComponentRegistry } from './ComponentRegistry'
 import { validateComponentRuntimeSource } from './importComponentPackage'
 
@@ -8,11 +8,11 @@ export interface ExecuteComponentRuntimeOptions {
 }
 
 export type ComponentRuntimeExecutionResult =
-  | { ok: true; definition: ComponentDefinition }
+  | { ok: true; definition: ComponentDefinitionV4 }
   | { ok: false; error: UserFacingError }
 
 /**
- * Components are explicitly trusted local code in V1. Supplying a small
+ * Components are explicitly trusted local code. Supplying a small
  * `window` object prevents accidental dependence on editor globals, but this is
  * deliberately not presented as a security sandbox.
  */
@@ -20,7 +20,7 @@ export function executeComponentRuntime(
   runtimeSource: string,
   expectedId: string,
   options: ExecuteComponentRuntimeOptions = {},
-): ComponentDefinition {
+): ComponentDefinitionV4 {
   const registry = options.registry ?? new ComponentRegistry()
   const capturedDefinitions = new ComponentRegistry()
   const registrationApi = Object.freeze({

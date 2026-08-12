@@ -25,8 +25,8 @@ import {
 import { createProjectV8Fields } from '../helpers/projectV8'
 
 const componentManifest: ComponentManifest = {
-  schemaVersion: 1,
-  runtimeApiVersion: 1,
+  schemaVersion: 4,
+  runtimeApiVersion: 4,
   id: 'com.example.counter',
   name: '示例计数器',
   version: '1.0.0',
@@ -40,6 +40,8 @@ const componentManifest: ComponentManifest = {
   defaultProps: {
     initialValue: 0,
   },
+  supportedScopes: ['scene'],
+  renderMode: 'phaser',
 }
 
 const project: ProjectDocument = {
@@ -102,6 +104,7 @@ const project: ProjectDocument = {
           flipY: false,
           cornerRadius: 0,
           feather: { amount: 0, mode: 'rectangle' },
+          safeAreas: [],
         },
         {
           id: 'component-1',
@@ -149,7 +152,7 @@ const project: ProjectDocument = {
 }
 
 const runtimeSource =
-  "window.CoursewareComponent.define({id:'com.example.counter',runtimeApiVersion:1,create(){return{destroy(){}}}})"
+  "window.CoursewareComponent.define({id:'com.example.counter',runtimeApiVersion:4,create(){return{destroy(){}}}})"
 
 const componentPackage: ComponentPackageData = {
   manifest: componentManifest,

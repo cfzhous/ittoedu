@@ -1,0 +1,155 @@
+import type { TeacherControllerNode } from '../shared/projectTypes'
+import {
+  createTeacherControllerLayout,
+  type TeacherControllerRect,
+} from '../shared/teacherControllerLayout'
+
+export const TEACHER_CONTROLLER_MOUSE_DRAG_THRESHOLD_PX = 6
+export const TEACHER_CONTROLLER_TOUCH_DRAG_THRESHOLD_PX = 10
+export const TEACHER_CONTROLLER_EDGE_SNAP = 12
+export const TEACHER_CONTROLLER_KEYBOARD_STEP = 8
+export const TEACHER_CONTROLLER_KEYBOARD_FINE_STEP = 1
+
+export interface TeacherControllerSessionOffset {
+  dx: number
+  dy: number
+}
+
+export interface TeacherControllerLogicalSize {
+  width: number
+  height: number
+}
+
+export type TeacherControllerGestureOutcome = 'activate' | 'moved' | 'cancelled'
+
+/** Keeps Phaser callback payloads out of the click-versus-drag decision. */
+export function teacherControllerGestureOutcome(
+  dragging: boolean,
+  cancelled: boolean,
+): TeacherControllerGestureOutcome {
+  if (cancelled) return 'cancelled'
+  return dragging ? 'moved' : 'activate'
+}
+
+interface AxisAlignedBounds {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+function visibleLocalRect(
+  node: TeacherControllerNode,
+  collapsed: boolean,
+): TeacherControllerRect {
+  if (collapsed) {
+    const collapse = createTeacherControllerLayout(node, node.width, node.height)
+      .collapse
+    if (collapse) return collapse
+  }
+  return { x: 0, y: 0, width: node.width, height: node.height }
+}
+
+function rotatedBounds(
+  node: TeacherControllerNode,
+  offset: TeacherControllerSessionOffset,
+  collapsed: boolean,
+): AxisAlignedBounds {
+  const rect = visibleLocalRect(node, collapsed)
+  const radians = node.rotation * Math.PI / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const centerX = node.x + node.width / 2 + offset.dx
+  const centerY = node.y + node.height / 2 + offset.dy
+  const localCenterX = node.width / 2
+  const localCenterY = node.height / 2
+  const corners = [
+    [rect.x, rect.y],
+    [rect.x + rect.width, rect.y],
+    [rect.x + rect.width, rect.y + rect.height],
+    [rect.x, rect.y + rect.height],
+  ].map(([x, y]) => {
+    const relativeX = x! - localCenterX
+    const relativeY = y! - localCenterY
+    return {
+      x: centerX + relativeX * cosine - relativeY * sine,
+      y: centerY + relativeX * sine + relativeY * cosine,
+    }
+  })
+  return {
+    left: Math.min(...corners.map(({ x }) => x)),
+    top: Math.min(...corners.map(({ y }) => y)),
+    right: Math.max(...corners.map(({ x }) => x)),
+    bottom: Math.max(...corners.map(({ y }) => y)),
+  }
+}
+
+function moveInsideCanvas(
+  offset: TeacherControllerSessionOffset,
+  bounds: AxisAlignedBounds,
+  canvas: TeacherControllerLogicalSize,
+): TeacherControllerSessionOffset {
+  let dx = offset.dx
+  let dy = offset.dy
+  if (bounds.left < 0) dx -= bounds.left
+  if (bounds.right > canvas.width) dx -= bounds.right - canvas.width
+  if (bounds.top < 0) dy -= bounds.top
+  if (bounds.bottom > canvas.height) dy -= bounds.bottom - canvas.height
+  return { dx, dy }
+}
+
+/** Keeps the currently visible controller geometry on the logical canvas. */
+export function constrainTeacherControllerOffset(
+  node: TeacherControllerNode,
+  proposed: TeacherControllerSessionOffset,
+  collapsed: boolean,
+  canvas: TeacherControllerLogicalSize,
+  snapToEdge = true,
+): TeacherControllerSessionOffset {
+  const safeCanvas = {
+    width: Math.max(1, canvas.width),
+    height: Math.max(1, canvas.height),
+  }
+  let offset = moveInsideCanvas(
+    proposed,
+    rotatedBounds(node, proposed, collapsed),
+    safeCanvas,
+  )
+  if (!snapToEdge) return offset
+
+  const bounds = rotatedBounds(node, offset, collapsed)
+  if (bounds.left <= TEACHER_CONTROLLER_EDGE_SNAP) {
+    offset = { ...offset, dx: offset.dx - bounds.left }
+  } else if (safeCanvas.width - bounds.right <= TEACHER_CONTROLLER_EDGE_SNAP) {
+    offset = {
+      ...offset,
+      dx: offset.dx + safeCanvas.width - bounds.right,
+    }
+  }
+  const snappedXBounds = rotatedBounds(node, offset, collapsed)
+  if (snappedXBounds.top <= TEACHER_CONTROLLER_EDGE_SNAP) {
+    offset = { ...offset, dy: offset.dy - snappedXBounds.top }
+  } else if (
+    safeCanvas.height - snappedXBounds.bottom <= TEACHER_CONTROLLER_EDGE_SNAP
+  ) {
+    offset = {
+      ...offset,
+      dy: offset.dy + safeCanvas.height - snappedXBounds.bottom,
+    }
+  }
+  return offset
+}
+
+export function logicalDragDelta(
+  start: { x: number; y: number },
+  current: { x: number; y: number },
+  renderedBounds: TeacherControllerLogicalSize,
+  logicalCanvas: TeacherControllerLogicalSize,
+): TeacherControllerSessionOffset {
+  const width = Math.max(1, renderedBounds.width)
+  const height = Math.max(1, renderedBounds.height)
+  return {
+    dx: (current.x - start.x) * logicalCanvas.width / width,
+    dy: (current.y - start.y) * logicalCanvas.height / height,
+  }
+}

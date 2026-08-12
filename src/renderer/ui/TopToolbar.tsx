@@ -4,7 +4,6 @@ import {
   ChevronDown,
   Eye,
   FileDown,
-  FileInput,
   FilePlus2,
   FolderOpen,
   FileText,
@@ -30,7 +29,6 @@ interface TopToolbarProps {
   recentProjects: RecentProjectEntry[]
   onOpenRecent(path: string): void
   onSave(saveAs?: boolean): void
-  onImportComponent(): void
   healthSummary: ProjectHealthSummary
   onOpenHealth(): void
   onPreview(): void
@@ -78,7 +76,6 @@ export function TopToolbar({
   recentProjects,
   onOpenRecent,
   onSave,
-  onImportComponent,
   healthSummary,
   onOpenHealth,
   onPreview,
@@ -198,16 +195,6 @@ export function TopToolbar({
 
       <div className="toolbar__separator" />
 
-      {editorMode === 'professional' && (
-        <ToolButton
-          label="导入组件"
-          title="导入可信的 .h5component 组件"
-          disabled={busy}
-          onClick={onImportComponent}
-        >
-          <FileInput size={18} />
-        </ToolButton>
-      )}
       {editorMode === 'simple' && (
         <details className="toolbar-more-menu">
           <summary className="tool-button" title="更多工程操作" aria-label="更多工程操作">

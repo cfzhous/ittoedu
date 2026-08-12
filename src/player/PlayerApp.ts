@@ -7,7 +7,7 @@ import { ComponentRegistry } from './ComponentRegistry'
 import { createPlayerComponentHostActions } from './componentHostActions'
 import { CourseRuntimeKernel } from './CourseRuntimeKernel'
 import { PreparedCanvasSnapshots } from './PreparedCanvasSnapshots'
-import { PlayerKeyboardNavigation } from './PlayerKeyboardNavigation'
+import { PlayerPresenterInput } from './PlayerPresenterInput'
 import { AudioManager } from './AudioManager'
 import {
   SCENE_PICKER_OPEN_EVENT,
@@ -89,7 +89,7 @@ function createRuntimeDomLayer(
 export class PlayerApp {
   readonly game: Phaser.Game
 
-  private readonly keyboardNavigation: PlayerKeyboardNavigation | null
+  private readonly presenterInput: PlayerPresenterInput | null
   readonly audio: AudioManager
   private readonly disposeAudioToggle: () => void
   private readonly componentRegistry = new ComponentRegistry()
@@ -97,6 +97,7 @@ export class PlayerApp {
   private readonly playerScene: PlayerScene
   private readonly runtimeKernel: CourseRuntimeKernel
   private readonly stage: HTMLElement
+  private readonly presenterStatus: HTMLDivElement
   private readonly runtimeDomLayers: PlayerRuntimeDomLayers
   private readonly scenePicker: ScenePickerOverlay | null
   private readonly scenePickerEventDisposers: Array<() => void> = []
@@ -108,6 +109,8 @@ export class PlayerApp {
   private capturePreparation: Promise<void> | null = null
   private authoringQueue: Promise<void> = Promise.resolve()
   private lastAuthoringRevision = -1
+  private presenterStatusTimer: ReturnType<typeof setTimeout> | null = null
+  private lastNavigationBlockedReason: string | null = null
   private destroyed = false
 
   constructor(
@@ -191,6 +194,33 @@ export class PlayerApp {
       this.runtimeDomLayers.scene.overlay,
       this.runtimeDomLayers.global.overlay,
     )
+    const presenterStatus = document.createElement('div')
+    presenterStatus.className = 'lesson-presenter-status'
+    presenterStatus.setAttribute('role', 'status')
+    presenterStatus.setAttribute('aria-live', 'polite')
+    presenterStatus.setAttribute('aria-atomic', 'true')
+    presenterStatus.hidden = true
+    Object.assign(presenterStatus.style, {
+      position: 'absolute',
+      left: '50%',
+      bottom: '24px',
+      zIndex: '40',
+      maxWidth: 'min(680px, calc(100% - 48px))',
+      padding: '10px 16px',
+      border: '1px solid rgba(244, 196, 92, 0.7)',
+      borderRadius: '999px',
+      color: '#fff8dc',
+      background: 'rgba(13, 22, 38, 0.94)',
+      boxShadow: '0 10px 32px rgba(0, 0, 0, 0.34)',
+      fontFamily: 'Inter, "Microsoft YaHei", "PingFang SC", sans-serif',
+      fontSize: '14px',
+      lineHeight: '1.45',
+      textAlign: 'center',
+      pointerEvents: 'none',
+      transform: 'translateX(-50%)',
+    })
+    stage.append(presenterStatus)
+    this.presenterStatus = presenterStatus
     if (this.authoringMode) {
       const inputShield = document.createElement('div')
       inputShield.className = 'lesson-authoring-input-shield'
@@ -218,7 +248,7 @@ export class PlayerApp {
       ? FROZEN_AUTHORING_ACTIONS
       : createPlayerComponentHostActions(this)
     this.runtimeKernel = new CourseRuntimeKernel(payload, hostActions, {
-      // Runtime API 1/2 has no authoring execution-mode literal. Reuse its
+      // Runtime API 2 has no authoring execution-mode literal. Reuse its
       // deterministic capture branch in the isolated editor host so trusted
       // runtimes do not start preview-only timers, media or autonomous motion.
       mode: this.authoringMode ? 'capture' : options.mode,
@@ -247,20 +277,51 @@ export class PlayerApp {
     this.disposeAudioToggle = this.runtimeKernel.events.on('audio:toggle-mute', () => {
       this.audio.toggleMuted()
     })
-    this.keyboardNavigation = !this.captureMode && !this.authoringMode &&
+    this.scenePickerEventDisposers.push(
+      this.runtimeKernel.events.on<{ reason?: string }>(
+        'navigation:blocked',
+        (event) => {
+          this.lastNavigationBlockedReason = event?.reason ?? '导航被课程规则阻止'
+          this.showPresenterFeedback(this.lastNavigationBlockedReason)
+        },
+      ),
+    )
+    const presenterSettings = payload.project.playback.presenter
+    this.presenterInput = !this.captureMode && !this.authoringMode &&
       options.controls !== false &&
-      (payload.project.playback?.keyboardNavigation ?? true)
-      ? new PlayerKeyboardNavigation(
-          payload.project.scenes.length,
-          (targetIndex) => this.goToScene(targetIndex),
-        )
+      (payload.project.playback.keyboardNavigation || presenterSettings.enabled)
+      ? new PlayerPresenterInput({
+          totalPages: payload.project.scenes.length,
+          keyboardNavigation: payload.project.playback.keyboardNavigation,
+          presenter: presenterSettings,
+          onNavigate: (targetIndex) => {
+            this.lastNavigationBlockedReason = null
+            const accepted = this.goToScene(targetIndex)
+            return accepted
+              ? { accepted: true }
+              : {
+                  accepted: false,
+                  message: this.lastNavigationBlockedReason ?? '场景导航未执行',
+                }
+          },
+          onAuthoredCommand: (command) => {
+            const accepted = this.hasActivePresenterRule(command)
+            this.runtimeKernel.events.emit('presenter:command', {
+              command,
+              sceneId: this.getCurrentSceneId(),
+            })
+            return accepted
+          },
+          onFeedback: ({ message }) => this.showPresenterFeedback(message),
+          isModalOpen: () => this.scenePicker?.isOpen ?? false,
+        })
       : null
     this.playerScene = new PlayerScene(
       payload,
       this.componentRegistry,
       (index) => {
         this.scenePicker?.close()
-        this.keyboardNavigation?.setIndex(index)
+        this.presenterInput?.setIndex(index)
         window.dispatchEvent(new CustomEvent('courseware-scene-change', {
           detail: {
             sceneId: this.payload.project.scenes[index]?.id,
@@ -402,11 +463,21 @@ export class PlayerApp {
   }
 
   previousScene(): boolean {
-    return this.goToScene(this.playerScene.getCurrentSceneIndex() - 1)
+    const index = this.playerScene.getCurrentSceneIndex()
+    if (index <= 0) {
+      this.showPresenterFeedback('已经是第一个场景')
+      return false
+    }
+    return this.goToScene(index - 1)
   }
 
   nextScene(): boolean {
-    return this.goToScene(this.playerScene.getCurrentSceneIndex() + 1)
+    const index = this.playerScene.getCurrentSceneIndex()
+    if (index >= this.payload.project.scenes.length - 1) {
+      this.showPresenterFeedback('已经是最后一个场景')
+      return false
+    }
+    return this.goToScene(index + 1)
   }
 
   replayScene(): boolean {
@@ -560,7 +631,9 @@ export class PlayerApp {
     }
     if (this.alignmentFrame !== null) cancelAnimationFrame(this.alignmentFrame)
     this.alignmentFrame = null
-    this.keyboardNavigation?.destroy()
+    this.presenterInput?.destroy()
+    if (this.presenterStatusTimer !== null) clearTimeout(this.presenterStatusTimer)
+    this.presenterStatusTimer = null
     this.scenePickerEventDisposers.splice(0).forEach((dispose) => dispose())
     this.scenePicker?.destroy()
     this.disposeAudioToggle()
@@ -585,6 +658,44 @@ export class PlayerApp {
         console.error(`组件“${component.manifest.name}”注册失败`, error)
       }
     }
+  }
+
+  private hasActivePresenterRule(command: 'next' | 'previous'): boolean {
+    const sceneId = this.getCurrentSceneId()
+    const stateId = this.getCurrentPresentationStateId()
+    const scene = this.payload.project.scenes.find((item) => item.id === sceneId)
+    const rules = [
+      ...this.payload.project.globalInteractions,
+      ...(scene?.interactions ?? []),
+    ]
+    return rules.some((rule) => {
+      if (
+        !rule.enabled ||
+        rule.trigger.type !== 'presenter.command' ||
+        rule.trigger.command !== command
+      ) {
+        return false
+      }
+      return rule.conditions.every((condition) => {
+        if (condition.type === 'scene.in') {
+          return sceneId !== null && condition.sceneIds.includes(sceneId)
+        }
+        return stateId !== null && condition.stateIds.includes(stateId)
+      })
+    })
+  }
+
+  private showPresenterFeedback(message: string): void {
+    if (this.destroyed || !message) return
+    if (this.presenterStatusTimer !== null) clearTimeout(this.presenterStatusTimer)
+    this.presenterStatus.textContent = message
+    this.presenterStatus.hidden = false
+    this.runtimeKernel.events.emit('presenter:feedback', { message })
+    this.presenterStatusTimer = setTimeout(() => {
+      this.presenterStatus.hidden = true
+      this.presenterStatus.textContent = ''
+      this.presenterStatusTimer = null
+    }, 2400)
   }
 
   private authoringError(

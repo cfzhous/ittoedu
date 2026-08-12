@@ -7,6 +7,7 @@ import {
 import { UserFacingError } from '@/shared/errors'
 import type { SelectedImageResult, SelectedMediaResult } from '@/shared/ipcTypes'
 import type {
+  AssetKind,
   AssetMeta,
   ProjectDocument,
   RuntimeAssetMap,
@@ -47,6 +48,37 @@ export interface MediaMetadata {
   duration: number
   width?: number
   height?: number
+}
+
+export async function assetBytesSha256(bytes: Uint8Array): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new UserFacingError(
+      '素材校验失败',
+      '当前环境不支持 SHA-256 内容校验。',
+      '请重新启动编辑器后再试。',
+    )
+  }
+  const source = bytes.slice()
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', source.buffer)
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+export async function buildAssetContentHashIndex(
+  kind: AssetKind,
+  assets: Readonly<Record<string, AssetMeta>>,
+  assetFiles: Readonly<Record<string, Uint8Array>>,
+): Promise<Map<string, ImportedImageAsset>> {
+  const hashes = new Map<string, ImportedImageAsset>()
+  for (const asset of Object.values(assets)) {
+    if (asset.kind !== kind) continue
+    const bytes = assetFiles[asset.id]
+    if (!bytes) continue
+    const hash = await assetBytesSha256(bytes)
+    if (!hashes.has(hash)) hashes.set(hash, { meta: asset, bytes })
+  }
+  return hashes
 }
 
 export interface ImportImageOptions {

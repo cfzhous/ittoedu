@@ -3,15 +3,28 @@ import { NodesTab } from './NodesTab'
 import { PropertiesTab } from './PropertiesTab'
 import { AutomationTab } from './AutomationTab'
 import { DeveloperTab } from './DeveloperTab'
+import { ComponentsTab } from './ComponentsTab'
 import { useEditorStore, type SidebarTab } from '../store/editorStore'
+import type {
+  AvailableComponentCatalogPackage,
+  ComponentCatalogSnapshot,
+} from '../../shared/componentCatalog'
 
 interface RightSidebarProps {
   onAddImage(x?: number, y?: number): void
   onReplaceImage(): void
   onAddVideo(x?: number, y?: number): void
+  onImportImage?(): void
   onImportAudio(): void
   onImportVideo(): void
+  onImportExternalComponents?(): void
   onReplaceComponent?(packageId: string): void
+  componentCatalog?: ComponentCatalogSnapshot
+  onRefreshComponentCatalog?(): void
+  onAddCatalogComponents?(
+    entries: AvailableComponentCatalogPackage[],
+  ): boolean | Promise<boolean>
+  onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
 }
 
 const simpleTabs: Array<{ id: SidebarTab; label: string }> = [
@@ -21,7 +34,10 @@ const simpleTabs: Array<{ id: SidebarTab; label: string }> = [
 ]
 
 const professionalTabs: Array<{ id: SidebarTab; label: string }> = [
-  ...simpleTabs,
+  { id: 'elements', label: '元素' },
+  { id: 'components', label: '组件' },
+  { id: 'layers', label: '图层' },
+  { id: 'properties', label: '属性' },
   { id: 'automation', label: '互动与动画' },
   { id: 'developer', label: '开发' },
 ]
@@ -30,9 +46,15 @@ export function RightSidebar({
   onAddImage,
   onReplaceImage,
   onAddVideo,
+  onImportImage,
   onImportAudio,
   onImportVideo,
+  onImportExternalComponents,
   onReplaceComponent,
+  componentCatalog,
+  onRefreshComponentCatalog,
+  onAddCatalogComponents,
+  onUpdateCatalogComponent,
 }: RightSidebarProps) {
   const activeTab = useEditorStore((state) => state.activeTab)
   const editorMode = useEditorStore((state) => state.editorMode)
@@ -73,8 +95,18 @@ export function RightSidebar({
           <ElementsTab
             onAddImage={onAddImage}
             onAddVideo={onAddVideo}
+            onImportImage={onImportImage}
             onImportAudio={onImportAudio}
             onImportVideo={onImportVideo}
+          />
+        )}
+        {activeTab === 'components' && editorMode === 'professional' && (
+          <ComponentsTab
+            componentCatalog={componentCatalog}
+            onImportExternalComponents={onImportExternalComponents}
+            onRefreshComponentCatalog={onRefreshComponentCatalog}
+            onAddCatalogComponents={onAddCatalogComponents}
+            onUpdateCatalogComponent={onUpdateCatalogComponent}
             onReplaceComponent={onReplaceComponent}
           />
         )}

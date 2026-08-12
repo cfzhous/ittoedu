@@ -10,24 +10,26 @@ import {
 } from '../../src/renderer/store/editorStore'
 
 function editableSource(id: string, marker = ''): string {
-  return `window.CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:2,create(){${marker};return{destroy(){}}}})`
+  return `window.CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:4,create(){${marker};return{destroy(){}}}})`
 }
 
 function componentPackage(
   id = 'com.example.developer',
 ): ComponentPackageData {
   const manifest = {
-    schemaVersion: 2 as const,
-    runtimeApiVersion: 2 as const,
+    schemaVersion: 4 as const,
+    runtimeApiVersion: 4 as const,
     id,
     name: '开发测试组件',
-    version: '2.0.0',
+    version: '4.0.0',
     entry: 'runtime.js',
     defaultSize: { width: 320, height: 180 },
     minSize: { width: 16, height: 16 },
     preserveAspectRatio: false,
     assets: {},
     defaultProps: { content: { title: '标题' } },
+    supportedScopes: ['scene', 'global'] as Array<'scene' | 'global'>,
+    renderMode: 'phaser' as const,
     editor: {
       properties: [
         { key: 'content.title', label: '标题', type: 'text' as const },
@@ -45,19 +47,13 @@ function componentPackage(
   }
 }
 
-function componentPackageV4(): ComponentPackageData {
-  const source = componentPackage('com.example.developer-v4')
+function domComponentPackage(): ComponentPackageData {
+  const source = componentPackage('com.example.developer-dom')
   const manifest = {
     ...source.manifest,
-    schemaVersion: 4 as const,
-    runtimeApiVersion: 4 as const,
-    supportedScopes: ['scene', 'global'] as Array<'scene' | 'global'>,
     renderMode: 'dom' as const,
   }
-  const runtimeSource = editableSource(manifest.id).replace(
-    'runtimeApiVersion:2',
-    'runtimeApiVersion:4',
-  )
+  const runtimeSource = editableSource(manifest.id)
   return {
     ...source,
     manifest,
@@ -271,7 +267,7 @@ describe('专业开发模式', () => {
 
   it('可编辑组件提交前复用完整包校验并保护现有实例作用域', () => {
     useEditorStore.getState().createNewProject()
-    const source = componentPackageV4()
+    const source = domComponentPackage()
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(source.manifest.id)
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!

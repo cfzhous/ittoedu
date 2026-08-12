@@ -33,7 +33,8 @@ describe('PlayerScene scene-level asset planning', () => {
           flipX: false,
           flipY: false,
           cornerRadius: 0,
-          feather: { amount: 0, mode: 'rectangle' },
+    feather: { amount: 0, mode: 'rectangle' },
+    safeAreas: [],
         },
         {
           id: 'component-1',
@@ -86,7 +87,8 @@ describe('PlayerScene scene-level asset planning', () => {
         flipX: false,
         flipY: false,
         cornerRadius: 0,
-        feather: { amount: 0, mode: 'rectangle' },
+          feather: { amount: 0, mode: 'rectangle' },
+          safeAreas: [],
       }],
       presentation: {
         initialStateId: 'state-initial',

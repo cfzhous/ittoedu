@@ -1,9 +1,4 @@
-import type {
-  RuntimeApiVersion,
-  RuntimeDefinition,
-} from '../shared/runtimeTypes'
-
-const SUPPORTED_RUNTIME_API_VERSIONS = new Set<RuntimeApiVersion>([1, 2])
+import type { RuntimeApiVersion, RuntimeDefinition } from '../shared/runtimeTypes'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -241,7 +236,7 @@ function isRuntimeDefinition(value: unknown): value is RuntimeDefinition {
   const runtimeApiVersion = Reflect.get(value, 'runtimeApiVersion')
   const authoringApiVersion = Reflect.get(value, 'authoringApiVersion')
   return (
-    SUPPORTED_RUNTIME_API_VERSIONS.has(runtimeApiVersion as RuntimeApiVersion) &&
+    runtimeApiVersion === 2 &&
     (authoringApiVersion === undefined || authoringApiVersion === 1) &&
     typeof Reflect.get(value, 'create') === 'function'
   )
@@ -343,7 +338,7 @@ export class RuntimeRegistry {
     }
     if (!isRuntimeDefinition(definition)) {
       throw new Error(
-        '运行时定义格式无效：需要 runtimeApiVersion 1/2、可选 authoringApiVersion 1 和 create()',
+        '运行时定义格式无效：只支持 runtimeApiVersion 2、可选 authoringApiVersion 1 和 create()',
       )
     }
     this.definitionDuringLoad = definition

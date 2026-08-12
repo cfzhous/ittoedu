@@ -4,7 +4,7 @@ import type {
   ComponentPackageData,
   ComponentScope,
 } from '../../src/shared/componentTypes'
-import { ElementsTab } from '../../src/renderer/ui/ElementsTab'
+import { ComponentsTab } from '../../src/renderer/ui/ComponentsTab'
 import {
   selectActiveScene,
   useEditorStore,
@@ -19,8 +19,8 @@ function componentPackage(
 ): ComponentPackageData {
   return {
     manifest: {
-      schemaVersion: 3,
-      runtimeApiVersion: 3,
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
       id: packageId,
       name: packageId === PACKAGE_ID ? '可管理组件' : '备用组件',
       version,
@@ -31,6 +31,7 @@ function componentPackage(
       assets: {},
       defaultProps: { label: `默认 ${version}` },
       supportedScopes,
+      renderMode: 'phaser',
     },
     runtimeSource: `window.CoursewareComponent.define({ version: '${version}' })`,
     files: {
@@ -47,6 +48,29 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('editorStore component package management', () => {
+  it('imports multiple packages in one undoable transaction', () => {
+    const first = componentPackage('1.0.0')
+    const second = componentPackage('1.0.0', ['scene'], 'com.example.second')
+
+    useEditorStore.getState().importComponentPackages([first, second])
+    let state = useEditorStore.getState()
+    expect(Object.keys(state.componentPackages)).toEqual([
+      PACKAGE_ID,
+      'com.example.second',
+    ])
+    expect(state.history.past).toHaveLength(1)
+
+    state.undo()
+    state = useEditorStore.getState()
+    expect(state.componentPackages).toEqual({})
+    expect(state.project.componentPackages).toEqual({})
+
+    state.redo()
+    state = useEditorStore.getState()
+    expect(state.componentPackages[PACKAGE_ID]).toBe(first)
+    expect(state.componentPackages['com.example.second']).toBe(second)
+  })
+
   it('deletes only unused packages and keeps delete undoable with runtime data', () => {
     const store = useEditorStore.getState()
     const imported = componentPackage('1.0.0')
@@ -56,7 +80,7 @@ describe('editorStore component package management', () => {
     let state = useEditorStore.getState()
     expect(state.project.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.componentPackages[PACKAGE_ID]).toBeUndefined()
-    expect(state.history.past).toHaveLength(1)
+    expect(state.history.past).toHaveLength(2)
 
     state.undo()
     state = useEditorStore.getState()
@@ -109,6 +133,7 @@ describe('editorStore component package management', () => {
     useEditorStore.getState().replaceComponentPackage(PACKAGE_ID, second)
     let state = useEditorStore.getState()
     expect(state.history.past).toHaveLength(historyBefore + 1)
+    expect(state.activeTab).toBe('components')
     expect(state.project.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
     expect(state.componentPackages[PACKAGE_ID]).toBe(second)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
@@ -163,7 +188,7 @@ describe('editorStore component package management', () => {
   })
 })
 
-describe('ElementsTab component package manager', () => {
+describe('ComponentsTab project component management', () => {
   it('shows version and usage, blocks referenced deletion, and requests replacement', () => {
     const store = useEditorStore.getState()
     store.importComponentPackage(componentPackage('1.0.0'))
@@ -173,21 +198,18 @@ describe('ElementsTab component package manager', () => {
     HTMLCanvasElement.prototype.getContext = () => null
     try {
       render(
-        <ElementsTab
-          onAddImage={vi.fn()}
+        <ComponentsTab
           onReplaceComponent={onReplaceComponent}
         />,
       )
-      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
 
       const manager = screen.getByTestId(`component-package-${PACKAGE_ID}`)
-      expect(manager).toHaveTextContent(`${PACKAGE_ID} · v1.0.0`)
-      expect(manager).toHaveTextContent('场景实例 1')
-      expect(manager).toHaveTextContent('全局实例 0')
-      expect(screen.getByTestId(`delete-component-package-${PACKAGE_ID}`))
-        .toBeDisabled()
+      expect(manager).toHaveTextContent('v1.0.0')
+      expect(manager).toHaveTextContent('场景 1 · 全局 0')
+      fireEvent.click(screen.getByLabelText('管理可管理组件'))
+      expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
 
-      fireEvent.click(screen.getByTestId(`replace-component-package-${PACKAGE_ID}`))
+      fireEvent.click(screen.getByRole('menuitem', { name: '替换组件包' }))
       expect(onReplaceComponent).toHaveBeenCalledWith(PACKAGE_ID)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
@@ -200,11 +222,9 @@ describe('ElementsTab component package manager', () => {
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
-      render(<ElementsTab onAddImage={vi.fn()} onReplaceComponent={vi.fn()} />)
-      fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
-      const deleteButton = screen.getByTestId(
-        `delete-component-package-${PACKAGE_ID}`,
-      )
+      render(<ComponentsTab onReplaceComponent={vi.fn()} />)
+      fireEvent.click(screen.getByLabelText('管理可管理组件'))
+      const deleteButton = screen.getByRole('menuitem', { name: '从工程移除' })
       expect(deleteButton).toBeEnabled()
       fireEvent.click(deleteButton)
       expect(screen.queryByTestId(`component-package-${PACKAGE_ID}`))

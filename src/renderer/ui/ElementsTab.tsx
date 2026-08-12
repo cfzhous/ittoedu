@@ -1,21 +1,16 @@
 import {
-  Box,
   Globe2,
   ImageIcon,
   MousePointerClick,
-  RefreshCw,
   Shapes,
-  Trash2,
   Type,
   Video,
   SlidersHorizontal,
   Music2,
   Search,
+  Sigma,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentPackageData } from '../../shared/componentTypes'
-import { componentSupportsScope } from '../../shared/componentCapabilities'
-import { collectComponentPackageUsage } from '../../shared/componentPackageLifecycle'
 import type { ShapeType } from '../../shared/projectTypes'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { createShapeNode } from '../project/createProject'
@@ -25,15 +20,14 @@ import { MediaTab } from './MediaTab'
 interface ElementsTabProps {
   onAddImage(x?: number, y?: number): void
   onAddVideo?(x?: number, y?: number): void
+  onImportImage?(): void
   onImportAudio?(): void
   onImportVideo?(): void
-  onReplaceComponent?(packageId: string): void
 }
 
 type AddCategory =
   | 'common'
   | 'media'
-  | 'components'
   | 'controls'
 
 const SIMPLE_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
@@ -43,7 +37,6 @@ const SIMPLE_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
 
 const PROFESSIONAL_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
   ...SIMPLE_ADD_CATEGORIES,
-  { id: 'components', label: '互动组件' },
   { id: 'controls', label: '控制与全局' },
 ]
 
@@ -55,13 +48,6 @@ function setDragData(
   event.dataTransfer.effectAllowed = 'copy'
   event.dataTransfer.setData('application/x-courseware-element', value)
   event.dataTransfer.setData('text/plain', label)
-}
-
-function ComponentThumbnail({ data }: { data: ComponentPackageData }) {
-  if (data.thumbnailUrl) {
-    return <img src={data.thumbnailUrl} alt="" />
-  }
-  return <Box size={20} />
 }
 
 function ShapePreview({ type }: { type: ShapeType }) {
@@ -86,31 +72,19 @@ function ShapePreview({ type }: { type: ShapeType }) {
 export function ElementsTab({
   onAddImage,
   onAddVideo,
+  onImportImage,
   onImportAudio,
   onImportVideo,
-  onReplaceComponent,
 }: ElementsTabProps) {
   const [activeCategory, setActiveCategory] = useState<AddCategory>('common')
   const [searchQuery, setSearchQuery] = useState('')
   const addTextNode = useEditorStore((state) => state.addTextNode)
+  const addFormulaNode = useEditorStore((state) => state.addFormulaNode)
   const addShapeNode = useEditorStore((state) => state.addShapeNode)
-  const addExternalComponentNode = useEditorStore(
-    (state) => state.addExternalComponentNode,
-  )
-  const components = useEditorStore((state) => state.componentPackages)
   const project = useEditorStore((state) => state.project)
   const editorMode = useEditorStore((state) => state.editorMode)
-  const deleteComponentPackage = useEditorStore(
-    (state) => state.deleteComponentPackage,
-  )
   const editingScope = useEditorStore((state) => state.editingScope)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
-  const availableComponents = Object.values(components).filter((data) =>
-    componentSupportsScope(data.manifest, editingScope),
-  )
-  const managedComponents = Object.values(components).sort((left, right) =>
-    left.manifest.name.localeCompare(right.manifest.name, 'zh-CN'),
-  )
   const categories = editorMode === 'professional'
     ? PROFESSIONAL_ADD_CATEGORIES
     : SIMPLE_ADD_CATEGORIES
@@ -126,17 +100,11 @@ export function ElementsTab({
       ),
     }))
     .filter((group) => group.items.length > 0), [normalizedQuery])
-  const visibleComponents = availableComponents.filter((data) =>
-    matchesSearch(
-      `${data.manifest.name} ${data.manifest.id} ${
-        data.manifest.schemaVersion === 1
-          ? ''
-          : data.manifest.presets?.map((preset) => preset.label).join(' ') ?? ''
-      }`,
-    ),
-  )
   const showText = searching
     ? matchesSearch('文本 文字')
+    : activeCategory === 'common'
+  const showFormula = searching
+    ? matchesSearch('公式 数学 formula')
     : activeCategory === 'common'
   const showImage = searching
     ? matchesSearch('图片 图像')
@@ -152,7 +120,7 @@ export function ElementsTab({
     (searching
       ? matchesSearch('教师控制器 导航')
       : activeCategory === 'controls')
-  const showQuickAdd = showText || showImage || showVideo || showAudio || showController
+  const showQuickAdd = showText || showFormula || showImage || showVideo || showAudio || showController
   const showShapes = searching
     ? visibleShapeGroups.length > 0
     : activeCategory === 'common'
@@ -166,8 +134,6 @@ export function ElementsTab({
     )
   )
   const showAssets = searching ? assetSearchMatches : activeCategory === 'media'
-  const showComponents = editorMode === 'professional' &&
-    (searching ? visibleComponents.length > 0 : activeCategory === 'components')
   const showControlsEmpty = editorMode === 'professional' &&
     activeCategory === 'controls' &&
     editingScope !== 'global' &&
@@ -176,7 +142,7 @@ export function ElementsTab({
   useEffect(() => {
     if (
       editorMode === 'simple' &&
-      (activeCategory === 'components' || activeCategory === 'controls')
+      activeCategory === 'controls'
     ) {
       setActiveCategory('common')
     }
@@ -199,7 +165,7 @@ export function ElementsTab({
           <input
             type="search"
             value={searchQuery}
-            placeholder="搜索元素、图形、素材或组件"
+            placeholder="搜索元素、图形或素材"
             aria-label="搜索元素内容"
             onChange={(event) => setSearchQuery(event.currentTarget.value)}
           />
@@ -247,6 +213,22 @@ export function ElementsTab({
                 <Type size={20} />
               </span>
               文本
+            </button>
+            )}
+            {showFormula && (
+            <button
+              type="button"
+              aria-label="公式"
+              className="element-card element-card--primary"
+              draggable
+              data-testid="add-formula"
+              onDragStart={(event) => setDragData(event, 'formula', '公式')}
+              onClick={() => addFormulaNode()}
+            >
+              <span className="element-icon">
+                <Sigma size={20} />
+              </span>
+              公式
             </button>
             )}
             {showImage && (
@@ -310,6 +292,7 @@ export function ElementsTab({
           {showAssets && onImportAudio && onImportVideo && (
             <MediaTab
               embedded
+              onImportImage={onImportImage}
               showAdvancedAudioSettings={editorMode === 'professional'}
               filterQuery={searchQuery}
               onImportAudio={onImportAudio}
@@ -358,157 +341,7 @@ export function ElementsTab({
           )}
       </>
 
-      {showComponents && (
-        <>
-          <div className="section-heading">
-            <span>{editingScope === 'global' ? '可用全局组件' : '互动组件'}</span>
-            <span>{visibleComponents.length}</span>
-          </div>
-          {visibleComponents.length === 0 ? (
-            <div className="empty-state">
-              {editingScope === 'global'
-                ? '尚未导入支持全局层的组件'
-                : '尚未导入可用于场景的组件'}
-              <br />使用顶部“导入组件”按钮添加
-            </div>
-          ) : (
-            <div className="component-list">
-              {visibleComponents.map((data) => (
-                <div key={data.manifest.id} className="component-entry">
-                  <button
-                    type="button"
-                    className="component-card"
-                    draggable
-                    data-testid={`component-${data.manifest.id}`}
-                    onDragStart={(event) =>
-                      setDragData(
-                        event,
-                        `component:${data.manifest.id}`,
-                        data.manifest.name,
-                      )
-                    }
-                    onClick={() => addExternalComponentNode(data.manifest.id)}
-                  >
-                    <span className="component-thumb">
-                      <ComponentThumbnail data={data} />
-                    </span>
-                    <span>
-                      <span className="component-name">{data.manifest.name}</span>
-                      <span className="component-version">
-                        {data.manifest.id} · {data.manifest.version}
-                      </span>
-                    </span>
-                    <Box size={15} />
-                  </button>
-                  {data.manifest.schemaVersion !== 1
-                    ? data.manifest.presets?.map((preset) => (
-                        <button
-                          type="button"
-                          key={preset.id}
-                          className="component-card component-card--preset"
-                          draggable
-                          data-testid={`component-${data.manifest.id}-preset-${preset.id}`}
-                          title={preset.description}
-                          onDragStart={(event) => setDragData(
-                            event,
-                            `component-preset:${encodeURIComponent(data.manifest.id)}:${encodeURIComponent(preset.id)}`,
-                            `${data.manifest.name} · ${preset.label}`,
-                          )}
-                          onClick={() => addExternalComponentNode(
-                            data.manifest.id,
-                            undefined,
-                            undefined,
-                            preset.id,
-                          )}
-                        >
-                          <span className="component-thumb">
-                            <ComponentThumbnail data={data} />
-                          </span>
-                          <span>
-                            <span className="component-name">{preset.label}</span>
-                            <span className="component-version">
-                              {data.manifest.name} · 预设
-                            </span>
-                          </span>
-                          <Box size={15} />
-                        </button>
-                      ))
-                    : null}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!searching && managedComponents.length > 0 && (
-            <>
-              <div className="section-heading section-heading--spaced">
-                <span>组件包管理</span>
-                <span>{managedComponents.length}</span>
-              </div>
-              <div className="component-package-list" data-testid="component-package-manager">
-                {managedComponents.map((data) => {
-                  const packageId = data.manifest.id
-                  const usage = collectComponentPackageUsage(project, packageId)
-                  const deleteReason = usage.totalInstanceCount > 0
-                    ? `仍有 ${usage.sceneInstanceCount} 个场景实例和 ${usage.globalInstanceCount} 个全局实例，需先删除实例。`
-                    : '当前没有实例引用，可以安全删除。'
-                  return (
-                    <section
-                      className="component-package-item"
-                      data-testid={`component-package-${packageId}`}
-                      key={packageId}
-                    >
-                      <div className="component-package-summary">
-                        <span className="component-thumb component-thumb--compact">
-                          <ComponentThumbnail data={data} />
-                        </span>
-                        <span className="component-package-copy">
-                          <strong>{data.manifest.name}</strong>
-                          <span>{packageId} · v{data.manifest.version}</span>
-                        </span>
-                      </div>
-                      <div className="component-package-usage">
-                        <span>场景实例 {usage.sceneInstanceCount}</span>
-                        <span>全局实例 {usage.globalInstanceCount}</span>
-                      </div>
-                      <div className="component-package-actions">
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          data-testid={`replace-component-package-${packageId}`}
-                          disabled={!onReplaceComponent}
-                          title={onReplaceComponent
-                            ? '选择同 ID 的组件包进行替换或升级'
-                            : '替换文件选择入口尚未接入'}
-                          onClick={() => onReplaceComponent?.(packageId)}
-                        >
-                          <RefreshCw size={13} />选择新包替换
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary-button secondary-button--danger"
-                          data-testid={`delete-component-package-${packageId}`}
-                          disabled={usage.totalInstanceCount > 0}
-                          title={deleteReason}
-                          onClick={() => deleteComponentPackage(packageId)}
-                        >
-                          <Trash2 size={13} />删除
-                        </button>
-                      </div>
-                      <span className={`component-package-hint${
-                        usage.totalInstanceCount > 0 ? ' component-package-hint--blocked' : ''
-                      }`}>
-                        {deleteReason}
-                      </span>
-                    </section>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </>
-      )}
-      {searching && !showQuickAdd && !showShapes && !showComponents && (
+      {searching && !showQuickAdd && !showShapes && !showAssets && (
         <div className="empty-state add-category-empty">
           没有找到“{searchQuery.trim()}”
         </div>

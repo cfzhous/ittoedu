@@ -15,7 +15,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Box,
   ChevronDown,
@@ -32,6 +32,7 @@ import {
   Unlock,
   Video,
   SlidersHorizontal,
+  Sigma,
 } from 'lucide-react'
 import type { SceneNode } from '../../shared/projectTypes'
 import {
@@ -42,6 +43,7 @@ import {
 
 const nodeIcon = {
   text: Type,
+  formula: Sigma,
   image: ImageIcon,
   video: Video,
   shape: Square,
@@ -73,10 +75,14 @@ function SortableNode({
   const Icon = nodeIcon[node.type]
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(node.name)
+  const selectTimerRef = useRef<number | null>(null)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: node.id })
 
   useEffect(() => setDraftName(node.name), [node.name])
+  useEffect(() => () => {
+    if (selectTimerRef.current !== null) window.clearTimeout(selectTimerRef.current)
+  }, [])
 
   const commitName = () => {
     const nextName = draftName.trim()
@@ -131,8 +137,33 @@ function SortableNode({
         <span
           className="node-name"
           title={`${node.name}（双击改名，Ctrl / Shift 单击可多选）`}
-          onClick={(event) => onSelect(event.ctrlKey || event.metaKey || event.shiftKey)}
-          onDoubleClick={() => setEditing(true)}
+          onClick={(event) => {
+            const additive = event.ctrlKey || event.metaKey || event.shiftKey
+            // Synthetic/keyboard activation and additive selection cannot be
+            // mistaken for rename, so keep those paths immediate. A real
+            // primary click is briefly deferred so the second click can claim
+            // the gesture for in-place rename before selecting the layer opens
+            // the Properties tab and unmounts this list.
+            if (event.detail === 0 || additive) {
+              onSelect(additive)
+              return
+            }
+            if (selectTimerRef.current !== null) {
+              window.clearTimeout(selectTimerRef.current)
+            }
+            selectTimerRef.current = window.setTimeout(() => {
+              selectTimerRef.current = null
+              onSelect(false)
+            }, 250)
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault()
+            if (selectTimerRef.current !== null) {
+              window.clearTimeout(selectTimerRef.current)
+              selectTimerRef.current = null
+            }
+            setEditing(true)
+          }}
         >
           {node.name}
         </span>
@@ -241,7 +272,11 @@ export function NodesTab() {
                     selected={selectedNodeIds.includes(node.id)}
                     onSelect={(additive) => {
                       selectNode(node.id, additive)
-                      setActiveTab('layers')
+                      // Ctrl/Shift selection is an in-progress layer-list
+                      // operation. Keep the list visible until the author has
+                      // assembled the set, then let an explicit Properties
+                      // click open the multi-selection controls.
+                      if (additive) setActiveTab('layers')
                     }}
                     onDelete={() => deleteNode(node.id)}
                     onDuplicate={() => duplicateNode(node.id)}

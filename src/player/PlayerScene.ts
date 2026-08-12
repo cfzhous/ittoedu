@@ -703,6 +703,7 @@ export class PlayerScene extends Phaser.Scene {
         sceneId: sceneDocument.id,
         emitComponentEvent: componentEvents.emit,
         canvasControlsEnabled: this.canvasControlsEnabled,
+        accessibilityRoot: this.domLayers.scene.overlay,
         textureKey: (assetId) => this.textureKey(assetId),
       }
       this.sceneMotionDirector = new NodeMotionDirector({
@@ -1283,6 +1284,7 @@ export class PlayerScene extends Phaser.Scene {
             : {}),
           emitComponentEvent: componentEvents.emit,
           canvasControlsEnabled: this.canvasControlsEnabled,
+          accessibilityRoot: this.domLayers.global.overlay,
           textureKey: (assetId) => this.textureKey(assetId),
         })
         this.applyStoredLifecycleState(handle)

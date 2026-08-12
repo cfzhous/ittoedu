@@ -14,6 +14,7 @@ import type { RenderedNodeHandle } from './renderNode'
 const SLIDE_DISTANCE = 48
 const SCALE_MULTIPLIER = 0.84
 const AUTHORING_EXIT_PREVIEW_HOLD_MS = 180
+const AUTHORING_PREVIEW_WATCHDOG_GRACE_MS = 500
 
 interface MotionFrame {
   x: number
@@ -128,6 +129,10 @@ export class NodeMotionDirector {
   private readonly disabledInputStates = new WeakMap<object, boolean>()
   private readonly previewTokens = new Map<string, symbol>()
   private readonly previewTimers = new Map<string, Phaser.Time.TimerEvent>()
+  private readonly previewWatchdogs = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >()
   private destroyed = false
 
   constructor(options: NodeMotionDirectorOptions) {
@@ -440,10 +445,12 @@ export class NodeMotionDirector {
     const start = (): void => {
       this.previewTimers.delete(action.nodeId)
       if (this.previewTokens.get(action.nodeId) !== token) return
-      void this.play(action, undefined, {
+      const playback = this.play(action, undefined, {
         restartFromBeginning: true,
         animateInCapture: true,
-      }).then((completed) => {
+      })
+      this.schedulePreviewWatchdog(action, token)
+      void playback.then((completed) => {
         if (this.previewTokens.get(action.nodeId) !== token) return
         if (!completed) {
           this.previewTokens.delete(action.nodeId)
@@ -502,7 +509,38 @@ export class NodeMotionDirector {
   private clearPreviewSession(nodeId: string): void {
     this.previewTimers.get(nodeId)?.remove(false)
     this.previewTimers.delete(nodeId)
+    const watchdog = this.previewWatchdogs.get(nodeId)
+    if (watchdog !== undefined) clearTimeout(watchdog)
+    this.previewWatchdogs.delete(nodeId)
     this.previewTokens.delete(nodeId)
+  }
+
+  /**
+   * Phaser tweens are driven by animation frames. A fully hidden authoring
+   * window can temporarily starve those frames even when Chromium background
+   * throttling is disabled, leaving the canvas at the preview start endpoint.
+   * This wall-clock guard affects only the isolated editor preview: normal
+   * playback keeps its authored timing, while an expired preview always
+   * returns to the stable Project frame.
+   */
+  private schedulePreviewWatchdog(
+    action: NodeMotionAction,
+    token: symbol,
+  ): void {
+    const previous = this.previewWatchdogs.get(action.nodeId)
+    if (previous !== undefined) clearTimeout(previous)
+    const duration = action.effect === 'none' || this.prefersReducedMotion()
+      ? 0
+      : Math.max(0, Math.min(10_000, action.durationMs))
+    const exitHold = action.type === 'node.exit'
+      ? AUTHORING_EXIT_PREVIEW_HOLD_MS
+      : 0
+    const watchdog = setTimeout(() => {
+      this.previewWatchdogs.delete(action.nodeId)
+      if (this.previewTokens.get(action.nodeId) !== token) return
+      this.cancel(action.nodeId, true)
+    }, duration + exitHold + AUTHORING_PREVIEW_WATCHDOG_GRACE_MS)
+    this.previewWatchdogs.set(action.nodeId, watchdog)
   }
 
   private frameFor(

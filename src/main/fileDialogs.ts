@@ -3,13 +3,20 @@ import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { dialog, type BrowserWindow } from 'electron'
 import type {
+  BatchFileDigest,
+  BatchFileRejection,
   OpenBinaryFileResult,
   SaveBinaryFileInput,
   SaveBinaryFileResult,
+  SelectedFileBatch,
   SelectedImageResult,
   SelectedMediaResult,
 } from '../shared/ipcTypes'
-import { DesktopOperationError } from './errors'
+import {
+  DesktopOperationError,
+  normalizeDesktopError,
+  type DesktopErrorPayload,
+} from './errors'
 import {
   recordRecentProject,
   resolveRecentProjectPath,
@@ -20,8 +27,26 @@ const MAX_IMAGE_BYTES = 100 * 1024 * 1024
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024
 const MAX_COMPONENT_BYTES = 50 * 1024 * 1024
+const MAX_BATCH_FILES = 100
+const MAX_IMAGE_BATCH_BYTES = 256 * 1024 * 1024
+const MAX_AUDIO_BATCH_BYTES = 256 * 1024 * 1024
+const MAX_VIDEO_BATCH_BYTES = 256 * 1024 * 1024
+const MAX_COMPONENT_BATCH_BYTES = 256 * 1024 * 1024
 const MAX_HTML_BYTES = 256 * 1024 * 1024
 const MAX_EXPORT_BYTES = 512 * 1024 * 1024
+
+export function batchCapacityIssue(
+  selectedIndex: number,
+  acceptedByteLength: number,
+  candidateByteLength: number,
+  maximumTotalBytes: number,
+): 'BATCH_FILE_COUNT_LIMIT' | 'BATCH_TOTAL_SIZE_LIMIT' | null {
+  if (selectedIndex >= MAX_BATCH_FILES) return 'BATCH_FILE_COUNT_LIMIT'
+  if (acceptedByteLength + candidateByteLength > maximumTotalBytes) {
+    return 'BATCH_TOTAL_SIZE_LIMIT'
+  }
+  return null
+}
 
 const imageMimeTypes = new Map<string, string>([
   ['.png', 'image/png'],
@@ -203,6 +228,95 @@ function mediaMatchesMime(bytes: Uint8Array, mimeType: string): boolean {
   return false
 }
 
+function fileDigest(bytes: Uint8Array): string {
+  return crypto.createHash('sha256').update(bytes).digest('hex')
+}
+
+function rejectedFile(
+  filePath: string,
+  error: unknown,
+  fallback: DesktopErrorPayload,
+): BatchFileRejection {
+  const normalized = normalizeDesktopError(error, fallback)
+  return {
+    path: filePath,
+    name: path.basename(filePath),
+    ...normalized,
+  }
+}
+
+interface SelectFileBatchOptions<T extends OpenBinaryFileResult> {
+  title: string
+  filters: Array<{ name: string; extensions: string[] }>
+  maximumTotalBytes: number
+  totalLimitLabel: string
+  fallback: DesktopErrorPayload
+  read(filePath: string): Promise<T>
+}
+
+async function selectFileBatch<T extends OpenBinaryFileResult>(
+  window: BrowserWindow,
+  options: SelectFileBatchOptions<T>,
+): Promise<SelectedFileBatch<T & BatchFileDigest> | null> {
+  const result = await dialog.showOpenDialog(window, {
+    title: options.title,
+    filters: options.filters,
+    properties: ['openFile', 'multiSelections', 'dontAddToRecent'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+
+  const accepted: Array<T & BatchFileDigest> = []
+  const rejected: BatchFileRejection[] = []
+  let acceptedByteLength = 0
+  for (const [index, filePath] of result.filePaths.entries()) {
+    if (
+      batchCapacityIssue(index, acceptedByteLength, 0, options.maximumTotalBytes) ===
+      'BATCH_FILE_COUNT_LIMIT'
+    ) {
+      rejected.push(rejectedFile(
+        filePath,
+        new DesktopOperationError(
+          'BATCH_FILE_COUNT_LIMIT',
+          '批量导入数量过多',
+          `一次最多选择 ${MAX_BATCH_FILES} 个文件。`,
+          '请分成多个批次导入。',
+        ),
+        options.fallback,
+      ))
+      continue
+    }
+    try {
+      const file = await options.read(filePath)
+      if (
+        batchCapacityIssue(
+          index,
+          acceptedByteLength,
+          file.bytes.byteLength,
+          options.maximumTotalBytes,
+        ) === 'BATCH_TOTAL_SIZE_LIMIT'
+      ) {
+        throw new DesktopOperationError(
+          'BATCH_TOTAL_SIZE_LIMIT',
+          '批量导入总大小超限',
+          `加入“${file.name}”后会超过本批 ${options.totalLimitLabel} 限制。`,
+          '请减少本次文件数量，或先压缩大文件。',
+        )
+      }
+      acceptedByteLength += file.bytes.byteLength
+      accepted.push({ ...file, sha256: fileDigest(file.bytes) })
+    } catch (error) {
+      rejected.push(rejectedFile(filePath, error, options.fallback))
+    }
+  }
+
+  return {
+    selectedCount: result.filePaths.length,
+    acceptedByteLength,
+    accepted,
+    rejected,
+  }
+}
+
 async function atomicWrite(filePath: string, data: Uint8Array | string): Promise<void> {
   const directory = path.dirname(filePath)
   const temporaryPath = path.join(
@@ -327,19 +441,7 @@ export async function saveProjectFile(
   return { path: targetPath }
 }
 
-export async function selectImageFile(
-  window: BrowserWindow,
-): Promise<SelectedImageResult | null> {
-  const result = await dialog.showOpenDialog(window, {
-    title: '选择图片',
-    filters: [
-      { name: '支持的图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
-    ],
-    properties: ['openFile', 'dontAddToRecent'],
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-
-  const filePath = result.filePaths[0]
+async function readImageSelection(filePath: string): Promise<SelectedImageResult> {
   const mimeType = imageMimeTypes.get(path.extname(filePath).toLocaleLowerCase('en-US'))
   if (!mimeType) {
     throw new DesktopOperationError(
@@ -368,22 +470,47 @@ export async function selectImageFile(
   return { path: filePath, name: path.basename(filePath), mimeType, bytes }
 }
 
-async function selectMediaFile(
+export async function selectImageFile(
   window: BrowserWindow,
-  kind: 'audio' | 'video',
-): Promise<SelectedMediaResult | null> {
-  const audio = kind === 'audio'
-  const mimeTypes = audio ? audioMimeTypes : videoMimeTypes
-  const extensions = audio ? ['mp3', 'ogg', 'wav', 'm4a'] : ['mp4', 'webm']
-  const label = audio ? '声音' : '视频'
+): Promise<SelectedImageResult | null> {
   const result = await dialog.showOpenDialog(window, {
-    title: `选择${label}`,
-    filters: [{ name: `支持的${label}`, extensions }],
+    title: '选择图片',
+    filters: [
+      { name: '支持的图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
+    ],
     properties: ['openFile', 'dontAddToRecent'],
   })
   if (result.canceled || result.filePaths.length === 0) return null
+  return readImageSelection(result.filePaths[0])
+}
 
-  const filePath = result.filePaths[0]
+export function selectImageFiles(
+  window: BrowserWindow,
+): Promise<SelectedFileBatch<SelectedImageResult & BatchFileDigest> | null> {
+  return selectFileBatch(window, {
+    title: '批量选择图片',
+    filters: [
+      { name: '支持的图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
+    ],
+    maximumTotalBytes: MAX_IMAGE_BATCH_BYTES,
+    totalLimitLabel: '256 MB',
+    fallback: {
+      code: 'IMAGE_READ_FAILED',
+      title: '图片导入失败',
+      message: '无法读取所选图片。',
+      suggestion: '请确认图片格式正确并重试。',
+    },
+    read: readImageSelection,
+  })
+}
+
+async function readMediaSelection(
+  filePath: string,
+  kind: 'audio' | 'video',
+): Promise<SelectedMediaResult> {
+  const audio = kind === 'audio'
+  const mimeTypes = audio ? audioMimeTypes : videoMimeTypes
+  const label = audio ? '声音' : '视频'
   const mimeType = mimeTypes.get(path.extname(filePath).toLocaleLowerCase('en-US'))
   if (!mimeType) {
     throw new DesktopOperationError(
@@ -410,6 +537,22 @@ async function selectMediaFile(
   return { path: filePath, name: path.basename(filePath), mimeType, bytes }
 }
 
+async function selectMediaFile(
+  window: BrowserWindow,
+  kind: 'audio' | 'video',
+): Promise<SelectedMediaResult | null> {
+  const audio = kind === 'audio'
+  const extensions = audio ? ['mp3', 'ogg', 'wav', 'm4a'] : ['mp4', 'webm']
+  const label = audio ? '声音' : '视频'
+  const result = await dialog.showOpenDialog(window, {
+    title: `选择${label}`,
+    filters: [{ name: `支持的${label}`, extensions }],
+    properties: ['openFile', 'dontAddToRecent'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return readMediaSelection(result.filePaths[0], kind)
+}
+
 export function selectAudioFile(window: BrowserWindow): Promise<SelectedMediaResult | null> {
   return selectMediaFile(window, 'audio')
 }
@@ -418,17 +561,45 @@ export function selectVideoFile(window: BrowserWindow): Promise<SelectedMediaRes
   return selectMediaFile(window, 'video')
 }
 
-export async function selectComponentFile(
+function selectMediaFiles(
   window: BrowserWindow,
-): Promise<OpenBinaryFileResult | null> {
-  const result = await dialog.showOpenDialog(window, {
-    title: '导入互动组件',
-    filters: [{ name: '课件互动组件', extensions: ['h5component'] }],
-    properties: ['openFile', 'dontAddToRecent'],
+  kind: 'audio' | 'video',
+): Promise<SelectedFileBatch<SelectedMediaResult & BatchFileDigest> | null> {
+  const audio = kind === 'audio'
+  const label = audio ? '声音' : '视频'
+  return selectFileBatch(window, {
+    title: `批量选择${label}`,
+    filters: [{
+      name: `支持的${label}`,
+      extensions: audio ? ['mp3', 'ogg', 'wav', 'm4a'] : ['mp4', 'webm'],
+    }],
+    maximumTotalBytes: audio ? MAX_AUDIO_BATCH_BYTES : MAX_VIDEO_BATCH_BYTES,
+    totalLimitLabel: '256 MB',
+    fallback: {
+      code: `${kind.toUpperCase()}_READ_FAILED`,
+      title: `${label}导入失败`,
+      message: `无法读取所选${label}。`,
+      suggestion: audio
+        ? '请确认声音格式正确并重试。'
+        : '请确认视频格式正确并重试。',
+    },
+    read: (filePath) => readMediaSelection(filePath, kind),
   })
-  if (result.canceled || result.filePaths.length === 0) return null
+}
 
-  const filePath = result.filePaths[0]
+export function selectAudioFiles(
+  window: BrowserWindow,
+): Promise<SelectedFileBatch<SelectedMediaResult & BatchFileDigest> | null> {
+  return selectMediaFiles(window, 'audio')
+}
+
+export function selectVideoFiles(
+  window: BrowserWindow,
+): Promise<SelectedFileBatch<SelectedMediaResult & BatchFileDigest> | null> {
+  return selectMediaFiles(window, 'video')
+}
+
+async function readComponentSelection(filePath: string): Promise<OpenBinaryFileResult> {
   const bytes = await readFileWithLimit(
     filePath,
     MAX_COMPONENT_BYTES,
@@ -445,6 +616,36 @@ export async function selectComponentFile(
   }
 
   return { path: filePath, name: path.basename(filePath), bytes }
+}
+
+export async function selectComponentFile(
+  window: BrowserWindow,
+): Promise<OpenBinaryFileResult | null> {
+  const result = await dialog.showOpenDialog(window, {
+    title: '导入互动组件',
+    filters: [{ name: '课件互动组件', extensions: ['h5component'] }],
+    properties: ['openFile', 'dontAddToRecent'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return readComponentSelection(result.filePaths[0])
+}
+
+export function selectComponentFiles(
+  window: BrowserWindow,
+): Promise<SelectedFileBatch<OpenBinaryFileResult & BatchFileDigest> | null> {
+  return selectFileBatch(window, {
+    title: '批量导入互动组件',
+    filters: [{ name: '课件互动组件', extensions: ['h5component'] }],
+    maximumTotalBytes: MAX_COMPONENT_BATCH_BYTES,
+    totalLimitLabel: '256 MB',
+    fallback: {
+      code: 'COMPONENT_READ_FAILED',
+      title: '组件导入失败',
+      message: '无法读取所选组件包。',
+      suggestion: '请确认 .h5component 文件有效并重试。',
+    },
+    read: readComponentSelection,
+  })
 }
 
 export async function writeHtmlFile(
@@ -534,7 +735,7 @@ export async function writeWebPackageFile(
 export async function writeBinaryExportFile(
   window: BrowserWindow,
   suggestedName: string,
-  extension: 'pptx' | 'pdf',
+  extension: 'pptx' | 'pdf' | 'json',
   bytes: Uint8Array,
 ): Promise<{ path: string } | null> {
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_EXPORT_BYTES) {
@@ -545,7 +746,11 @@ export async function writeBinaryExportFile(
       '请减少页面数量或压缩大图片后重试。',
     )
   }
-  const labels = { pptx: 'PowerPoint 演示文稿', pdf: 'PDF 文档' } as const
+  const labels = {
+    pptx: 'PowerPoint 演示文稿',
+    pdf: 'PDF 文档',
+    json: 'JSON 报告',
+  } as const
   const result = await dialog.showSaveDialog(window, {
     title: `导出${labels[extension]}`,
     defaultPath: sanitizeSuggestedName(suggestedName, `.${extension}`),

@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import {
+  COMPONENT_RENDER_MODES,
+  COMPONENT_SCOPES,
+} from './componentTypes'
 
 const componentIdSchema = z
   .string()
@@ -142,7 +146,7 @@ const configurableManifestSchema = manifestBaseSchema.extend({
   presets: z.array(componentPresetSchema).max(100).optional(),
 })
 
-const supportedScopesSchema = z.array(z.enum(['scene', 'global']))
+const supportedScopesSchema = z.array(z.enum(COMPONENT_SCOPES))
   .min(1, '组件必须声明至少一个支持的作用域')
   .max(2)
   .refine((scopes) => new Set(scopes).size === scopes.length, '组件作用域不能重复')
@@ -305,38 +309,14 @@ function validateRecursiveContentManifest(
   })
 }
 
-export const componentManifestV1Schema = manifestBaseSchema.extend({
-  schemaVersion: z.literal(1),
-  runtimeApiVersion: z.literal(1),
-})
-
-export const componentManifestV2Schema = configurableManifestSchema.extend({
-  schemaVersion: z.literal(2),
-  runtimeApiVersion: z.literal(2),
-}).superRefine(validateConfigurableManifest)
-
-export const componentManifestV3Schema = configurableManifestSchema.extend({
-  schemaVersion: z.literal(3),
-  runtimeApiVersion: z.literal(3),
-  supportedScopes: supportedScopesSchema,
-}).superRefine((manifest, context) => {
-  validateConfigurableManifest(manifest, context)
-  validateRecursiveContentManifest(manifest, context)
-})
-
 export const componentManifestV4Schema = configurableManifestSchema.extend({
   schemaVersion: z.literal(4),
   runtimeApiVersion: z.literal(4),
   supportedScopes: supportedScopesSchema,
-  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
+  renderMode: z.enum(COMPONENT_RENDER_MODES),
 }).superRefine((manifest, context) => {
   validateConfigurableManifest(manifest, context)
   validateRecursiveContentManifest(manifest, context)
 })
 
-export const componentManifestSchema = z.union([
-  componentManifestV1Schema,
-  componentManifestV2Schema,
-  componentManifestV3Schema,
-  componentManifestV4Schema,
-])
+export const componentManifestSchema = componentManifestV4Schema

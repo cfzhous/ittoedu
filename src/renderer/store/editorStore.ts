@@ -31,6 +31,7 @@ import type {
   GlobalLayerItem,
   GlobalLayerVisibility,
   ProjectDocument,
+  ProjectDesignTokens,
   ProjectAudioSettings,
   SceneDocument,
   SceneNode,
@@ -57,6 +58,10 @@ import type {
 } from '../../shared/runtimeTypes'
 import { UserFacingError } from '../../shared/errors'
 import {
+  analyzeProjectAssetReferences,
+  describeProjectAssetReference,
+} from '../../shared/assetReferences'
+import {
   collectComponentPackageUsage,
   evaluateComponentPackageDeletion,
   planComponentPackageReplacement,
@@ -73,6 +78,7 @@ import {
 } from '../../shared/constants'
 import {
   createExternalComponentNode,
+  createFormulaNode,
   createImageNode,
   createProject,
   createRectangleNode,
@@ -86,6 +92,7 @@ import {
   cloneProject,
   emptyHistory,
   pushHistory,
+  type AssetFileHistoryChange,
   type ComponentPackageHistoryChange,
   type HistoryState,
 } from './history'
@@ -110,6 +117,7 @@ function clampAudioVolume(value: number, fallback: number): number {
 
 export type SidebarTab =
   | 'elements'
+  | 'components'
   | 'layers'
   | 'properties'
   | 'automation'
@@ -169,6 +177,11 @@ export interface ProjectAudioSettingsPatch {
   masterVolume?: number
   channelVolumes?: Partial<Record<AudioChannel, number>>
   narrationDucking?: Partial<ProjectAudioSettings['narrationDucking']>
+}
+
+export interface ImportedAssetBatchItem {
+  meta: AssetMeta
+  bytes: Uint8Array
 }
 
 export interface EditorState {
@@ -255,13 +268,24 @@ export interface EditorState {
   clearPresentationStateOverrides(stateId: string): void
 
   addTextNode(x?: number, y?: number): void
+  addFormulaNode(x?: number, y?: number): void
   addRectangleNode(x?: number, y?: number): void
   addShapeNode(shapeType: ShapeType, x?: number, y?: number): void
   addImageNode(asset: AssetMeta, bytes: Uint8Array, x?: number, y?: number): void
   addVideoNode(asset: AssetMeta, bytes: Uint8Array, x?: number, y?: number): void
+  addImageNodes(
+    items: ImportedAssetBatchItem[],
+    position?: { x?: number; y?: number },
+  ): string[]
+  addVideoNodes(
+    items: ImportedAssetBatchItem[],
+    position?: { x?: number; y?: number },
+  ): string[]
   importAsset(asset: AssetMeta, bytes: Uint8Array): void
+  importAssets(items: ImportedAssetBatchItem[]): void
   replaceImageAsset(nodeId: string, asset: AssetMeta, bytes: Uint8Array): void
   importSound(asset: AssetMeta, bytes: Uint8Array, sound?: Partial<SoundDefinition>): string
+  importSounds(items: ImportedAssetBatchItem[]): string[]
   updateAudioSettings(patch: ProjectAudioSettingsPatch): void
   updateSound(soundId: string, patch: Partial<Omit<SoundDefinition, 'id'>>): void
   deleteSound(soundId: string): boolean
@@ -285,9 +309,11 @@ export interface EditorState {
     config: SimpleEntranceAnimationConfig | null,
   ): void
   updatePlayback(patch: Partial<ProjectDocument['playback']>): void
+  updateDesignTokens(tokens: ProjectDesignTokens): void
   ensureTeacherController(): void
   addExternalComponentNode(packageId: string, x?: number, y?: number, presetId?: string): void
   importComponentPackage(packageData: ComponentPackageData): void
+  importComponentPackages(packageData: ComponentPackageData[]): void
   deleteComponentPackage(packageId: string): boolean
   replaceComponentPackage(packageId: string, packageData: ComponentPackageData): void
   createEditableComponentCopy(packageId: string, nodeId?: string): string | null
@@ -959,6 +985,14 @@ function patchSceneNode(node: SceneNode, patch: DeepPartial<SceneNode>): SceneNo
       style: { ...node.style, ...typedPatch.style },
     } as SceneNode
   }
+  if (node.type === 'formula') {
+    const typedPatch = safePatch as DeepPartial<typeof node>
+    return {
+      ...common,
+      type: 'formula',
+      style: { ...node.style, ...typedPatch.style },
+    } as SceneNode
+  }
   if (node.type === 'shape') {
     const typedPatch = safePatch as DeepPartial<typeof node>
     return {
@@ -1084,6 +1118,58 @@ function normalizeNewNodeGeometry(
   )
 }
 
+const DEFAULT_INSERTION_COLUMNS = 6
+const DEFAULT_INSERTION_OFFSET = 20
+export const MAX_BATCH_CANVAS_ITEMS = 12
+
+function offsetDefaultInsertion(
+  node: SceneNode,
+  existingNodeCount: number,
+  hasExplicitPosition: boolean,
+): SceneNode {
+  if (hasExplicitPosition) return node
+  const slot = existingNodeCount % (DEFAULT_INSERTION_COLUMNS * 4)
+  return {
+    ...node,
+    x: node.x + (slot % DEFAULT_INSERTION_COLUMNS) * DEFAULT_INSERTION_OFFSET,
+    y: node.y + Math.floor(slot / DEFAULT_INSERTION_COLUMNS) * DEFAULT_INSERTION_OFFSET,
+  }
+}
+
+/**
+ * Produces a deterministic, non-overlapping layout for a small import batch.
+ * Every returned node is fully inside the fixed Project V8 canvas.
+ */
+export function layoutMediaBatchNodes(nodes: SceneNode[]): SceneNode[] {
+  if (nodes.length <= 1) return nodes
+  const margin = 24
+  const gap = 20
+  const columns = Math.min(
+    4,
+    Math.max(1, Math.ceil(Math.sqrt(nodes.length * (CANVAS_WIDTH / CANVAS_HEIGHT)))),
+  )
+  const rows = Math.ceil(nodes.length / columns)
+  const availableWidth = CANVAS_WIDTH - margin * 2 - gap * (columns - 1)
+  const availableHeight = CANVAS_HEIGHT - margin * 2 - gap * (rows - 1)
+  const cellWidth = availableWidth / columns
+  const cellHeight = availableHeight / rows
+
+  return nodes.map((node, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const scale = Math.min(1, cellWidth / node.width, cellHeight / node.height)
+    const width = Math.max(MIN_NODE_SIZE, node.width * scale)
+    const height = Math.max(MIN_NODE_SIZE, node.height * scale)
+    return {
+      ...node,
+      x: margin + column * (cellWidth + gap) + (cellWidth - width) / 2,
+      y: margin + row * (cellHeight + gap) + (cellHeight - height) / 2,
+      width,
+      height,
+    }
+  })
+}
+
 function componentMeta(
   data: ComponentPackageData,
   authoring?: Pick<
@@ -1101,6 +1187,7 @@ function componentMeta(
     thumbnailPath: data.manifest.thumbnail
       ? `${base}/${data.manifest.thumbnail}`
       : undefined,
+    ...(data.provenance === undefined ? {} : data.provenance),
     ...(authoring?.editableCopy ? { editableCopy: true } : {}),
     ...(authoring?.sourcePackageId
       ? { sourcePackageId: authoring.sourcePackageId }
@@ -1261,17 +1348,35 @@ function applyComponentPackageValue(
   return nextPackages
 }
 
-function applyComponentPackageHistoryChange(
+function applyComponentPackageHistoryChanges(
   packages: Readonly<Record<string, ComponentPackageData>>,
-  change: ComponentPackageHistoryChange | undefined,
+  changes: ComponentPackageHistoryChange[] | undefined,
   direction: 'undo' | 'redo',
 ): Record<string, ComponentPackageData> {
-  if (!change) return packages as Record<string, ComponentPackageData>
-  return applyComponentPackageValue(
-    packages,
-    change.packageId,
-    direction === 'undo' ? change.before : change.after,
+  if (!changes?.length) return packages as Record<string, ComponentPackageData>
+  return changes.reduce(
+    (nextPackages, change) => applyComponentPackageValue(
+      nextPackages,
+      change.packageId,
+      direction === 'undo' ? change.before : change.after,
+    ),
+    packages as Record<string, ComponentPackageData>,
   )
+}
+
+function applyAssetFileHistoryChanges(
+  files: Readonly<Record<string, Uint8Array>>,
+  changes: AssetFileHistoryChange[] | undefined,
+  direction: 'undo' | 'redo',
+): Record<string, Uint8Array> {
+  if (!changes?.length) return files as Record<string, Uint8Array>
+  const nextFiles = { ...files }
+  for (const change of changes) {
+    const value = direction === 'undo' ? change.before : change.after
+    if (value === undefined) delete nextFiles[change.assetId]
+    else nextFiles[change.assetId] = value.slice()
+  }
+  return nextFiles
 }
 
 export const useEditorStore = create<EditorState>((set, get) => {
@@ -1280,37 +1385,43 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const commit = (
     recipe: (draft: ProjectDocument) => void,
     selection?: string | null,
-    componentPackageMutation?: ComponentPackageMutation,
+    componentPackageMutation?: ComponentPackageMutation | ComponentPackageMutation[],
   ) => {
     set((state) => {
       const prepared = commitTextEditSessionState(state)
+      const componentPackageMutations = componentPackageMutation
+        ? Array.isArray(componentPackageMutation)
+          ? componentPackageMutation
+          : [componentPackageMutation]
+        : []
       const [nextProject, patches, inversePatches] = produceWithPatches(
         prepared.project,
         recipe,
       )
-      if (nextProject === prepared.project && !componentPackageMutation) return prepared
-      const componentPackageChange = componentPackageMutation
-        ? {
-            packageId: componentPackageMutation.packageId,
-            before: prepared.componentPackages[componentPackageMutation.packageId],
-            after: componentPackageMutation.next,
-          }
-        : undefined
+      if (nextProject === prepared.project && componentPackageMutations.length === 0) return prepared
+      const componentPackageChanges = componentPackageMutations.map((mutation) => ({
+        packageId: mutation.packageId,
+        before: prepared.componentPackages[mutation.packageId],
+        after: mutation.next,
+      }))
       return {
         ...prepared,
         project: nextProject,
-        componentPackages: componentPackageMutation
-          ? applyComponentPackageValue(
-              prepared.componentPackages,
-              componentPackageMutation.packageId,
-              componentPackageMutation.next,
-            )
-          : prepared.componentPackages,
+        componentPackages: componentPackageMutations.reduce(
+          (packages, mutation) => applyComponentPackageValue(
+            packages,
+            mutation.packageId,
+            mutation.next,
+          ),
+          prepared.componentPackages,
+        ),
         history: pushHistory(
           prepared.history,
           patches,
           inversePatches,
-          componentPackageChange,
+          componentPackageChanges.length > 0
+            ? { componentPackageChanges }
+            : {},
         ),
         dirty: true,
         selectedNodeId:
@@ -1325,18 +1436,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     })
   }
 
-  const canAddNode = (): boolean => {
+  const canAddNodes = (count = 1): boolean => {
     const state = get()
     const nodes = editingNodes(state)
-    if (nodes.length < MAX_SCENE_NODES) return true
+    if (count > 0 && nodes.length + count <= MAX_SCENE_NODES) return true
     set({
       errorMessage: state.editingScope === 'global'
-        ? `全局层已达到 ${MAX_SCENE_NODES} 个元素上限。请删除不需要的全局元素后继续。`
-        : `当前场景已达到 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`,
+        ? `全局层已达到或将超过 ${MAX_SCENE_NODES} 个元素上限。请删除不需要的全局元素后继续。`
+        : `当前场景已达到或将超过 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`,
       statusMessage: null,
     })
     return false
   }
+
+  const canAddNode = (): boolean => canAddNodes(1)
 
   const appendNodeToEditingScope = (node: SceneNode): void => {
     const state = get()
@@ -1359,6 +1472,120 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
       }
     }, node.id)
+  }
+
+  const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => {
+    if (left.byteLength !== right.byteLength) return false
+    return left.every((value, index) => value === right[index])
+  }
+
+  interface AssetFileMutation {
+    assetId: string
+    after?: Uint8Array
+    /** Import rejects an existing different payload; replacement opts in. */
+    allowReplace?: boolean
+  }
+
+  const commitAssetTransaction = (
+    fileMutations: AssetFileMutation[],
+    recipe: (draft: ProjectDocument) => void,
+    selectedNodeIds: string[] | undefined,
+    statusMessage: string,
+  ): void => {
+    set((state) => {
+      const prepared = commitTextEditSessionState(state)
+      const nextFiles = { ...prepared.assetFiles }
+      const assetFileChanges: AssetFileHistoryChange[] = []
+      for (const mutation of fileMutations) {
+        const before = prepared.assetFiles[mutation.assetId]
+        const after = mutation.after?.slice()
+        if (
+          before &&
+          after &&
+          !mutation.allowReplace &&
+          !sameBytes(before, after)
+        ) {
+          throw new UserFacingError(
+            '素材导入失败',
+            `素材 ID“${mutation.assetId}”已被另一个文件使用。`,
+            '请重新选择文件；如问题持续，请重新启动编辑器。',
+          )
+        }
+        const unchanged = before === undefined
+          ? after === undefined
+          : after !== undefined && sameBytes(before, after)
+        if (unchanged) continue
+        if (after === undefined) delete nextFiles[mutation.assetId]
+        else nextFiles[mutation.assetId] = after
+        assetFileChanges.push({
+          assetId: mutation.assetId,
+          ...(before === undefined ? {} : { before }),
+          ...(after === undefined ? {} : { after }),
+        })
+      }
+      const [nextProject, patches, inversePatches] = produceWithPatches(
+        prepared.project,
+        recipe,
+      )
+      if (nextProject === prepared.project && assetFileChanges.length === 0) {
+        return prepared
+      }
+      return {
+        ...prepared,
+        project: nextProject,
+        assetFiles: nextFiles,
+        history: pushHistory(prepared.history, patches, inversePatches, {
+          assetFileChanges,
+        }),
+        dirty: true,
+        ...(selectedNodeIds === undefined ? {} : {
+          selectedNodeIds,
+          selectedNodeId: selectedNodeIds.at(-1) ?? null,
+        }),
+        statusMessage,
+      }
+    })
+  }
+
+  const commitAssetBatch = (
+    items: ImportedAssetBatchItem[],
+    recipe: (draft: ProjectDocument) => void,
+    selectedNodeIds: string[] | undefined,
+    statusMessage: string,
+  ): void => {
+    if (items.length === 0) return
+    const uniqueItems = new Map<string, ImportedAssetBatchItem>()
+    for (const item of items) {
+      const duplicate = uniqueItems.get(item.meta.id)
+      if (duplicate && !sameBytes(duplicate.bytes, item.bytes)) {
+        throw new UserFacingError(
+          '素材导入失败',
+          `批次中出现了相同 ID 但内容不同的素材“${item.meta.filename}”。`,
+          '请取消导入并重新选择文件。',
+        )
+      }
+      uniqueItems.set(item.meta.id, {
+        meta: structuredClone(item.meta),
+        bytes: item.bytes.slice(),
+      })
+    }
+
+    commitAssetTransaction(
+      [...uniqueItems.values()].map((item) => ({
+        assetId: item.meta.id,
+        after: item.bytes,
+      })),
+      (draft) => {
+        for (const item of uniqueItems.values()) {
+          if (!draft.assets[item.meta.id]) {
+            draft.assets[item.meta.id] = structuredClone(item.meta)
+          }
+        }
+        recipe(draft)
+      },
+      selectedNodeIds,
+      statusMessage,
+    )
   }
 
   return {
@@ -1495,7 +1722,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ...commitTextEditSessionState(state),
         editorMode,
         activeTab: editorMode === 'simple' &&
-          (state.activeTab === 'automation' || state.activeTab === 'developer')
+          (state.activeTab === 'components' || state.activeTab === 'automation' || state.activeTab === 'developer')
           ? 'properties'
           : state.activeTab,
         statusMessage: editorMode === 'simple'
@@ -2117,28 +2344,55 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     addTextNode(x, y) {
       if (!canAddNode()) return
+      const state = get()
       const node = normalizeNewNodeGeometry(
-        createTextNode(x, y),
-        get().componentPackages,
+        offsetDefaultInsertion(
+          createTextNode(x, y),
+          editingNodes(state).length,
+          x !== undefined || y !== undefined,
+        ),
+        state.componentPackages,
       )
       appendNodeToEditingScope(node)
       set({
-        activeTab: 'properties',
         statusMessage: get().editingScope === 'global'
           ? '已添加全局文本'
           : '已添加文本',
       })
     },
 
-    addRectangleNode(x, y) {
+    addFormulaNode(x, y) {
       if (!canAddNode()) return
+      const state = get()
       const node = normalizeNewNodeGeometry(
-        createRectangleNode(x, y),
-        get().componentPackages,
+        offsetDefaultInsertion(
+          createFormulaNode(x, y),
+          editingNodes(state).length,
+          x !== undefined || y !== undefined,
+        ),
+        state.componentPackages,
       )
       appendNodeToEditingScope(node)
       set({
-        activeTab: 'properties',
+        statusMessage: get().editingScope === 'global'
+          ? '已添加全局公式'
+          : '已添加公式',
+      })
+    },
+
+    addRectangleNode(x, y) {
+      if (!canAddNode()) return
+      const state = get()
+      const node = normalizeNewNodeGeometry(
+        offsetDefaultInsertion(
+          createRectangleNode(x, y),
+          editingNodes(state).length,
+          x !== undefined || y !== undefined,
+        ),
+        state.componentPackages,
+      )
+      appendNodeToEditingScope(node)
+      set({
         statusMessage: get().editingScope === 'global'
           ? '已添加全局矩形'
           : '已添加矩形',
@@ -2147,13 +2401,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     addShapeNode(shapeType, x, y) {
       if (!canAddNode()) return
+      const state = get()
       const node = normalizeNewNodeGeometry(
-        createShapeNode(shapeType, { x, y }),
-        get().componentPackages,
+        offsetDefaultInsertion(
+          createShapeNode(shapeType, { x, y }),
+          editingNodes(state).length,
+          x !== undefined || y !== undefined,
+        ),
+        state.componentPackages,
       )
       appendNodeToEditingScope(node)
       set({
-        activeTab: 'properties',
         statusMessage: get().editingScope === 'global'
           ? `已添加全局“${node.name}”`
           : `已添加“${node.name}”`,
@@ -2162,80 +2420,209 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     addImageNode(asset, bytes, x, y) {
       if (!canAddNode()) return
+      const initialState = get()
       const node = normalizeNewNodeGeometry(
-        createImageNode(asset.id, asset.width, asset.height, x, y),
-        get().componentPackages,
+        offsetDefaultInsertion(
+          createImageNode(asset.id, asset.width, asset.height, x, y),
+          editingNodes(initialState).length,
+          x !== undefined || y !== undefined,
+        ),
+        initialState.componentPackages,
       )
-      set((state) => ({
-        project: produce(state.project, (draft) => {
-          draft.assets[asset.id] = asset
-        }),
-        assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
-        dirty: true,
-      }))
-      appendNodeToEditingScope(node)
-      set({
-        activeTab: 'properties',
-        statusMessage: get().editingScope === 'global'
-          ? '图片已添加到全局层'
-          : '图片已添加到画布',
-      })
+      const sceneId = initialState.activeSceneId
+      commitAssetBatch([{ meta: asset, bytes }], (draft) => {
+        if (initialState.editingScope === 'global') {
+          draft.globalLayer.push({
+            node,
+            layer: 'overlay',
+            visibility: { mode: 'all', sceneIds: [] },
+          })
+        } else {
+          const scene = draft.scenes.find((item) => item.id === sceneId)
+          if (scene) appendNodesToScene(
+            scene as SceneDocument,
+            [node],
+            initialState.activePresentationStateId,
+          )
+        }
+      }, [node.id], initialState.editingScope === 'global'
+        ? '图片已添加到全局层'
+        : '图片已添加到画布')
     },
 
     addVideoNode(asset, bytes, x, y) {
       if (!canAddNode()) return
+      const initialState = get()
       const node = normalizeNewNodeGeometry(
-        createVideoNode({
-          assetId: asset.id,
-          width: asset.width ?? 640,
-          height: asset.height ?? 360,
-          x,
-          y,
-        }),
-        get().componentPackages,
+        offsetDefaultInsertion(
+          createVideoNode({
+            assetId: asset.id,
+            width: asset.width ?? 640,
+            height: asset.height ?? 360,
+            x,
+            y,
+          }),
+          editingNodes(initialState).length,
+          x !== undefined || y !== undefined,
+        ),
+        initialState.componentPackages,
       )
-      set((state) => ({
-        project: produce(state.project, (draft) => {
-          draft.assets[asset.id] = asset
-        }),
-        assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
-        dirty: true,
+      const sceneId = initialState.activeSceneId
+      commitAssetBatch([{ meta: asset, bytes }], (draft) => {
+        if (initialState.editingScope === 'global') {
+          draft.globalLayer.push({
+            node,
+            layer: 'overlay',
+            visibility: { mode: 'all', sceneIds: [] },
+          })
+        } else {
+          const scene = draft.scenes.find((item) => item.id === sceneId)
+          if (scene) appendNodesToScene(
+            scene as SceneDocument,
+            [node],
+            initialState.activePresentationStateId,
+          )
+        }
+      }, [node.id], initialState.editingScope === 'global'
+        ? '视频已添加到全局层'
+        : '视频已添加到画布')
+    },
+
+    addImageNodes(items, position) {
+      if (items.length === 0 || !canAddNodes(items.length)) return []
+      if (items.length > MAX_BATCH_CANVAS_ITEMS) {
+        set({
+          errorMessage: `一次最多在画布排放 ${MAX_BATCH_CANVAS_ITEMS} 张图片。请先批量加入媒体库，再按需放置。`,
+          statusMessage: null,
+        })
+        return []
+      }
+      const state = get()
+      let nodes = items.map(({ meta }) => createImageNode(
+        meta.id,
+        meta.width,
+        meta.height,
+        items.length === 1 ? position?.x : undefined,
+        items.length === 1 ? position?.y : undefined,
+      ))
+      nodes = layoutMediaBatchNodes(nodes).map((node) =>
+        normalizeNewNodeGeometry(node, state.componentPackages),
+      ) as typeof nodes
+      const sceneId = state.activeSceneId
+      commitAssetBatch(items, (draft) => {
+        if (state.editingScope === 'global') {
+          draft.globalLayer.push(...nodes.map((node) => ({
+            node,
+            layer: 'overlay' as const,
+            visibility: { mode: 'all' as const, sceneIds: [] },
+          })))
+        } else {
+          const scene = draft.scenes.find((item) => item.id === sceneId)
+          if (scene) {
+            appendNodesToScene(
+              scene as SceneDocument,
+              nodes,
+              state.activePresentationStateId,
+            )
+          }
+        }
+      }, nodes.map((node) => node.id), `已批量添加 ${nodes.length} 张图片`)
+      return nodes.map((node) => node.id)
+    },
+
+    addVideoNodes(items, position) {
+      if (items.length === 0 || !canAddNodes(items.length)) return []
+      if (items.length > MAX_BATCH_CANVAS_ITEMS) {
+        set({
+          errorMessage: `一次最多在画布排放 ${MAX_BATCH_CANVAS_ITEMS} 个视频。请先批量加入媒体库，再按需放置。`,
+          statusMessage: null,
+        })
+        return []
+      }
+      const state = get()
+      let nodes = items.map(({ meta }) => createVideoNode({
+        assetId: meta.id,
+        width: meta.width ?? 640,
+        height: meta.height ?? 360,
+        x: items.length === 1 ? position?.x : undefined,
+        y: items.length === 1 ? position?.y : undefined,
       }))
-      appendNodeToEditingScope(node)
-      set({
-        activeTab: 'properties',
-        statusMessage: get().editingScope === 'global'
-          ? '视频已添加到全局层'
-          : '视频已添加到画布',
-      })
+      nodes = layoutMediaBatchNodes(nodes).map((node) =>
+        normalizeNewNodeGeometry(node, state.componentPackages),
+      ) as typeof nodes
+      const sceneId = state.activeSceneId
+      commitAssetBatch(items, (draft) => {
+        if (state.editingScope === 'global') {
+          draft.globalLayer.push(...nodes.map((node) => ({
+            node,
+            layer: 'overlay' as const,
+            visibility: { mode: 'all' as const, sceneIds: [] },
+          })))
+        } else {
+          const scene = draft.scenes.find((item) => item.id === sceneId)
+          if (scene) {
+            appendNodesToScene(
+              scene as SceneDocument,
+              nodes,
+              state.activePresentationStateId,
+            )
+          }
+        }
+      }, nodes.map((node) => node.id), `已批量添加 ${nodes.length} 个视频`)
+      return nodes.map((node) => node.id)
     },
 
     importAsset(asset, bytes) {
-      set((state) => ({
-        project: produce(state.project, (draft) => {
-          draft.assets[asset.id] = asset
-        }),
-        assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
-        dirty: true,
-        activeTab: 'elements',
-        statusMessage: `已导入素材“${asset.filename}”`,
-      }))
+      commitAssetBatch(
+        [{ meta: asset, bytes }],
+        () => undefined,
+        undefined,
+        `已导入素材“${asset.filename}”`,
+      )
+      set({ activeTab: 'elements' })
+    },
+
+    importAssets(items) {
+      if (items.length === 0) return
+      commitAssetBatch(items, () => undefined, [], `已批量导入 ${items.length} 个媒体素材`)
     },
 
     replaceImageAsset(nodeId, asset, bytes) {
       const state = get()
-      if (!editingNodes(state).some((node) => node.id === nodeId && node.type === 'image')) {
-        return
-      }
-      set((state) => ({
-        project: produce(state.project, (draft) => {
-          draft.assets[asset.id] = asset
-        }),
-        assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
-        dirty: true,
-      }))
-      get().updateNode(nodeId, { assetId: asset.id })
-      set({ statusMessage: '图片已替换' })
+      const effective = editingNodes(state).find(
+        (node) => node.id === nodeId && node.type === 'image',
+      )
+      if (!effective || effective.type !== 'image') return
+      const sceneId = state.activeSceneId
+      const nextNode = { ...effective, assetId: asset.id }
+      commitAssetTransaction(
+        [{ assetId: asset.id, after: bytes, allowReplace: true }],
+        (draft) => {
+          draft.assets[asset.id] = structuredClone(asset)
+          if (state.editingScope === 'global') {
+            const item = draft.globalLayer.find(({ node }) => node.id === nodeId)
+            if (item?.node.type === 'image') item.node.assetId = asset.id
+            return
+          }
+          const scene = draft.scenes.find((item) => item.id === sceneId)
+          if (!scene) return
+          if (state.activePresentationStateId === null) {
+            const node = scene.nodes.find((item) => item.id === nodeId)
+            if (node?.type === 'image') node.assetId = asset.id
+            return
+          }
+          const baseNode = scene.nodes.find((item) => item.id === nodeId)
+          if (!baseNode) return
+          setPresentationNodeOverride(
+            scene as SceneDocument,
+            state.activePresentationStateId,
+            nodeId,
+            deriveSceneNodeOverride(baseNode, nextNode),
+          )
+        },
+        undefined,
+        '图片已替换',
+      )
     },
 
     importSound(asset, bytes, sound = {}) {
@@ -2248,17 +2635,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
         defaultVolume: sound.defaultVolume ?? 1,
         defaultLoop: sound.defaultLoop ?? false,
       }
-      set((state) => ({
-        project: produce(state.project, (draft) => {
-          draft.assets[asset.id] = asset
-          draft.media.audio.sounds[soundId] = definition
-        }),
-        assetFiles: { ...state.assetFiles, [asset.id]: bytes.slice() },
-        dirty: true,
-        activeTab: 'elements',
-        statusMessage: `已导入声音“${definition.name}”`,
-      }))
+      commitAssetBatch([{ meta: asset, bytes }], (draft) => {
+        draft.media.audio.sounds[soundId] = definition
+      }, undefined, `已导入声音“${definition.name}”`)
+      set({ activeTab: 'elements' })
       return soundId
+    },
+
+    importSounds(items) {
+      if (items.length === 0) return []
+      const definitions = items.map(({ meta }) => ({
+        id: `sound_${nanoid()}`,
+        name: meta.filename.replace(/\.[^.]+$/, ''),
+        assetId: meta.id,
+        channel: 'sfx' as const,
+        defaultVolume: 1,
+        defaultLoop: false,
+      }))
+      commitAssetBatch(items, (draft) => {
+        for (const definition of definitions) {
+          draft.media.audio.sounds[definition.id] = definition
+        }
+      }, [], `已批量导入 ${definitions.length} 个声音`)
+      return definitions.map((definition) => definition.id)
     },
 
     updateAudioSettings(patch) {
@@ -2351,42 +2750,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     deleteAsset(assetId) {
       const state = get()
-      const usedBySound = Object.values(state.project.media.audio.sounds)
-        .some((sound) => sound.assetId === assetId)
-      const usedByGlobal = state.project.globalLayer.some(({ node }) =>
-        node.type === 'image' && node.assetId === assetId ||
-        node.type === 'video' && (node.assetId === assetId || node.poster.assetId === assetId),
-      )
-      const usedByScene = state.project.scenes.some((scene) =>
-        scene.backgroundAssetId === assetId ||
-        scene.nodes.some((node) =>
-          node.type === 'image' && node.assetId === assetId ||
-          node.type === 'video' && (node.assetId === assetId || node.poster.assetId === assetId),
-        ) ||
-        Object.values(scene.runtime?.assets ?? {}).some((binding) => binding.assetId === assetId),
-      )
-      const usedByRuntime = Object.values(state.project.globalRuntime?.assets ?? {})
-        .some((binding) => binding.assetId === assetId)
-      if (usedBySound || usedByGlobal || usedByScene || usedByRuntime) {
+      const references = analyzeProjectAssetReferences(state.project, {
+        componentPackages: state.componentPackages,
+      }).graph.get(assetId) ?? []
+      if (references.length > 0) {
+        const locations = references
+          .slice(0, 3)
+          .map(describeProjectAssetReference)
+          .join('；')
         set({
-          errorMessage: '该素材仍被画布、声音目录或运行时引用，不能直接删除。',
+          errorMessage: `该素材仍被引用，不能删除：${locations}${references.length > 3 ? `；另有 ${references.length - 3} 处` : ''}。`,
           statusMessage: null,
         })
         return false
       }
       if (!state.project.assets[assetId]) return false
-      set((current) => {
-        const nextFiles = { ...current.assetFiles }
-        delete nextFiles[assetId]
-        return {
-          project: produce(current.project, (draft) => {
-            delete draft.assets[assetId]
-          }),
-          assetFiles: nextFiles,
-          dirty: true,
-          statusMessage: '未使用素材已删除',
-        }
-      })
+      commitAssetTransaction(
+        [{ assetId }],
+        (draft) => { delete draft.assets[assetId] },
+        undefined,
+        '未使用素材已删除',
+      )
       return true
     },
 
@@ -2612,6 +2996,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set({ statusMessage: '成品控制设置已更新' })
     },
 
+    updateDesignTokens(tokens) {
+      commit((draft) => {
+        draft.designTokens = structuredClone(tokens)
+      })
+      set({ statusMessage: '项目字体与色板 Token 已更新' })
+    },
+
     ensureTeacherController() {
       const existing = get().project.globalLayer.find(
         (item) => item.node.type === 'teacher-controller',
@@ -2637,7 +3028,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }, node.id)
       set({
         editingScope: 'global',
-        activeTab: 'properties',
         statusMessage: '已添加画布内教师控制器',
       })
     },
@@ -2656,13 +3046,18 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return
       }
       if (!canAddNode()) return
+      const state = get()
       const node = normalizeNewNodeGeometry(
-        createExternalComponentNode(data.manifest, x, y),
-        get().componentPackages,
+        offsetDefaultInsertion(
+          createExternalComponentNode(data.manifest, x, y),
+          editingNodes(state).length,
+          x !== undefined || y !== undefined,
+        ),
+        state.componentPackages,
       )
       if (node.type !== 'external-component') return
       let presetLabel: string | undefined
-      if (presetId && data.manifest.schemaVersion !== 1) {
+      if (presetId) {
         const preset = data.manifest.presets?.find((item) => item.id === presetId)
         if (preset && node.type === 'external-component') {
           node.name = `${data.manifest.name} · ${preset.label}`
@@ -2672,7 +3067,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       appendNodeToEditingScope(node)
       set({
-        activeTab: 'properties',
         statusMessage: scope === 'global'
           ? `已将“${presetLabel ?? data.manifest.name}”添加到全局层`
           : `已添加“${presetLabel ?? data.manifest.name}”`,
@@ -2680,29 +3074,52 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     importComponentPackage(packageData) {
-      const id = packageData.manifest.id
-      const existing = get().componentPackages[id]
-      if (existing) {
-        const sameVersion =
-          existing.manifest.version === packageData.manifest.version
+      get().importComponentPackages([packageData])
+    },
+
+    importComponentPackages(packageData) {
+      if (packageData.length === 0) return
+      const existingPackages = get().componentPackages
+      const pendingIds = new Set<string>()
+      for (const data of packageData) {
+        const id = data.manifest.id
+        if (pendingIds.has(id)) {
+          throw new UserFacingError(
+            '组件批量导入失败',
+            `所选文件中包含多个 ID 为“${id}”的组件包。`,
+            '每个组件 ID 每批只能加入一个版本；请取消重复选择后重试。',
+          )
+        }
+        pendingIds.add(id)
+        const existing = existingPackages[id]
+        if (!existing) continue
+        const sameVersion = existing.manifest.version === data.manifest.version
         throw new UserFacingError(
           '组件导入失败',
           sameVersion
-            ? `组件“${existing.manifest.name}” ${existing.manifest.version} 已经导入。`
-            : `工程已包含组件“${existing.manifest.name}” ${existing.manifest.version}，不能再导入同 ID 的 ${packageData.manifest.version}。`,
+            ? `组件“${existing.manifest.name}” ${existing.manifest.version} 已经加入工程。`
+            : `工程已包含组件“${existing.manifest.name}” ${existing.manifest.version}，不能再加入同 ID 的 ${data.manifest.version}。`,
           sameVersion
-            ? '请直接使用现有组件；若要更新代码，请在“组件包管理”中选择新包替换。'
-            : '请在“组件包管理”中对现有组件选择同 ID 新包替换，实例会统一升级。',
+            ? '请直接从“工程组件”插入实例；若要更新代码，请使用该组件的管理菜单。'
+            : '请从“工程组件”的管理菜单审阅更新或替换，实例会统一升级。',
         )
       }
-      set((state) => ({
-        project: produce(state.project, (draft) => {
-          draft.componentPackages[id] = componentMeta(packageData)
-        }),
-        componentPackages: { ...state.componentPackages, [id]: packageData },
-        dirty: true,
-      }))
-      set({ activeTab: 'elements', statusMessage: `已导入组件“${packageData.manifest.name}”` })
+
+      commit((draft) => {
+        packageData.forEach((data) => {
+          draft.componentPackages[data.manifest.id] = componentMeta(data)
+        })
+      }, undefined, packageData.map((data) => ({
+        packageId: data.manifest.id,
+        next: data,
+      })))
+      set({
+        activeTab: get().editorMode === 'professional' ? 'components' : get().activeTab,
+        errorMessage: null,
+        statusMessage: packageData.length === 1
+          ? `已将组件“${packageData[0]!.manifest.name}”加入工程`
+          : `已将 ${packageData.length} 个组件加入工程`,
+      })
     },
 
     deleteComponentPackage(packageId) {
@@ -2748,6 +3165,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
 
       const state = get()
+      const currentPackage = state.componentPackages[packageId]
+      const currentHash = currentPackage?.provenance?.sha256
+      const replacementHash = packageData.provenance?.sha256
+      if (
+        currentPackage?.manifest.version === packageData.manifest.version &&
+        currentHash !== undefined &&
+        replacementHash !== undefined &&
+        currentHash !== replacementHash
+      ) {
+        throw new UserFacingError(
+          '组件替换失败',
+          `组件“${packageId}”的 ${packageData.manifest.version} 版本与工程内同版本哈希不一致。`,
+          '同一 ID 与版本必须锁定到完全相同的包；请让组件维护者提升版本号后再更新。',
+        )
+      }
       const usage = collectComponentPackageUsage(state.project, packageId)
       const manifest = packageData.manifest
       const supportsScene = componentSupportsScope(manifest, 'scene')
@@ -2802,7 +3234,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
       }, undefined, { packageId, next: packageData })
       set({
-        activeTab: 'elements',
+        activeTab: 'components',
         errorMessage: null,
         statusMessage: `组件“${packageData.manifest.name}”已替换为 ${plan.replacementVersion}，${plan.affectedInstances.length} 个实例已同步`,
       })
@@ -2862,8 +3294,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         source.manifest.id,
         nextId,
       )
+      const sourceWithoutProvenance = { ...source }
+      delete sourceWithoutProvenance.provenance
       const packageData: ComponentPackageData = {
-        ...source,
+        ...sourceWithoutProvenance,
         manifest,
         runtimeSource,
         files: componentFilesWithAuthoredCode(source, manifest, runtimeSource),
@@ -3606,9 +4040,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return {
           ...prepared,
           project,
-          componentPackages: applyComponentPackageHistoryChange(
+          componentPackages: applyComponentPackageHistoryChanges(
             prepared.componentPackages,
-            previous.componentPackageChange,
+            previous.componentPackageChanges,
+            'undo',
+          ),
+          assetFiles: applyAssetFileHistoryChanges(
+            prepared.assetFiles,
+            previous.assetFileChanges,
             'undo',
           ),
           activeSceneId: activeScene,
@@ -3656,9 +4095,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return {
           ...prepared,
           project,
-          componentPackages: applyComponentPackageHistoryChange(
+          componentPackages: applyComponentPackageHistoryChanges(
             prepared.componentPackages,
-            next.componentPackageChange,
+            next.componentPackageChanges,
+            'redo',
+          ),
+          assetFiles: applyAssetFileHistoryChanges(
+            prepared.assetFiles,
+            next.assetFileChanges,
             'redo',
           ),
           activeSceneId: activeScene,

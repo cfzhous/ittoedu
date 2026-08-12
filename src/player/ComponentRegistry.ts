@@ -1,6 +1,6 @@
 import { COMPONENT_RUNTIME_API_VERSION } from '../shared/constants'
 import type {
-  ComponentDefinition,
+  ComponentDefinitionV4,
   ComponentManifest,
   ComponentRuntimeApiVersion,
 } from '../shared/componentTypes'
@@ -9,7 +9,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function isComponentDefinition(value: unknown): value is ComponentDefinition {
+function isComponentDefinition(value: unknown): value is ComponentDefinitionV4 {
   if (typeof value !== 'object' || value === null) {
     return false
   }
@@ -19,19 +19,16 @@ function isComponentDefinition(value: unknown): value is ComponentDefinition {
   return (
     typeof candidate.id === 'string' &&
     candidate.id.length > 0 &&
-    typeof runtimeApiVersion === 'number' &&
-    Number.isInteger(runtimeApiVersion) &&
-    runtimeApiVersion >= 1 &&
-    runtimeApiVersion <= COMPONENT_RUNTIME_API_VERSION &&
+    runtimeApiVersion === COMPONENT_RUNTIME_API_VERSION &&
     typeof candidate.create === 'function'
   )
 }
 
 export class ComponentRegistry {
-  private readonly definitions = new Map<string, ComponentDefinition>()
+  private readonly definitions = new Map<string, ComponentDefinitionV4>()
   private readonly loadErrors = new Map<string, Error>()
   private readonly globalApi = {
-    define: (definition: ComponentDefinition): void => {
+    define: (definition: ComponentDefinitionV4): void => {
       this.defineDuringLoad(definition)
     },
   }
@@ -39,7 +36,7 @@ export class ComponentRegistry {
   private previousGlobalApi: Window['CoursewareComponent']
   private expectedId: string | null = null
   private expectedRuntimeApiVersion: ComponentRuntimeApiVersion | null = null
-  private definitionDuringLoad: ComponentDefinition | null = null
+  private definitionDuringLoad: ComponentDefinitionV4 | null = null
   private installed = false
 
   install(): void {
@@ -52,12 +49,12 @@ export class ComponentRegistry {
     this.installed = true
   }
 
-  executeRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinition
-  executeRuntime(componentId: string, runtimeSource: string): ComponentDefinition
+  executeRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinitionV4
+  executeRuntime(componentId: string, runtimeSource: string): ComponentDefinitionV4
   executeRuntime(
     manifestOrId: ComponentManifest | string,
     runtimeSource: string,
-  ): ComponentDefinition {
+  ): ComponentDefinitionV4 {
     const componentId = typeof manifestOrId === 'string'
       ? manifestOrId
       : manifestOrId.id
@@ -83,12 +80,12 @@ export class ComponentRegistry {
       ) as (runtimeWindow: Window) => void
       execute(window)
 
-      const registered = this.definitionDuringLoad as ComponentDefinition | null
+      const registered = this.definitionDuringLoad as ComponentDefinitionV4 | null
       if (!registered) {
         throw new Error(`组件“${componentId}”没有调用 CoursewareComponent.define`)
       }
 
-      const definition: ComponentDefinition = registered
+      const definition: ComponentDefinitionV4 = registered
       if (
         this.expectedRuntimeApiVersion !== null &&
         definition.runtimeApiVersion !== this.expectedRuntimeApiVersion
@@ -119,11 +116,11 @@ export class ComponentRegistry {
     }
   }
 
-  loadRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinition {
+  loadRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinitionV4 {
     return this.executeRuntime(manifest, runtimeSource)
   }
 
-  get(componentId: string): ComponentDefinition | undefined {
+  get(componentId: string): ComponentDefinitionV4 | undefined {
     return this.definitions.get(componentId)
   }
 
@@ -148,7 +145,7 @@ export class ComponentRegistry {
     this.loadErrors.clear()
   }
 
-  private defineDuringLoad(definition: ComponentDefinition): void {
+  private defineDuringLoad(definition: ComponentDefinitionV4): void {
     if (!this.expectedId) {
       throw new Error('当前没有正在加载的组件')
     }
@@ -156,7 +153,7 @@ export class ComponentRegistry {
       throw new Error(`组件“${this.expectedId}”重复调用了 define`)
     }
     if (!isComponentDefinition(definition)) {
-      throw new Error('组件定义格式无效')
+      throw new Error('组件定义格式无效；只支持 Component API 4')
     }
     if (definition.id !== this.expectedId) {
       throw new Error(

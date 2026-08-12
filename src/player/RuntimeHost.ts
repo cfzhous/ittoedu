@@ -3,8 +3,9 @@ import { runtimeDocumentSchema } from '../shared/runtimeSchema'
 import type {
   CourseEventBus as CourseEventBusContract,
   CourseStateStore as CourseStateStoreContract,
-  RuntimeCreateContextV1,
-  RuntimeCreateContextV2,
+  RuntimeCreateContext,
+  RuntimeCreateContextBase,
+  RuntimeDomRoots,
   RuntimeDocument,
   RuntimeEventDisposer,
   RuntimeEventListener,
@@ -13,6 +14,8 @@ import type {
   RuntimeInstanceLifecycle,
   RuntimeNavigationGuard,
   RuntimeNodeHandle,
+  RuntimeNodeResolver,
+  RuntimePhaserRoots,
   RuntimePresentationApi,
   RuntimeScope,
 } from '../shared/runtimeTypes'
@@ -188,11 +191,6 @@ function errorOf(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-type RuntimeCommonContext = Omit<
-  RuntimeCreateContextV1,
-  'runtimeApiVersion' | 'Phaser' | 'phaser' | 'domRoot' | 'dom' | 'nodes'
->
-
 export class RuntimeHost {
   private readonly localState: CourseStateStore
   private readonly scopedEvents: ScopedEventBus
@@ -220,8 +218,8 @@ export class RuntimeHost {
     })
 
     if (!runtime.enabled) return
-    const exposesPhaser = runtime.runtimeApiVersion === 1 || runtime.renderMode !== 'dom'
-    const exposesDom = runtime.runtimeApiVersion === 1 || runtime.renderMode !== 'phaser'
+    const exposesPhaser = runtime.renderMode !== 'dom'
+    const exposesDom = runtime.renderMode !== 'phaser'
     if (exposesPhaser) this.createPhaserMounts()
     if (exposesDom) this.createDomMounts()
 
@@ -246,7 +244,7 @@ export class RuntimeHost {
         })
       }
       const contentValues = Object.freeze({ ...runtime.content.values })
-      const commonContext: RuntimeCommonContext = {
+      const commonContext: RuntimeCreateContextBase = {
         scope: options.scope,
         mode: options.mode,
         sceneId: options.sceneId,
@@ -314,72 +312,45 @@ export class RuntimeHost {
           })
         },
       }
-      const nodes: RuntimeCreateContextV1['nodes'] = {
+      const nodes: RuntimeNodeResolver = {
         get: (bindingOrNodeId: string) => options.environment.resolveNode(
           runtime.nodeBindings?.[bindingOrNodeId] ?? bindingOrNodeId,
         ),
       }
 
-      let lifecycle: RuntimeInstanceLifecycle
-      if (runtime.runtimeApiVersion === 1) {
-        if (definition.runtimeApiVersion !== 1) {
-          throw new Error(
-            `运行时 API 不匹配：文档为 1，源码为 ${definition.runtimeApiVersion}`,
-          )
-        }
-        const phaser = this.phaserRoots()
-        const dom = this.domRoots()
-        const context: RuntimeCreateContextV1 = {
+      let context: RuntimeCreateContext
+      if (runtime.renderMode === 'phaser') {
+        context = {
           ...commonContext,
-          runtimeApiVersion: 1,
+          runtimeApiVersion: 2,
+          renderMode: 'phaser',
           Phaser,
-          phaser,
+          phaser: this.phaserRoots(),
+          nodes,
+        }
+      } else if (runtime.renderMode === 'dom') {
+        const dom = this.domRoots()
+        context = {
+          ...commonContext,
+          runtimeApiVersion: 2,
+          renderMode: 'dom',
+          domRoot: dom.root,
+          dom,
+        }
+      } else {
+        const dom = this.domRoots()
+        context = {
+          ...commonContext,
+          runtimeApiVersion: 2,
+          renderMode: 'hybrid',
+          Phaser,
+          phaser: this.phaserRoots(),
           domRoot: dom.root,
           dom,
           nodes,
         }
-        lifecycle = definition.create(context)
-      } else {
-        if (definition.runtimeApiVersion !== 2) {
-          throw new Error(
-            `运行时 API 不匹配：文档为 2，源码为 ${definition.runtimeApiVersion}`,
-          )
-        }
-
-        let context: RuntimeCreateContextV2
-        if (runtime.renderMode === 'phaser') {
-          context = {
-            ...commonContext,
-            runtimeApiVersion: 2,
-            renderMode: 'phaser',
-            Phaser,
-            phaser: this.phaserRoots(),
-            nodes,
-          }
-        } else if (runtime.renderMode === 'dom') {
-          const dom = this.domRoots()
-          context = {
-            ...commonContext,
-            runtimeApiVersion: 2,
-            renderMode: 'dom',
-            domRoot: dom.root,
-            dom,
-          }
-        } else {
-          const dom = this.domRoots()
-          context = {
-            ...commonContext,
-            runtimeApiVersion: 2,
-            renderMode: 'hybrid',
-            Phaser,
-            phaser: this.phaserRoots(),
-            domRoot: dom.root,
-            dom,
-            nodes,
-          }
-        }
-        lifecycle = definition.create(context)
       }
+      const lifecycle: RuntimeInstanceLifecycle = definition.create(context)
       if (!lifecycle || typeof lifecycle.destroy !== 'function') {
         throw new Error('运行时 create() 必须返回含 destroy() 的生命周期对象')
       }
@@ -571,7 +542,7 @@ export class RuntimeHost {
     return this.overlayDom
   }
 
-  private phaserRoots(): RuntimeCreateContextV1['phaser'] {
+  private phaserRoots(): RuntimePhaserRoots {
     if (!this.underlayMount || !this.overlayMount) {
       throw new Error('运行时未声明 Phaser 渲染能力')
     }
@@ -583,7 +554,7 @@ export class RuntimeHost {
     }
   }
 
-  private domRoots(): RuntimeCreateContextV1['dom'] {
+  private domRoots(): RuntimeDomRoots {
     if (!this.underlayDom || !this.overlayDom) {
       throw new Error('运行时未声明 DOM 渲染能力')
     }

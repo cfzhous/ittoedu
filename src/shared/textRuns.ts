@@ -7,6 +7,7 @@ function normalizeStyle(style: TextRunStyle): TextRunStyle {
     ...(style.italic !== undefined ? { italic: style.italic } : {}),
     ...(style.underline !== undefined ? { underline: style.underline } : {}),
     ...(style.strike !== undefined ? { strike: style.strike } : {}),
+    ...(style.emphasis !== undefined ? { emphasis: style.emphasis } : {}),
     ...(style.highlightColor !== undefined
       ? { highlightColor: style.highlightColor }
       : {}),
@@ -19,6 +20,66 @@ function sameStyle(left: TextRunStyle, right: TextRunStyle): boolean {
 
 function hasStyle(style: TextRunStyle): boolean {
   return Object.keys(normalizeStyle(style)).length > 0
+}
+
+function stylesByCharacter(
+  characterCount: number,
+  runs: TextRun[],
+): TextRunStyle[] {
+  const styles = Array.from(
+    { length: characterCount },
+    (): TextRunStyle => ({}),
+  )
+  for (const run of runs) {
+    const start = Math.max(0, Math.min(characterCount, run.start))
+    const end = Math.max(start, Math.min(characterCount, run.end))
+    for (let index = start; index < end; index += 1) {
+      Object.assign(styles[index], run.style)
+    }
+  }
+  return styles.map(normalizeStyle)
+}
+
+function runsFromCharacterStyles(styles: TextRunStyle[]): TextRun[] {
+  const result: TextRun[] = []
+  let start = 0
+  while (start < styles.length) {
+    const style = normalizeStyle(styles[start])
+    let end = start + 1
+    while (end < styles.length && sameStyle(style, styles[end])) end += 1
+    if (hasStyle(style)) result.push({ start, end, style })
+    start = end
+  }
+  return result
+}
+
+/**
+ * Toggles emphasis on a Unicode-code-point range while preserving all other
+ * rich-text overrides. An override equal to the node default is removed so
+ * runs continue to encode differences instead of a duplicated base style.
+ */
+export function toggleTextRunEmphasis(
+  text: string,
+  runs: TextRun[],
+  selectionStart: number,
+  selectionEnd: number,
+  baseEmphasis: boolean,
+): TextRun[] {
+  const characterCount = Array.from(text).length
+  const start = Math.max(0, Math.min(characterCount, Math.floor(selectionStart)))
+  const end = Math.max(start, Math.min(characterCount, Math.floor(selectionEnd)))
+  if (end <= start) return structuredClone(runs)
+
+  const styles = stylesByCharacter(characterCount, runs)
+  const allEmphasized = styles
+    .slice(start, end)
+    .every((style) => style.emphasis ?? baseEmphasis)
+  const nextEmphasis = !allEmphasized
+  for (let index = start; index < end; index += 1) {
+    if (nextEmphasis === baseEmphasis) delete styles[index].emphasis
+    else styles[index].emphasis = nextEmphasis
+  }
+  return runsFromCharacterStyles(styles)
 }
 
 /**
@@ -36,17 +97,7 @@ export function remapTextRuns(
 
   const previous = Array.from(previousText)
   const next = Array.from(nextText)
-  const previousStyles = previous.map<TextRunStyle>(() => ({}))
-  for (const run of runs) {
-    const start = Math.max(0, Math.min(previous.length, run.start))
-    const end = Math.max(start, Math.min(previous.length, run.end))
-    for (let index = start; index < end; index += 1) {
-      Object.assign(previousStyles[index], run.style)
-    }
-  }
-  previousStyles.forEach((style, index) => {
-    previousStyles[index] = normalizeStyle(style)
-  })
+  const previousStyles = stylesByCharacter(previous.length, runs)
 
   let prefix = 0
   while (
@@ -91,14 +142,5 @@ export function remapTextRuns(
     }
   }
 
-  const result: TextRun[] = []
-  let start = 0
-  while (start < nextStyles.length) {
-    const style = normalizeStyle(nextStyles[start])
-    let end = start + 1
-    while (end < nextStyles.length && sameStyle(style, nextStyles[end])) end += 1
-    if (hasStyle(style)) result.push({ start, end, style })
-    start = end
-  }
-  return result
+  return runsFromCharacterStyles(nextStyles)
 }

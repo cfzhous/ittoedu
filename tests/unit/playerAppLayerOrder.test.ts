@@ -85,8 +85,8 @@ vi.mock('../../src/player/PlayerScene', () => ({
   },
 }))
 
-vi.mock('../../src/player/PlayerKeyboardNavigation', () => ({
-  PlayerKeyboardNavigation: class FakeKeyboardNavigation {
+vi.mock('../../src/player/PlayerPresenterInput', () => ({
+  PlayerPresenterInput: class FakePresenterInput {
     destroy(): void {}
   },
 }))

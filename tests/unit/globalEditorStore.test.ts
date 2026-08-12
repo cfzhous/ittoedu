@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type {
-  ComponentManifestV3,
+  ComponentManifestV4,
   ComponentPackageData,
 } from '@/shared/componentTypes'
 import type { RuntimeDocument } from '@/shared/runtimeTypes'
@@ -8,16 +8,17 @@ import { useEditorStore } from '@/renderer/store/editorStore'
 
 function componentPackage(
   id: string,
-  supportedScopes: ComponentManifestV3['supportedScopes'],
+  supportedScopes: ComponentManifestV4['supportedScopes'],
 ): ComponentPackageData {
   return {
     manifest: {
-      schemaVersion: 3,
-      runtimeApiVersion: 3,
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
       supportedScopes,
+      renderMode: 'phaser',
       id,
       name: id === 'com.example.global' ? '全局控制条' : '场景练习',
-      version: '3.0.0',
+      version: '4.0.0',
       entry: 'runtime.js',
       defaultSize: { width: 480, height: 120 },
       minSize: { width: 160, height: 60 },
@@ -31,7 +32,7 @@ function componentPackage(
       },
     },
     runtimeSource:
-      "window.CoursewareComponent.define({id:'placeholder',runtimeApiVersion:3,create:function(){return {destroy:function(){}}}})",
+      "window.CoursewareComponent.define({id:'placeholder',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})",
     files: {
       'manifest.json': new Uint8Array([1]),
       'runtime.js': new Uint8Array([2]),
@@ -41,10 +42,10 @@ function componentPackage(
 
 function runtime(title: string): RuntimeDocument {
   return {
-    runtimeApiVersion: 1,
+    runtimeApiVersion: 2,
     enabled: true,
     renderMode: 'hybrid',
-    source: `CoursewareRuntime.define({create(){/* ${title} */return{destroy(){}}}})`,
+    source: `CoursewareRuntime.define({runtimeApiVersion:2,create(){/* ${title} */return{destroy(){}}}})`,
     content: {
       values: {
         title,
@@ -63,7 +64,7 @@ beforeEach(() => {
 })
 
 describe('Project V8 global-layer editor store', () => {
-  it('accepts only global-capable V3 packages and creates an undoable placement', () => {
+  it('accepts only global-capable V4 packages and creates an undoable placement', () => {
     const store = useEditorStore.getState()
     const global = componentPackage('com.example.global', ['scene', 'global'])
     const sceneOnly = componentPackage('com.example.scene', ['scene'])

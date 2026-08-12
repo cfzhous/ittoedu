@@ -99,7 +99,7 @@ function restoreRuntime(
 ): RuntimeDocument | undefined {
   if (!runtime) return undefined
   if (
-    (runtime.apiVersion !== 1 && runtime.apiVersion !== 2) ||
+    runtime.apiVersion !== 2 ||
     !['phaser', 'dom', 'hybrid'].includes(runtime.renderMode) ||
     !isRecord(runtime.content) ||
     !isRecord(runtime.assets)
@@ -107,7 +107,7 @@ function restoreRuntime(
     throw new Error(`${label}格式无效`)
   }
   return {
-    runtimeApiVersion: runtime.apiVersion,
+    runtimeApiVersion: 2,
     enabled: true,
     renderMode: runtime.renderMode,
     source: decodePublishedCode(runtime.code, `${label}代码`),
@@ -153,6 +153,13 @@ function assetKind(mimeType: string): AssetKind {
 }
 
 function componentManifest(component: PublishedComponent): ComponentManifest {
+  if (
+    component.apiVersion !== 4 ||
+    !Array.isArray(component.scopes) ||
+    !['phaser', 'dom', 'hybrid'].includes(component.renderMode)
+  ) {
+    throw new Error(`发布组件“${component.id}”的 API 版本或渲染模式不受支持`)
+  }
   const common = {
     id: component.id,
     name: component.name,
@@ -167,30 +174,13 @@ function componentManifest(component: PublishedComponent): ComponentManifest {
     // Published component instances already carry effective props.
     defaultProps: {},
   }
-  if (component.apiVersion === 1) {
-    return { ...common, schemaVersion: 1, runtimeApiVersion: 1 }
+  return {
+    ...common,
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    supportedScopes: cloneJson(component.scopes),
+    renderMode: component.renderMode,
   }
-  if (component.apiVersion === 2) {
-    return { ...common, schemaVersion: 2, runtimeApiVersion: 2 }
-  }
-  if (component.apiVersion === 3) {
-    return {
-      ...common,
-      schemaVersion: 3,
-      runtimeApiVersion: 3,
-      supportedScopes: cloneJson(component.scopes),
-    }
-  }
-  if (component.apiVersion === 4) {
-    return {
-      ...common,
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      supportedScopes: cloneJson(component.scopes),
-      renderMode: component.renderMode,
-    }
-  }
-  throw new Error(`发布组件“${component.id}”的 API 版本不受支持`)
 }
 
 function assertPublishedShape(
@@ -342,6 +332,18 @@ export function publishedLessonToExportPayload(
       visibility: cloneJson(item.visibility),
     })),
     globalInteractions: cloneJson(published.globalInteractions),
+    designTokens: {
+      fonts: [{
+        id: 'body',
+        label: '正文',
+        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+      }],
+      colors: [
+        { id: 'background', label: '背景', color: '#ffffff' },
+        { id: 'text', label: '正文', color: '#1f2937' },
+        { id: 'accent', label: '强调', color: '#2563eb' },
+      ],
+    },
     media: cloneJson(published.media),
     playback: {
       controls: publishedPlayback.controls === 'footer'

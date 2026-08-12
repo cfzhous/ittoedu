@@ -6,7 +6,7 @@ import type { ProjectHealthDiagnostic } from '../../src/shared/projectHealth'
 function diagnostic(patch: Partial<ProjectHealthDiagnostic>): ProjectHealthDiagnostic {
   return {
     severity: 'error',
-    code: 'test',
+    code: 'asset-reference-missing',
     message: 'test',
     scope: 'project',
     path: [],

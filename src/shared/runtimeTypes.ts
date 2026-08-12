@@ -1,10 +1,13 @@
 import type * as Phaser from 'phaser'
 
-export type RuntimeApiVersion = 1 | 2
-export type RuntimeRenderMode = 'phaser' | 'dom' | 'hybrid'
+export type RuntimeApiVersion = 2
+export const RUNTIME_RENDER_MODES = ['phaser', 'dom', 'hybrid'] as const
+export const RUNTIME_SCOPES = ['scene', 'global'] as const
+export const RUNTIME_EXECUTION_MODES = ['preview', 'capture'] as const
+export type RuntimeRenderMode = typeof RUNTIME_RENDER_MODES[number]
 export type RuntimeLayer = 'underlay' | 'overlay'
-export type RuntimeScope = 'global' | 'scene'
-export type RuntimeExecutionMode = 'preview' | 'capture'
+export type RuntimeScope = typeof RUNTIME_SCOPES[number]
+export type RuntimeExecutionMode = typeof RUNTIME_EXECUTION_MODES[number]
 export type RuntimeAuthoringApiVersion = 1
 
 export interface EditableTextMetadata {
@@ -42,15 +45,9 @@ interface RuntimeDocumentBase {
   staticFallback?: RuntimeStaticFallback
 }
 
-export interface RuntimeDocumentV1 extends RuntimeDocumentBase {
-  runtimeApiVersion: 1
-}
-
-export interface RuntimeDocumentV2 extends RuntimeDocumentBase {
+export interface RuntimeDocument extends RuntimeDocumentBase {
   runtimeApiVersion: 2
 }
-
-export type RuntimeDocument = RuntimeDocumentV1 | RuntimeDocumentV2
 
 export type CourseStateData =
   | null
@@ -126,14 +123,14 @@ export interface RuntimePresentationApi {
 
 export interface RuntimePhaserRoots {
   scene: Phaser.Scene
-  /** Backwards-compatible default root. It points to the overlay root. */
+  /** Default root alias. It points to the overlay root. */
   root: Phaser.GameObjects.Container
   underlay: Phaser.GameObjects.Container
   overlay: Phaser.GameObjects.Container
 }
 
 export interface RuntimeDomRoots {
-  /** Backwards-compatible default root. It points to the overlay root. */
+  /** Default root alias. It points to the overlay root. */
   root: HTMLElement
   underlay: HTMLElement
   overlay: HTMLElement
@@ -244,7 +241,7 @@ export interface RuntimeAuthoringTargetUpdate {
   targets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
 }
 
-interface RuntimeCreateContextBase {
+export interface RuntimeCreateContextBase {
   scope: RuntimeScope
   mode: RuntimeExecutionMode
   sceneId?: string
@@ -265,37 +262,27 @@ interface RuntimeCreateContextBase {
   emit(eventName: string, payload?: unknown): void
 }
 
-/** API 1 compatibility context. Both render surfaces are always exposed. */
-export interface RuntimeCreateContextV1 extends RuntimeCreateContextBase {
-  runtimeApiVersion: 1
-  Phaser: typeof Phaser
-  phaser: RuntimePhaserRoots
-  domRoot: HTMLElement
-  dom: RuntimeDomRoots
-  nodes: RuntimeNodeResolver
-}
-
-interface RuntimeCreateContextV2Base extends RuntimeCreateContextBase {
+interface RuntimeCreateContextWithRenderMode extends RuntimeCreateContextBase {
   runtimeApiVersion: 2
   renderMode: RuntimeRenderMode
 }
 
-export interface RuntimeCreateContextV2Phaser
-  extends RuntimeCreateContextV2Base {
+export interface RuntimeCreateContextPhaser
+  extends RuntimeCreateContextWithRenderMode {
   renderMode: 'phaser'
   Phaser: typeof Phaser
   phaser: RuntimePhaserRoots
   nodes: RuntimeNodeResolver
 }
 
-export interface RuntimeCreateContextV2Dom extends RuntimeCreateContextV2Base {
+export interface RuntimeCreateContextDom extends RuntimeCreateContextWithRenderMode {
   renderMode: 'dom'
   domRoot: HTMLElement
   dom: RuntimeDomRoots
 }
 
-export interface RuntimeCreateContextV2Hybrid
-  extends RuntimeCreateContextV2Base {
+export interface RuntimeCreateContextHybrid
+  extends RuntimeCreateContextWithRenderMode {
   renderMode: 'hybrid'
   Phaser: typeof Phaser
   phaser: RuntimePhaserRoots
@@ -304,13 +291,11 @@ export interface RuntimeCreateContextV2Hybrid
   nodes: RuntimeNodeResolver
 }
 
-/** API 2 exposes only the render surfaces declared by RuntimeDocument.renderMode. */
-export type RuntimeCreateContextV2 =
-  | RuntimeCreateContextV2Phaser
-  | RuntimeCreateContextV2Dom
-  | RuntimeCreateContextV2Hybrid
-
-export type RuntimeCreateContext = RuntimeCreateContextV1 | RuntimeCreateContextV2
+/** Runtime API 2 exposes only the surfaces declared by RuntimeDocument.renderMode. */
+export type RuntimeCreateContext =
+  | RuntimeCreateContextPhaser
+  | RuntimeCreateContextDom
+  | RuntimeCreateContextHybrid
 
 export interface RuntimeInstanceLifecycle {
   resize?(width: number, height: number): void
@@ -321,18 +306,9 @@ export interface RuntimeInstanceLifecycle {
   destroy(): void
 }
 
-export interface RuntimeDefinitionV1 {
-  runtimeApiVersion: 1
-  /** Optional canvas-authoring extension; independent from Runtime API 1/2. */
-  authoringApiVersion?: RuntimeAuthoringApiVersion
-  create(context: RuntimeCreateContextV1): RuntimeInstanceLifecycle
-}
-
-export interface RuntimeDefinitionV2 {
+export interface RuntimeDefinition {
   runtimeApiVersion: 2
-  /** Optional canvas-authoring extension; independent from Runtime API 1/2. */
+  /** Optional canvas-authoring extension; versioned independently. */
   authoringApiVersion?: RuntimeAuthoringApiVersion
-  create(context: RuntimeCreateContextV2): RuntimeInstanceLifecycle
+  create(context: RuntimeCreateContext): RuntimeInstanceLifecycle
 }
-
-export type RuntimeDefinition = RuntimeDefinitionV1 | RuntimeDefinitionV2

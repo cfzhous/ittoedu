@@ -6,10 +6,14 @@ import type {
   RuntimePresentationApi,
 } from './runtimeTypes'
 
-export type ComponentSchemaVersion = 1 | 2 | 3 | 4
-export type ComponentRuntimeApiVersion = 1 | 2 | 3 | 4
-export type ComponentScope = 'scene' | 'global'
-export type ComponentRenderMode = 'phaser' | 'dom' | 'hybrid'
+export type ComponentSchemaVersion = 4
+export type ComponentRuntimeApiVersion = 4
+export const COMPONENT_SCOPES = ['scene', 'global'] as const
+export const COMPONENT_RENDER_MODES = ['phaser', 'dom', 'hybrid'] as const
+export const COMPONENT_EXECUTION_MODES = ['edit', 'preview', 'capture'] as const
+export type ComponentScope = typeof COMPONENT_SCOPES[number]
+export type ComponentRenderMode = typeof COMPONENT_RENDER_MODES[number]
+export type ComponentExecutionMode = typeof COMPONENT_EXECUTION_MODES[number]
 
 interface ComponentManifestBase {
   id: string
@@ -113,29 +117,6 @@ export interface ComponentPreset {
   previewPageId?: string
 }
 
-export interface ComponentManifestV1 extends ComponentManifestBase {
-  schemaVersion: 1
-  runtimeApiVersion: 1
-}
-
-export interface ComponentManifestV2 extends ComponentManifestBase {
-  schemaVersion: 2
-  runtimeApiVersion: 2
-  editor?: ComponentEditorSchema
-  variants?: ComponentVariant[]
-  presets?: ComponentPreset[]
-}
-
-export interface ComponentManifestV3 extends ComponentManifestBase {
-  schemaVersion: 3
-  runtimeApiVersion: 3
-  /** Every V3 component must explicitly declare where it can be mounted. */
-  supportedScopes: ComponentScope[]
-  editor?: ComponentEditorSchema
-  variants?: ComponentVariant[]
-  presets?: ComponentPreset[]
-}
-
 export interface ComponentManifestV4 extends ComponentManifestBase {
   schemaVersion: 4
   runtimeApiVersion: 4
@@ -147,16 +128,9 @@ export interface ComponentManifestV4 extends ComponentManifestBase {
   presets?: ComponentPreset[]
 }
 
-export type ConfigurableComponentManifest =
-  | ComponentManifestV2
-  | ComponentManifestV3
-  | ComponentManifestV4
-
-export type ComponentManifest =
-  | ComponentManifestV1
-  | ComponentManifestV2
-  | ComponentManifestV3
-  | ComponentManifestV4
+/** Current production component contract. */
+export type ConfigurableComponentManifest = ComponentManifestV4
+export type ComponentManifest = ComponentManifestV4
 
 export interface ComponentHostActions {
   goToScene(sceneId: string, targetStateId?: string): boolean
@@ -242,40 +216,13 @@ export interface ComponentEditorHost {
   invalidate(): void
 }
 
-/** V1-V3 compatibility context. Existing renderer fields stay unchanged; the edit-only host is additive. */
-export interface ComponentCreateContext {
-  Phaser: typeof Phaser
-  scene: Phaser.Scene
-  root: Phaser.GameObjects.Container
-  instanceId: string
-  width: number
-  height: number
-  mode: 'edit' | 'preview'
-  props: Record<string, unknown>
-  editorState: Readonly<ComponentEditorState>
-  /** Editor-only optional bridge; absent in preview/capture players. */
-  editor?: ComponentEditorHost
-  actions: Readonly<ComponentHostActions>
-  /** Present in the V3 player; optional keeps V1/V2 component code compatible. */
-  scope?: ComponentScope
-  /** Lifecycle-scoped in the player: subscriptions are removed on destroy. */
-  events?: CourseEventBus
-  /** Shared across ordinary scene navigation and reset by restartCourse(). */
-  courseState?: CourseStateStore
-  /** Player-only declarative scene-state controller. */
-  presentation?: RuntimePresentationApi
-  assetUrl(assetKey: string): string
-  projectAssetUrl(assetId: string): string
-  emit(eventName: string, payload?: unknown): void
-}
-
 interface ComponentCreateContextV4Base {
   runtimeApiVersion: 4
   renderMode: ComponentRenderMode
   instanceId: string
   width: number
   height: number
-  mode: 'edit' | 'preview' | 'capture'
+  mode: ComponentExecutionMode
   props: Record<string, unknown>
   editorState: Readonly<ComponentEditorState>
   /** Editor-only optional bridge; absent in preview/capture players. */
@@ -334,7 +281,7 @@ export type ComponentCreateContextV4 =
   | ComponentCreateContextV4Hybrid
 
 export interface ComponentInstanceLifecycle {
-  setMode?(mode: 'edit' | 'preview' | 'capture'): void
+  setMode?(mode: ComponentExecutionMode): void
   resize?(width: number, height: number): void
   updateProps?(props: Record<string, unknown>): void
   setEditorState?(state: Readonly<ComponentEditorState>): void
@@ -345,25 +292,23 @@ export interface ComponentInstanceLifecycle {
   destroy(): void
 }
 
-export interface LegacyComponentDefinition {
-  id: string
-  runtimeApiVersion: 1 | 2 | 3
-  create(context: ComponentCreateContext): ComponentInstanceLifecycle
-}
-
 export interface ComponentDefinitionV4 {
   id: string
   runtimeApiVersion: 4
   create(context: ComponentCreateContextV4): ComponentInstanceLifecycle
 }
 
-export type ComponentDefinition = LegacyComponentDefinition | ComponentDefinitionV4
-
 export interface ComponentPackageData {
   manifest: ComponentManifest
   runtimeSource: string
   files: Record<string, Uint8Array>
   thumbnailUrl?: string
+  /** Import provenance used to lock exact executable bytes in Project V8. */
+  provenance?: {
+    sha256: string
+    importedAt: string
+    sourceLabel: string
+  }
 }
 
 export interface ExportPayload {

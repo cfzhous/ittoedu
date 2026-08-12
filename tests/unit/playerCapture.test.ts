@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PlayerApp } from '../../src/player/PlayerApp'
 import {
   capturePlayerStage,
-  playerSupportsRuntimeCapture,
   sizeHiddenPlayerStage,
   waitForPlayerCaptureReady,
 } from '../../src/renderer/export/playerCapture'
@@ -57,11 +56,10 @@ describe('playerCapture', () => {
     const waitForCaptureReady = vi.fn().mockResolvedValue(undefined)
     const player = fakePlayer(waitForCaptureReady)
 
-    expect(playerSupportsRuntimeCapture(player)).toBe(true)
     const pending = waitForPlayerCaptureReady(player, 1_000)
     await vi.runAllTimersAsync()
     await expect(pending).resolves.toBeUndefined()
-    expect(waitForCaptureReady).toHaveBeenCalledWith(1_000)
+    expect(waitForCaptureReady).toHaveBeenCalledWith()
   })
 
   it('运行时登记的捕获任务失败时向导出链路传播错误', async () => {

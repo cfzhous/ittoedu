@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs'
 import { strToU8, zipSync } from 'fflate'
 import sharp from 'sharp'
 import type {
-  ComponentCreateContext,
+  ComponentCreateContextV4Phaser,
   ComponentManifest,
 } from '../src/shared/componentTypes'
 import type { ProjectDocument } from '../src/shared/projectTypes'
@@ -298,9 +298,6 @@ class MockGameObject {
 
 function validateCounterRuntime(runtimeSource: string, manifest: ComponentManifest): void {
   const definition = executeComponentRuntime(runtimeSource, manifest.id)
-  if (definition.runtimeApiVersion === 4) {
-    throw new Error('旧版 Phaser 计数器校验器不适用于 Component API 4')
-  }
   const objects: MockGameObject[] = []
   const emittedValues: number[] = []
   const scene = {
@@ -323,16 +320,29 @@ function validateCounterRuntime(runtimeSource: string, manifest: ComponentManife
     },
   }
   const lifecycle = definition.create({
-    Phaser: {},
-    scene,
-    root,
+    runtimeApiVersion: 4,
+    renderMode: 'phaser',
+    phaser: { Phaser: {}, scene, root },
     instanceId: 'validation-counter',
     width: manifest.defaultSize.width,
     height: manifest.defaultSize.height,
     mode: 'preview',
     props: manifest.defaultProps,
+    editorState: {},
+    actions: {
+      goToScene: () => false,
+      nextScene: () => false,
+      previousScene: () => false,
+      replayScene: () => false,
+      restartCourse: () => false,
+    },
+    scope: 'scene',
+    capture: { waitUntil: () => undefined },
     assetUrl() {
       throw new Error('示例计数器不应请求素材')
+    },
+    projectAssetUrl() {
+      throw new Error('示例计数器不应请求工程素材')
     },
     emit(eventName: string, payload?: unknown) {
       if (
@@ -344,7 +354,7 @@ function validateCounterRuntime(runtimeSource: string, manifest: ComponentManife
         emittedValues.push(Reflect.get(payload, 'value') as number)
       }
     },
-  } as unknown as ComponentCreateContext)
+  } as unknown as ComponentCreateContextV4Phaser)
 
   const valueText = objects.find((object) => object.text === '0')
   const buttons = objects.filter((object) => object.interactive)
@@ -397,8 +407,8 @@ async function main(): Promise<void> {
   const reopened = openProjectArchive(projectArchive)
   validateGeneratedProject(reopened.project)
   importComponentPackage(componentArchive, {
-    expectedId: 'com.example.sample-counter',
-    expectedVersion: '2.0.0',
+    expectedId: importedComponent.manifest.id,
+    expectedVersion: importedComponent.manifest.version,
   })
 
   console.log(`已生成示例组件：${componentOutputPath}`)

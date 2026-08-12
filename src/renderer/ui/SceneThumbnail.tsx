@@ -6,6 +6,7 @@ import {
 } from '../../shared/presentation'
 import { useEditorStore } from '../store/editorStore'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
+import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import { buildSceneThumbnailComposition } from './sceneThumbnailComposition'
@@ -130,8 +131,11 @@ export function SceneThumbnail({ scene }: { scene: SceneDocument }) {
         const renderedText = node.type === 'text'
           ? renderTextNodeCanvas(node, node.width, SCALE)
           : null
-        const visualWidth = renderedText?.width ?? node.width
-        const visualHeight = renderedText?.height ?? node.height
+        const renderedFormula = node.type === 'formula'
+          ? renderFormulaNodeCanvas(node, node.width, node.height, SCALE)
+          : null
+        const visualWidth = renderedText?.width ?? renderedFormula?.width ?? node.width
+        const visualHeight = renderedText?.height ?? renderedFormula?.height ?? node.height
         context.save()
         context.translate(
           (node.x + visualWidth / 2) * SCALE,
@@ -150,6 +154,14 @@ export function SceneThumbnail({ scene }: { scene: SceneDocument }) {
             -renderedText!.height * SCALE / 2,
             renderedText!.width * SCALE,
             renderedText!.height * SCALE,
+          )
+        } else if (node.type === 'formula') {
+          context.drawImage(
+            renderedFormula!.canvas,
+            -renderedFormula!.width * SCALE / 2,
+            -renderedFormula!.height * SCALE / 2,
+            renderedFormula!.width * SCALE,
+            renderedFormula!.height * SCALE,
           )
         } else if (node.type === 'image') {
           const meta = assets[node.assetId]

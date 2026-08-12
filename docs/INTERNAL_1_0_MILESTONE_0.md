@@ -1,12 +1,12 @@
 # 内部正式版 1.0：里程碑 0 冻结记录
 
-> 状态：已冻结，可进入分段实现
+> 状态：里程碑已完成；本文保留为协议断代与文件处置的历史冻结记录
 >
 > 日期：2026-08-07
 >
 > 适用目标：Editor 1.0.0 / Project V8 / Runtime API 2 / Component API 4
 
-本文把根目录 [开发计划](../MULTI_SURFACE_DEVELOPMENT_PLAN.md) 的里程碑 0 转成可执行合同。2026-08-07 的“根据根目录的开发计划，开始进行开发”指令视为允许进入里程碑 0 和后续分段实现；它不等于对尚未产生的视觉结果、课例结果或内部正式版 1.0 的人工 `accepted`。
+本文把根目录 [开发计划](../MULTI_SURFACE_DEVELOPMENT_PLAN.md) 的里程碑 0 转成可执行合同。协议断代已经完成；本文只解释当时的决策、归档入口和处置理由，不再充当待执行清单。当前能力、测试数量与后续工作以 [文档导航](README.md) 中列出的现行文档为准。
 
 ## 1. 可恢复基线
 
@@ -176,11 +176,11 @@ interface ComponentCatalogV1 {
 | `scripts/build-math-motion-*.ts`、`validate-math-motion-*.ts`、`export-math-motion-static.ts`、`export_math_motion_pdf.py` | 迁出 | 跟随数学课例进入 `courseware-cases` |
 | `src/shared/coursewareEvidence.ts` 与对应测试 | 评估后迁出 | 若只服务课例证据则移入课例库；核心不承载领域交付治理 |
 | `.agents/skills/orchestrate-courseware/**` | 保留并改写 | 仓库权威 Skill；V8 合同冻结后中文化 |
-| `.agents/skills/build-project-v7-courseware/**` | 目录改名并改写 | 稳定新 ID 面向 Project V8；旧 V7 Skill 只在归档标签存在 |
+| `.agents/skills/build-project-v7-courseware/**` | 保留为受阻断历史入口 | 当前主干不得使用；W1 另建稳定 V8 实现 Skill，不能原地伪改版本 |
 | `scripts/install-courseware-skills.ps1` | 保留并改写 | 继续从仓库权威源幂等安装当前两个 Skill |
 | `docs/AI_COURSEWARE_AUTHORING.md` | 改写 | 切换为 Editor 1.0.0 / Project V8 / API 2 / API 4 |
-| `docs/RUNTIME_V3_AUTHORING.md`、`docs/COMPONENT_AUTHORING.md` | 改写 | 删除旧协议描述；文件是否改名在链接全量修复时决定 |
-| `docs/RUNTIME_V3_DEVELOPMENT_PLAN.md` | 归档或改名 | 历史开发计划不作为当前能力说明 |
+| `docs/RUNTIME_AUTHORING.md`、`docs/COMPONENT_AUTHORING.md` | 改写 | 删除旧协议描述；当前链接使用不带历史代际的文件名 |
+| `docs/RUNTIME_V3_DEVELOPMENT_PLAN.md` | 从主干删除 | 历史内容由标签 `internal-prototype-1.7.0` 保留 |
 | `README.md`、`docs/USER_GUIDE.md` | 改写 | 只描述当前正式版真实能力和旧格式拒绝方式 |
 | `MULTI_SURFACE_DEVELOPMENT_PLAN.md` | 保留 | 作为正式版收敛与后续多表面路线图，持续登记进度 |
 

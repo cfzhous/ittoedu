@@ -1,29 +1,26 @@
 import { COMPONENT_RUNTIME_API_VERSION } from '@/shared/constants'
 import { UserFacingError } from '@/shared/errors'
-import type { ComponentDefinition } from '@/shared/componentTypes'
+import type { ComponentDefinitionV4 } from '@/shared/componentTypes'
 
-function isComponentDefinition(value: unknown): value is ComponentDefinition {
+function isComponentDefinition(value: unknown): value is ComponentDefinitionV4 {
   if (typeof value !== 'object' || value === null) return false
   const runtimeApiVersion = Reflect.get(value, 'runtimeApiVersion')
   return (
     typeof Reflect.get(value, 'id') === 'string' &&
-    typeof runtimeApiVersion === 'number' &&
-    Number.isInteger(runtimeApiVersion) &&
-    runtimeApiVersion >= 1 &&
-    runtimeApiVersion <= COMPONENT_RUNTIME_API_VERSION &&
+    runtimeApiVersion === COMPONENT_RUNTIME_API_VERSION &&
     typeof Reflect.get(value, 'create') === 'function'
   )
 }
 
 export class ComponentRegistry {
-  private readonly definitions = new Map<string, ComponentDefinition>()
+  private readonly definitions = new Map<string, ComponentDefinitionV4>()
 
   define(definition: unknown): void {
     if (!isComponentDefinition(definition)) {
       throw new UserFacingError(
         '组件注册失败',
-        '组件注册对象缺少有效的 id、runtimeApiVersion 或 create()。',
-        '请让组件作者按照组件开发文档修正 runtime.js。',
+        '组件注册对象必须提供 id、runtimeApiVersion: 4 和 create()。',
+        '请让组件作者按照 Component API 4 开发文档修正 runtime.js。',
       )
     }
     if (definition.id.trim().length === 0) {
@@ -47,11 +44,11 @@ export class ComponentRegistry {
     this.define(definition)
   }
 
-  get(id: string): ComponentDefinition | undefined {
+  get(id: string): ComponentDefinitionV4 | undefined {
     return this.definitions.get(id)
   }
 
-  require(id: string): ComponentDefinition {
+  require(id: string): ComponentDefinitionV4 {
     const definition = this.get(id)
     if (definition === undefined) {
       throw new UserFacingError(
@@ -75,7 +72,7 @@ export class ComponentRegistry {
     this.definitions.clear()
   }
 
-  list(): ComponentDefinition[] {
+  list(): ComponentDefinitionV4[] {
     return [...this.definitions.values()]
   }
 

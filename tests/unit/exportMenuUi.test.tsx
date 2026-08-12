@@ -32,7 +32,6 @@ function renderToolbar(
       recentProjects={options.recentProjects ?? []}
       onOpenRecent={options.onOpenRecent ?? (() => undefined)}
       onSave={options.onSave ?? (() => undefined)}
-      onImportComponent={() => undefined}
       healthSummary={{ error: 0, warning: 0, info: 0, total: 0, canExport: true }}
       onOpenHealth={onOpenHealth}
       onPreview={() => undefined}
@@ -99,9 +98,9 @@ describe('unified export menu', () => {
     expect(screen.getByRole('button', {
       name: '工程检查：未发现问题',
     })).toBeInTheDocument()
-    expect(screen.getByRole('button', {
+    expect(screen.queryByRole('button', {
       name: '导入可信的 .h5component 组件',
-    })).toBeInTheDocument()
+    })).not.toBeInTheDocument()
   })
 
   it('changes editor density without replacing or mutating the Project document', () => {

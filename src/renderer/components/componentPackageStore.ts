@@ -23,6 +23,9 @@ function clonePackage(pkg: ImportedComponentPackage): ImportedComponentPackage {
     manifest: structuredClone(pkg.manifest),
     metadata: { ...pkg.metadata },
     files,
+    ...(pkg.provenance === undefined
+      ? {}
+      : { provenance: { ...pkg.provenance } }),
   }
 }
 
@@ -56,7 +59,7 @@ export class ComponentPackageStore {
       throw new UserFacingError(
         '组件导入失败',
         `组件“${pkg.manifest.name}” ${pkg.manifest.version} 已经导入。`,
-        '请直接从“已导入组件”区域使用，或先移除旧版本。',
+        '请直接从“工程组件”区域使用，或先移除旧版本。',
       )
     }
     const stored = clonePackage(pkg)
@@ -159,7 +162,7 @@ export function componentPackagesFromArchive(
       throw new UserFacingError(
         '工程文件损坏',
         `工程包含多个同 ID 的组件“${meta.packageId}”。`,
-        'V1 工程只能同时使用一个组件 ID 的一个版本，请移除重复版本。',
+        'Project V8 工程只能同时使用一个组件 ID 的一个版本，请移除重复版本。',
       )
     }
     const key = componentPackageKey(meta.packageId, meta.version)
@@ -175,6 +178,15 @@ export function componentPackagesFromArchive(
       expectedId: meta.packageId,
       expectedVersion: meta.version,
       blobUrlRegistry,
+      ...(meta.sha256 && meta.importedAt && meta.sourceLabel
+        ? {
+            provenance: {
+              sha256: meta.sha256,
+              importedAt: meta.importedAt,
+              sourceLabel: meta.sourceLabel,
+            },
+          }
+        : {}),
     })
   }
   return packages

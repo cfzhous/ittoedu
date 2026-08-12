@@ -5,11 +5,11 @@ import type { RuntimeDocument } from '../../src/shared/runtimeTypes'
 import { RuntimeContentEditor } from '../../src/renderer/ui/RuntimeContentEditor'
 
 const runtime: RuntimeDocument = {
-  runtimeApiVersion: 1,
+  runtimeApiVersion: 2,
   enabled: true,
   renderMode: 'hybrid',
   source:
-    'CoursewareRuntime.define({runtimeApiVersion:1,create(){return{destroy(){}}}})',
+    'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
   content: {
     values: {
       title: '原始标题',

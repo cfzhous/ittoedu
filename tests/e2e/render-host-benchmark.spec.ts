@@ -15,10 +15,10 @@ const visualOutputDirectory = join(projectRoot, 'output', 'playwright')
 
 async function goToScene(page: Page, index: number): Promise<void> {
   expect(await page.evaluate((targetIndex) =>
-    (window as any).__H5_LESSON_PLAYER__?.goToScene(targetIndex) === true,
+    window.__H5_LESSON_PLAYER__?.goToScene(targetIndex) === true,
   index)).toBe(true)
   await page.waitForFunction((targetIndex) =>
-    (window as any).__H5_LESSON_PLAYER__?.getCurrentSceneIndex() === targetIndex,
+    window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() === targetIndex,
   index)
 }
 
@@ -34,12 +34,15 @@ async function clickLogicalPoint(page: Page, x: number, y: number): Promise<void
 
 async function phaserTexts(page: Page): Promise<string[]> {
   return page.evaluate(() => {
-    const player = (window as any).__H5_LESSON_PLAYER__
+    const player = window.__H5_LESSON_PLAYER__
+    if (!player) throw new Error('Player is not initialized')
     const scene = player.game.scene.getScene('courseware-player')
     const texts: string[] = []
-    const visit = (candidate: any): void => {
-      if (typeof candidate?.text === 'string') texts.push(candidate.text)
-      if (Array.isArray(candidate?.list)) candidate.list.forEach(visit)
+    const visit = (candidate: unknown): void => {
+      if (typeof candidate !== 'object' || candidate === null) return
+      const record = candidate as Record<string, unknown>
+      if (typeof record.text === 'string') texts.push(record.text)
+      if (Array.isArray(record.list)) record.list.forEach(visit)
     }
     scene.children.list.forEach(visit)
     return texts
@@ -78,19 +81,23 @@ test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主
       active.delete(id)
       originalCancel(id)
     }
-    ;(window as any).__renderHostActiveRafCount = () => active.size
+    window.__renderHostActiveRafCount = () => active.size
   })
 
   try {
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' })
-    await page.waitForFunction(() => Boolean((window as any).__H5_LESSON_PLAYER__))
+    await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
     await expect.poll(() => page.evaluate(() =>
-      (window as any).__H5_LESSON_PLAYER__.getCurrentSceneIndex(),
+      window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
     )).toBe(0)
     await expect.poll(() => page.evaluate(() => {
-      const scene = (window as any).__H5_LESSON_PLAYER__.game.scene
+      const scene = window.__H5_LESSON_PLAYER__?.game.scene
         .getScene('courseware-player')
-      return scene.children.getByName('scene-nodes')?.list.length ?? 0
+      if (!scene) return 0
+      const sceneNodes = scene.children.getByName('scene-nodes')
+      if (!sceneNodes) return 0
+      const children = Reflect.get(sceneNodes, 'list')
+      return Array.isArray(children) ? children.length : 0
     })).toBe(8)
 
     await goToScene(page, 1)
@@ -114,9 +121,10 @@ test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主
     await expect(page.locator('.lesson-runtime-mount output')).toHaveText('观察距离已更新')
     await page.getByRole('button', { name: '恢复视角' }).click()
     await expect(page.locator('.lesson-runtime-mount output')).toHaveText('已恢复默认观察视角')
-    await page.evaluate(() => (window as any).__H5_LESSON_PLAYER__.waitForCaptureReady())
+    await page.evaluate(() => window.__H5_LESSON_PLAYER__?.waitForCaptureReady())
     const preparedThreeFrame = await page.evaluate(() => {
-      const player = (window as any).__H5_LESSON_PLAYER__
+      const player = window.__H5_LESSON_PLAYER__
+      if (!player) throw new Error('Player is not initialized')
       const source = [...document.querySelectorAll<HTMLElement>(
         '.lesson-runtime-mount',
       )]
@@ -167,18 +175,19 @@ test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主
     })
 
     await goToScene(page, 4)
-    expect(await phaserTexts(page)).toContain('V3 OK')
+    expect(await phaserTexts(page)).toContain('V4 OK')
     await clickLogicalPoint(page, 640, 380)
     await expect.poll(async () => (await phaserTexts(page)).some((text) =>
       text.includes('第 1 次交互'),
     )).toBe(true)
     await page.waitForTimeout(50)
     const stableRafCount = await page.evaluate(() =>
-      (window as any).__renderHostActiveRafCount(),
+      window.__renderHostActiveRafCount?.() ?? 0,
     )
 
     const stress = await page.evaluate(async () => {
-      const player = (window as any).__H5_LESSON_PLAYER__
+      const player = window.__H5_LESSON_PLAYER__
+      if (!player) throw new Error('Player is not initialized')
       let switches = 0
       let replays = 0
       for (let round = 0; round < 25; round += 1) {
@@ -194,7 +203,7 @@ test('Project V8 五种渲染路径可离线互动且反复切换不泄漏宿主
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
       return {
         index: player.getCurrentSceneIndex(),
-        rafCount: (window as any).__renderHostActiveRafCount(),
+        rafCount: window.__renderHostActiveRafCount?.() ?? 0,
         runtimeMounts: document.querySelectorAll('.lesson-runtime-mount').length,
         componentMounts: document.querySelectorAll('.lesson-component-mount').length,
         runtimeCanvases: document.querySelectorAll('.lesson-runtime-mount canvas').length,

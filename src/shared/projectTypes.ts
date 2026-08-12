@@ -55,13 +55,18 @@ export function isStrokeOnlyShapeType(shapeType: ShapeType): boolean {
   return strokeOnlyShapeTypes.has(shapeType)
 }
 
-export type NodeType =
-  | 'text'
-  | 'image'
-  | 'video'
-  | 'shape'
-  | 'teacher-controller'
-  | 'external-component'
+/** Runtime-visible Project V8 node discriminators used by generated contracts. */
+export const SCENE_NODE_TYPES = [
+  'text',
+  'formula',
+  'image',
+  'video',
+  'shape',
+  'teacher-controller',
+  'external-component',
+] as const
+
+export type NodeType = typeof SCENE_NODE_TYPES[number]
 
 export interface SoundDefinition {
   id: string
@@ -86,6 +91,24 @@ export interface ProjectAudioSettings {
 
 export interface ProjectMediaSettings {
   audio: ProjectAudioSettings
+}
+
+export interface ProjectFontToken {
+  id: string
+  label: string
+  fontFamily: string
+}
+
+export interface ProjectColorToken {
+  id: string
+  label: string
+  color: string
+}
+
+/** Minimal machine-readable style vocabulary; it does not store art-direction prose. */
+export interface ProjectDesignTokens {
+  fonts: ProjectFontToken[]
+  colors: ProjectColorToken[]
 }
 
 export interface ProjectPlaybackSettings {
@@ -131,6 +154,7 @@ export interface ProjectDocument {
   globalLayer: GlobalLayerItem[]
   /** Persistent, course-wide declarative mappings for global-layer nodes. */
   globalInteractions: import('./interactionTypes').InteractionRule[]
+  designTokens: ProjectDesignTokens
   media: ProjectMediaSettings
   playback: ProjectPlaybackSettings
 }
@@ -141,7 +165,7 @@ export interface SceneDocument {
   backgroundColor: string
   backgroundAssetId?: string | null
   nodes: SceneNode[]
-  /** Optional on legacy in-memory documents; editor loading supplies a default. */
+  /** Optional when a scene does not author named presentation states. */
   presentation?: ScenePresentation
   runtime?: RuntimeDocument
   interactions: import('./interactionTypes').InteractionRule[]
@@ -191,6 +215,8 @@ export interface TextRunStyle {
   italic?: boolean
   underline?: boolean
   strike?: boolean
+  /** East Asian emphasis marks rendered per authored Unicode character. */
+  emphasis?: boolean
   highlightColor?: string | null
 }
 
@@ -212,6 +238,8 @@ export interface TextNode extends BaseNode {
     italic: boolean
     underline: boolean
     strike: boolean
+    /** Draw filled emphasis dots below horizontal text and to the right of vertical text. */
+    emphasis: boolean
     highlightColor: string | null
     align: TextAlign
     verticalAlign: VerticalAlign
@@ -223,6 +251,71 @@ export interface TextNode extends BaseNode {
     backgroundColor: string
     backgroundOpacity: number
     cornerRadius: number
+  }
+}
+
+export type FormulaAstNode =
+  | FormulaRow
+  | FormulaToken
+  | FormulaOperator
+  | FormulaFraction
+  | FormulaRoot
+  | FormulaScript
+  | FormulaFenced
+
+export interface FormulaRow {
+  type: 'row'
+  children: FormulaAstNode[]
+}
+
+export interface FormulaToken {
+  type: 'token'
+  value: string
+}
+
+export interface FormulaOperator {
+  type: 'operator'
+  value: string
+}
+
+export interface FormulaFraction {
+  type: 'fraction'
+  numerator: FormulaAstNode
+  denominator: FormulaAstNode
+}
+
+export interface FormulaRoot {
+  type: 'root'
+  radicand: FormulaAstNode
+  index?: FormulaAstNode
+}
+
+export interface FormulaScript {
+  type: 'script'
+  base: FormulaAstNode
+  superscript?: FormulaAstNode
+  subscript?: FormulaAstNode
+}
+
+export interface FormulaFenced {
+  type: 'fenced'
+  open: string
+  close: string
+  body: FormulaAstNode
+}
+
+/** A semantic formula rendered from one shared recursive AST on every surface. */
+export interface FormulaNode extends BaseNode {
+  type: 'formula'
+  /** Stable content reference used by lesson traceability and AI edits. */
+  formulaId: string
+  /** Human-readable equivalent for accessibility and non-visual inspection. */
+  accessibleText: string
+  ast: FormulaAstNode
+  style: {
+    fontSize: number
+    color: string
+    align: TextAlign
   }
 }
 
@@ -248,6 +341,17 @@ export interface ImageNode extends BaseNode {
     amount: number
     mode: FeatherMode
   }
+  /** Author-only normalized regions that keep important image content reviewable. */
+  safeAreas: ImageSafeArea[]
+}
+
+export interface ImageSafeArea {
+  id: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface VideoNode extends BaseNode {
@@ -287,9 +391,6 @@ export interface ShapeNode extends BaseNode {
   }
 }
 
-/** @deprecated V1 rectangles migrate to ShapeNode automatically. */
-export type RectangleNode = ShapeNode
-
 export interface ExternalComponentNode extends BaseNode {
   type: 'external-component'
   component: {
@@ -312,9 +413,6 @@ export type TeacherControllerAction =
     }
   | { type: 'audio.toggle-mute' }
   | { type: 'player.fullscreen.toggle' }
-
-/** @deprecated Project V5 compatibility name. */
-export type TeacherControlAction = TeacherControllerAction
 
 export interface TeacherControllerButton {
   id: string
@@ -354,16 +452,9 @@ export interface GlobalLayerItem {
   visibility: GlobalLayerVisibility
 }
 
-/** @deprecated Project V3 compatibility type. Use GlobalLayerVisibility. */
-export type GlobalComponentVisibility = GlobalLayerVisibility
-
-/** @deprecated Project V3 compatibility type. Use GlobalLayerItem. */
-export interface GlobalComponentInstance extends Omit<GlobalLayerItem, 'node'> {
-  node: ExternalComponentNode
-}
-
 export type SceneNode =
   | TextNode
+  | FormulaNode
   | ImageNode
   | VideoNode
   | ShapeNode
@@ -397,6 +488,12 @@ export interface EmbeddedComponentPackageMeta {
   manifestPath: string
   runtimePath: string
   thumbnailPath?: string
+  /** SHA-256 of the exact .h5component bytes selected from a catalog or file. */
+  sha256?: string
+  /** ISO timestamp recorded when the executable package entered this project. */
+  importedAt?: string
+  /** Human-readable catalog/source label; never an external absolute path. */
+  sourceLabel?: string
   /** Explicit authoring provenance; imported third-party packages default to read-only. */
   editableCopy?: boolean
   sourcePackageId?: string

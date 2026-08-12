@@ -4,11 +4,7 @@ import type {
 } from '@/shared/componentTypes'
 import type { ProjectDocument } from '@/shared/projectTypes'
 import { componentPackageKey } from '@/renderer/project/archivePath'
-import {
-  BlobUrlRegistry,
-  type ObjectUrlApi,
-} from '@/renderer/project/blobUrlRegistry'
-import { assertV3ExportDependencies } from '@/renderer/export/v3ExportSupport'
+import { assertExportPayloadDependencies } from '@/renderer/export/exportPayloadSupport'
 
 export const SANDBOX_ASSET_PLACEHOLDER_PREFIX =
   'courseware-preview-asset:' as const
@@ -23,12 +19,6 @@ export interface RuntimePreviewPayloadInput {
   project: ProjectDocument
   assetFiles: Readonly<Record<string, Uint8Array>>
   components: Readonly<Record<string, ComponentPackageData>>
-  /**
-   * Sandboxed iframes have an opaque origin and cannot reliably consume Blob
-   * URLs created by the editor window. Transfer bytes across that boundary so
-   * the iframe can create same-context Blob URLs without Base64 expansion.
-   */
-  assetUrlMode?: 'object-url' | 'sandbox-transfer'
 }
 
 export interface RuntimePreviewPayloadResources {
@@ -81,26 +71,18 @@ function findComponent(
 }
 
 /**
- * Builds the Player payload with object URLs by default. Sandboxed preview
- * hosts can opt into transferable bytes plus placeholder URLs; the iframe
- * materializes those placeholders as Blob URLs in its own opaque origin. The
- * caller owns the returned resource set and must revoke it when replacing or
- * closing the preview iframe.
+ * Sandboxed preview iframes have an opaque origin and cannot consume Blob URLs
+ * created by the editor window. Always transfer bytes plus placeholder URLs;
+ * the iframe materializes them as same-context Blob URLs without Base64 growth.
  */
 export function createRuntimePreviewPayloadResources(
   input: RuntimePreviewPayloadInput,
-  urlApi?: ObjectUrlApi,
 ): RuntimePreviewPayloadResources {
-  const registry = input.assetUrlMode === 'sandbox-transfer'
-    ? null
-    : new BlobUrlRegistry(urlApi)
   const assetTransfers: RuntimePreviewAssetTransfer[] = []
   const createAssetUrl = (
-    key: string,
     bytes: Uint8Array,
     mimeType: string,
   ): string => {
-    if (registry) return registry.create(key, bytes, mimeType)
     const placeholder = `${SANDBOX_ASSET_PLACEHOLDER_PREFIX}${assetTransfers.length}` as const
     assetTransfers.push({
       placeholder,
@@ -124,7 +106,6 @@ export function createRuntimePreviewPayloadResources(
       payload.assets[meta.id] = {
         mimeType: meta.mimeType,
         dataUrl: createAssetUrl(
-          `project:${meta.id}`,
           bytes,
           meta.mimeType,
         ),
@@ -158,7 +139,6 @@ export function createRuntimePreviewPayloadResources(
         assets[assetKey] = {
           mimeType,
           dataUrl: createAssetUrl(
-            `component:${recordKey}:${assetKey}`,
             bytes,
             mimeType,
           ),
@@ -171,16 +151,13 @@ export function createRuntimePreviewPayloadResources(
       }
     }
 
-    assertV3ExportDependencies(payload)
+    assertExportPayloadDependencies(payload)
     return {
       payload,
       assetTransfers,
-      revoke() {
-        registry?.dispose()
-      },
+      revoke() {},
     }
   } catch (error) {
-    registry?.dispose()
     throw error
   }
 }

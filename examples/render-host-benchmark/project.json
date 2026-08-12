@@ -36,6 +36,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -72,6 +73,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -186,6 +188,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -222,6 +225,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -258,6 +262,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -302,6 +307,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -338,6 +344,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -424,6 +431,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -460,6 +468,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -556,6 +565,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -592,6 +602,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -634,12 +645,12 @@
       "interactions": []
     },
     {
-      "id": "scene_component_v3_legacy",
-      "name": "05 V3 Phaser 兼容组件",
+      "id": "scene_component_v4_phaser",
+      "name": "05 V4 Phaser 仪表组件",
       "backgroundColor": "#1e1b4b",
       "nodes": [
         {
-          "id": "legacy_title",
+          "id": "phaser_component_title",
           "name": "场景标题",
           "x": 68,
           "y": 34,
@@ -650,7 +661,7 @@
           "opacity": 1,
           "locked": false,
           "type": "text",
-          "text": "05 Component API 3：历史 Phaser 组件保持兼容",
+          "text": "05 Component API 4：Phaser 仪表作为可复用组件",
           "runs": [],
           "style": {
             "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
@@ -660,6 +671,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -675,7 +687,7 @@
           "playbackInitialVisibility": "inherit"
         },
         {
-          "id": "legacy_subtitle",
+          "id": "phaser_component_subtitle",
           "name": "场景说明",
           "x": 100,
           "y": 86,
@@ -686,7 +698,7 @@
           "opacity": 1,
           "locked": false,
           "type": "text",
-          "text": "新组件使用 V4，但已有 V3 组件不需立即重写；本页专门回归旧上下文。",
+          "text": "同一 API 4 合同可按需选择 Phaser、DOM 或 Hybrid 渲染面；本页回归 Phaser 组件。",
           "runs": [],
           "style": {
             "fontFamily": "Microsoft YaHei, PingFang SC, sans-serif",
@@ -696,6 +708,7 @@
             "italic": false,
             "underline": false,
             "strike": false,
+            "emphasis": false,
             "highlightColor": null,
             "align": "center",
             "verticalAlign": "middle",
@@ -711,8 +724,8 @@
           "playbackInitialVisibility": "inherit"
         },
         {
-          "id": "legacy_component_instance",
-          "name": "V3 Phaser 兼容仪表",
+          "id": "phaser_meter_component_instance",
+          "name": "V4 Phaser 交互仪表",
           "x": 280,
           "y": 156,
           "width": 720,
@@ -723,12 +736,12 @@
           "locked": false,
           "type": "external-component",
           "component": {
-            "packageId": "com.example.render-host-legacy-phaser",
-            "version": "3.0.0"
+            "packageId": "com.example.render-host-phaser-meter",
+            "version": "4.0.0"
           },
           "props": {
             "content": {
-              "centerLabel": "V3 OK"
+              "centerLabel": "V4 OK"
             }
           },
           "playbackInitialVisibility": "inherit"
@@ -768,13 +781,13 @@
       "runtimePath": "components/com.example.render-host-editable-table@4.0.0/runtime.js",
       "thumbnailPath": "components/com.example.render-host-editable-table@4.0.0/thumbnail.svg"
     },
-    "com.example.render-host-legacy-phaser@3.0.0": {
-      "packageId": "com.example.render-host-legacy-phaser",
-      "version": "3.0.0",
-      "name": "V3 Phaser 兼容仪表",
-      "manifestPath": "components/com.example.render-host-legacy-phaser@3.0.0/manifest.json",
-      "runtimePath": "components/com.example.render-host-legacy-phaser@3.0.0/runtime.js",
-      "thumbnailPath": "components/com.example.render-host-legacy-phaser@3.0.0/thumbnail.svg"
+    "com.example.render-host-phaser-meter@4.0.0": {
+      "packageId": "com.example.render-host-phaser-meter",
+      "version": "4.0.0",
+      "name": "V4 Phaser 交互仪表",
+      "manifestPath": "components/com.example.render-host-phaser-meter@4.0.0/manifest.json",
+      "runtimePath": "components/com.example.render-host-phaser-meter@4.0.0/runtime.js",
+      "thumbnailPath": "components/com.example.render-host-phaser-meter@4.0.0/thumbnail.svg"
     }
   },
   "globalLayer": [
@@ -848,6 +861,32 @@
     }
   ],
   "globalInteractions": [],
+  "designTokens": {
+    "fonts": [
+      {
+        "id": "body",
+        "label": "正文",
+        "fontFamily": "\"Microsoft YaHei\", \"PingFang SC\", sans-serif"
+      }
+    ],
+    "colors": [
+      {
+        "id": "background",
+        "label": "背景",
+        "color": "#ffffff"
+      },
+      {
+        "id": "text",
+        "label": "正文",
+        "color": "#1f2937"
+      },
+      {
+        "id": "accent",
+        "label": "强调",
+        "color": "#2563eb"
+      }
+    ]
+  },
   "media": {
     "audio": {
       "defaultMuted": false,

@@ -1,6 +1,5 @@
 import * as Phaser from 'phaser'
 import type {
-  ComponentCreateContext,
   ComponentCreateContextV4,
   ComponentHostActions,
   ComponentInstanceLifecycle,
@@ -9,7 +8,6 @@ import type {
 import {
   componentRenderMode,
   componentSupportsScope,
-  isComponentManifestV4,
 } from '../shared/componentCapabilities'
 import {
   createPhaserDomComponentMount,
@@ -51,6 +49,7 @@ import {
 } from './ComponentAuthoringTargetRegistry'
 import { renderShapeGraphics } from '../shared/phaserShapeRenderer'
 import { renderImageNodeCanvas } from '../shared/imageEffects'
+import { renderFormulaNodeCanvas } from '../shared/formulaRenderer'
 import { renderTextNodeCanvas } from '../shared/textLayout'
 
 export interface ComponentEventDetail {
@@ -83,6 +82,8 @@ export interface RenderNodeContext {
   emitComponentEvent?(detail: ComponentEventDetail): void
   /** False when the host explicitly suppresses delivery-time canvas controls. */
   canvasControlsEnabled?: boolean
+  /** Delivery-only DOM plane for native keyboard and screen-reader affordances. */
+  accessibilityRoot?: HTMLElement
   textureKey(assetId: string): string
 }
 
@@ -621,64 +622,45 @@ function renderExternalComponent(
       emit,
     }
 
-    const v4ComponentMode: ComponentCreateContextV4['mode'] =
+    const componentMode: ComponentCreateContextV4['mode'] =
       context.authoring === true
         ? 'edit'
         : context.mode === 'capture'
           ? 'capture'
           : 'preview'
-    const legacyComponentMode: ComponentCreateContext['mode'] =
-      context.authoring === true ? 'edit' : 'preview'
-
-    let createLifecycle: () => unknown
-    if (definition.runtimeApiVersion === 4) {
-      if (!isComponentManifestV4(componentPackage.manifest)) {
-        throw new Error('Component API 4 runtime 必须配合 V4 manifest')
+    const base = {
+      ...commonContext,
+      runtimeApiVersion: 4 as const,
+      renderMode,
+      mode: componentMode,
+      capture: { waitUntil: registerCaptureTask },
+    }
+    let createContext: ComponentCreateContextV4
+    if (renderMode === 'phaser') {
+      createContext = {
+        ...base,
+        renderMode: 'phaser',
+        phaser: { Phaser, scene, root: contentRoot },
       }
-      const base = {
-        ...commonContext,
-        runtimeApiVersion: 4 as const,
-        renderMode,
-        mode: v4ComponentMode,
-        capture: { waitUntil: registerCaptureTask },
+    } else if (renderMode === 'dom') {
+      if (!domMount) throw new Error('DOM 组件挂载点创建失败')
+      createContext = {
+        ...base,
+        renderMode: 'dom',
+        dom: { root: domMount.root },
       }
-      let createContext: ComponentCreateContextV4
-      if (renderMode === 'phaser') {
-        createContext = {
-          ...base,
-          renderMode: 'phaser',
-          phaser: { Phaser, scene, root: contentRoot },
-        }
-      } else if (renderMode === 'dom') {
-        if (!domMount) throw new Error('DOM 组件挂载点创建失败')
-        createContext = {
-          ...base,
-          renderMode: 'dom',
-          dom: { root: domMount.root },
-        }
-      } else {
-        if (!domMount) throw new Error('Hybrid 组件 DOM 挂载点创建失败')
-        createContext = {
-          ...base,
-          renderMode: 'hybrid',
-          phaser: { Phaser, scene, root: contentRoot },
-          dom: { root: domMount.root },
-        }
-      }
-      createLifecycle = () => definition.create(createContext)
     } else {
-      const createContext: ComponentCreateContext = {
-        ...commonContext,
-        Phaser,
-        scene,
-        root: contentRoot,
-        mode: legacyComponentMode,
+      if (!domMount) throw new Error('Hybrid 组件 DOM 挂载点创建失败')
+      createContext = {
+        ...base,
+        renderMode: 'hybrid',
+        phaser: { Phaser, scene, root: contentRoot },
+        dom: { root: domMount.root },
       }
-      createLifecycle = () => definition.create(createContext)
     }
 
     const creation = tryCreateComponentLifecycle(
-      createLifecycle,
+      () => definition.create(createContext),
       {
         componentId: componentPackage.manifest.id,
         instanceId: node.id,
@@ -687,9 +669,6 @@ function renderExternalComponent(
     )
     if (!creation.ok) throw creation.failure.error
     const lifecycle = creation.lifecycle
-    const componentMode = definition.runtimeApiVersion === 4
-      ? v4ComponentMode
-      : legacyComponentMode
     lifecycle.setMode?.(componentMode)
     lifecycle.resize?.(node.width, node.height)
     lifecycle.setVisible?.(effectiveVisibility())
@@ -938,6 +917,52 @@ function renderNodeContent(
             undefined,
             nextRendered.width,
           )
+        },
+        destroy(): void {
+          if (root.active) root.destroy()
+          if (scene.textures.exists(renderedKey)) scene.textures.remove(renderedKey)
+        },
+      }
+    }
+
+    case 'formula': {
+      const rendered = renderFormulaNodeCanvas(node)
+      let revision = 0
+      let renderedKey = `rendered-formula-${node.id}-${depth}-${revision}`
+      if (scene.textures.exists(renderedKey)) scene.textures.remove(renderedKey)
+      scene.textures.addCanvas(renderedKey, rendered.canvas)
+      const root = scene.add
+        .container(node.x + node.width / 2, node.y + node.height / 2)
+        .setName(`node:${node.id}`)
+        .setDepth(depth)
+        .setAngle(node.rotation)
+        .setAlpha(node.opacity)
+        .setVisible(node.visible)
+      root.setSize(node.width, node.height)
+      attachToParent(root, context.parentRoot)
+      const formula = scene.add
+        .image(-node.width / 2, -node.height / 2, renderedKey)
+        .setOrigin(0)
+        .setDisplaySize(node.width, node.height)
+      root.add(formula)
+      return {
+        id: node.id,
+        type: node.type,
+        root,
+        update(nextNode, transition): void {
+          if (nextNode.type !== 'formula' || nextNode.id !== node.id) return
+          const nextRendered = renderFormulaNodeCanvas(nextNode)
+          const nextKey = `rendered-formula-${node.id}-${depth}-${++revision}`
+          if (scene.textures.exists(nextKey)) scene.textures.remove(nextKey)
+          scene.textures.addCanvas(nextKey, nextRendered.canvas)
+          formula
+            .setTexture(nextKey)
+            .setPosition(-nextNode.width / 2, -nextNode.height / 2)
+            .setDisplaySize(nextNode.width, nextNode.height)
+          const previousKey = renderedKey
+          renderedKey = nextKey
+          if (scene.textures.exists(previousKey)) scene.textures.remove(previousKey)
+          applyNodeFrame(scene, nextNode, root, nextNode.height, transition)
         },
         destroy(): void {
           if (root.active) root.destroy()

@@ -13,9 +13,10 @@ const TEST_COMPONENT_ID = 'com.example.mode-test'
 function createTestComponentPackage(): ComponentPackageData {
   return {
     manifest: {
-      schemaVersion: 3,
-      runtimeApiVersion: 3,
+      schemaVersion: 4,
+      runtimeApiVersion: 4,
       supportedScopes: ['scene'],
+      renderMode: 'phaser',
       id: TEST_COMPONENT_ID,
       name: '模式测试组件',
       version: '1.0.0',
@@ -28,7 +29,7 @@ function createTestComponentPackage(): ComponentPackageData {
         content: { title: '测试组件' },
       },
     },
-    runtimeSource: 'window.CoursewareComponent.define({})',
+    runtimeSource: `window.CoursewareComponent.define({id:${JSON.stringify(TEST_COMPONENT_ID)},runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})`,
     files: {},
   }
 }
@@ -52,6 +53,7 @@ describe('simple and professional editor modes', () => {
   it('uses one categorized element browser and exposes advanced authoring only in professional mode', () => {
     const props = {
       onAddImage: vi.fn(),
+      onImportImage: vi.fn(),
       onReplaceImage: vi.fn(),
       onAddVideo: vi.fn(),
       onImportAudio: vi.fn(),
@@ -67,6 +69,7 @@ describe('simple and professional editor modes', () => {
     expect(screen.getByRole('tab', { name: '图层' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '属性' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '素材' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '组件' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '互动与动画' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '开发' })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '常用' })).toHaveAttribute(
@@ -79,7 +82,7 @@ describe('simple and professional editor modes', () => {
     expect(screen.queryByRole('tab', { name: '素材库' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '互动组件' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '控制与全局' })).not.toBeInTheDocument()
-    expect(screen.queryByTestId('component-package-manager')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('components-tab')).not.toBeInTheDocument()
 
     expect(screen.getByTestId('add-text')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加右箭头' })).toBeInTheDocument()
@@ -93,8 +96,10 @@ describe('simple and professional editor modes', () => {
     expect(screen.queryByTestId('add-image')).not.toBeInTheDocument()
     expect(screen.queryByTestId('add-video')).not.toBeInTheDocument()
     expect(screen.queryByTestId('import-audio')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '导入声音' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '导入视频' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '导入图片' }))
+    expect(props.onImportImage).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '导入声音' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导入视频' })).toBeInTheDocument()
     expect(screen.getByText('声音库')).toBeInTheDocument()
     expect(screen.getByText('视频素材')).toBeInTheDocument()
     expect(screen.getByText('图片素材')).toBeInTheDocument()
@@ -104,11 +109,12 @@ describe('simple and professional editor modes', () => {
 
     expect(screen.getByRole('tab', { name: '互动与动画' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '开发' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '互动组件' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '组件' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '互动组件' })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '控制与全局' })).toBeInTheDocument()
     expect(screen.getByText('全局声音设置')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('tab', { name: '互动组件' }))
-    expect(screen.getByTestId('component-package-manager')).toHaveTextContent(
+    fireEvent.click(screen.getByRole('tab', { name: '组件' }))
+    expect(screen.getByTestId('components-tab')).toHaveTextContent(
       '模式测试组件',
     )
     expect(useEditorStore.getState().project).toBe(projectBeforeSwitch)

@@ -196,6 +196,7 @@ function textNode(
       italic: false,
       underline: false,
       strike: false,
+      emphasis: false,
       highlightColor: null,
       align: options.align ?? 'left',
       verticalAlign: 'middle',
@@ -489,7 +490,7 @@ async function main(): Promise<void> {
     phaserRuntimeSource,
     playerBundle,
     tableComponent,
-    legacyComponent,
+    phaserMeterComponent,
   ] = await Promise.all([
     loadThreePackageMetadata(),
     bundleThreeRuntime(),
@@ -498,7 +499,7 @@ async function main(): Promise<void> {
       throw new Error('缺少 dist-player/player.iife.js；请先运行 npm run build:player', { cause: error })
     }),
     loadComponent('editable-table', 'render-host-editable-table.h5component'),
-    loadComponent('legacy-phaser', 'render-host-legacy-phaser.h5component'),
+    loadComponent('phaser-meter', 'render-host-phaser-meter.h5component'),
   ])
 
   assertOfflineBundle(phaserRuntimeSource, 'Phaser 场景运行时')
@@ -506,8 +507,11 @@ async function main(): Promise<void> {
   if (tableComponent.data.manifest.schemaVersion !== 4 || tableComponent.data.manifest.renderMode !== 'dom') {
     throw new Error('可编辑表格必须是 V4 DOM 组件')
   }
-  if (legacyComponent.data.manifest.schemaVersion !== 3) {
-    throw new Error('兼容仪表必须保持 V3 组件协议')
+  if (
+    phaserMeterComponent.data.manifest.schemaVersion !== 4 ||
+    phaserMeterComponent.data.manifest.renderMode !== 'phaser'
+  ) {
+    throw new Error('交互仪表必须是 V4 Phaser 组件')
   }
 
   const generatedAssets = {
@@ -563,10 +567,10 @@ async function main(): Promise<void> {
     '表格需要结构化编辑和重复使用，因此值得组件化；文案全部位于 props.content。',
     '#ccfbf1',
   )
-  const legacyHeaders = headerNodes(
-    'legacy',
-    '05 Component API 3：历史 Phaser 组件保持兼容',
-    '新组件使用 V4，但已有 V3 组件不需立即重写；本页专门回归旧上下文。',
+  const phaserComponentHeaders = headerNodes(
+    'phaser_component',
+    '05 Component API 4：Phaser 仪表作为可复用组件',
+    '同一 API 4 合同可按需选择 Phaser、DOM 或 Hybrid 渲染面；本页回归 Phaser 组件。',
     '#fef3c7',
   )
 
@@ -580,7 +584,7 @@ async function main(): Promise<void> {
     assets: projectAssets,
     componentPackages: {
       [tableComponent.data.key]: tableComponent.data.metadata,
-      [legacyComponent.data.key]: legacyComponent.data.metadata,
+      [phaserMeterComponent.data.key]: phaserMeterComponent.data.metadata,
     },
     globalLayer: [{
       node: controllerNode(),
@@ -588,6 +592,18 @@ async function main(): Promise<void> {
       visibility: { mode: 'all', sceneIds: [] },
     }],
     globalInteractions: [],
+    designTokens: {
+      fonts: [{
+        id: 'body',
+        label: '正文',
+        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+      }],
+      colors: [
+        { id: 'background', label: '背景', color: '#ffffff' },
+        { id: 'text', label: '正文', color: '#1f2937' },
+        { id: 'accent', label: '强调', color: '#2563eb' },
+      ],
+    },
     media: {
       audio: {
         defaultMuted: false,
@@ -680,22 +696,22 @@ async function main(): Promise<void> {
         ],
       },
       {
-        id: 'scene_component_v3_legacy',
-        name: '05 V3 Phaser 兼容组件',
+        id: 'scene_component_v4_phaser',
+        name: '05 V4 Phaser 仪表组件',
         backgroundColor: '#1e1b4b',
         interactions: [],
         nodes: [
-          ...legacyHeaders,
+          ...phaserComponentHeaders,
           componentNode(
-            'legacy_component_instance',
-            'V3 Phaser 兼容仪表',
-            legacyComponent.data.manifest.id,
-            legacyComponent.data.manifest.version,
+            'phaser_meter_component_instance',
+            'V4 Phaser 交互仪表',
+            phaserMeterComponent.data.manifest.id,
+            phaserMeterComponent.data.manifest.version,
             280,
             156,
             720,
             390,
-            { content: { centerLabel: 'V3 OK' } },
+            { content: { centerLabel: 'V4 OK' } },
           ),
         ],
       },
@@ -707,11 +723,11 @@ async function main(): Promise<void> {
 
   const components: Record<string, ComponentPackageData> = {
     [tableComponent.data.key]: tableComponent.data,
-    [legacyComponent.data.key]: legacyComponent.data,
+    [phaserMeterComponent.data.key]: phaserMeterComponent.data,
   }
   const componentFiles = {
     [tableComponent.data.key]: tableComponent.data.files,
-    [legacyComponent.data.key]: legacyComponent.data.files,
+    [phaserMeterComponent.data.key]: phaserMeterComponent.data.files,
   }
   const lessonArchive = createProjectArchive(
     { project, assetFiles, componentFiles },

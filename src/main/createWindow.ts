@@ -206,7 +206,6 @@ export async function createMainWindow(
   window.once('ready-to-show', () => {
     if (window.isDestroyed()) return
     if (showApplicationWindows) window.show()
-    else window.showInactive()
   })
 
   if (developmentServerUrl) {

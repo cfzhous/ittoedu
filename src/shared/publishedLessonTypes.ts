@@ -27,7 +27,7 @@ export interface PublishedExecutableCode {
 }
 
 export interface PublishedRuntimeDocument {
-  apiVersion: 1 | 2
+  apiVersion: 2
   renderMode: RuntimeRenderMode
   code: PublishedExecutableCode
   content: Record<string, string>

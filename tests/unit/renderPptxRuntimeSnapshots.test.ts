@@ -6,7 +6,7 @@ import {
   createScene,
   createTextNode,
 } from '../../src/renderer/project/createProject'
-import { runtimeSnapshotKey } from '../../src/renderer/export/v3ExportSupport'
+import { runtimeSnapshotKey } from '../../src/renderer/export/exportPayloadSupport'
 
 const playerCalls = vi.hoisted(() => [] as Array<{
   payload: ExportPayload
@@ -208,9 +208,9 @@ describe('PPTX runtime snapshot isolation', () => {
     }
     scene.runtime = {
       enabled: true,
-      runtimeApiVersion: 1,
+      runtimeApiVersion: 2,
       renderMode: 'dom',
-      source: 'CoursewareRuntime.define({})',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create:function(){return{destroy:function(){}}}})',
       content: { values: {} },
       assets: {},
       nodeBindings: { title: title.id, component: component.id },
@@ -221,8 +221,8 @@ describe('PPTX runtime snapshot isolation', () => {
       components: {
         'com.example.stateful@1.0.0': {
           manifest: {
-            schemaVersion: 1,
-            runtimeApiVersion: 1,
+            schemaVersion: 4,
+            runtimeApiVersion: 4,
             id: 'com.example.stateful',
             name: '有状态组件',
             version: '1.0.0',
@@ -232,6 +232,8 @@ describe('PPTX runtime snapshot isolation', () => {
             preserveAspectRatio: false,
             assets: {},
             defaultProps: {},
+            supportedScopes: ['scene'],
+            renderMode: 'phaser',
           },
           runtimeSource: 'throw new Error("must not execute")',
           assets: {},
@@ -294,9 +296,9 @@ describe('PPTX runtime snapshot isolation', () => {
     }]
     project.globalRuntime = {
       enabled: true,
-      runtimeApiVersion: 1,
+      runtimeApiVersion: 2,
       renderMode: 'phaser',
-      source: 'CoursewareRuntime.define({})',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create:function(){return{destroy:function(){}}}})',
       content: { values: {} },
       assets: {},
       nodeBindings: {
@@ -310,8 +312,8 @@ describe('PPTX runtime snapshot isolation', () => {
       components: {
         'com.example.side-effect@1.0.0': {
           manifest: {
-            schemaVersion: 1,
-            runtimeApiVersion: 1,
+            schemaVersion: 4,
+            runtimeApiVersion: 4,
             id: 'com.example.side-effect',
             name: '有副作用的全局组件',
             version: '1.0.0',
@@ -321,6 +323,8 @@ describe('PPTX runtime snapshot isolation', () => {
             preserveAspectRatio: false,
             assets: {},
             defaultProps: {},
+            supportedScopes: ['global'],
+            renderMode: 'phaser',
           },
           runtimeSource: 'throw new Error("must not execute")',
           assets: {},
@@ -370,9 +374,9 @@ describe('PPTX runtime snapshot isolation', () => {
     for (const scene of project.scenes) {
       scene.runtime = {
         enabled: true,
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         renderMode: 'dom',
-        source: 'CoursewareRuntime.define({})',
+        source: 'CoursewareRuntime.define({runtimeApiVersion:2,create:function(){return{destroy:function(){}}}})',
         content: { values: {} },
         assets: {},
       }
@@ -417,9 +421,9 @@ describe('PPTX runtime snapshot isolation', () => {
     for (const scene of project.scenes) {
       scene.runtime = {
         enabled: true,
-        runtimeApiVersion: 1,
+        runtimeApiVersion: 2,
         renderMode: 'dom',
-        source: 'CoursewareRuntime.define({})',
+        source: 'CoursewareRuntime.define({runtimeApiVersion:2,create:function(){return{destroy:function(){}}}})',
         content: { values: {} },
         assets: {},
       }

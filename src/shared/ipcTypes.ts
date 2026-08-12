@@ -1,3 +1,8 @@
+import type {
+  ComponentCatalogPackageFile,
+  ComponentCatalogSnapshot,
+} from './componentCatalog'
+
 export interface OpenBinaryFileResult {
   path: string
   name: string
@@ -20,6 +25,35 @@ export interface SelectedImageResult extends OpenBinaryFileResult {
 
 export interface SelectedMediaResult extends OpenBinaryFileResult {
   mimeType: string
+}
+
+export interface BatchFileDigest {
+  /** SHA-256 of the exact selected bytes, encoded as lowercase hexadecimal. */
+  sha256: string
+}
+
+export type SelectedBinaryBatchFile = OpenBinaryFileResult & BatchFileDigest
+export type SelectedImageBatchFile = SelectedImageResult & BatchFileDigest
+export type SelectedMediaBatchFile = SelectedMediaResult & BatchFileDigest
+
+export interface BatchFileRejection {
+  path: string
+  name: string
+  code: string
+  title: string
+  message: string
+  suggestion: string
+}
+
+/**
+ * A cancelled system dialog returns `null`. Once the user confirms a selection,
+ * every path is represented exactly once in either `accepted` or `rejected`.
+ */
+export interface SelectedFileBatch<T extends OpenBinaryFileResult> {
+  selectedCount: number
+  acceptedByteLength: number
+  accepted: T[]
+  rejected: BatchFileRejection[]
 }
 
 export interface RecentProjectEntry {
@@ -47,9 +81,24 @@ export interface DesktopAPI {
   readRecoveryProject(): Promise<RecoveryProjectResult | null>
   clearRecoveryProject(): Promise<void>
   selectImage(): Promise<SelectedImageResult | null>
+  selectImages(): Promise<SelectedFileBatch<SelectedImageBatchFile> | null>
   selectAudio(): Promise<SelectedMediaResult | null>
+  selectAudios(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
   selectVideo(): Promise<SelectedMediaResult | null>
+  selectVideos(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
   selectComponentPackage(): Promise<OpenBinaryFileResult | null>
+  selectComponentPackages(): Promise<SelectedFileBatch<SelectedBinaryBatchFile> | null>
+  loadComponentCatalog(): Promise<ComponentCatalogSnapshot>
+  selectComponentCatalogSource(): Promise<ComponentCatalogSnapshot | null>
+  setComponentCatalogSourceTrust(input: {
+    sourceId: string
+    trust: 'trusted' | 'prompt'
+  }): Promise<ComponentCatalogSnapshot>
+  readComponentCatalogPackage(input: {
+    sourceId: string
+    packageId: string
+    version: string
+  }): Promise<ComponentCatalogPackageFile>
   exportHtml(input: {
     suggestedName: string
     html: string
@@ -60,7 +109,7 @@ export interface DesktopAPI {
   }): Promise<{ path: string } | null>
   exportBinary(input: {
     suggestedName: string
-    extension: 'pptx'
+    extension: 'pptx' | 'json'
     bytes: Uint8Array
   }): Promise<{ path: string } | null>
   exportPdf(input: {
@@ -89,9 +138,17 @@ export const IPC_CHANNELS = {
   readRecoveryProject: 'project:read-recovery',
   clearRecoveryProject: 'project:clear-recovery',
   selectImage: 'asset:select-image',
+  selectImages: 'asset:select-images',
   selectAudio: 'asset:select-audio',
+  selectAudios: 'asset:select-audios',
   selectVideo: 'asset:select-video',
+  selectVideos: 'asset:select-videos',
   selectComponent: 'component:select-package',
+  selectComponents: 'component:select-packages',
+  loadComponentCatalog: 'component-catalog:load',
+  selectComponentCatalogSource: 'component-catalog:select-source',
+  setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
+  readComponentCatalogPackage: 'component-catalog:read-package',
   exportHtml: 'export:write-html',
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',

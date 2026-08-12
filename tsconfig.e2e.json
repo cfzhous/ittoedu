@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@playwright/test"],
+    "noEmit": true
+  },
+  "include": [
+    "tests/e2e/**/*.ts",
+    "tests/e2e/**/*.d.ts",
+    "tests/helpers/**/*.ts",
+    "playwright.config.ts",
+    "src/shared/**/*.ts",
+    "src/player/global.d.ts",
+    "src/player/runtime-global.d.ts",
+    "src/renderer/vite-env.d.ts"
+  ],
+  "exclude": ["release", "dist-*", "node_modules"]
+}

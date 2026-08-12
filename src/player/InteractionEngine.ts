@@ -362,6 +362,16 @@ export class InteractionEngine {
           optionalString(payload, 'sceneId') ?? this.currentSceneId(),
         )
       }),
+      this.events.on<unknown>('presenter:command', (payload) => {
+        if (!isRecord(payload)) return
+        const command = optionalString(payload, 'command')
+        if (command !== 'next' && command !== 'previous') return
+        this.dispatch(
+          { type: 'presenter.command', command },
+          this.presentation.current(),
+          this.currentSceneId(),
+        )
+      }),
       this.events.on<unknown>('audio:ended', (payload) => {
         if (!this.mediaEventBelongsToScope(payload)) return
         const soundId = optionalString(payload, 'soundId')

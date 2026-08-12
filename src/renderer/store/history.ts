@@ -9,11 +9,24 @@ export interface ComponentPackageHistoryChange {
   after?: ComponentPackageData
 }
 
+export interface AssetFileHistoryChange {
+  assetId: string
+  before?: Uint8Array
+  after?: Uint8Array
+}
+
+export interface HistoryResourceChanges {
+  componentPackageChanges?: ComponentPackageHistoryChange[]
+  assetFileChanges?: AssetFileHistoryChange[]
+}
+
 export interface HistoryEntry {
   patches: Patch[]
   inversePatches: Patch[]
-  /** Keeps the executable package in lockstep with project metadata on undo/redo. */
-  componentPackageChange?: ComponentPackageHistoryChange
+  /** Keeps executable packages in lockstep with project metadata on undo/redo. */
+  componentPackageChanges?: ComponentPackageHistoryChange[]
+  /** Keeps imported binary resources in lockstep with project asset metadata. */
+  assetFileChanges?: AssetFileHistoryChange[]
 }
 
 export interface HistoryState {
@@ -31,13 +44,33 @@ export function pushHistory(
   history: HistoryState,
   patches: Patch[],
   inversePatches: Patch[],
-  componentPackageChange?: ComponentPackageHistoryChange,
+  resourceChanges: HistoryResourceChanges = {},
 ): HistoryState {
-  if (patches.length === 0 && !componentPackageChange) return history
+  const componentPackageChanges = resourceChanges.componentPackageChanges
+    ?.map((change) => ({ ...change }))
+  const assetFileChanges = resourceChanges.assetFileChanges?.map((change) => ({
+    assetId: change.assetId,
+    ...(change.before === undefined ? {} : { before: change.before.slice() }),
+    ...(change.after === undefined ? {} : { after: change.after.slice() }),
+  }))
+  if (
+    patches.length === 0 &&
+    !componentPackageChanges?.length &&
+    !assetFileChanges?.length
+  ) {
+    return history
+  }
   return {
     past: [
       ...history.past,
-      { patches, inversePatches, componentPackageChange },
+      {
+        patches,
+        inversePatches,
+        ...(componentPackageChanges?.length
+          ? { componentPackageChanges }
+          : {}),
+        ...(assetFileChanges?.length ? { assetFileChanges } : {}),
+      },
     ].slice(-MAX_HISTORY_STEPS),
     future: [],
   }

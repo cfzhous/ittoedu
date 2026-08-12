@@ -17,7 +17,7 @@ import type {
 } from '../../shared/componentTypes'
 import type {
   ExternalComponentNode,
-  RuntimeAssetMap,
+  FormulaNode,
   SceneDocument,
   SceneNode,
   TextNode,
@@ -46,6 +46,7 @@ import {
 } from '../store/editorStore'
 import { TextEditOverlay } from './TextEditOverlay'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
+import { FormulaEditDialog } from './FormulaEditDialog'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
@@ -105,7 +106,13 @@ interface WorkspaceProps {
   onSelectImageAsset(): Promise<ImportedImageAsset | null>
 }
 
-const EMPTY_RUNTIME_ASSETS: RuntimeAssetMap = Object.freeze({})
+interface FormulaEditSession {
+  projectId: string
+  scope: 'scene' | 'global'
+  sceneId: string
+  stateId: string | null
+  nodeId: string
+}
 
 function nodesEqual(
   previous: SceneDocument['nodes'][number],
@@ -324,10 +331,9 @@ export function Workspace({
   const activePreviewResourcesRef =
     useRef<ActiveRuntimePreviewResources | null>(null)
   const previousSceneRef = useRef<SceneDocument | null>(null)
-  const previousResourcesRef = useRef<{
-    assets: RuntimeAssetMap
-    components: Record<string, ComponentPackageData>
-  } | null>(null)
+  const previousComponentPackagesRef = useRef<
+    Record<string, ComponentPackageData> | null
+  >(null)
   const previewInitRef = useRef<{
     token: string
     payload: ExportPayload
@@ -373,6 +379,8 @@ export function Workspace({
     useState<Readonly<RuntimeTargetEditSession> | null>(null)
   const [activeComponentTextSession, setActiveComponentTextSession] =
     useState<Readonly<ComponentTextEditSession> | null>(null)
+  const [activeFormulaEditSession, setActiveFormulaEditSession] =
+    useState<Readonly<FormulaEditSession> | null>(null)
   const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
     useState<string | null>(null)
   const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
@@ -866,7 +874,6 @@ export function Workspace({
         project,
         assetFiles,
         components: componentPackages,
-        assetUrlMode: 'sandbox-transfer',
       })
       const payload = payloadResources.payload
       const playerBundle = loadPlayerBundle()
@@ -1267,6 +1274,36 @@ export function Workspace({
         : undefined,
     [document.nodes, editingTextNodeId],
   )
+  const editingFormulaNode = useMemo<FormulaNode | undefined>(() => {
+    const session = activeFormulaEditSession
+    if (
+      !session ||
+      canvasMode !== 'edit' ||
+      session.projectId !== project.id ||
+      session.scope !== editingScope ||
+      session.sceneId !== scene.id ||
+      session.stateId !== activePresentationStateId
+    ) {
+      return undefined
+    }
+    return document.nodes.find((node): node is FormulaNode => (
+      node.id === session.nodeId && node.type === 'formula'
+    ))
+  }, [
+    activeFormulaEditSession,
+    activePresentationStateId,
+    canvasMode,
+    document.nodes,
+    editingScope,
+    project.id,
+    scene.id,
+  ])
+
+  useEffect(() => {
+    if (activeFormulaEditSession && !editingFormulaNode) {
+      setActiveFormulaEditSession(null)
+    }
+  }, [activeFormulaEditSession, editingFormulaNode])
   const visibleRuntimeTargets = useMemo(
     () => runtimeTargets.filter((target) => (
       (target.kind === 'text' || target.kind === 'asset') &&
@@ -1690,7 +1727,6 @@ export function Workspace({
     const host = gameHostRef.current
     if (!host) return
     const handle = createEditorGame(host, {
-      interactionOnly: true,
       fixedLogicalSize: true,
     })
     gameRef.current = handle
@@ -1775,10 +1811,30 @@ export function Workspace({
         )
       }),
       handle.bridge.onTextDoubleClick((nodeId) => {
+        setActiveFormulaEditSession(null)
         setActiveComponentTextSession(null)
         setActiveRuntimeTextSession(null)
         useEditorStore.getState().selectNode(nodeId)
         useEditorStore.getState().beginTextEdit(nodeId, 'canvas')
+      }),
+      handle.bridge.onFormulaDoubleClick((nodeId) => {
+        const store = useEditorStore.getState()
+        const node = selectEditingNodes(store).find((item) => item.id === nodeId)
+        if (node?.type !== 'formula' || store.canvasMode !== 'edit') return
+        if (store.editingTextNodeId) {
+          store.cancelTextEdit()
+          handle.bridge.setTextEditing(null)
+        }
+        setActiveComponentTextSession(null)
+        setActiveRuntimeTextSession(null)
+        store.selectNode(nodeId)
+        setActiveFormulaEditSession({
+          projectId: store.project.id,
+          scope: store.editingScope,
+          sceneId: store.activeSceneId,
+          stateId: store.activePresentationStateId,
+          nodeId,
+        })
       }),
     ]
 
@@ -1807,22 +1863,16 @@ export function Workspace({
     const handle = gameRef.current
     if (!handle) return
     const previous = previousSceneRef.current
-    const previousResources = previousResourcesRef.current
-    const resourcesChanged =
-      previousResources?.assets !== EMPTY_RUNTIME_ASSETS ||
-      previousResources?.components !== componentPackages
+    const componentsChanged =
+      previousComponentPackagesRef.current !== componentPackages
 
     if (
       !previous ||
       previous.id !== document.id ||
-      previous.backgroundAssetId !== document.backgroundAssetId ||
-      resourcesChanged
+      componentsChanged
     ) {
-      handle.bridge.loadScene(document, EMPTY_RUNTIME_ASSETS, componentPackages)
+      handle.bridge.loadScene(document, componentPackages)
     } else {
-      if (previous.backgroundColor !== document.backgroundColor) {
-        handle.bridge.setBackground(document.backgroundColor)
-      }
       const previousById = new Map(previous.nodes.map((node) => [node.id, node]))
       const nextById = new Map(document.nodes.map((node) => [node.id, node]))
       previous.nodes.forEach((node) => {
@@ -1874,10 +1924,7 @@ export function Workspace({
       }
     }
     previousSceneRef.current = structuredClone(document)
-    previousResourcesRef.current = {
-      assets: EMPTY_RUNTIME_ASSETS,
-      components: componentPackages,
-    }
+    previousComponentPackagesRef.current = componentPackages
   }, [
     canvasMode,
     componentPackages,
@@ -1933,6 +1980,7 @@ export function Workspace({
     })
     const store = useEditorStore.getState()
     if (value === 'text') store.addTextNode(x, y)
+    else if (value === 'formula') store.addFormulaNode(x, y)
     else if (value === 'rectangle') store.addRectangleNode(x, y)
     else if (value.startsWith('shape:')) {
       store.addShapeNode(value.slice('shape:'.length) as Parameters<typeof store.addShapeNode>[0], x, y)
@@ -2031,7 +2079,7 @@ export function Workspace({
           !authoringCanvasInteractive ||
           (event.target instanceof HTMLElement &&
             event.target.closest(
-              '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .component-text-edit-overlay',
+              '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog',
             ))
         ) {
           return
@@ -2289,6 +2337,20 @@ export function Workspace({
           )}
         </div>
       </div>
+      {canvasMode === 'edit' && editingFormulaNode && (
+        <FormulaEditDialog
+          key={`${editingFormulaNode.id}:${activePresentationStateId ?? 'base'}`}
+          node={editingFormulaNode}
+          onCancel={() => setActiveFormulaEditSession(null)}
+          onCommit={(ast, accessibleText) => {
+            useEditorStore.getState().updateNode(editingFormulaNode.id, {
+              ast,
+              accessibleText,
+            })
+            setActiveFormulaEditSession(null)
+          }}
+        />
+      )}
       {canvasMode === 'edit' && editingNode && canvas && workspaceRef.current && (
         <TextEditOverlay
           key={editingNode.id}
@@ -2309,7 +2371,6 @@ export function Workspace({
                 rendered?.height ?? editingNode.height,
                 rendered?.width ?? editingNode.width,
               )
-            gameRef.current?.bridge.previewText(editingNode.id, text, runs)
           }}
           onCommit={(text, runs) => {
             const store = useEditorStore.getState()

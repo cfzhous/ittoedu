@@ -1,13 +1,23 @@
 import { AlertCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  AvailableComponentCatalogPackage,
+  ComponentCatalogSnapshot,
+} from '../shared/componentCatalog'
 import type { ComponentPackageData } from '../shared/componentTypes'
 import {
   RECOMMENDED_PROJECT_SCENES,
   RECOMMENDED_SCENE_NODES,
 } from '../shared/constants'
 import { toUserMessage, UserFacingError } from '../shared/errors'
-import type { RecentProjectEntry, RecoveryProjectResult } from '../shared/ipcTypes'
-import type { ProjectDocument } from '../shared/projectTypes'
+import type {
+  BatchFileRejection,
+  RecentProjectEntry,
+  RecoveryProjectResult,
+  SelectedImageBatchFile,
+  SelectedMediaBatchFile,
+} from '../shared/ipcTypes'
+import type { AssetKind, ProjectDocument } from '../shared/projectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
 import { buildStandaloneHtml } from './export/buildStandaloneHtml'
@@ -18,20 +28,34 @@ import {
   SINGLE_HTML_WARNING_BYTES,
   utf8ByteLength,
 } from './export/exportSize'
+import {
+  collectExportPreflight,
+  type ExportPreflightItem,
+  type ExportPreflightReport,
+} from './export/exportPreflight'
 import { loadPlayerBundle } from './export/loadPlayerBundle'
 import { renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
 } from './components/componentPackageStore'
-import { importComponentPackageAsync } from './components/importComponentPackage'
 import {
+  componentPackageSha256,
+  importComponentPackageAsync,
+} from './components/importComponentPackage'
+import {
+  buildAssetContentHashIndex,
   createImageAssetImport,
   createMediaAssetImport,
   readImageDimensions,
   readMediaMetadata,
   type ImportedImageAsset,
 } from './project/assetManager'
+import {
+  commitMediaBatchImport,
+  planMediaBatchImport,
+  type MediaBatchLibraryFallback,
+} from './project/mediaBatch'
 import { openProjectArchiveAsync } from './project/projectArchive'
 import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
 import { saveProjectAsync } from './project/saveProject'
@@ -40,15 +64,27 @@ import {
   selectEditingNodes,
   selectSelectedNode,
   useEditorStore,
+  MAX_BATCH_CANVAS_ITEMS,
+  type ImportedAssetBatchItem,
 } from './store/editorStore'
 import { ConfirmDialog } from './ui/ConfirmDialog'
+import { CopyableSummaryDialog } from './ui/CopyableSummaryDialog'
 import { ExportSizeWarningDialog } from './ui/ExportSizeWarningDialog'
+import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import { RightSidebar } from './ui/RightSidebar'
 import { ScenePanel } from './ui/ScenePanel'
 import { SceneStateStrip } from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
+import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
+import { planCatalogBatchJoin } from './components/componentLibraryModel'
+
+const EMPTY_COMPONENT_CATALOG: ComponentCatalogSnapshot = {
+  sources: [],
+  packages: [],
+  issues: [],
+}
 
 function desktopApi() {
   if (!window.desktopAPI) {
@@ -71,6 +107,78 @@ function readableError(error: unknown, fallback: string): string {
     return error.message
   }
   return toUserMessage(error, fallback)
+}
+
+interface BatchImportIssue {
+  name: string
+  message: string
+}
+
+interface PreparedAssetBatch {
+  /** One item per successfully decoded selection; duplicates share asset IDs. */
+  placements: ImportedAssetBatchItem[]
+  /** Unique content that is not already present in the project. */
+  additions: ImportedAssetBatchItem[]
+  duplicateCount: number
+  issues: BatchImportIssue[]
+}
+
+function desktopRejections(issues: BatchFileRejection[]): BatchImportIssue[] {
+  return issues.map((issue) => ({
+    name: issue.name,
+    message: `${issue.message} ${issue.suggestion}`,
+  }))
+}
+
+async function prepareAssetBatch<T extends {
+  name: string
+  mimeType: string
+  bytes: Uint8Array
+  sha256: string
+}>(
+  files: T[],
+  kind: AssetKind,
+  build: (file: T) => Promise<ImportedAssetBatchItem>,
+): Promise<PreparedAssetBatch> {
+  const state = useEditorStore.getState()
+  const hashes = await buildAssetContentHashIndex(
+    kind,
+    state.project.assets,
+    state.assetFiles,
+  )
+  const placements: ImportedAssetBatchItem[] = []
+  const additions: ImportedAssetBatchItem[] = []
+  const issues: BatchImportIssue[] = []
+  let duplicateCount = 0
+
+  for (const file of files) {
+    const existing = hashes.get(file.sha256)
+    if (existing) {
+      duplicateCount += 1
+      placements.push(existing)
+      continue
+    }
+    try {
+      const imported = await build(file)
+      hashes.set(file.sha256, imported)
+      additions.push(imported)
+      placements.push(imported)
+    } catch (error) {
+      issues.push({
+        name: file.name,
+        message: readableError(error, '文件无法解码。'),
+      })
+    }
+  }
+  return { placements, additions, duplicateCount, issues }
+}
+
+function formatBatchIssueSummary(issues: BatchImportIssue[]): string {
+  const shown = issues.slice(0, 5).map((issue) => `• ${issue.name}：${issue.message}`)
+  if (issues.length > shown.length) {
+    shown.push(`• 其他 ${issues.length - shown.length} 个文件未导入`)
+  }
+  return shown.join('\n')
 }
 
 function isEditingTarget(target: EventTarget | null): boolean {
@@ -133,14 +241,40 @@ function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
 export default function App() {
   const [busy, setBusy] = useState(false)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
-    { mode: 'import' } | { mode: 'replace'; packageId: string } | null
+    | {
+        mode: 'import'
+        packages: ComponentPackageData[]
+        selectedCount: number
+        issues: string[]
+      }
+    | {
+        mode: 'replace'
+        packageId: string
+        packageData: ComponentPackageData
+        sourceFileName: string
+      }
+    | null
   >(null)
+  const [componentCatalog, setComponentCatalog] = useState<ComponentCatalogSnapshot>(
+    EMPTY_COMPONENT_CATALOG,
+  )
+  const [batchOperationSummary, setBatchOperationSummary] = useState<{
+    title: string
+    summary: string
+  } | null>(null)
+  const [catalogPackageRequest, setCatalogPackageRequest] = useState<{
+    mode: 'add' | 'update'
+    entries: AvailableComponentCatalogPackage[]
+  } | null>(null)
   const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
   const [recoveryProject, setRecoveryProject] = useState<RecoveryProjectResult | null>(null)
   const [recoveryDecisionComplete, setRecoveryDecisionComplete] = useState(false)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
+  const [exportPreflightReport, setExportPreflightReport] =
+    useState<ExportPreflightReport | null>(null)
   const saveInFlightRef = useRef(false)
+  const catalogPackageRequestResolverRef = useRef<((completed: boolean) => void) | null>(null)
   const pendingLargeHtmlRef = useRef<string | null>(null)
   const recoveryRevisionRef = useRef(0)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
@@ -168,8 +302,8 @@ export default function App() {
   const errorMessage = useEditorStore((state) => state.errorMessage)
   const statusMessage = useEditorStore((state) => state.statusMessage)
   const projectHealthDiagnostics = useMemo(
-    () => collectProjectHealth(project),
-    [project],
+    () => collectProjectHealth(project, componentPackages),
+    [project, componentPackages],
   )
   const projectHealthSummary = useMemo(
     () => summarizeProjectHealth(projectHealthDiagnostics),
@@ -177,22 +311,23 @@ export default function App() {
   )
 
   const setError = useEditorStore((state) => state.setError)
+  const setStatus = useEditorStore((state) => state.setStatus)
   const createNewProject = useEditorStore((state) => state.createNewProject)
   const loadProject = useEditorStore((state) => state.loadProject)
   const markSaved = useEditorStore((state) => state.markSaved)
-  const importPackageIntoStore = useEditorStore(
-    (state) => state.importComponentPackage,
+  const importPackagesIntoStore = useEditorStore(
+    (state) => state.importComponentPackages,
   )
   const replacePackageInStore = useEditorStore(
     (state) => state.replaceComponentPackage,
   )
-  const addImageNode = useEditorStore((state) => state.addImageNode)
+  const addImageNodes = useEditorStore((state) => state.addImageNodes)
   const replaceImageAsset = useEditorStore(
     (state) => state.replaceImageAsset,
   )
-  const addVideoNode = useEditorStore((state) => state.addVideoNode)
-  const importAsset = useEditorStore((state) => state.importAsset)
-  const importSound = useEditorStore((state) => state.importSound)
+  const addVideoNodes = useEditorStore((state) => state.addVideoNodes)
+  const importAssets = useEditorStore((state) => state.importAssets)
+  const importSounds = useEditorStore((state) => state.importSounds)
 
   const run = useCallback(
     async <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
@@ -210,6 +345,39 @@ export default function App() {
     },
     [busy, setError],
   )
+
+  const reportBatchOutcome = useCallback((input: {
+    label: string
+    completedCount: number
+    duplicateCount: number
+    issues: BatchImportIssue[]
+    libraryFallback?: MediaBatchLibraryFallback
+  }) => {
+    const details = [
+      `已完成 ${input.completedCount} 项`,
+      input.duplicateCount > 0 ? `内容重复 ${input.duplicateCount} 项（已复用素材）` : '',
+      input.issues.length > 0 ? `失败 ${input.issues.length} 项` : '',
+      input.libraryFallback === 'batch-size'
+        ? '数量过多，已只加入媒体库'
+        : '',
+      input.libraryFallback === 'scene-capacity'
+        ? '当前层容量不足，已改为只加入媒体库'
+        : '',
+    ].filter(Boolean)
+    setStatus(`${input.label}：${details.join('；')}`)
+    if (input.issues.length > 0) {
+      setError(`${input.label}部分文件未完成：\n${formatBatchIssueSummary(input.issues)}`)
+      setBatchOperationSummary({
+        title: `${input.label}结果`,
+        summary: [
+          ...details,
+          '',
+          '未完成：',
+          ...input.issues.map((issue) => `- ${issue.name}：${issue.message}`),
+        ].join('\n'),
+      })
+    }
+  }, [setError, setStatus])
 
   const refreshRecentProjects = useCallback(async () => {
     if (!window.desktopAPI) return
@@ -321,15 +489,15 @@ export default function App() {
 
   const selectAndImportImage = useCallback(
     async (
-      mode: 'add' | 'replace',
+      mode: 'add' | 'library' | 'replace',
       position?: { x?: number; y?: number },
     ) => {
       await run(async () => {
-        const file = await desktopApi().selectImage()
-        if (!file) return
-        const dimensions = await readImageDimensions(file.bytes, file.mimeType)
-        const imported = createImageAssetImport(file, { dimensions })
         if (mode === 'replace') {
+          const file = await desktopApi().selectImage()
+          if (!file) return
+          const dimensions = await readImageDimensions(file.bytes, file.mimeType)
+          const imported = createImageAssetImport(file, { dimensions })
           const node = selectSelectedNode(useEditorStore.getState())
           if (!node || node.type !== 'image') {
             throw new UserFacingError(
@@ -339,17 +507,43 @@ export default function App() {
             )
           }
           replaceImageAsset(node.id, imported.meta, imported.bytes)
-        } else {
-          addImageNode(
-            imported.meta,
-            imported.bytes,
-            position?.x,
-            position?.y,
-          )
+          return
         }
+
+        const batch = await desktopApi().selectImages()
+        if (!batch) return
+        const prepared = await prepareAssetBatch<SelectedImageBatchFile>(
+          batch.accepted,
+          'image',
+          async (file) => {
+            const dimensions = await readImageDimensions(file.bytes, file.mimeType)
+            const imported = createImageAssetImport(file, { dimensions })
+            return { meta: imported.meta, bytes: imported.bytes }
+          },
+        )
+        const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+        const importPlan = planMediaBatchImport(
+          mode,
+          prepared.placements.length,
+          MAX_BATCH_CANVAS_ITEMS,
+        )
+        const commitResult = commitMediaBatchImport({
+          plan: importPlan,
+          placements: prepared.placements,
+          additions: prepared.additions,
+          placeOnCanvas: (items) => addImageNodes(items, position),
+          importIntoLibrary: importAssets,
+        })
+        reportBatchOutcome({
+          label: mode === 'library' ? '图片批量入库' : '图片批量添加',
+          completedCount: commitResult.completedCount,
+          duplicateCount: prepared.duplicateCount,
+          issues,
+          libraryFallback: commitResult.libraryFallback,
+        })
       }, '图片读取失败。请重新选择受支持的图片。')
     },
-    [addImageNode, replaceImageAsset, run],
+    [addImageNodes, importAssets, replaceImageAsset, reportBatchOutcome, run],
   )
 
   const selectImageAsset = useCallback(async (): Promise<ImportedImageAsset | null> => {
@@ -364,54 +558,323 @@ export default function App() {
 
   const selectAndImportAudio = useCallback(async () => {
     await run(async () => {
-      const file = await desktopApi().selectAudio()
-      if (!file) return
-      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
-      const imported = createMediaAssetImport(file, 'audio', metadata)
-      importSound(imported.meta, imported.bytes)
+      const batch = await desktopApi().selectAudios()
+      if (!batch) return
+      const prepared = await prepareAssetBatch<SelectedMediaBatchFile>(
+        batch.accepted,
+        'audio',
+        async (file) => {
+          const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
+          const imported = createMediaAssetImport(file, 'audio', metadata)
+          return { meta: imported.meta, bytes: imported.bytes }
+        },
+      )
+      importSounds(prepared.additions)
+      reportBatchOutcome({
+        label: '声音批量入库',
+        completedCount: prepared.additions.length,
+        duplicateCount: prepared.duplicateCount,
+        issues: [...desktopRejections(batch.rejected), ...prepared.issues],
+      })
     }, '声音读取失败。请重新选择受支持的声音文件。')
-  }, [importSound, run])
+  }, [importSounds, reportBatchOutcome, run])
 
   const selectAndImportVideo = useCallback(async (
     mode: 'add' | 'library',
     position?: { x?: number; y?: number },
   ) => {
     await run(async () => {
-      const file = await desktopApi().selectVideo()
-      if (!file) return
-      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
-      const imported = createMediaAssetImport(file, 'video', metadata)
-      if (mode === 'add') {
-        addVideoNode(imported.meta, imported.bytes, position?.x, position?.y)
-      } else {
-        importAsset(imported.meta, imported.bytes)
-      }
+      const batch = await desktopApi().selectVideos()
+      if (!batch) return
+      const prepared = await prepareAssetBatch<SelectedMediaBatchFile>(
+        batch.accepted,
+        'video',
+        async (file) => {
+          const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
+          const imported = createMediaAssetImport(file, 'video', metadata)
+          return { meta: imported.meta, bytes: imported.bytes }
+        },
+      )
+      const importPlan = planMediaBatchImport(
+        mode,
+        prepared.placements.length,
+        MAX_BATCH_CANVAS_ITEMS,
+      )
+      const commitResult = commitMediaBatchImport({
+        plan: importPlan,
+        placements: prepared.placements,
+        additions: prepared.additions,
+        placeOnCanvas: (items) => addVideoNodes(items, position),
+        importIntoLibrary: importAssets,
+      })
+      reportBatchOutcome({
+        label: mode === 'add' ? '视频批量添加' : '视频批量入库',
+        completedCount: commitResult.completedCount,
+        duplicateCount: prepared.duplicateCount,
+        issues: [...desktopRejections(batch.rejected), ...prepared.issues],
+        libraryFallback: commitResult.libraryFallback,
+      })
     }, '视频读取失败。请重新选择 MP4 或 WebM 文件。')
-  }, [addVideoNode, importAsset, run])
+  }, [addVideoNodes, importAssets, reportBatchOutcome, run])
 
   const handleImportComponent = useCallback(() => {
-    setComponentPackageRequest({ mode: 'import' })
-  }, [])
+    void run(async () => {
+      const batch = await desktopApi().selectComponentPackages()
+      if (!batch) return
+      const issues = batch.rejected.map((item) =>
+        `${item.name}：${item.title}；${item.message}；${item.suggestion}`,
+      )
+      const packagesById = new Map<string, ComponentPackageData>()
+      const currentPackages = useEditorStore.getState().componentPackages
+      for (const file of batch.accepted) {
+        try {
+          const imported = await importComponentPackageAsync(file.bytes, {
+            provenance: {
+              sha256: file.sha256,
+              importedAt: new Date().toISOString(),
+              sourceLabel: `手动导入：${file.name}`,
+            },
+          })
+          const packageId = imported.manifest.id
+          const duplicateInBatch = packagesById.get(packageId)
+          if (duplicateInBatch) {
+            issues.push(
+              `${file.name}：同一批次已包含组件 ${packageId} ` +
+              `v${duplicateInBatch.manifest.version}，请每个 ID 只选择一个版本。`,
+            )
+            continue
+          }
+          const existing = currentPackages[packageId]
+          if (existing) {
+            const sameLockedPackage =
+              existing.manifest.version === imported.manifest.version &&
+              existing.provenance?.sha256 === imported.provenance?.sha256
+            issues.push(sameLockedPackage
+              ? `${file.name}：工程已经包含完全相同的组件，已跳过。`
+              : `${file.name}：工程已包含 ${packageId} v${existing.manifest.version}；请从工程组件菜单审阅更新或替换。`)
+            continue
+          }
+          packagesById.set(packageId, imported)
+        } catch (error) {
+          issues.push(`${file.name}：${readableError(error, '组件包内容无效。')}`)
+        }
+      }
+
+      const packages = [...packagesById.values()]
+      if (packages.length === 0) {
+        useEditorStore.getState().setStatus('外部组件导入未改变工程')
+        setBatchOperationSummary({
+          title: '外部组件批量导入结果',
+          summary: [
+            `选择文件：${batch.selectedCount}`,
+            '成功加入：0',
+            `跳过或失败：${issues.length}`,
+            '',
+            ...issues.map((issue) => `- ${issue}`),
+          ].join('\n'),
+        })
+        if (issues.length > 0) {
+          setError(`没有可加入工程的组件：\n${issues.slice(0, 8).join('\n')}`)
+        }
+        return
+      }
+      setComponentPackageRequest({
+        mode: 'import',
+        packages,
+        selectedCount: batch.selectedCount,
+        issues,
+      })
+    }, '外部组件读取失败。请重新选择 .h5component 文件。')
+  }, [run, setError])
 
   const handleReplaceComponent = useCallback((packageId: string) => {
-    setComponentPackageRequest({ mode: 'replace', packageId })
-  }, [])
+    void run(async () => {
+      const file = await desktopApi().selectComponentPackage()
+      if (!file) return
+      const sha256 = await componentPackageSha256(file.bytes)
+      const imported = await importComponentPackageAsync(file.bytes, {
+        provenance: {
+          sha256,
+          importedAt: new Date().toISOString(),
+          sourceLabel: `手动替换：${file.name}`,
+        },
+      })
+      if (imported.manifest.id !== packageId) {
+        throw new UserFacingError(
+          '组件替换已取消',
+          `所选包 ID 为“${imported.manifest.id}”，与工程组件“${packageId}”不一致。`,
+          '请选择同一组件 ID 的新版本；需要并存的组件应作为新包导入。',
+        )
+      }
+      setComponentPackageRequest({
+        mode: 'replace',
+        packageId,
+        packageData: imported,
+        sourceFileName: file.name,
+      })
+    }, '组件替换包读取失败，工程内原版本已保留。')
+  }, [run])
 
   const performComponentImport = useCallback(() => {
     const request = componentPackageRequest
     setComponentPackageRequest(null)
     if (!request) return
+    if (request.mode === 'import') {
+      void run(async () => {
+        importPackagesIntoStore(request.packages)
+        setBatchOperationSummary({
+          title: '外部组件批量导入结果',
+          summary: [
+            `选择文件：${request.selectedCount}`,
+            `成功加入：${request.packages.length}`,
+            `跳过或失败：${request.issues.length}`,
+            '',
+            '已加入工程：',
+            ...request.packages.map((item) =>
+              `- ${item.manifest.name} (${item.manifest.id}) v${item.manifest.version}`,
+            ),
+            ...(request.issues.length > 0
+              ? ['', '未加入：', ...request.issues.map((issue) => `- ${issue}`)]
+              : []),
+          ].join('\n'),
+        })
+        if (request.issues.length > 0) {
+          setError(
+            `已加入 ${request.packages.length} 个组件；另有 ${request.issues.length} 项未加入：\n` +
+            request.issues.slice(0, 8).join('\n'),
+          )
+        }
+      }, '组件批量导入失败，工程未改变。')
+      return
+    }
     void run(async () => {
-      const file = await desktopApi().selectComponentPackage()
-      if (!file) return
-      const imported = await importComponentPackageAsync(file.bytes)
-      if (request.mode === 'replace') {
-        replacePackageInStore(request.packageId, imported)
-      } else {
-        importPackageIntoStore(imported)
+      replacePackageInStore(request.packageId, request.packageData)
+    }, '组件替换失败，工程内原版本已保留。')
+  }, [componentPackageRequest, importPackagesIntoStore, replacePackageInStore, run, setError])
+
+  const performCatalogPackageOperation = useCallback(async (
+    entries: AvailableComponentCatalogPackage[],
+    mode: 'add' | 'update',
+  ): Promise<boolean> => {
+    const completed = await run(async () => {
+      const stateBefore = useEditorStore.getState()
+      const pendingEntries = mode === 'add'
+        ? entries.filter((entry) =>
+            componentCatalogInstallStatus(
+              entry,
+              stateBefore.componentPackages[entry.packageId],
+            ) === 'available',
+          )
+        : entries
+      if (mode === 'add' && pendingEntries.length === 0) {
+        stateBefore.setStatus('所选组件均已加入工程')
+        return true
       }
-    }, '组件导入失败。请检查组件包内容是否完整。')
-  }, [componentPackageRequest, importPackageIntoStore, replacePackageInStore, run])
+      const updateEntry = pendingEntries[0]
+      if (
+        mode === 'update' &&
+        (!updateEntry || componentCatalogInstallStatus(
+          updateEntry,
+          stateBefore.componentPackages[updateEntry.packageId],
+        ) !== 'update-available')
+      ) {
+        throw new UserFacingError(
+          '组件更新已取消',
+          '工程内组件与目录状态已发生变化。',
+          '请刷新组件目录，重新审阅版本和哈希后再试。',
+        )
+      }
+
+      const importedPackages: ComponentPackageData[] = []
+      for (const entry of pendingEntries) {
+        const file = await desktopApi().readComponentCatalogPackage({
+          sourceId: entry.sourceId,
+          packageId: entry.packageId,
+          version: entry.version,
+        })
+        if (file.sha256 !== entry.sha256) {
+          throw new UserFacingError(
+            '组件目录已改变',
+            `组件“${entry.name}”读取到的包哈希与当前目录快照不一致。`,
+            '请刷新组件库并重新确认该版本。',
+          )
+        }
+        importedPackages.push(await importComponentPackageAsync(file.bytes, {
+          expectedId: entry.packageId,
+          expectedVersion: entry.version,
+          provenance: {
+            sha256: file.sha256,
+            importedAt: new Date().toISOString(),
+            sourceLabel: entry.sourceLabel,
+          },
+        }))
+      }
+      if (mode === 'update') {
+        replacePackageInStore(updateEntry!.packageId, importedPackages[0]!)
+        return true
+      }
+      const latestState = useEditorStore.getState()
+      for (const entry of pendingEntries) {
+        if (componentCatalogInstallStatus(
+          entry,
+          latestState.componentPackages[entry.packageId],
+        ) !== 'available') {
+          throw new UserFacingError(
+            '组件加入已取消',
+            '工程内组件状态在目录读取期间发生变化。',
+            '请返回组件库重新选择，避免覆盖刚刚完成的修改。',
+          )
+        }
+      }
+      importPackagesIntoStore(importedPackages)
+      setBatchOperationSummary({
+        title: '内置组件加入结果',
+        summary: [
+          `成功加入：${importedPackages.length}`,
+          '',
+          ...importedPackages.map((item) =>
+            `- ${item.manifest.name} (${item.manifest.id}) v${item.manifest.version} · ${item.provenance?.sourceLabel ?? '内置组件库'}`,
+          ),
+        ].join('\n'),
+      })
+      return true
+    }, mode === 'update'
+      ? '组件更新失败，工程内原版本已保留。'
+      : '目录组件嵌入失败，工程未改变。')
+    return completed === true
+  }, [importPackagesIntoStore, replacePackageInStore, run])
+
+  const requestCatalogPackageBatch = useCallback(async (
+    entries: AvailableComponentCatalogPackage[],
+  ): Promise<boolean> => {
+    const state = useEditorStore.getState()
+    const plan = planCatalogBatchJoin(entries, state.componentPackages)
+    const pendingEntries = plan.entries
+    if (pendingEntries.length === 0) {
+      state.setStatus('所选组件均已加入工程')
+      return true
+    }
+    if (plan.requiresTrustConfirmation) {
+      if (catalogPackageRequest) return false
+      return await new Promise<boolean>((resolve) => {
+        catalogPackageRequestResolverRef.current = resolve
+        setCatalogPackageRequest({ entries: pendingEntries, mode: 'add' })
+      })
+    }
+    return performCatalogPackageOperation(pendingEntries, 'add')
+  }, [catalogPackageRequest, performCatalogPackageOperation])
+
+  const requestCatalogPackageUpdate = useCallback((
+    entry: AvailableComponentCatalogPackage,
+  ) => {
+    setCatalogPackageRequest({ entries: [entry], mode: 'update' })
+  }, [])
+
+  const handleRefreshComponentCatalog = useCallback(() => {
+    void run(async () => {
+      setComponentCatalog(await desktopApi().loadComponentCatalog())
+    }, '组件目录刷新失败。')
+  }, [run])
 
   const buildHtml = useCallback(() => {
     const state = useEditorStore.getState()
@@ -485,7 +948,7 @@ export default function App() {
       })
       if (result) {
         state.setStatus(
-          `PPTX 已导出到 ${result.path}（文字、图形、图片和组件均为独立对象）`,
+          `PPTX 已导出到 ${result.path}（可编辑对象保持独立；需保真的内容按预检说明静态化）`,
         )
       }
     }, 'PPTX 导出失败。请减少大图片数量后重试。')
@@ -510,18 +973,63 @@ export default function App() {
   }, [run])
 
   const handleExport = useCallback((format: ExportFormat) => {
-    const diagnostics = collectProjectHealth(useEditorStore.getState().project)
-    const summary = summarizeProjectHealth(diagnostics)
-    if (!summary.canExport) {
-      setProjectHealthOpen(true)
-      setError(`工程检查发现 ${summary.error} 个错误。请先定位并修复，再导出成品。`)
-      return
-    }
-    if (format === 'single-html') handleExportHtml()
-    else if (format === 'web-package') handleExportWebPackage()
-    else if (format === 'pptx') handleExportPptx()
+    const state = useEditorStore.getState()
+    setExportPreflightReport(collectExportPreflight(
+      state.project,
+      format,
+      {
+        assetFiles: state.assetFiles,
+        components: state.componentPackages,
+      },
+    ))
+  }, [])
+
+  const continuePreflightExport = useCallback(() => {
+    const report = exportPreflightReport
+    if (!report?.summary.canExport) return
+    setExportPreflightReport(null)
+    if (report.target === 'single-html') handleExportHtml()
+    else if (report.target === 'web-package') handleExportWebPackage()
+    else if (report.target === 'pptx') handleExportPptx()
     else handleExportPdf()
-  }, [handleExportHtml, handleExportPdf, handleExportPptx, handleExportWebPackage, setError])
+  }, [
+    exportPreflightReport,
+    handleExportHtml,
+    handleExportPdf,
+    handleExportPptx,
+    handleExportWebPackage,
+  ])
+
+  const locatePreflightItem = useCallback((item: ExportPreflightItem) => {
+    const state = useEditorStore.getState()
+    const globalNode = item.nodeId
+      ? state.project.globalLayer.some(({ node }) => node.id === item.nodeId)
+      : false
+    state.setEditingScope(globalNode ? 'global' : 'scene')
+    if (item.sceneId) state.setActiveScene(item.sceneId)
+    if (!globalNode && item.stateId !== undefined) {
+      state.setActivePresentationState(item.stateId)
+    }
+    if (item.nodeId) state.selectNode(item.nodeId)
+    state.setActiveTab('properties')
+    state.setStatus(`已定位导出预检问题：${item.message}`)
+    setExportPreflightReport(null)
+  }, [])
+
+  const saveExportPreflightReport = useCallback(() => {
+    const report = exportPreflightReport
+    if (!report) return
+    void run(async () => {
+      const state = useEditorStore.getState()
+      const bytes = new TextEncoder().encode(`${JSON.stringify(report, null, 2)}\n`)
+      const result = await desktopApi().exportBinary({
+        suggestedName: `${state.project.title}-${report.target}-preflight.json`,
+        extension: 'json',
+        bytes,
+      })
+      if (result) state.setStatus(`导出预检报告已保存到 ${result.path}`)
+    }, '导出预检报告保存失败。请换一个可写目录后重试。')
+  }, [exportPreflightReport, run])
 
   const handleExportDiagnostics = useCallback(() => {
     void run(async () => {
@@ -563,6 +1071,19 @@ export default function App() {
       console.error('读取本地恢复状态失败', error)
       setRecoveryDecisionComplete(true)
       setError('无法读取本地恢复状态；请在编辑后及时手动保存。')
+    })
+    return () => { cancelled = true }
+  }, [setError])
+
+  useEffect(() => {
+    if (!window.desktopAPI) return
+    let cancelled = false
+    void window.desktopAPI.loadComponentCatalog().then((snapshot) => {
+      if (!cancelled) setComponentCatalog(snapshot)
+    }).catch((error) => {
+      if (cancelled) return
+      console.error('读取组件目录失败', error)
+      setError('本地组件目录读取失败；仍可手动导入 .h5component。')
     })
     return () => { cancelled = true }
   }, [setError])
@@ -671,7 +1192,6 @@ export default function App() {
         recentProjects={recentProjects}
         onOpenRecent={handleOpenRecent}
         onSave={(saveAs) => void handleSave(saveAs)}
-        onImportComponent={handleImportComponent}
         healthSummary={projectHealthSummary}
         onOpenHealth={() => setProjectHealthOpen(true)}
         onPreview={handlePreview}
@@ -703,9 +1223,15 @@ export default function App() {
           }
           onReplaceImage={() => void selectAndImportImage('replace')}
           onAddVideo={(x, y) => void selectAndImportVideo('add', { x, y })}
+          onImportImage={() => void selectAndImportImage('library')}
           onImportAudio={() => void selectAndImportAudio()}
           onImportVideo={() => void selectAndImportVideo('library')}
+          onImportExternalComponents={handleImportComponent}
           onReplaceComponent={handleReplaceComponent}
+          componentCatalog={componentCatalog}
+          onRefreshComponentCatalog={handleRefreshComponentCatalog}
+          onAddCatalogComponents={requestCatalogPackageBatch}
+          onUpdateCatalogComponent={requestCatalogPackageUpdate}
         />
       </div>
       <footer className="status-bar" aria-live="polite">
@@ -749,21 +1275,78 @@ export default function App() {
       <ConfirmDialog
         open={Boolean(componentPackageRequest)}
         title={componentPackageRequest?.mode === 'replace'
-          ? '替换可执行组件包'
-          : '导入可执行组件'}
+          ? '审阅组件包替换'
+          : '确认批量导入外部组件'}
         message={componentPackageRequest?.mode === 'replace'
-          ? '请选择同一组件 ID 的可信新包。替换后，场景与全局层中的全部实例会切换到新版本并保留当前属性；此操作可以撤销。'
-          : '组件包含可执行代码。请仅导入来自可信来源的组件包。组件在无 Node.js 权限的渲染环境中运行，但不提供完整代码沙箱。'}
+          ? (() => {
+              const current = componentPackages[componentPackageRequest.packageId]
+              const next = componentPackageRequest.packageData
+              return `组件：${next.manifest.name} (${next.manifest.id})\n当前版本：${current?.manifest.version ?? '未知'}\n新版本：${next.manifest.version}\n文件：${componentPackageRequest.sourceFileName}\nSHA-256：${next.provenance?.sha256 ?? '未登记'}\n\n确认后，场景与全局层中的全部实例会切换到该包并保留当前属性；此操作可以撤销。请只替换为已审阅的可信代码。`
+            })()
+          : componentPackageRequest?.mode === 'import'
+            ? `本次选择 ${componentPackageRequest.selectedCount} 个文件，已验证 ${componentPackageRequest.packages.length} 个可加入组件${
+                componentPackageRequest.issues.length > 0
+                  ? `，另有 ${componentPackageRequest.issues.length} 项将跳过`
+                  : ''
+              }。\n\n${componentPackageRequest.packages.map((item) => `• ${item.manifest.name} v${item.manifest.version}`).join('\n')}\n\n组件包含可执行代码。请仅导入可信来源；隔离运行不等于完整恶意代码沙箱。`
+            : ''}
         confirmLabel={componentPackageRequest?.mode === 'replace'
-          ? '选择新包替换'
-          : '选择组件包'}
+          ? '确认替换'
+          : componentPackageRequest?.mode === 'import'
+            ? `加入工程（${componentPackageRequest.packages.length}）`
+            : '加入工程'}
         onCancel={() => setComponentPackageRequest(null)}
         onConfirm={performComponentImport}
+      />
+      <ConfirmDialog
+        open={Boolean(catalogPackageRequest)}
+        title={catalogPackageRequest?.mode === 'update'
+          ? '审阅目录组件更新'
+          : '确认加入外部目录组件'}
+        message={catalogPackageRequest
+          ? catalogPackageRequest.mode === 'update'
+            ? (() => {
+                const entry = catalogPackageRequest.entries[0]!
+                return `组件：${entry.name} v${entry.version}\n来源：${entry.sourceLabel}\nSHA-256：${entry.sha256}\n质量：${entry.quality}\n发布阻断：${entry.releaseBlockers?.join('、') || '无'}\n\n更新会改变工程锁定的组件代码和全部实例，必须明确审阅。读取时仍会重新校验哈希。`
+              })()
+            : `本批包含 ${catalogPackageRequest.entries.length} 个来自未信任目录的可执行组件：\n${catalogPackageRequest.entries.map((entry) => `• ${entry.name} v${entry.version} · ${entry.sourceLabel}`).join('\n')}\n\n本次只确认这一批；编辑器会逐包重新校验 SHA-256，但这不等于恶意代码安全证明。`
+          : ''}
+        confirmLabel={catalogPackageRequest?.mode === 'update'
+          ? '确认更新'
+          : `确认加入（${catalogPackageRequest?.entries.length ?? 0}）`}
+        onCancel={() => {
+          setCatalogPackageRequest(null)
+          const resolve = catalogPackageRequestResolverRef.current
+          catalogPackageRequestResolverRef.current = null
+          resolve?.(false)
+        }}
+        onConfirm={() => {
+          const request = catalogPackageRequest
+          setCatalogPackageRequest(null)
+          if (!request) return
+          const resolve = catalogPackageRequestResolverRef.current
+          catalogPackageRequestResolverRef.current = null
+          void performCatalogPackageOperation(request.entries, request.mode)
+            .then((completed) => resolve?.(completed))
+        }}
       />
       <ProjectHealthPanel
         open={projectHealthOpen}
         onClose={() => setProjectHealthOpen(false)}
         onExportDiagnostics={handleExportDiagnostics}
+      />
+      <CopyableSummaryDialog
+        open={batchOperationSummary !== null}
+        title={batchOperationSummary?.title ?? '批次结果'}
+        summary={batchOperationSummary?.summary ?? ''}
+        onClose={() => setBatchOperationSummary(null)}
+      />
+      <ExportPreflightDialog
+        report={exportPreflightReport}
+        onCancel={() => setExportPreflightReport(null)}
+        onContinue={continuePreflightExport}
+        onLocate={locatePreflightItem}
+        onSaveReport={saveExportPreflightReport}
       />
       <ExportSizeWarningDialog
         open={largeHtmlByteLength !== null}

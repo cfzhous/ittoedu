@@ -205,8 +205,6 @@ export function ComponentPropertiesEditor({
   assets,
   onChange,
 }: ComponentPropertiesEditorProps) {
-  if (manifest.schemaVersion === 1) return null
-
   const effectiveProps = mergeComponentProps(manifest, node.props)
   const editorState = resolveComponentEditorState(manifest, effectiveProps)
   const discoveredProperties = resolveComponentEditorProperties(manifest, node.props)

@@ -1,5 +1,5 @@
 import type {
-  ComponentDefinition,
+  ComponentDefinitionV4,
   ExportPayload,
 } from '../shared/componentTypes'
 import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
@@ -14,7 +14,7 @@ declare global {
     __H5_LESSON_PLAYER_OPTIONS__?: PlayerAppOptions
     __H5_LESSON_BRIDGE_TOKEN__?: string
     CoursewareComponent?: {
-      define(definition: ComponentDefinition): void
+      define(definition: ComponentDefinitionV4): void
     }
   }
 }

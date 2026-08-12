@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <circle cx="360" cy="350" r="150" fill="none" stroke="#38bdf8" stroke-width="4" opacity=".8"/>
-  <rect x="760" y="170" width="430" height="250" rx="26" fill="#082f49" fill-opacity=".94" stroke="#7dd3fc"/>
-  <foreignObject x="788" y="198" width="374" height="194"><div xmlns="http://www.w3.org/1999/xhtml" style="color:#e0f2fe;font:700 22px/1.55 Microsoft YaHei,sans-serif">点击左侧发光卡片，直接触发写在 scene.runtime 中的一次性互动。</div></foreignObject>
-</svg>

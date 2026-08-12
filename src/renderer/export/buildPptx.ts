@@ -19,16 +19,17 @@ import {
   type PptxSlide,
 } from './pptxShared'
 import {
+  addPptxFormulaNode,
   addPptxShapeNode,
   addPptxTextNode,
 } from './pptxTextAndShape'
 import {
-  assertV3ExportDependencies,
+  assertExportPayloadDependencies,
   runtimeEntriesForScene,
   runtimeSnapshotKey,
   visibleGlobalLayerItemsForScene,
   type RuntimeStaticExportEntry,
-} from './v3ExportSupport'
+} from './exportPayloadSupport'
 
 export interface BuildPptxOptions {
   /** Test/host injection point. Production builds render snapshots on demand. */
@@ -164,7 +165,7 @@ function addPptxWarnings(slide: PptxSlide, warnings: string[]): void {
     y: WIDE_SLIDE_HEIGHT - height - 0.08,
     w: WIDE_SLIDE_WIDTH - 0.3,
     h: height,
-    objectName: 'V3 静态导出警告',
+    objectName: '静态导出警告',
     margin: 5,
     fontFace: 'Microsoft YaHei',
     fontSize: 10,
@@ -183,7 +184,7 @@ export async function buildPptx(
   assetFiles: Record<string, Uint8Array>,
   options: BuildPptxOptions = {},
 ): Promise<Uint8Array> {
-  assertV3ExportDependencies(payload)
+  assertExportPayloadDependencies(payload)
   const project = payload.project
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
@@ -289,6 +290,8 @@ export async function buildPptx(
     if (!node.visible) return
     if (node.type === 'text') {
       addPptxTextNode(slide, node, scale)
+    } else if (node.type === 'formula') {
+      addPptxFormulaNode(slide, node, scale)
     } else if (node.type === 'shape') {
       addPptxShapeNode(slide, node, scale)
     } else if (node.type === 'image') {

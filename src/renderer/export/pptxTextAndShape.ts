@@ -1,10 +1,15 @@
 import type PptxGenJS from 'pptxgenjs'
 import {
   isStrokeOnlyShapeType,
+  type FormulaNode,
   type ShapeNode,
   type TextNode,
 } from '../../shared/projectTypes'
-import { renderTextNodeCanvas } from '../../shared/textLayout'
+import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
+import {
+  renderTextNodeCanvas,
+  textNodeHasEmphasis,
+} from '../../shared/textLayout'
 import {
   clamp,
   PIXELS_TO_POINTS,
@@ -100,10 +105,15 @@ export function addPptxTextNode(
   node: TextNode,
   scale: CanvasScale,
 ): void {
-  if (node.style.writingMode === 'vertical-lr') {
+  if (
+    node.style.writingMode === 'vertical-lr' ||
+    textNodeHasEmphasis(node)
+  ) {
     // OOXML's East Asian vertical text flow is right-to-left. Preserve the
     // authored left-to-right column order as a deterministic image instead of
-    // silently reversing it in PowerPoint.
+    // silently reversing it in PowerPoint. OOXML/PptxGenJS also has no run-level
+    // East Asian emphasis-mark primitive, so only text nodes that visibly use
+    // emphasis are rasterized; ordinary text remains editable.
     const rendered = renderTextNodeCanvas(node, node.width)
     slide.addImage({
       data: rendered.canvas.toDataURL('image/png'),
@@ -165,6 +175,27 @@ export function addPptxTextNode(
     fit: 'none',
     wrap: true,
     isTextBox: true,
+  })
+}
+
+/**
+ * PPTX has no dependable editable mapping for the recursive V8 formula AST.
+ * Export one transparent PNG so its authored geometry remains deterministic;
+ * Formula ID and accessible text remain available as object metadata.
+ */
+export function addPptxFormulaNode(
+  slide: PptxSlide,
+  node: FormulaNode,
+  scale: CanvasScale,
+): void {
+  const rendered = renderFormulaNodeCanvas(node, node.width, node.height, 2)
+  slide.addImage({
+    data: rendered.canvas.toDataURL('image/png'),
+    ...pptxNodePosition(node, scale),
+    rotate: pptxRotation(node.rotation),
+    transparency: pptxTransparency(node.opacity),
+    objectName: `${pptxObjectName(node)} · 静态公式`,
+    altText: `${node.accessibleText}（公式 ID：${node.formulaId}）`,
   })
 }
 

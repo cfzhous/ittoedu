@@ -13,9 +13,13 @@ import {
   openRecentProjectFile,
   saveProjectFile,
   selectAudioFile,
+  selectAudioFiles,
   selectComponentFile,
+  selectComponentFiles,
   selectImageFile,
+  selectImageFiles,
   selectVideoFile,
+  selectVideoFiles,
   writeHtmlFile,
   writeBinaryExportFile,
   writeWebPackageFile,
@@ -31,6 +35,7 @@ import {
 } from './projectPersistence'
 import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
+import { componentCatalogManager } from './componentCatalogManager'
 
 interface IpcSuccess<T> {
   ok: true
@@ -100,7 +105,7 @@ const htmlSchema = z
 
 const binaryExportSchema = z.object({
   suggestedName: z.string().trim().min(1).max(160),
-  extension: z.literal('pptx'),
+  extension: z.enum(['pptx', 'json']),
   bytes: bytesSchema.refine((bytes) => bytes.byteLength <= 512 * 1024 * 1024, '导出文件过大'),
 }).strict()
 
@@ -126,6 +131,17 @@ const diagnosticSchema = z.object({
   source: z.enum(['renderer', 'preview', 'component']),
   message: z.string().min(1).max(8_000),
   stack: z.string().max(24_000).optional(),
+}).strict()
+
+const componentCatalogSourceTrustSchema = z.object({
+  sourceId: z.string().min(1).max(200),
+  trust: z.enum(['trusted', 'prompt']),
+}).strict()
+
+const componentCatalogPackageSchema = z.object({
+  sourceId: z.string().min(1).max(200),
+  packageId: z.string().min(1).max(200),
+  version: z.string().min(1).max(100),
 }).strict()
 
 function requireNoArguments(args: unknown[]): void {
@@ -314,6 +330,21 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
+    IPC_CHANNELS.selectImages,
+    context,
+    {
+      code: 'IMAGE_BATCH_SELECT_FAILED',
+      title: '图片批量导入失败',
+      message: '无法读取所选图片。',
+      suggestion: '请确认图片格式正确并重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return selectImageFiles(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
     IPC_CHANNELS.selectAudio,
     context,
     {
@@ -325,6 +356,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       requireNoArguments(args)
       return selectAudioFile(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.selectAudios,
+    context,
+    {
+      code: 'AUDIO_BATCH_SELECT_FAILED',
+      title: '声音批量导入失败',
+      message: '无法读取所选声音。',
+      suggestion: '请确认声音格式正确并重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return selectAudioFiles(requireWindow(context))
     },
   )
 
@@ -344,6 +390,21 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
+    IPC_CHANNELS.selectVideos,
+    context,
+    {
+      code: 'VIDEO_BATCH_SELECT_FAILED',
+      title: '视频批量导入失败',
+      message: '无法读取所选视频。',
+      suggestion: '请确认视频格式正确并重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return selectVideoFiles(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
     IPC_CHANNELS.selectComponent,
     context,
     {
@@ -355,6 +416,85 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       requireNoArguments(args)
       return selectComponentFile(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.selectComponents,
+    context,
+    {
+      code: 'COMPONENT_BATCH_SELECT_FAILED',
+      title: '组件批量导入失败',
+      message: '无法读取所选组件包。',
+      suggestion: '请确认 .h5component 文件有效并重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return selectComponentFiles(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.loadComponentCatalog,
+    context,
+    {
+      code: 'COMPONENT_CATALOG_LOAD_FAILED',
+      title: '组件目录读取失败',
+      message: '无法扫描已配置的组件目录。',
+      suggestion: '请检查 catalog.json 和目录权限后重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return componentCatalogManager.load()
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.selectComponentCatalogSource,
+    context,
+    {
+      code: 'COMPONENT_CATALOG_SELECT_FAILED',
+      title: '组件目录导入失败',
+      message: '无法使用所选组件目录。',
+      suggestion: '请确认目录根部包含有效的 catalog.json。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return componentCatalogManager.select(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.setComponentCatalogSourceTrust,
+    context,
+    {
+      code: 'COMPONENT_CATALOG_TRUST_FAILED',
+      title: '组件目录信任设置失败',
+      message: '无法保存组件目录的信任级别。',
+      suggestion: '请重新选择组件目录后再试。',
+    },
+    async (_event, args) => {
+      const input = componentCatalogSourceTrustSchema.parse(requireSingleArgument(args))
+      return componentCatalogManager.setTrust(input.sourceId, input.trust)
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.readComponentCatalogPackage,
+    context,
+    {
+      code: 'COMPONENT_CATALOG_PACKAGE_READ_FAILED',
+      title: '组件包读取失败',
+      message: '目录中的组件包无法读取或哈希已改变。',
+      suggestion: '请刷新目录，并确认包文件与 catalog.json 一致。',
+    },
+    async (_event, args) => {
+      const input = componentCatalogPackageSchema.parse(requireSingleArgument(args))
+      return componentCatalogManager.readPackage(
+        input.sourceId,
+        input.packageId,
+        input.version,
+      )
     },
   )
 

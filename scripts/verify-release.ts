@@ -13,6 +13,7 @@ import { openProjectArchive } from '../src/renderer/project/projectArchive'
 import { APP_VERSION } from '../src/shared/constants'
 import type { ProjectDocument } from '../src/shared/projectTypes'
 import { createTeacherControllerLayout } from '../src/shared/teacherControllerLayout'
+import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
 import {
   assertExpectedAsarPackage,
   assertExpectedWindowsVersion,
@@ -80,9 +81,9 @@ const renderHostBenchmarkTable = path.join(
   renderHostBenchmarkDirectory,
   'render-host-editable-table.h5component',
 )
-const renderHostBenchmarkLegacy = path.join(
+const renderHostBenchmarkPhaserMeter = path.join(
   renderHostBenchmarkDirectory,
-  'render-host-legacy-phaser.h5component',
+  'render-host-phaser-meter.h5component',
 )
 const renderHostBenchmarkHtml = path.join(
   renderHostBenchmarkDirectory,
@@ -341,6 +342,7 @@ async function launchPackagedEditor(
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
       VITE_DEV_SERVER_URL: '',
+      [BACKGROUND_E2E_ENV]: '1',
     },
     timeout: 45_000,
   })
@@ -392,6 +394,7 @@ async function verifyPortableStartup(): Promise<void> {
         ...process.env,
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
         VITE_DEV_SERVER_URL: '',
+        [BACKGROUND_E2E_ENV]: '1',
       },
       stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
@@ -806,7 +809,7 @@ async function main(): Promise<void> {
     path.join(projectRoot, 'docs', 'USER_GUIDE.md'),
     path.join(projectRoot, 'docs', 'COMPONENT_AUTHORING.md'),
     path.join(projectRoot, 'docs', 'AI_COURSEWARE_AUTHORING.md'),
-    path.join(projectRoot, 'docs', 'RUNTIME_V3_AUTHORING.md'),
+    path.join(projectRoot, 'docs', 'RUNTIME_AUTHORING.md'),
     path.join(renderHostBenchmarkDirectory, 'README.md'),
     path.join(renderHostBenchmarkDirectory, 'THIRD_PARTY_NOTICES.md'),
     path.join(projectRoot, 'package-lock.json'),
@@ -839,16 +842,16 @@ async function main(): Promise<void> {
     '示例工程与组件包均通过正式解析器校验',
   )
 
-  const [benchmarkBytes, tableBytes, legacyBytes, benchmarkHtml] =
+  const [benchmarkBytes, tableBytes, phaserMeterBytes, benchmarkHtml] =
     await Promise.all([
       fs.readFile(renderHostBenchmarkProject),
       fs.readFile(renderHostBenchmarkTable),
-      fs.readFile(renderHostBenchmarkLegacy),
+      fs.readFile(renderHostBenchmarkPhaserMeter),
       fs.readFile(renderHostBenchmarkHtml, 'utf8'),
     ])
   const benchmarkProject = openProjectArchive(Uint8Array.from(benchmarkBytes))
   const benchmarkTable = importComponentPackage(Uint8Array.from(tableBytes))
-  const benchmarkLegacy = importComponentPackage(Uint8Array.from(legacyBytes))
+  const benchmarkPhaserMeter = importComponentPackage(Uint8Array.from(phaserMeterBytes))
   assert(
     benchmarkProject.project.schemaVersion === 8 &&
       benchmarkProject.project.scenes.length === 5,
@@ -867,8 +870,9 @@ async function main(): Promise<void> {
     '渲染宿主基准缺少 V4 DOM 组件',
   )
   assert(
-    benchmarkLegacy.manifest.schemaVersion === 3,
-    '渲染宿主基准缺少 V3 Phaser 兼容组件',
+    benchmarkPhaserMeter.manifest.schemaVersion === 4 &&
+      benchmarkPhaserMeter.manifest.renderMode === 'phaser',
+    '渲染宿主基准缺少 V4 Phaser 组件',
   )
   assert(
     benchmarkHtml.includes('connect-src data: blob:') &&
@@ -878,7 +882,7 @@ async function main(): Promise<void> {
   )
   pass(
     '渲染宿主基准',
-    'Project V8、API 2 Phaser/Three、V4 DOM 与待移除 V3 兼容组件产物均通过正式解析器',
+    'Project V8、Runtime API 2 Phaser/Three 与 Component API 4 DOM/Phaser 产物均通过正式解析器',
   )
 
   await verifyPortableStartup()
