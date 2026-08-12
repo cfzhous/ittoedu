@@ -9,8 +9,8 @@ async function main(): Promise<void> {
     : path.resolve(process.cwd(), '..', 'courseware-components')
 
   const catalog = await scanComponentCatalogDirectory(catalogRoot, 'prompt')
-  if (catalog.packages.length !== 9) {
-    throw new Error(`首批目录必须精确包含 9 个组件，实际为 ${catalog.packages.length}`)
+  if (catalog.packages.length !== 4) {
+    throw new Error(`当前目录必须精确包含 4 个组件，实际为 ${catalog.packages.length}`)
   }
   if (catalog.issues.length > 0) {
     throw new Error(`组件目录完整性问题：${catalog.issues.map((issue) => issue.message).join('\n')}`)
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('已验证外部目录中 9 个 experimental Component API 4 包、哈希、作用域与 22 px 字号下限')
+  console.log('已验证外部目录中 4 个 experimental Component API 4 包、哈希、作用域与 22 px 字号下限')
 }
 
 main().catch((error: unknown) => {

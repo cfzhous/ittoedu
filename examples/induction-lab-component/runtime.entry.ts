@@ -206,7 +206,7 @@ function loadImage(image: HTMLImageElement, source: string): Promise<void> {
 }
 
 globalThis.CoursewareComponent.define({
-  id: 'com.alepha.physics.induction-lab',
+  id: 'com.ittoedu.physics.induction-lab',
   runtimeApiVersion: 4,
 
   create(ctx) {

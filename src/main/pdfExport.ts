@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, type BrowserWindow as BrowserWindowType } from 'electron'
+import { APP_PDF_TEMP_FILE_PREFIX } from '../shared/constants'
 import { writeBinaryExportFile } from './fileDialogs'
 
 interface PrintableDocumentState {
@@ -56,7 +57,7 @@ export async function exportPdfFromHtml(
 ): Promise<{ path: string } | null> {
   const temporaryPath = path.join(
     app.getPath('temp'),
-    `phaser-courseware-pdf-${crypto.randomUUID()}.html`,
+    `${APP_PDF_TEMP_FILE_PREFIX}${crypto.randomUUID()}.html`,
   )
   let window: BrowserWindow | null = null
   try {

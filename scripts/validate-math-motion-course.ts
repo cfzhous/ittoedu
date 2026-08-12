@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   const runtimeSource = strFromU8(component.files[manifest.entry]!)
   results.push(check(
     'component.protocol',
-    manifest.id === 'com.alepha.math.motion-function-lab'
+    manifest.id === 'com.ittoedu.math.motion-function-lab'
       && manifest.schemaVersion === 4
       && manifest.runtimeApiVersion === 4
       && manifest.renderMode === 'dom'

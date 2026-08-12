@@ -199,6 +199,7 @@ describe('工程健康检查', () => {
       name: 'Widget',
       manifestPath: 'components/widget/manifest.json',
       runtimePath: 'components/widget/runtime.js',
+      contentSha256: '0'.repeat(64),
     }
     project.componentPackages['com.example.unused@1.0.0'] = {
       packageId: 'com.example.unused',
@@ -207,6 +208,7 @@ describe('工程健康检查', () => {
       manifestPath: 'components/unused/manifest.json',
       runtimePath: 'components/unused/runtime.js',
       thumbnailPath: 'components/unused/thumbnail.png',
+      contentSha256: '0'.repeat(64),
     }
     const controller = project.globalLayer.find(
       (item) => item.node.type === 'teacher-controller',

@@ -1,0 +1,4 @@
+/** Locale-independent UTF-16 code-unit ordering for deterministic artifacts. */
+export function compareStableStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}

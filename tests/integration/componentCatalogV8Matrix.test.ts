@@ -23,6 +23,42 @@ const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
 const catalogAvailable = existsSync(path.join(componentCatalogRoot, 'catalog.json'))
 const catalogDescribe = catalogAvailable ? describe : describe.skip
 const importedAt = '2026-08-11T00:00:00.000Z'
+const expectedPackageCount = 4
+
+const expectedCanvasTextKeys: Readonly<Record<string, readonly string[]>> = {
+  'com.ittoedu.language.reading-annotation': [
+    'content.legendEmphasis',
+    'content.legendLiaison',
+    'content.legendPause',
+    'content.markup',
+    'content.pauseSymbol',
+    'content.title',
+  ],
+  'com.ittoedu.language.pinyin-annotation': [
+    'content.hideAllLabel',
+    'content.pairs',
+    'content.showAllLabel',
+    'content.title',
+  ],
+  'com.ittoedu.visual.text-container': [
+    'content.body',
+    'content.eyebrow',
+    'content.steps',
+    'content.title',
+  ],
+  'com.ittoedu.visual.image-frame': ['content.caption'],
+}
+
+const expectedVisualStyles: Readonly<Record<string, readonly string[]>> = {
+  'com.ittoedu.visual.text-container': [
+    'transparent-glass',
+    'frosted-glass',
+    'sticky-note',
+    'torn-paper',
+    'file-folder',
+  ],
+  'com.ittoedu.visual.image-frame': ['brush', 'sticker'],
+}
 
 function setPath(target: Record<string, unknown>, dottedPath: string, value: unknown): void {
   const parts = dottedPath.split('.')
@@ -68,8 +104,8 @@ function activeExternalNodes(): ExternalComponentNode[] {
 
 async function loadCatalogPackages(): Promise<ImportedComponentPackage[]> {
   const catalog = await scanComponentCatalogDirectory(componentCatalogRoot, 'prompt')
-  if (catalog.packages.length !== 9 || catalog.issues.length !== 0) {
-    throw new Error(`九组件目录不完整：${catalog.packages.length} 个包，${catalog.issues.length} 项问题`)
+  if (catalog.packages.length !== expectedPackageCount || catalog.issues.length !== 0) {
+    throw new Error(`四组件目录不完整：${catalog.packages.length} 个包，${catalog.issues.length} 项问题`)
   }
   return Promise.all(catalog.packages.map(async (entry) => {
     const file = await readCatalogComponentPackage(catalog, entry.packageId, entry.version)
@@ -85,7 +121,7 @@ async function loadCatalogPackages(): Promise<ImportedComponentPackage[]> {
   }))
 }
 
-catalogDescribe('九组件 Project V8 编辑、归档与生命周期矩阵', () => {
+catalogDescribe('四组件 Project V8 编辑、归档与生命周期矩阵', () => {
   let packages: ImportedComponentPackage[] = []
   let originalDecode: typeof HTMLImageElement.prototype.decode | undefined
 
@@ -146,8 +182,8 @@ catalogDescribe('九组件 Project V8 编辑、归档与生命周期矩阵', () 
       useEditorStore.getState().undo()
     }
 
-    expect(activeExternalNodes()).toHaveLength(9)
-    useEditorStore.getState().addPresentationState('九组件状态覆盖')
+    expect(activeExternalNodes()).toHaveLength(expectedPackageCount)
+    useEditorStore.getState().addPresentationState('四组件状态覆盖')
     const stateId = useEditorStore.getState().activePresentationStateId
     expect(stateId).toBeTruthy()
     for (const [index, component] of packages.entries()) {
@@ -179,7 +215,7 @@ catalogDescribe('九组件 Project V8 编辑、归档与生命周期矩阵', () 
     }
   })
 
-  it('保存重开后保留九个精确包、来源元数据、实例与状态覆盖', () => {
+  it('保存重开后保留四个精确包、来源元数据、实例与状态覆盖', () => {
     const state = useEditorStore.getState()
     const archive = createProjectArchive({
       project: state.project,
@@ -192,13 +228,14 @@ catalogDescribe('九组件 Project V8 编辑、归档与生命周期矩阵', () 
       reopened.componentFiles,
     )
 
-    expect(Object.keys(reopened.project.componentPackages)).toHaveLength(9)
-    expect(Object.keys(restoredPackages)).toHaveLength(9)
+    expect(Object.keys(reopened.project.componentPackages)).toHaveLength(expectedPackageCount)
+    expect(Object.keys(restoredPackages)).toHaveLength(expectedPackageCount)
     for (const component of packages) {
       const metadata = reopened.project.componentPackages[component.manifest.id]
       expect(metadata).toMatchObject({
         packageId: component.manifest.id,
         version: component.manifest.version,
+        contentSha256: component.contentSha256,
         sha256: component.provenance!.sha256,
         importedAt,
         sourceLabel: component.provenance!.sourceLabel,
@@ -214,10 +251,10 @@ catalogDescribe('九组件 Project V8 编辑、归档与生命周期矩阵', () 
       reopened.assetFiles,
       restoredPackages,
     )
-    expect(activeExternalNodes()).toHaveLength(9)
+    expect(activeExternalNodes()).toHaveLength(expectedPackageCount)
   })
 
-  it('九个真实 runtime 完成创建、更新、显隐、暂停、捕获和幂等销毁', async () => {
+  it('四个真实 runtime 完成创建、更新、显隐、暂停、捕获和幂等销毁，所有可见文字目标均已登记', async () => {
     const failures: Array<{ packageId: string; error: unknown }> = []
     for (const [index, component] of packages.entries()) {
       const captureTasks: Promise<unknown>[] = []
@@ -253,12 +290,26 @@ catalogDescribe('九组件 Project V8 编辑、归档与生命周期矩阵', () 
         }
         const lifecycle = definition.create(context)
         expect(root.childElementCount, component.manifest.id).toBeGreaterThan(0)
+        const canvasTextKeys = [...root.querySelectorAll<HTMLElement>(
+          '[data-courseware-edit-key]',
+        )].map((element) => element.dataset.coursewareEditKey!).sort()
+        expect(canvasTextKeys, component.manifest.id).toEqual(
+          [...(expectedCanvasTextKeys[component.manifest.id] ?? [])].sort(),
+        )
         lifecycle.setMode?.('edit')
         lifecycle.resize?.(
           component.manifest.defaultSize.width + 20,
           component.manifest.defaultSize.height + 10,
         )
         lifecycle.updateProps?.(structuredClone(component.manifest.defaultProps))
+        const stage = root.querySelector<HTMLElement>('.stage')
+        for (const visualStyle of expectedVisualStyles[component.manifest.id] ?? []) {
+          const props = structuredClone(component.manifest.defaultProps)
+          Reflect.set(props, 'visualStyle', visualStyle)
+          lifecycle.updateProps?.(props)
+          expect(stage?.dataset.style, `${component.manifest.id}:${visualStyle}`)
+            .toBe(visualStyle)
+        }
         lifecycle.setVisible?.(false)
         lifecycle.suspend?.()
         lifecycle.setVisible?.(true)

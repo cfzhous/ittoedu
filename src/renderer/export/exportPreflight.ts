@@ -19,6 +19,8 @@ import {
 import { visibleGlobalLayerItemsForScene } from './exportPayloadSupport'
 import type { ExportPreflightCode } from '../../shared/diagnosticCodes'
 import { collectUnusedProjectAssetIds } from '../../shared/assetReferences'
+import { componentContentSha256 } from '../../shared/componentContentIntegrity'
+import { compareStableStrings } from '../../shared/stableOrder'
 
 export type ExportPreflightTarget =
   | 'single-html'
@@ -243,10 +245,15 @@ function collectNodeItems(
     try {
       const layout = analyzeFormulaNodeLayout(node)
       if (layout.overflowsWidth || layout.overflowsHeight) {
+        const estimated = layout.measurementMode === 'deterministic-fallback'
         add({
-          severity: 'error',
-          code: 'formula-content-overflow',
-          message: `${label}的公式超出节点可用区域，导出时会被裁切；请扩大节点或减小字号。`,
+          severity: estimated ? 'warning' : 'error',
+          code: estimated
+            ? 'formula-content-overflow-estimated'
+            : 'formula-content-overflow',
+          message: estimated
+            ? `${label}的公式在 Node 确定性近似测量中可能超出节点区域；请用真实导出或编辑器画布确认。`
+            : `${label}的公式超出节点可用区域，导出时会被裁切；请扩大节点或减小字号。`,
           sceneId: context.sceneId,
           ...(context.stateId ? { stateId: context.stateId } : {}),
           nodeId: node.id,
@@ -361,10 +368,15 @@ function collectNodeItems(
       layout.fontSize <= 8 &&
       (layout.overflowsWidth || layout.overflowsHeight)
     if (clipsText || shrinkHitFloor) {
+      const estimated = layout.measurementMode === 'deterministic-fallback'
       add({
-        severity: 'error',
-        code: 'text-content-overflow',
-        message: `${label}的文字超出节点可用区域，当前“${node.style.overflow === 'fixed' ? '裁切' : '缩小'}”策略仍无法完整呈现。`,
+        severity: estimated ? 'warning' : 'error',
+        code: estimated
+          ? 'text-content-overflow-estimated'
+          : 'text-content-overflow',
+        message: estimated
+          ? `${label}的文字在 Node 确定性近似测量中可能超出节点区域；请用真实导出或编辑器画布确认。`
+          : `${label}的文字超出节点可用区域，当前“${node.style.overflow === 'fixed' ? '裁切' : '缩小'}”策略仍无法完整呈现。`,
         sceneId: context.sceneId,
         ...(context.stateId ? { stateId: context.stateId } : {}),
         nodeId: node.id,
@@ -464,16 +476,14 @@ export function collectExportPreflight(
       })
       continue
     }
-    if (
-      embedded.sha256 &&
-      component.provenance?.sha256 &&
-      embedded.sha256 !== component.provenance.sha256
-    ) {
+    const actualContentSha256 = component.contentSha256 ??
+      componentContentSha256(component.files)
+    if (embedded.contentSha256 !== actualContentSha256) {
       add({
         severity: 'error',
         code: 'component-hash-mismatch',
-        message: `组件包“${componentKey(embedded.packageId, embedded.version)}”的工程锁定哈希与当前执行内容不一致。`,
-        path: ['componentPackages', packageKey, 'sha256'],
+        message: `组件包“${componentKey(embedded.packageId, embedded.version)}”的工程锁定内容哈希与当前执行内容不一致。`,
+        path: ['componentPackages', packageKey, 'contentSha256'],
       })
     }
     const networkFinding = inspectSourceNetworkUse(component.runtimeSource)
@@ -693,8 +703,8 @@ export function collectExportPreflight(
   const items = [...itemMap.values()].sort((left, right) => {
     const severityOrder = { error: 0, warning: 1, info: 2 }
     return severityOrder[left.severity] - severityOrder[right.severity] ||
-      left.code.localeCompare(right.code) ||
-      (left.sceneId ?? '').localeCompare(right.sceneId ?? '')
+      compareStableStrings(left.code, right.code) ||
+      compareStableStrings(left.sceneId ?? '', right.sceneId ?? '')
   })
   return {
     reportVersion: 1,

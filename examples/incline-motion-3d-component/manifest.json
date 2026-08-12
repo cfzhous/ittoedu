@@ -5,7 +5,7 @@
   "supportedScopes": [
     "scene"
   ],
-  "id": "com.alepha.physics.incline-motion-3d",
+  "id": "com.ittoedu.physics.incline-motion-3d",
   "name": "3D 斜面运动实验",
   "version": "1.0.0",
   "description": "调节斜面倾角与摩擦系数，观察滑块运动并记录两组对照数据",

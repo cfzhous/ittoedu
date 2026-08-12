@@ -63,6 +63,7 @@ function PropertyField({
       <label className="property-row property-row--checkbox" htmlFor={id}>
         <input
           id={id}
+          aria-label={field.label}
           type="checkbox"
           checked={value === true}
           onChange={(event) => update(event.currentTarget.checked)}
@@ -79,6 +80,7 @@ function PropertyField({
       control = (
         <input
           id={id}
+          aria-label={field.label}
           type="text"
           value={stringValue(value)}
           placeholder={field.placeholder}
@@ -92,6 +94,7 @@ function PropertyField({
       control = (
         <textarea
           id={id}
+          aria-label={field.label}
           value={stringValue(value)}
           placeholder={field.placeholder}
           maxLength={field.maxLength}
@@ -105,6 +108,7 @@ function PropertyField({
         <span className="component-property-number">
           <input
             id={id}
+            aria-label={field.label}
             type="number"
             value={typeof value === 'number' && Number.isFinite(value) ? value : ''}
             min={field.min}
@@ -124,6 +128,7 @@ function PropertyField({
       control = (
         <input
           id={id}
+          aria-label={field.label}
           type="color"
           value={/^#[0-9a-f]{6}$/i.test(stringValue(value)) ? stringValue(value) : '#000000'}
           required={field.required}
@@ -135,6 +140,7 @@ function PropertyField({
       control = (
         <select
           id={id}
+          aria-label={field.label}
           value={stringValue(value)}
           required={field.required}
           onChange={(event) => update(event.currentTarget.value)}
@@ -153,6 +159,7 @@ function PropertyField({
       control = (
         <select
           id={id}
+          aria-label={field.label}
           value={stringValue(value)}
           required={field.required}
           onChange={(event) => update(event.currentTarget.value || undefined)}

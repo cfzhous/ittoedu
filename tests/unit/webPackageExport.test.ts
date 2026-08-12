@@ -111,6 +111,7 @@ const project: ProjectDocument = {
       name: componentManifest.name,
       manifestPath: '../../manifest.json',
       runtimePath: '../../runtime.js',
+      contentSha256: '0'.repeat(64),
     },
   },
   globalLayer: [],

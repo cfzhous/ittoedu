@@ -66,6 +66,7 @@ import {
   evaluateComponentPackageDeletion,
   planComponentPackageReplacement,
 } from '../../shared/componentPackageLifecycle'
+import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
   CANVAS_HEIGHT,
@@ -1184,6 +1185,7 @@ function componentMeta(
     name: data.manifest.name,
     manifestPath: `${base}/manifest.json`,
     runtimePath: `${base}/${data.manifest.entry}`,
+    contentSha256: data.contentSha256 ?? componentContentSha256(data.files),
     thumbnailPath: data.manifest.thumbnail
       ? `${base}/${data.manifest.thumbnail}`
       : undefined,
@@ -3296,11 +3298,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       )
       const sourceWithoutProvenance = { ...source }
       delete sourceWithoutProvenance.provenance
+      const authoredFiles = componentFilesWithAuthoredCode(
+        source,
+        manifest,
+        runtimeSource,
+      )
       const packageData: ComponentPackageData = {
         ...sourceWithoutProvenance,
         manifest,
         runtimeSource,
-        files: componentFilesWithAuthoredCode(source, manifest, runtimeSource),
+        files: authoredFiles,
+        contentSha256: componentContentSha256(authoredFiles),
       }
       validateEditableComponentPackage(
         packageData,
@@ -3370,15 +3378,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
       }
       const runtimeSource = patch.runtimeSource ?? currentPackage.runtimeSource
+      const authoredFiles = componentFilesWithAuthoredCode(
+        currentPackage,
+        manifest,
+        runtimeSource,
+      )
       const nextPackage: ComponentPackageData = {
         ...currentPackage,
         manifest,
         runtimeSource,
-        files: componentFilesWithAuthoredCode(
-          currentPackage,
-          manifest,
-          runtimeSource,
-        ),
+        files: authoredFiles,
+        contentSha256: componentContentSha256(authoredFiles),
       }
       validateEditableComponentPackage(nextPackage, state.project)
       commit((draft) => {

@@ -15,6 +15,7 @@
 | Component API 4 | [互动组件开发指南](COMPONENT_AUTHORING.md) |
 | 单 HTML / 网页包发布输入 | [PublishedLesson V1](PUBLISHED_LESSON_V1.md) |
 | 机器发现当前契约 | [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) |
+| 无界面自检完整 Project V8 | `npm run --silent validate:project -- <file.h5lesson>` |
 
 当前主干只接受 Project V8、Runtime API 2 与 Component API 4。新的 Project V8 实现 Skill 尚未完成，因此 AI 可以完成策划和 `implementation-ready` 交接，但必须暂停在工程生成门禁；归档的 V7 Skill 不能用于当前主干。
 
@@ -22,10 +23,11 @@
 
 | 文档 | 性质 |
 |---|---|
-| [AI-native 编辑器基建验证记录（2026-08-12）](reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md) | 最新自动化基线：123 文件 / 777 项 Vitest、隐藏 E2E 27/27；结论为 `engineering candidate` |
-| [软件本体验收证据报告（2026-08-11）](reviews/SOFTWARE_CORE_VERIFICATION_20260811.md) | S6 历史证据快照；数字不得替代 2026-08-12 基线 |
+| [AI-native 编辑器基建验证记录（2026-08-12）](reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md) | 身份断代前的 P0–P4 基线；其数字只用于历史溯源 |
 | [R0 公式作者编辑技术决策](reviews/FORMULA_AUTHORING_R0_DECISION_20260811.md) | 当前公式输入路线的有效决策记录 |
 | [声明式课程状态与导航守卫 RFC](reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md) | 待人类批准的提案；不是当前 Project V8 能力 |
+| [产品身份断代与 Headless 自检验证记录](reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md) | 2026-08-12 整体基线：ittoedu 身份、能力门禁、Project V8 自检、127/799、隐藏 E2E 27/27 与制品冒烟 16/16 |
+| [组件库收敛验证记录](reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md) | 当前组件事实：两项语文组件 + 两项通用视觉容器，画布文字与 2/2 隐藏矩阵 |
 
 ## 历史与失败证据
 

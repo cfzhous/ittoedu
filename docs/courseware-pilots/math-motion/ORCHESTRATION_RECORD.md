@@ -139,7 +139,7 @@ acceptanceEvidence:
 
 ## 7. 核心样片门禁与扩展条件
 
-课程专用组件 `com.alepha.math.motion-function-lab` 先以 `linked-graph` 模式和单场景 `linked_explore → linked_proved` 样片接受视觉门禁；通过后才获准扩展其余六幕。该门禁已经完成，随后实施七幕整课。
+课程专用组件 `com.ittoedu.math.motion-function-lab` 已按当前身份重新构建；原视觉门禁结论不因身份变化而改变。它先以 `linked-graph` 模式和单场景 `linked_explore → linked_proved` 样片接受视觉门禁，通过后才获准扩展其余六幕，随后实施七幕整课。
 
 只有同时满足以下条件，结果状态才可标为 `art candidate`：
 

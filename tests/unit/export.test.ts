@@ -5,6 +5,7 @@ import type {
 } from '../../src/shared/componentTypes'
 import type { ProjectDocument } from '../../src/shared/projectTypes'
 import type { PublishedLessonPayload } from '../../src/shared/publishedLessonTypes'
+import { APP_COMPANY, APP_NAME } from '../../src/shared/constants'
 import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { buildPptx } from '../../src/renderer/export/buildPptx'
@@ -145,6 +146,7 @@ const project: ProjectDocument = {
       name: componentManifest.name,
       manifestPath: 'components/com.example.counter@1.0.0/manifest.json',
       runtimePath: 'components/com.example.counter@1.0.0/runtime.js',
+      contentSha256: '0'.repeat(64),
     },
   },
   globalLayer: [],
@@ -330,6 +332,12 @@ describe('PowerPoint 对象映射', () => {
     const slideXml = new TextDecoder().decode(
       archive['ppt/slides/slide1.xml'],
     )
+    const corePropertiesXml = new TextDecoder().decode(
+      archive['docProps/core.xml'],
+    )
+    const applicationPropertiesXml = new TextDecoder().decode(
+      archive['docProps/app.xml'],
+    )
     const parsed = new DOMParser().parseFromString(slideXml, 'application/xml')
 
     expect(parsed.getElementsByTagName('parsererror')).toHaveLength(0)
@@ -338,5 +346,7 @@ describe('PowerPoint 对象映射', () => {
     expect(slideXml).not.toContain('<p:pic>')
     expect(slideXml).not.toContain('<p:timing>')
     expect(slideXml).toContain('typeface="Microsoft YaHei"')
+    expect(corePropertiesXml).toContain(`>${APP_NAME}<`)
+    expect(applicationPropertiesXml).toContain(`>${APP_COMPANY}<`)
   })
 })

@@ -110,7 +110,7 @@ function disposeMaterial(material: THREE.Material): void {
 }
 
 globalThis.CoursewareComponent.define({
-  id: 'com.alepha.physics.incline-motion-3d',
+  id: 'com.ittoedu.physics.incline-motion-3d',
   runtimeApiVersion: 4,
 
   create(ctx) {

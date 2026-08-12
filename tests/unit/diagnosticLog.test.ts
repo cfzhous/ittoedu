@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DiagnosticLog } from '../../src/main/diagnosticLog'
+import { APP_NAME } from '../../src/shared/constants'
 
 const directories: string[] = []
 
@@ -26,7 +27,7 @@ describe('DiagnosticLog', () => {
     ])
     const report = await log.report()
 
-    expect(report).toContain('Phaser 课件编辑器诊断报告')
+    expect(report).toContain(`${APP_NAME}诊断报告`)
     expect(report).toContain('"message":"first"')
     expect(report).toContain('"message":"second"')
     expect(report).toContain('"source":"component"')

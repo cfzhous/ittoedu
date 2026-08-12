@@ -8,7 +8,7 @@ export default defineConfig({
     sourcemap: false,
     lib: {
       entry: resolve(__dirname, 'src/player/index.ts'),
-      name: 'PhaserCoursewarePlayer',
+      name: 'CoursewarePlayer',
       formats: ['iife'],
       fileName: () => 'player.iife.js',
     },

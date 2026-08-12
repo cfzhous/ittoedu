@@ -36,6 +36,7 @@ const webPackagePath = path.join(outputRoot, 'component-catalog-v8-matrix-web.zi
 const evidencePath = path.join(outputRoot, 'matrix-build-evidence.json')
 const buildTimestamp = '2026-08-11T00:00:00.000Z'
 const archiveTimestamp = new Date(buildTimestamp)
+const expectedPackageCount = 4
 
 function setPath(target: Record<string, unknown>, dottedPath: string, value: unknown): void {
   const parts = dottedPath.split('.')
@@ -77,6 +78,10 @@ function matrixProps(
   setPath(props, property.key, baseText)
   if (Object.prototype.hasOwnProperty.call(props, 'showCaption')) props.showCaption = true
   if (Object.prototype.hasOwnProperty.call(props, 'showTitle')) props.showTitle = true
+  if (Object.prototype.hasOwnProperty.call(props, 'showEyebrow')) props.showEyebrow = true
+  if (Object.prototype.hasOwnProperty.call(props, 'showSteps')) props.showSteps = true
+  if (Object.prototype.hasOwnProperty.call(props, 'showLegend')) props.showLegend = true
+  if (Object.prototype.hasOwnProperty.call(props, 'showGlobalControls')) props.showGlobalControls = true
   return { props, textPath: property.key, baseText, stateText }
 }
 
@@ -130,9 +135,9 @@ async function main(): Promise<void> {
     scanComponentCatalogDirectory(componentCatalogRoot, 'prompt'),
     fs.readFile(playerBundlePath, 'utf8'),
   ])
-  if (catalog.packages.length !== 9 || catalog.issues.length !== 0) {
+  if (catalog.packages.length !== expectedPackageCount || catalog.issues.length !== 0) {
     throw new Error(
-      `矩阵要求 9 个无完整性错误的目录组件；发现 ${catalog.packages.length} 个，问题 ${catalog.issues.length} 项。`,
+      `矩阵要求 ${expectedPackageCount} 个无完整性错误的目录组件；发现 ${catalog.packages.length} 个，问题 ${catalog.issues.length} 项。`,
     )
   }
 
@@ -156,7 +161,7 @@ async function main(): Promise<void> {
 
   const project = createProject({
     id: 'project_component_catalog_v8_matrix',
-    title: 'Component Catalog V8 九组件矩阵',
+    title: 'Component Catalog V8 四组件矩阵',
     now: buildTimestamp,
     includeDefaultController: false,
   })
@@ -206,11 +211,17 @@ async function main(): Promise<void> {
   const reopened = openProjectArchive(archive)
   if (
     reopened.project.schemaVersion !== 8 ||
-    reopened.project.scenes.length !== 9 ||
-    Object.keys(reopened.project.componentPackages).length !== 9 ||
-    Object.keys(reopened.componentFiles).length !== 9
+    reopened.project.scenes.length !== expectedPackageCount ||
+    Object.keys(reopened.project.componentPackages).length !== expectedPackageCount ||
+    Object.keys(reopened.componentFiles).length !== expectedPackageCount
   ) {
-    throw new Error('九组件矩阵工程保存重开后结构不完整。')
+    throw new Error('四组件矩阵工程保存重开后结构不完整。')
+  }
+  for (const entry of catalog.packages) {
+    const contentSha256 = components[entry.packageId]!.contentSha256
+    if (reopened.project.componentPackages[entry.packageId]?.contentSha256 !== contentSha256) {
+      throw new Error(`${entry.packageId}@${entry.version} 保存重开后内容哈希不一致。`)
+    }
   }
 
   const payload = buildExportPayload({ project: parsedProject, components })
@@ -229,6 +240,7 @@ async function main(): Promise<void> {
       packageId: entry.packageId,
       version: entry.version,
       sha256: entry.sha256,
+      contentSha256: components[entry.packageId]!.contentSha256,
       quality: entry.quality,
       releaseBlockers: entry.releaseBlockers ?? [],
     })),
@@ -249,13 +261,13 @@ async function main(): Promise<void> {
     fs.writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8'),
   ])
 
-  console.log(`已生成九组件 Project V8 矩阵：${lessonPath}`)
+  console.log(`已生成四组件 Project V8 矩阵：${lessonPath}`)
   console.log(`已生成离线单 HTML：${htmlPath}`)
   console.log(`已生成离线网页包：${webPackagePath}`)
   console.log(`已生成矩阵证据：${evidencePath}`)
 }
 
 main().catch((error: unknown) => {
-  console.error('九组件 V8 矩阵生成失败', error)
+  console.error('四组件 V8 矩阵生成失败', error)
   process.exitCode = 1
 })

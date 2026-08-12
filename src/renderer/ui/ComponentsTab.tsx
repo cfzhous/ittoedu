@@ -450,7 +450,7 @@ export function ComponentsTab({
         </button>
         <button type="button" className="component-entry-action" data-testid="import-external-components" disabled={!onImportExternalComponents} onClick={onImportExternalComponents}>
           <Upload size={20} />
-          <span><strong>导入外部组件</strong><small>可一次选择多个 .h5component</small></span>
+          <span><strong>导入外部组件</strong><small>校验后直接加入；仅选择可信来源</small></span>
         </button>
       </div>
 

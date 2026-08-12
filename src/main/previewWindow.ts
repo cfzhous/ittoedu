@@ -22,12 +22,12 @@ import {
   BACKGROUND_E2E_WINDOW_ORIGIN,
   shouldShowApplicationWindows,
 } from './windowVisibility'
+import { APP_PREVIEW_TEMP_DIRECTORY_NAME } from '../shared/constants'
 
-const PREVIEW_DIRECTORY_NAME = 'phaser-courseware-editor-preview'
 const previewWindows = new Set<BrowserWindowType>()
 
 function previewDirectory(): string {
-  return path.join(app.getPath('temp'), PREVIEW_DIRECTORY_NAME)
+  return path.join(app.getPath('temp'), APP_PREVIEW_TEMP_DIRECTORY_NAME)
 }
 
 async function removePreviewFile(filePath: string): Promise<void> {

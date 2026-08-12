@@ -6,7 +6,9 @@
 
 新工程必须写 `schemaVersion: 8`。旧 Project V1–V7 会由产品入口明确拒绝，不再是加载迁移输入，也不能通过只改版本号变成有效 V8。
 
-Project V8 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
+Project V8 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
+
+完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、运行时离线规则和四格式预检。该命令不执行运行时代码或真实导出，Node 布局近似也不能替代像素验收。
 
 编辑器的“编辑状态”和“当前位置试运行”使用同一块 1280×720 画布，Player 是唯一视觉源。编辑状态在 Blob sandbox iframe 中使用隔离 authoring Player 创建场景/全局运行时的真实稳定视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结学生输入、声明式互动、音视频、导航、呈现状态推进和 `courseState` 写入。当前位置试运行在原画布位置切换为完整 playback Player，直接从当前场景和当前命名状态启动（基础场景使用当前场景初始状态）。两种状态都使用会话过滤；父窗口用临时 Blob URL 承载文档，素材以可转移缓冲区进入沙箱后由 iframe 创建本地 Blob URL，实例替换、关闭、重试或失败时分别回收。顶部“整课预览”仍在独立窗口中从第一场景初始状态开始。
 
@@ -575,6 +577,7 @@ interface RuntimeInstanceLifecycle {
 - [ ] `resize/setVisible/suspend/resume` 与场景/全局生命周期相符；事件、守卫、监听、RAF、Tween、Timer、音频、WebGL 和 GPU 资源在销毁时清理。
 - [ ] `capture.waitUntil()` 不会永久阻塞；`prepareCapture()` 能为 Canvas/WebGL 主动渲染一个确定帧；实现没有私造多帧时间线或第二套捕获协议。
 - [ ] Three.js 如有使用，仅打包在该运行时内，GLB/纹理/loader 均离线，编辑器核心不承担 Three.js 依赖。
+- [ ] 完整归档已运行 `npm run --silent validate:project -- <file.h5lesson>`；按 JSON 中的 Schema、Project Health 和四格式预检修复确定性错误，Node 近似布局警告留给真实像素复核。
 - [ ] 工程检查没有阻断错误；信息释放/视觉密度只作为只读复核线索；四种目标的 Export Preflight 已审阅，阻断错误修复，必要时保存 JSON；需要排障时另行导出异常诊断报告。
 - [ ] 预览、单 HTML、网页包、PDF 和 PPTX 的结果均已检查。
 - [ ] 编辑状态与当前位置试运行使用同一 1280×720 Player 视觉边界；authoring 冻结互动、媒体、导航和课程状态，透明 Phaser 层没有造成位置偏移或重复视觉。

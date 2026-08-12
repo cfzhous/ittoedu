@@ -213,10 +213,39 @@ describe('Project V8 FormulaNode contract', () => {
       severity: 'info',
     }))
     expect(report.items).toContainEqual(expect.objectContaining({
+      code: 'formula-content-overflow-estimated',
+      nodeId: clipped.id,
+      severity: 'warning',
+    }))
+    expect(report.summary.canExport).toBe(true)
+  })
+
+  it('keeps formula overflow blocking when real browser Canvas metrics are available', () => {
+    vi.stubGlobal('navigator', { userAgent: 'Chrome' })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      measuringContext(),
+    )
+    const project = createProject({ includeDefaultController: false })
+    const clipped = createFormulaNode({
+      id: 'formula-browser-clipped',
+      width: 24,
+      height: 24,
+      style: { fontSize: 80 },
+      ast: completeAst,
+    })
+    project.scenes[0]!.nodes.push(clipped)
+
+    const report = collectExportPreflight(
+      project,
+      'pptx',
+      { assetFiles: {}, components: {} },
+    )
+    expect(report.items).toContainEqual(expect.objectContaining({
       code: 'formula-content-overflow',
       nodeId: clipped.id,
       severity: 'error',
     }))
     expect(report.summary.canExport).toBe(false)
+    vi.unstubAllGlobals()
   })
 })

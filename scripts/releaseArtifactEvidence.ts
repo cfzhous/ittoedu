@@ -46,6 +46,7 @@ export function isExpectedWindowsVersion(
 export function assertExpectedWindowsVersion(
   evidence: WindowsVersionEvidence,
   expectedVersion: string,
+  expectedProductName: string,
   label: string,
 ): void {
   if (
@@ -57,6 +58,13 @@ export function assertExpectedWindowsVersion(
         `FileVersion=${evidence.fileVersion || '<empty>'}，` +
         `ProductVersion=${evidence.productVersion || '<empty>'}，` +
         `期望 ${expectedVersion}`,
+    )
+  }
+  if (evidence.productName !== expectedProductName) {
+    throw new Error(
+      `${label} 产品身份不一致：` +
+        `ProductName=${evidence.productName || '<empty>'}，` +
+        `期望 ${expectedProductName}`,
     )
   }
 }

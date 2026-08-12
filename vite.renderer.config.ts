@@ -2,6 +2,16 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
+import { APP_NAME } from './src/shared/constants'
+
+function productIdentityPlugin(): Plugin {
+  return {
+    name: 'product-identity',
+    transformIndexHtml(html) {
+      return html.replaceAll('__APP_NAME__', APP_NAME)
+    },
+  }
+}
 
 function playerBundlePlugin(): Plugin {
   const virtualId = 'virtual:player-bundle'
@@ -21,7 +31,7 @@ function playerBundlePlugin(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [react(), playerBundlePlugin()],
+  plugins: [productIdentityPlugin(), react(), playerBundlePlugin()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

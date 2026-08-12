@@ -628,21 +628,32 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'package-lock.json',
     'package.json',
     'scripts/generate-ai-capabilities.ts',
+    'scripts/validate-project.ts',
+    'src/renderer/components/componentPackageStore.ts',
     'src/renderer/components/importComponentPackage.ts',
     'src/renderer/export/exportSize.ts',
+    'src/renderer/export/exportPreflight.ts',
+    'src/renderer/project/projectArchive.ts',
+    'src/renderer/project/validateProjectArchive.ts',
     'src/shared/builtInComponentCatalog.ts',
     'src/shared/componentCatalog.ts',
+    'src/shared/componentContentIntegrity.ts',
     'src/shared/componentSchema.ts',
     'src/shared/componentTypes.ts',
     'src/shared/constants.ts',
     'src/shared/diagnosticCodes.ts',
     'src/shared/interactionSchema.ts',
     'src/shared/interactionTypes.ts',
+    'src/shared/formulaRenderer.ts',
+    'src/shared/layoutMeasure.ts',
+    'src/shared/projectHealth.ts',
     'src/shared/projectSchema.ts',
     'src/shared/projectTypes.ts',
     'src/shared/publishedLessonTypes.ts',
     'src/shared/runtimeSchema.ts',
     'src/shared/runtimeTypes.ts',
+    'src/shared/stableOrder.ts',
+    'src/shared/textLayout.ts',
   ]
   return Promise.all(sources.map(async (relativePath) => ({
     path: relativePath,
@@ -910,6 +921,27 @@ export async function generateAiCapabilityArtifacts(
     },
     diagnostics: 'diagnostics.json',
     limits: 'limits.json',
+    validation: {
+      command: 'npm run --silent validate:project -- <project.h5lesson>',
+      input: 'Project V8 .h5lesson',
+      output: 'stable-json',
+      reportVersion: 1,
+      checks: [
+        'project-schema',
+        'project-health',
+        'single-html-preflight',
+        'web-package-preflight',
+        'pdf-preflight',
+        'pptx-preflight',
+      ],
+      exitCodes: {
+        valid: 0,
+        diagnosedErrors: 1,
+        unreadableOrUsageError: 2,
+      },
+      execution: 'node-only-no-electron-no-export-no-write',
+      layoutMeasurement: 'browser-canvas-or-declared-deterministic-fallback',
+    },
     exportSurfaces: {
       singleHtml: { interactivity: 'preserved', resources: 'inline' },
       webPackage: { interactivity: 'preserved', resources: 'relative-files' },
@@ -1011,6 +1043,7 @@ export async function checkAiCapabilityArtifacts(
   generated: AiCapabilityGenerationResult,
 ): Promise<void> {
   const failures: string[] = []
+  const stalePaths: string[] = []
   for (const [relativePath, expected] of generated.files) {
     const absolute = path.join(outputRoot, ...relativePath.split('/'))
     let actual: string
@@ -1020,7 +1053,19 @@ export async function checkAiCapabilityArtifacts(
       failures.push(`缺失 ${relativePath}`)
       continue
     }
-    if (actual !== expected) failures.push(`过期 ${relativePath}`)
+    if (actual !== expected) stalePaths.push(relativePath)
+  }
+  const staleCapabilityPaths = stalePaths.filter(
+    (relativePath) => relativePath !== 'generation-evidence.json',
+  )
+  if (staleCapabilityPaths.length > 0) {
+    failures.push(
+      ...staleCapabilityPaths.map(
+        (relativePath) => `能力生成物过期 ${relativePath}`,
+      ),
+    )
+  } else if (stalePaths.includes('generation-evidence.json')) {
+    failures.push('来源溯源证据过期 generation-evidence.json')
   }
   const expectedPaths = new Set(generated.files.keys())
   for (const relativePath of await listJsonFiles(outputRoot)) {

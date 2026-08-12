@@ -6,7 +6,7 @@
   var BASE_H = 460
 
   window.CoursewareComponent.define({
-    id: 'com.alepha.photosynthesis-lab',
+    id: 'com.ittoedu.photosynthesis-lab',
     runtimeApiVersion: 4,
 
     create: function (ctx) {

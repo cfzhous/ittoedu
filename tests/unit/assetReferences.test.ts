@@ -100,6 +100,7 @@ describe('project asset reference graph', () => {
       packageId: 'com.test.media', version: '4.0.0', name: 'Media',
       manifestPath: 'components/com.test.media/manifest.json',
       runtimePath: 'components/com.test.media/runtime.js',
+      contentSha256: '0'.repeat(64),
     }
     const components = {
       'com.test.media': {

@@ -1,5 +1,5 @@
-appId: com.alepha.phaser-courseware-editor
-productName: Phaser Courseware Editor
+appId: com.ittoedu.courseware-editor
+productName: ittoedu Courseware Editor
 asar: true
 asarUnpack:
   - "**/*.node"
@@ -13,7 +13,7 @@ files:
   - package.json
 win:
   icon: resources/icons/icon.ico
-  executableName: PhaserCoursewareEditor
+  executableName: ittoedu-courseware-editor
   target:
     - target: portable
       arch:
@@ -23,7 +23,7 @@ win:
         - x64
   requestedExecutionLevel: asInvoker
 portable:
-  artifactName: PhaserCoursewareEditor-Portable-${version}.${ext}
-artifactName: PhaserCoursewareEditor-${version}-${arch}.${ext}
+  artifactName: ittoedu-courseware-editor-portable-${version}.${ext}
+artifactName: ittoedu-courseware-editor-${version}-${arch}.${ext}
 npmRebuild: false
 publish: null

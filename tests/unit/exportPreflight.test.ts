@@ -71,6 +71,7 @@ describe('export preflight', () => {
     } as unknown as CanvasRenderingContext2D
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
       .mockReturnValue(context)
+    vi.stubGlobal('navigator', { userAgent: 'Chrome' })
     const project = createProject({ includeDefaultController: false })
     const outside = createTextNode({ x: 1400, y: 20, width: 200, height: 80 })
     outside.text = '画布外文字'
@@ -86,8 +87,13 @@ describe('export preflight', () => {
     expect(codes).toContain('node-fully-outside-canvas')
     expect(codes).toContain('text-font-size-below-recommended')
     expect(codes).toContain('text-content-overflow')
+    expect(report.items).toContainEqual(expect.objectContaining({
+      code: 'text-content-overflow',
+      severity: 'error',
+    }))
     expect(report.summary.canExport).toBe(false)
     getContext.mockRestore()
+    vi.unstubAllGlobals()
   })
 
   it('blocks explicit external network dependencies in enabled runtimes', () => {

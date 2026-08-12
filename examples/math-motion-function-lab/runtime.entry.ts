@@ -1122,7 +1122,7 @@ export function createMotionFunctionLab(ctx: ComponentContext): MotionFunctionLa
 }
 
 ;(globalThis as unknown as CoursewareComponentGlobal).CoursewareComponent.define({
-  id: 'com.alepha.math.motion-function-lab',
+  id: 'com.ittoedu.math.motion-function-lab',
   runtimeApiVersion: 4,
   create: createMotionFunctionLab,
 })

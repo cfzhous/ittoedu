@@ -302,6 +302,8 @@ export interface ComponentPackageData {
   manifest: ComponentManifest
   runtimeSource: string
   files: Record<string, Uint8Array>
+  /** Recomputed by package parsing; raw test/build sources may omit the cache. */
+  readonly contentSha256?: string
   thumbnailUrl?: string
   /** Import provenance used to lock exact executable bytes in Project V8. */
   provenance?: {

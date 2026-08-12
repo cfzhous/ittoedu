@@ -1,4 +1,9 @@
 import type { TextNode, TextRunStyle, WritingMode } from './projectTypes'
+import {
+  resolveLayoutMeasureContext,
+  type LayoutMeasureContext,
+  type LayoutMeasurementMode,
+} from './layoutMeasure'
 
 export interface RenderedTextCanvas {
   canvas: HTMLCanvasElement
@@ -8,6 +13,7 @@ export interface RenderedTextCanvas {
 }
 
 export interface TextNodeLayoutAnalysis {
+  measurementMode: LayoutMeasurementMode
   fontSize: number
   requiredWidth: number
   requiredHeight: number
@@ -108,7 +114,7 @@ function roundedRectPath(
 }
 
 function layoutHorizontal(
-  context: CanvasRenderingContext2D,
+  context: LayoutMeasureContext,
   node: TextNode,
   fontSize: number,
   availableWidth: number,
@@ -167,7 +173,7 @@ function requiredHorizontalHeight(
 }
 
 function layoutVertical(
-  context: CanvasRenderingContext2D,
+  context: LayoutMeasureContext,
   node: TextNode,
   fontSize: number,
   availableHeight: number,
@@ -275,7 +281,7 @@ function drawCharacter(
 }
 
 function fitFontSize(
-  context: CanvasRenderingContext2D,
+  context: LayoutMeasureContext,
   node: TextNode,
   availableWidth: number,
   availableHeight: number,
@@ -303,9 +309,7 @@ export function analyzeTextNodeLayout(
   node: TextNode,
   width = node.width,
 ): TextNodeLayoutAnalysis {
-  const measureCanvas = document.createElement('canvas')
-  const measure = measureCanvas.getContext('2d')
-  if (!measure) throw new Error('无法创建文字排版测量画布')
+  const { context: measure, mode: measurementMode } = resolveLayoutMeasureContext()
   const padding = node.style.padding
   const availableWidth = Math.max(1, width - padding * 2)
   const availableHeight = Math.max(1, node.height - padding * 2)
@@ -323,6 +327,7 @@ export function analyzeTextNodeLayout(
       longestColumn * lineHeight - node.style.lineSpacing,
     )
     return {
+      measurementMode,
       fontSize,
       requiredWidth,
       requiredHeight,
@@ -340,6 +345,7 @@ export function analyzeTextNodeLayout(
   )
   const requiredHeight = requiredHorizontalHeight(node, fontSize, lines)
   return {
+    measurementMode,
     fontSize,
     requiredWidth,
     requiredHeight,

@@ -23,12 +23,26 @@ describe('release artifact version evidence', () => {
         {
           fileVersion: '1.5.0',
           productVersion: '1.5.0.0',
-          productName: 'Phaser Courseware Editor',
+          productName: 'ittoedu Courseware Editor',
         },
         '1.6.0',
+        'ittoedu Courseware Editor',
         'win-unpacked exe',
       ),
     ).toThrow(/win-unpacked exe.*1\.5\.0.*期望 1\.6\.0/)
+
+    expect(() =>
+      assertExpectedWindowsVersion(
+        {
+          fileVersion: '1.6.0',
+          productVersion: '1.6.0.0',
+          productName: 'Legacy Courseware Editor',
+        },
+        '1.6.0',
+        'ittoedu Courseware Editor',
+        'win-unpacked exe',
+      ),
+    ).toThrow(/win-unpacked exe.*ProductName=Legacy Courseware Editor.*ittoedu Courseware Editor/)
   })
 
   it('reads the packaged application identity and hashes the actual app.asar', async () => {
@@ -42,9 +56,9 @@ describe('release artifact version evidence', () => {
       await writeFile(
         path.join(applicationDirectory, 'package.json'),
         JSON.stringify({
-          name: 'phaser-courseware-editor',
+          name: 'ittoedu-courseware-editor',
           version: '1.6.0',
-          productName: 'Phaser Courseware Editor',
+          productName: 'ittoedu Courseware Editor',
         }),
         'utf8',
       )
@@ -52,21 +66,21 @@ describe('release artifact version evidence', () => {
 
       const metadata = readAsarPackageMetadata(asarPath)
       expect(metadata).toEqual({
-        name: 'phaser-courseware-editor',
+        name: 'ittoedu-courseware-editor',
         version: '1.6.0',
-        productName: 'Phaser Courseware Editor',
+        productName: 'ittoedu Courseware Editor',
       })
       expect(() =>
         assertExpectedAsarPackage(
           metadata,
-          'phaser-courseware-editor',
+          'ittoedu-courseware-editor',
           '1.6.0',
         ),
       ).not.toThrow()
       expect(() =>
         assertExpectedAsarPackage(
           metadata,
-          'phaser-courseware-editor',
+          'ittoedu-courseware-editor',
           '1.5.0',
         ),
       ).toThrow(/app\.asar.*1\.6\.0.*期望.*1\.5\.0/)

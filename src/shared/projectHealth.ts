@@ -26,6 +26,7 @@ import {
   analyzeProjectAssetReferences,
 } from './assetReferences'
 import type { ProjectHealthCode } from './diagnosticCodes'
+import { compareStableStrings } from './stableOrder'
 
 export type ProjectHealthSeverity = 'error' | 'warning' | 'info'
 export type ProjectHealthScope =
@@ -1159,8 +1160,8 @@ export function collectProjectHealth(
   }
   return collector.diagnostics.sort((left, right) => (
     severityOrder[left.severity] - severityOrder[right.severity] ||
-    JSON.stringify(left.path).localeCompare(JSON.stringify(right.path)) ||
-    left.code.localeCompare(right.code)
+    compareStableStrings(JSON.stringify(left.path), JSON.stringify(right.path)) ||
+    compareStableStrings(left.code, right.code)
   ))
 }
 

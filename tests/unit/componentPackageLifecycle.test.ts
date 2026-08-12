@@ -26,6 +26,7 @@ function packageMeta(
     manifestPath: `components/${packageId}@${version}/manifest.json`,
     runtimePath: `components/${packageId}@${version}/runtime.js`,
     thumbnailPath: `components/${packageId}@${version}/thumbnail.png`,
+    contentSha256: '0'.repeat(64),
   }
 }
 

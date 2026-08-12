@@ -11,6 +11,7 @@ import {
   isArchiveDirectory,
 } from '@/renderer/project/archivePath'
 import type { BlobUrlRegistry } from '@/renderer/project/blobUrlRegistry'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 
 const MAX_COMPONENT_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 
@@ -263,12 +264,14 @@ export function parseComponentPackageFiles(
 
   const key = componentPackageKey(manifest.id, manifest.version)
   const archiveRoot = componentArchiveRoot(manifest.id, manifest.version)
+  const contentSha256 = componentContentSha256(files)
   const metadata: EmbeddedComponentPackageMeta = {
     packageId: manifest.id,
     version: manifest.version,
     name: manifest.name,
     manifestPath: `${archiveRoot}/manifest.json`,
     runtimePath: `${archiveRoot}/${manifest.entry}`,
+    contentSha256,
     ...(manifest.thumbnail === undefined
       ? {}
       : { thumbnailPath: `${archiveRoot}/${manifest.thumbnail}` }),
@@ -281,6 +284,7 @@ export function parseComponentPackageFiles(
     manifest,
     runtimeSource,
     files,
+    contentSha256,
     ...(thumbnailUrl === undefined ? {} : { thumbnailUrl }),
     ...(options.provenance === undefined
       ? {}

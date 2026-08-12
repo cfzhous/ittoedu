@@ -23,7 +23,7 @@ def main() -> None:
     pages = config["pages"]
     document = canvas.Canvas(str(PDF_PATH), pagesize=(PAGE_WIDTH, PAGE_HEIGHT), pageCompression=1)
     document.setTitle("让运动变成函数——动点问题的五步建模法")
-    document.setAuthor("Phaser 课件编辑器")
+    document.setAuthor("互动课件编辑器")
     for page in pages:
         page_path = COURSE_DIR / page["pageOutput"]
         if not page_path.exists():

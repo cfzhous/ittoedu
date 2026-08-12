@@ -158,6 +158,7 @@ function makePayload(): ExportPayload {
         name: componentManifest.name,
         manifestPath: 'components/com.example.published@4.0.0/manifest.json',
         runtimePath: 'components/com.example.published@4.0.0/runtime.js',
+        contentSha256: '0'.repeat(64),
       },
     },
     globalLayer: [],

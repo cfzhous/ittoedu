@@ -15,13 +15,21 @@ import sharp from 'sharp'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { projectDocumentSchema } from '../../src/shared/projectSchema'
 import {
+  APP_E2E_TEMP_DIRECTORY_NAME,
+  APP_NAME,
+} from '../../src/shared/constants'
+import {
   BACKGROUND_E2E_ENV,
   BACKGROUND_E2E_WINDOW_ORIGIN,
 } from '../../src/main/windowVisibility'
 
 const root = resolve(__dirname, '..', '..')
-const outputDir = join(tmpdir(), 'phaser-courseware-editor-e2e')
-const e2eUserDataPath = join(outputDir, 'electron-profile')
+const outputDir = join(tmpdir(), APP_E2E_TEMP_DIRECTORY_NAME)
+// Independent Playwright CLI processes are not serialized by one another.
+// Keep one profile inside this worker so recovery tests can relaunch against
+// the same state, while preventing a concurrent diagnostic run from locking
+// or deleting the full-suite profile.
+const e2eUserDataPath = join(outputDir, `electron-profile-${process.pid}`)
 const projectPath = join(outputDir, 'roundtrip.h5lesson')
 const componentProjectPath = join(outputDir, 'component-roundtrip.h5lesson')
 const globalComponentProjectPath = join(outputDir, 'global-component-roundtrip.h5lesson')
@@ -509,19 +517,15 @@ async function editDefaultTextWithComposition(page: Page, value: string) {
 async function importExternalComponentThroughUi(page: Page): Promise<void> {
   await page.getByRole('tab', { name: '组件', exact: true }).click()
   await page.getByTestId('import-external-components').click()
-  const confirmation = page.getByRole('alertdialog', {
+  await expect(page.getByRole('alertdialog', {
     name: '确认批量导入外部组件',
-  })
-  await expect(confirmation).toBeVisible()
-  await confirmation.getByRole('button', { name: /加入工程（\d+）/ }).click()
-  const summary = page.getByRole('dialog', {
+  })).toHaveCount(0)
+  await expect(page.getByRole('dialog', {
     name: '外部组件批量导入结果',
-  })
-  await expect(summary).toBeVisible()
-  await summary.getByRole('button', { name: '完成' }).click()
+  })).toHaveCount(0)
 }
 
-test.describe.serial('Phaser 课件编辑器 1.0 / Project V8 收敛', () => {
+test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   test.beforeAll(() => {
     mkdirSync(outputDir, { recursive: true })
     mkdirSync(visualOutputDirectory, { recursive: true })

@@ -10,7 +10,11 @@ import type { Browser, ElectronApplication, Page } from 'playwright'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 import { openProjectArchive } from '../src/renderer/project/projectArchive'
-import { APP_VERSION } from '../src/shared/constants'
+import {
+  APP_EXECUTABLE_NAME,
+  APP_PRODUCT_NAME,
+  APP_VERSION,
+} from '../src/shared/constants'
 import type { ProjectDocument } from '../src/shared/projectTypes'
 import { createTeacherControllerLayout } from '../src/shared/teacherControllerLayout'
 import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
@@ -45,12 +49,12 @@ const releaseDirectory = path.join(projectRoot, 'release')
 const verificationDirectory = path.join(releaseDirectory, 'verification')
 const portableExecutable = path.join(
   releaseDirectory,
-  `PhaserCoursewareEditor-Portable-${packageJson.version}.exe`,
+  `${APP_EXECUTABLE_NAME}-portable-${packageJson.version}.exe`,
 )
 const unpackedExecutable = path.join(
   releaseDirectory,
   'win-unpacked',
-  'PhaserCoursewareEditor.exe',
+  `${APP_EXECUTABLE_NAME}.exe`,
 )
 const unpackedAppAsar = path.join(
   releaseDirectory,
@@ -178,7 +182,12 @@ async function assertWindowsExecutable(
     collectFileArtifactEvidence(filePath),
     readWindowsVersionEvidence(filePath),
   ])
-  assertExpectedWindowsVersion(windowsVersion, expectedVersion, label)
+  assertExpectedWindowsVersion(
+    windowsVersion,
+    expectedVersion,
+    APP_PRODUCT_NAME,
+    label,
+  )
   pass(
     label,
     `${filePath}（${(stats.size / 1024 / 1024).toFixed(1)} MB，` +
@@ -464,18 +473,13 @@ async function verifyUnpackedWorkflows(): Promise<void> {
       },
       sampleComponent,
     )
-    await componentRun.page
-      .getByRole('button', { name: '导入可信的 .h5component 组件' })
-      .click()
-    await componentRun.page
-      .getByRole('button', { name: '选择组件包' })
-      .click()
-    await componentRun.page.getByRole('tab', { name: '元素' }).click()
-    await componentRun.page.getByRole('tab', { name: '互动组件' }).click()
+    await componentRun.page.getByRole('tab', { name: '组件', exact: true }).click()
+    await componentRun.page.getByTestId('import-external-components').click()
     await componentRun.page
       .locator('[data-testid="component-com.example.sample-counter"]')
       .waitFor({ timeout: 20_000 })
 
+    await componentRun.page.getByRole('tab', { name: '元素' }).click()
     await componentRun.page.getByRole('tab', { name: '常用' }).click()
     await componentRun.page.getByTestId('add-text').click()
     await componentRun.page.getByRole('tab', { name: '属性' }).click()
@@ -557,6 +561,10 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     await projectRun.page
       .getByTestId('export-single-html')
       .click()
+    const htmlPreflight = projectRun.page.getByRole('alertdialog', {
+      name: '单 HTML 导出预检',
+    })
+    await htmlPreflight.getByRole('button', { name: '继续导出' }).click()
 
     const exportDeadline = Date.now() + 30_000
     while (!existsSync(exportedHtml) && Date.now() < exportDeadline) {
@@ -578,6 +586,10 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     await projectRun.page
       .getByTestId('export-pdf')
       .click()
+    const pdfPreflight = projectRun.page.getByRole('alertdialog', {
+      name: 'PDF 导出预检',
+    })
+    await pdfPreflight.getByRole('button', { name: '继续导出' }).click()
     const pdfDeadline = Date.now() + 30_000
     while (!existsSync(exportedPdf) && Date.now() < pdfDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -595,6 +607,10 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     await projectRun.page
       .getByTestId('export-pptx')
       .click()
+    const pptxPreflight = projectRun.page.getByRole('alertdialog', {
+      name: 'PPTX 导出预检',
+    })
+    await pptxPreflight.getByRole('button', { name: '继续导出' }).click()
     const pptxDeadline = Date.now() + 30_000
     while (!existsSync(exportedPptx) && Date.now() < pptxDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 100))

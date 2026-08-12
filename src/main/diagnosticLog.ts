@@ -2,6 +2,10 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
+import {
+  APP_EXECUTABLE_NAME,
+  APP_NAME,
+} from '../shared/constants'
 
 const MAX_LOG_BYTES = 2 * 1024 * 1024
 const MAX_MESSAGE_LENGTH = 8_000
@@ -78,7 +82,7 @@ export class DiagnosticLog {
       read(this.logPath()),
     ])
     const header = [
-      'Phaser 课件编辑器诊断报告',
+      `${APP_NAME}诊断报告`,
       `生成时间：${new Date().toISOString()}`,
       `应用版本：${app?.isReady?.() ? app.getVersion() : (process.env.npm_package_version ?? 'unknown')}`,
       `平台：${process.platform} ${process.arch}`,
@@ -118,7 +122,7 @@ export async function exportDiagnosticReport(
 ): Promise<{ path: string } | null> {
   const result = await dialog.showSaveDialog(window, {
     title: '导出诊断报告',
-    defaultPath: `PhaserCoursewareEditor-diagnostics-${new Date()
+    defaultPath: `${APP_EXECUTABLE_NAME}-diagnostics-${new Date()
       .toISOString()
       .slice(0, 10)}.txt`,
     filters: [{ name: '文本诊断报告', extensions: ['txt'] }],

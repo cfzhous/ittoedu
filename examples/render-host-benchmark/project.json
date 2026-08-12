@@ -779,7 +779,8 @@
       "name": "V4 DOM 可编辑对比表",
       "manifestPath": "components/com.example.render-host-editable-table@4.0.0/manifest.json",
       "runtimePath": "components/com.example.render-host-editable-table@4.0.0/runtime.js",
-      "thumbnailPath": "components/com.example.render-host-editable-table@4.0.0/thumbnail.svg"
+      "thumbnailPath": "components/com.example.render-host-editable-table@4.0.0/thumbnail.svg",
+      "contentSha256": "49022ec7c82c9abdf3468069dfec4f91b0930b38057e53c6ea1b1a1f2b7941fd"
     },
     "com.example.render-host-phaser-meter@4.0.0": {
       "packageId": "com.example.render-host-phaser-meter",
@@ -787,7 +788,8 @@
       "name": "V4 Phaser 交互仪表",
       "manifestPath": "components/com.example.render-host-phaser-meter@4.0.0/manifest.json",
       "runtimePath": "components/com.example.render-host-phaser-meter@4.0.0/runtime.js",
-      "thumbnailPath": "components/com.example.render-host-phaser-meter@4.0.0/thumbnail.svg"
+      "thumbnailPath": "components/com.example.render-host-phaser-meter@4.0.0/thumbnail.svg",
+      "contentSha256": "30c70804b8860bc402ae3532b9492adca3324d49a759ab675863b5862ef55d3a"
     }
   },
   "globalLayer": [

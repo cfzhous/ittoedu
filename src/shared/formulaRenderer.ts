@@ -1,4 +1,9 @@
 import type { FormulaAstNode, FormulaNode } from './projectTypes'
+import {
+  resolveLayoutMeasureContext,
+  type LayoutMeasureContext,
+  type LayoutMeasurementMode,
+} from './layoutMeasure'
 
 export interface RenderedFormulaCanvas {
   canvas: HTMLCanvasElement
@@ -9,6 +14,7 @@ export interface RenderedFormulaCanvas {
 }
 
 export interface FormulaNodeLayoutAnalysis {
+  measurementMode: LayoutMeasurementMode
   requiredWidth: number
   requiredHeight: number
   availableWidth: number
@@ -35,7 +41,7 @@ function font(size: number, italic = false): string {
 }
 
 function textBox(
-  measure: CanvasRenderingContext2D,
+  measure: LayoutMeasureContext,
   value: string,
   size: number,
   color: string,
@@ -60,7 +66,7 @@ function textBox(
 }
 
 function buildFormulaBox(
-  measure: CanvasRenderingContext2D,
+  measure: LayoutMeasureContext,
   ast: FormulaAstNode,
   size: number,
   color: string,
@@ -234,11 +240,15 @@ function buildFormulaBox(
   }
 }
 
-function measureFormulaNode(node: FormulaNode): FormulaBox {
-  const canvas = document.createElement('canvas')
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('无法创建公式排版测量画布')
-  return buildFormulaBox(context, node.ast, node.style.fontSize, node.style.color)
+function measureFormulaNode(node: FormulaNode): {
+  box: FormulaBox
+  measurementMode: LayoutMeasurementMode
+} {
+  const { context, mode } = resolveLayoutMeasureContext()
+  return {
+    box: buildFormulaBox(context, node.ast, node.style.fontSize, node.style.color),
+    measurementMode: mode,
+  }
 }
 
 /** Measures a FormulaNode with the exact AST layout used by every renderer. */
@@ -247,11 +257,12 @@ export function analyzeFormulaNodeLayout(
   width = node.width,
   height = node.height,
 ): FormulaNodeLayoutAnalysis {
-  const box = measureFormulaNode(node)
+  const { box, measurementMode } = measureFormulaNode(node)
   const padding = formulaPadding(node.style.fontSize)
   const requiredWidth = box.width + padding * 2
   const requiredHeight = box.ascent + box.descent + padding * 2
   return {
+    measurementMode,
     requiredWidth,
     requiredHeight,
     availableWidth: Math.max(0, width - padding * 2),

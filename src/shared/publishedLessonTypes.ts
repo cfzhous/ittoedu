@@ -87,6 +87,8 @@ export interface PublishedComponent {
   id: string
   name: string
   version: string
+  /** Canonical digest of the complete authoring component embedded upstream. */
+  contentSha256: string
   apiVersion: ComponentRuntimeApiVersion
   scopes: ComponentScope[]
   renderMode: ComponentRenderMode

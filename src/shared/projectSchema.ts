@@ -134,6 +134,10 @@ const embeddedComponentPackageMetaSchema = z.object({
   manifestPath: z.string().min(1),
   runtimePath: z.string().min(1),
   thumbnailPath: z.string().min(1).optional(),
+  contentSha256: z.string().regex(
+    /^[0-9a-f]{64}$/,
+    '组件内容哈希必须是小写 SHA-256',
+  ),
   sha256: z.string().regex(/^[0-9a-f]{64}$/, '组件包哈希必须是小写 SHA-256').optional(),
   importedAt: z.string().datetime().optional(),
   sourceLabel: z.string().min(1).max(200).optional(),

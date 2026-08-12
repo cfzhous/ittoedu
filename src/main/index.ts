@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, session } from 'electron'
+import { configureApplicationStorage } from './applicationIdentity'
 import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
@@ -16,12 +17,15 @@ import {
   BACKGROUND_E2E_CHROMIUM_SWITCHES,
   shouldShowApplicationWindows,
 } from './windowVisibility'
+import { APP_ID } from '../shared/constants'
 
 if (!shouldShowApplicationWindows()) {
   BACKGROUND_E2E_CHROMIUM_SWITCHES.forEach((name) => {
     app.commandLine.appendSwitch(name)
   })
 }
+
+configureApplicationStorage(app)
 
 registerPrivilegedSchemes()
 
@@ -93,7 +97,7 @@ app
   .whenReady()
   .then(async () => {
     if (process.platform === 'win32') {
-      app.setAppUserModelId('com.alepha.phaser-courseware-editor')
+      app.setAppUserModelId(APP_ID)
     }
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()

@@ -174,7 +174,7 @@ export function componentPackagesFromArchive(
         '请从备份恢复工程，或重新导入该组件。',
       )
     }
-    packages[meta.packageId] = parseComponentPackageFiles(files, {
+    const parsed = parseComponentPackageFiles(files, {
       expectedId: meta.packageId,
       expectedVersion: meta.version,
       blobUrlRegistry,
@@ -188,6 +188,14 @@ export function componentPackagesFromArchive(
           }
         : {}),
     })
+    if (parsed.contentSha256 !== meta.contentSha256) {
+      throw new UserFacingError(
+        '工程文件损坏',
+        `组件“${key}”的内容 SHA-256 与工程锁定值不一致。`,
+        '该组件的执行文件可能已被修改；请从可信备份恢复工程。',
+      )
+    }
+    packages[meta.packageId] = parsed
   }
   return packages
 }

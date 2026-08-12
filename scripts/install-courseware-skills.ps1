@@ -28,8 +28,8 @@ $skillNames = @(
   'orchestrate-courseware',
   'build-project-v7-courseware'
 )
-$manifestFileName = '.html-courseware-editor-managed-skills.json'
-$sourceId = 'html-courseware-editor'
+$manifestFileName = '.ittoedu-courseware-editor-managed-skills.json'
+$sourceId = 'ittoedu-courseware-editor'
 
 function Get-NormalizedPath {
   param([Parameter(Mandatory = $true)][string]$Path)

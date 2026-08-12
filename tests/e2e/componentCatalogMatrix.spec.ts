@@ -55,6 +55,9 @@ const runtimeEvidencePath = join(
   'matrix-runtime-evidence.json',
 )
 const backgroundE2e = process.env[BACKGROUND_E2E_ENV] ?? '1'
+const expectedPackageCount = 4
+const pressureRounds = 25
+const expectedPressureNavigations = expectedPackageCount * pressureRounds
 const matrixFixtureAvailable = [
   matrixProjectPath,
   matrixLessonPath,
@@ -77,6 +80,7 @@ interface MatrixProject {
   componentPackages: Record<string, {
     packageId: string
     version: string
+    contentSha256: string
     sha256?: string
     importedAt?: string
     sourceLabel?: string
@@ -118,6 +122,71 @@ const matrixCases = matrixProject.scenes.map((scene, index) => {
     stateText: `状态覆盖 ${String(index + 1).padStart(2, '0')}`,
   }
 })
+
+const expectedCanvasTextLabels: Readonly<Record<string, readonly string[]>> = {
+  'com.ittoedu.language.reading-annotation': [
+    '标题',
+    '朗读标注文稿',
+    '较长停顿符号',
+    '重音',
+    '较长停顿',
+    '连读',
+  ],
+  'com.ittoedu.language.pinyin-annotation': [
+    '标题',
+    '汉字与拼音',
+    '显示拼音按钮',
+    '隐藏拼音按钮',
+  ],
+  'com.ittoedu.visual.text-container': ['眉题', '标题', '正文', '步骤'],
+  'com.ittoedu.visual.image-frame': ['图片标题'],
+}
+
+const canvasEditCases: Readonly<Record<string, {
+  label: string
+  value: string
+  expectedText: string
+  multiline: boolean
+}>> = {
+  'com.ittoedu.language.reading-annotation': {
+    label: '朗读标注文稿',
+    value: '画布更新的 **朗读重音**',
+    expectedText: '画布更新的',
+    multiline: true,
+  },
+  'com.ittoedu.language.pinyin-annotation': {
+    label: '汉字与拼音',
+    value: '新|xīn 词|cí',
+    expectedText: '新',
+    multiline: true,
+  },
+  'com.ittoedu.visual.text-container': {
+    label: '步骤',
+    value: '画布步骤一\n画布步骤二',
+    expectedText: '画布步骤一',
+    multiline: true,
+  },
+  'com.ittoedu.visual.image-frame': {
+    label: '图片标题',
+    value: '画布图片标题',
+    expectedText: '画布图片标题',
+    multiline: false,
+  },
+}
+
+const visualStyleEditCases: Readonly<Record<string, {
+  value: string
+  label: string
+}>> = {
+  'com.ittoedu.visual.text-container': {
+    value: 'sticky-note',
+    label: '便利贴',
+  },
+  'com.ittoedu.visual.image-frame': {
+    value: 'sticker',
+    label: '贴纸',
+  },
+}
 
 function removeKnownOutput(filePath: string): void {
   if (existsSync(filePath)) rmSync(filePath, { force: true })
@@ -371,16 +440,19 @@ async function exportThroughUi(
   ).toBeGreaterThan(minimumBytes)
 }
 
-test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
+test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
   test.skip(
     !matrixFixtureAvailable,
-    '请先运行 npm run build:component-catalog-matrix 生成九组件矩阵。',
+    '请先运行 npm run build:component-catalog-matrix 生成四组件矩阵。',
   )
 
   test.beforeAll(() => {
     expect(matrixProject.schemaVersion).toBe(8)
-    expect(matrixCases).toHaveLength(9)
-    expect(Object.keys(matrixProject.componentPackages)).toHaveLength(9)
+    expect(matrixCases).toHaveLength(expectedPackageCount)
+    expect(Object.keys(matrixProject.componentPackages)).toHaveLength(expectedPackageCount)
+    expect(Object.values(matrixProject.componentPackages).every((metadata) => (
+      /^[0-9a-f]{64}$/.test(metadata.contentSha256)
+    ))).toBe(true)
     expect(existsSync(matrixLessonPath)).toBe(true)
     expect(existsSync(matrixHtmlPath)).toBe(true)
     expect(existsSync(matrixWebPackagePath)).toBe(true)
@@ -395,7 +467,7 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
     ].forEach(removeKnownOutput)
   })
 
-  test('生成物的单 HTML 与网页包离线运行九组件、状态覆盖和 225 次压力翻页', async () => {
+  test('生成物的单 HTML 与网页包离线运行四组件、状态覆盖和 100 次压力翻页', async () => {
     test.setTimeout(180_000)
     const browser = await launchHeadlessBrowser()
     try {
@@ -403,7 +475,7 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
       const standaloneEvidence = await verifyOfflinePlayer(
         standalone,
         matrixHtmlPath,
-        25,
+        pressureRounds,
       )
       await standalone.screenshot({
         path: join(outputDirectory, 'standalone-player.png'),
@@ -417,8 +489,8 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
         join(exportedWebDirectory, 'index.html'),
         1,
       )
-      expect(standaloneEvidence.navigationCount).toBe(225)
-      expect(packageEvidence.navigationCount).toBe(9)
+      expect(standaloneEvidence.navigationCount).toBe(expectedPressureNavigations)
+      expect(packageEvidence.navigationCount).toBe(expectedPackageCount)
       writeFileSync(runtimeEvidencePath, `${JSON.stringify({
         generatedAt: new Date().toISOString(),
         verified: {
@@ -426,8 +498,8 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
           generatedWebPackage: packageEvidence,
         },
         pressure: {
-          rounds: 25,
-          sceneCount: 9,
+          rounds: pressureRounds,
+          sceneCount: expectedPackageCount,
           navigationCount: standaloneEvidence.navigationCount,
           maxMounted: standaloneEvidence.maxMounted,
           minMounted: standaloneEvidence.minMounted,
@@ -470,7 +542,7 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
       await page.getByRole('tab', { name: '组件', exact: true }).click()
       await page.getByTestId('open-component-library').click()
       await expect(page.locator('[data-testid^="catalog-component-"]'))
-        .toHaveCount(9)
+        .toHaveCount(expectedPackageCount)
 
       for (const entry of matrixCases) {
         const catalogEntry = page.getByTestId(`catalog-component-${entry.packageId}`)
@@ -496,13 +568,12 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
       })
 
       await page.getByRole('button', { name: '全选当前结果' }).click()
-      await expect(page.getByText('已选择 9 个组件')).toBeVisible()
-      await page.getByRole('button', { name: '加入工程（9）' }).click()
-      const joinSummary = page.getByRole('dialog', { name: '内置组件加入结果' })
-      await expect(joinSummary).toContainText('成功加入：9')
-      await joinSummary.getByRole('button', { name: '完成' }).click()
+      await expect(page.getByText(`已选择 ${expectedPackageCount} 个组件`)).toBeVisible()
+      await page.getByRole('button', { name: `加入工程（${expectedPackageCount}）` }).click()
+      await expect(page.getByRole('dialog', { name: '内置组件加入结果' }))
+        .toHaveCount(0)
       await expect(page.locator('[data-testid^="component-package-"]'))
-        .toHaveCount(9)
+        .toHaveCount(expectedPackageCount)
 
       // The visible editing renderer is the same isolated Player used at
       // runtime, hosted in the sandboxed authoring iframe. The legacy Phaser
@@ -525,17 +596,17 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
 
       // 删除、撤销、重做、再次撤销恢复，验证 UI 历史栈和宿主销毁重建。
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(9)
+      await expect(page.locator('.node-item')).toHaveCount(expectedPackageCount)
       await page.locator('.node-item').last().getByTitle('删除节点').click()
-      await expect(editorHost).toHaveCount(8)
+      await expect(editorHost).toHaveCount(expectedPackageCount - 1)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
-      await expect(editorHost).toHaveCount(9)
+      await expect(editorHost).toHaveCount(expectedPackageCount)
       await page.getByRole('button', {
         name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
       }).click()
-      await expect(editorHost).toHaveCount(8)
+      await expect(editorHost).toHaveCount(expectedPackageCount - 1)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
-      await expect(editorHost).toHaveCount(9)
+      await expect(editorHost).toHaveCount(expectedPackageCount)
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(importedRoundtripPath)).toBe(true)
@@ -545,19 +616,20 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
       const roundtripProject = JSON.parse(
         new TextDecoder().decode(roundtripArchive['project.json']),
       ) as MatrixProject
-      expect(Object.keys(roundtripProject.componentPackages)).toHaveLength(9)
+      expect(Object.keys(roundtripProject.componentPackages)).toHaveLength(expectedPackageCount)
       expect(Object.values(roundtripProject.componentPackages).every((metadata) => (
+        /^[0-9a-f]{64}$/.test(metadata.contentSha256) &&
         Boolean(metadata.sha256) &&
         Boolean(metadata.importedAt) &&
         Boolean(metadata.sourceLabel)
       ))).toBe(true)
       expect(Object.keys(roundtripArchive).filter((entry) => (
         /^components\/[^/]+\/manifest\.json$/.test(entry)
-      ))).toHaveLength(9)
+      ))).toHaveLength(expectedPackageCount)
 
       await patchDialogs(app, { projectOpen: importedRoundtripPath })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(editorHost).toHaveCount(9)
+      await expect(editorHost).toHaveCount(expectedPackageCount)
 
       await patchDialogs(app, {
         projectOpen: matrixLessonPath,
@@ -567,9 +639,9 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
         pptxSave: exportedPptxPath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(page.locator('.scene-item')).toHaveCount(9)
-      await expect(page.locator('.scene-thumbnail')).toHaveCount(9)
-      await expect(page.locator('.thumbnail-state-badge')).toHaveCount(9)
+      await expect(page.locator('.scene-item')).toHaveCount(expectedPackageCount)
+      await expect(page.locator('.scene-thumbnail')).toHaveCount(expectedPackageCount)
+      await expect(page.locator('.thumbnail-state-badge')).toHaveCount(expectedPackageCount)
       await expect(page.locator('.thumbnail-state-badge').first())
         .toContainText('矩阵状态覆盖')
       const thumbnails = page.locator('.scene-thumbnail')
@@ -602,11 +674,58 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
           return nonTransparent
         }))
       }
-      expect(thumbnailPixels).toHaveLength(9)
+      expect(thumbnailPixels).toHaveLength(expectedPackageCount)
 
       for (const entry of matrixCases) {
         await page.getByTestId(`scene-item-${entry.sceneId}`).click()
         await expect(editorHost).toHaveCount(1)
+        for (const label of expectedCanvasTextLabels[entry.packageId] ?? []) {
+          await expect(page.getByRole('button', {
+            name: `${label}，双击编辑组件文字`,
+            exact: true,
+          })).toHaveCount(1)
+        }
+        const editCase = canvasEditCases[entry.packageId]
+        if (!editCase) throw new Error(`${entry.packageId} 缺少画布文字验证用例`)
+        const editTarget = page.getByRole('button', {
+          name: `${editCase.label}，双击编辑组件文字`,
+          exact: true,
+        })
+        const editBounds = await editTarget.boundingBox()
+        if (!editBounds) throw new Error(`${entry.packageId} 的 ${editCase.label} 画布目标不可见`)
+        await page.mouse.dblclick(
+          editBounds.x + editBounds.width / 2,
+          editBounds.y + editBounds.height / 2,
+          { delay: 40 },
+        )
+        const canvasEditor = page.getByTestId('canvas-plain-text-editor')
+        const textBox = canvasEditor.getByRole('textbox', {
+          name: editCase.label,
+          exact: true,
+        })
+        await expect(textBox).toBeFocused()
+        await textBox.fill(editCase.value)
+        await textBox.press(editCase.multiline ? 'Control+Enter' : 'Enter')
+        await expect(canvasEditor).toHaveCount(0)
+        await expect.poll(() => shadowText(editorHost)).toContain(editCase.expectedText)
+        entry.baseText = editCase.expectedText
+        const visualStyleCase = visualStyleEditCases[entry.packageId]
+        if (visualStyleCase) {
+          await page.getByRole('tab', { name: '图层' }).click()
+          await page.getByTestId(`node-item-${entry.nodeId}`)
+            .locator('.node-name')
+            .click()
+          await expect(page.getByRole('tab', { name: '属性' }))
+            .toHaveAttribute('aria-selected', 'true')
+          await expect(page.locator('.sidebar-content')).toContainText('组件内容')
+          const styleSelect = page.getByLabel('视觉样式', { exact: true })
+          await styleSelect.selectOption(visualStyleCase.value)
+          await expect(styleSelect).toHaveValue(visualStyleCase.value)
+          await expect(styleSelect).toContainText(visualStyleCase.label)
+          await expect.poll(() => editorHost.evaluate((host) => (
+            host.shadowRoot?.querySelector<HTMLElement>('.stage')?.dataset.style ?? null
+          ))).toBe(visualStyleCase.value)
+        }
         await page.getByRole('button', {
           name: /矩阵状态覆盖，命名状态/,
         }).click()
@@ -614,7 +733,7 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
           .toContain(entry.stateText)
       }
       await page.screenshot({
-        path: join(outputDirectory, 'editor-nine-component-matrix.png'),
+        path: join(outputDirectory, 'editor-four-component-matrix.png'),
         fullPage: true,
       })
 
@@ -624,8 +743,8 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
       }).click()
       const preview = await previewWindow
       // Hidden Electron windows deliberately throttle animation frames. The
-      // 25-round/225-navigation pressure case runs in headless Chromium above;
-      // here one complete nine-scene pass proves the Electron preview surface.
+      // 25-round/100-navigation pressure case runs in headless Chromium above;
+      // here one complete four-scene pass proves the Electron preview surface.
       const previewEvidence = await verifyOfflinePlayer(preview, null, 1)
       evidence.preview = previewEvidence
       await preview.screenshot({
@@ -661,13 +780,13 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
       const pdf = readFileSync(exportedPdfPath)
       expect(pdf.subarray(0, 5).toString()).toBe('%PDF-')
       expect(pdf.toString('latin1').match(/\/Type\s*\/Page\b/g)?.length ?? 0)
-        .toBe(9)
+        .toBe(expectedPackageCount)
 
       const pptx = unzipSync(new Uint8Array(readFileSync(exportedPptxPath)))
       const slidePaths = Object.keys(pptx).filter((entry) => (
         /^ppt\/slides\/slide\d+\.xml$/.test(entry)
       ))
-      expect(slidePaths).toHaveLength(9)
+      expect(slidePaths).toHaveLength(expectedPackageCount)
       for (const slidePath of slidePaths) {
         const xml = new TextDecoder().decode(pptx[slidePath])
         expect(xml).toContain('<p:pic>')
@@ -706,7 +825,10 @@ test.describe.serial('Component Catalog V8 九组件全矩阵', () => {
         exportedPdfPath,
         exportedPptxPath,
       }
-      evidence.staticExports = { pdfPages: 9, pptxSlides: 9 }
+      evidence.staticExports = {
+        pdfPages: expectedPackageCount,
+        pptxSlides: expectedPackageCount,
+      }
       delete evidence.notYetVerified
       writeFileSync(runtimeEvidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
     } finally {

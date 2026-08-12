@@ -2,7 +2,9 @@
 
 本文定义 Editor 1.0.0 / Project V8 使用的 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
-文档同步基线：**2026-08-12**。当前源码包版本为 1.0.0 收敛分支；生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
+文档同步基线：**2026-08-13**。当前源码包版本为 1.0.0 收敛分支；生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
+
+产品发布者是 ittoedu。ittoedu 自有组件命名空间为 `com.ittoedu.*`；第三方作者必须使用自己控制的反向域名，文档中的 `com.example.*` 仅为示例，不能据此冒用 ittoedu 身份。
 
 编辑器只接受 V4：严格声明 `supportedScopes` 与 `renderMode`，使用 DOM/Phaser 分能力上下文、可见性/暂停生命周期和确定性捕获准备。V1–V3 包会在导入边界得到明确的“不受支持”诊断。
 
@@ -12,11 +14,24 @@
 
 该目标桥是确定性的人工 authoring 协议，不包含 Blueprint、AI 局部 patch 或模型调用。全部编辑器内 AI 接入延后到 2.0 以后；1.x 仅保留可选、版本化的能力边界。
 
-组件发现、导入、插入和包管理位于专业模式独立“组件”页。全尺寸“内置组件库”从受控 catalog 动态生成通用/学科、学段与用途筛选，可多选加入工程但不自动创建实例；“导入外部组件”允许一次选择多个包，并在一份批次确认后原子加入。两种来源最终都进入同一“工程组件”列表，卡片负责插入，次级菜单负责详情、显式更新、替换、定位和受引用保护的移除。已经嵌入的精确包可直接反复实例化，不重新读取目录或重复提示；只有与发行版审核摘要一致的内置 catalog 可免确认，外部导入、更新、替换和哈希冲突仍受安全门禁。编辑器选中节点时通过“属性/交互”维护 `node.click`；右侧“互动与动画”维护状态/场景进入、节点激活、动画完成、音视频生命周期/时间点、`component.event` 和带 `scene/global` 来源的 `runtime.event`。步骤可用 `after-previous` / `with-previous` 编排顺序与并行，并设局部延迟。组件若只需发出一个可枚举事件，应使用 V4 `ctx.emit()`，再由规则编排元素动画、状态、声音、视频或导航。
+组件发现、导入、插入和包管理位于专业模式独立“组件”页。全尺寸“内置组件库”从受控 catalog 动态生成通用/学科、学段与用途筛选，可多选加入工程但不自动创建实例；“导入外部组件”允许一次选择多个包，选定后直接校验并原子加入，不逐包弹出导入确认或成功摘要。两种来源最终都进入同一“工程组件”列表，卡片负责插入，次级菜单负责详情、显式更新、替换、定位和受引用保护的移除。已经嵌入的精确包可直接反复实例化，不重新读取目录或重复提示；会覆盖已用代码的更新、替换和哈希冲突仍显式审阅或阻断。编辑器选中节点时通过“属性/交互”维护 `node.click`；右侧“互动与动画”维护状态/场景进入、节点激活、动画完成、音视频生命周期/时间点、`component.event` 和带 `scene/global` 来源的 `runtime.event`。步骤可用 `after-previous` / `with-previous` 编排顺序与并行，并设局部延迟。组件若只需发出一个可枚举事件，应使用 V4 `ctx.emit()`，再由规则编排元素动画、状态、声音、视频或导航。
 
-机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只信任与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；目录缺失、不受信任或不匹配时必须标记为不可用/降级。它不是组件生成器，也不解除质量门禁：当前九个登记包仍全部为 `experimental`，许可、素材来源和维护人 `releaseBlockers` 必须保留，不能因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
+机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只信任与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；目录缺失、不受信任或不匹配时必须标记为不可用/降级。它不是组件生成器，也不解除质量门禁：当前四个登记包仍全部为 `experimental`，许可和维护人 `releaseBlockers` 必须保留，不能因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
 
 组件不应重复实现编辑器已有的一等能力：常规视频使用 `VideoNode`，课程声音使用 `media.audio` 声音库与声道，默认教师控制平台使用 `globalLayer` 中的 `TeacherControllerNode`。内置控制器的默认 `scene.open-picker` 按钮展开全部场景，选择后只进入目标初始状态；固定 `scene.go` 是高级按钮动作。只有策划要求独特视觉、复用封装或内置节点无法表达的行为时，才把媒体播放器或控制平台制作成 V4 组件。
+
+### 0.1 当前内置组件边界
+
+当前 catalog 只保留四个实验包：
+
+- `com.ittoedu.language.reading-annotation`：朗读重音、停顿和连读语义；
+- `com.ittoedu.language.pinyin-annotation`：汉字/拼音配对与显隐行为；
+- `com.ittoedu.visual.text-container`：使用 `visualStyle` 在透明玻璃、磨砂玻璃、便利贴、撕纸和文件夹之间切换；
+- `com.ittoedu.visual.image-frame`：使用 `visualStyle` 在笔刷裁切和贴纸白边之间切换。
+
+语文两项因具有独立学科语义和行为保持分立；七项旧通用视觉包只是外观差异，已删除并按内容载体合并为两个组件。当行为、数据结构和导出语义不变时，新外观应继续作为属性选项，不应再新建一个包。旧七个 ID 没有别名、迁移或宿主兼容分支。两个新视觉组件使用纯 CSS/SVG 程序视觉，不复用旧来源不明位图。
+
+四个当前内置包的可编辑稳定可见文字均必须同时出现在属性栏和画布双击目标中。不可见的无障碍说明继续只在属性栏编辑。
 
 ## 1. 组件包结构
 
@@ -32,6 +47,10 @@ global-controls.h5component
 ```
 
 约束：
+
+工程同时记录两种不同哈希：`sha256` 是最初选择的 `.h5component` ZIP 原始字节来源锁，`contentSha256` 是对全部安全相对路径和解包字节按稳定顺序、带长度边界计算的 canonical SHA-256。新 Project V8 归档必须包含 `contentSha256`；打开、保存或 headless 校验时任一嵌入文件被改动都会作为归档损坏拒绝。内容哈希不受 ZIP 压缩、条目顺序和时间戳影响，也不是数字签名、许可证或权属证明。
+
+组件进入工程后，可执行 `npm run --silent validate:project -- <file.h5lesson>` 检查真实内嵌文件、离线网络规则、工程引用和四格式预检。当前四个 ittoedu 身份实验包虽然可重现构建并通过 V8 四组件矩阵，但许可证和维护人仍未确认，排除在正式发布范围外。
 
 - 单包不超过 50 MB；
 - 路径使用 `/`，不得有绝对路径、盘符、反斜线、`..` 或路径穿越；
@@ -510,7 +529,9 @@ V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照�
 ## 16. 发布检查清单
 
 - [ ] 组件使用 schema/runtime API 4，声明准确的 `supportedScopes` 与最小 `renderMode`；V1–V3 输入得到明确拒绝。
+- [ ] Package ID 使用权利主体控制的反向域名；ittoedu 自有组件使用 `com.ittoedu.*`，第三方组件保留自己的命名空间，不靠改 ID 转移权属。
 - [ ] manifest 与 runtime 的 ID 和 API 版本一致，入口同步只注册一次。
+- [ ] 原始 `.h5component` ZIP 的 `sha256` 与嵌入文件集的 canonical `contentSha256` 均已记录并核对；内容哈希未被误写成签名、许可证或权属证明。
 - [ ] 所有人工可见文字均位于有效 `props.content`，所有状态和页面均已覆盖。
 - [ ] 显式文字字段只补充标签/说明，未依赖它决定可编辑性。
 - [ ] 如开放画布文字编辑，DOM key 或 `ctx.editor?.registerTextRegion()` 与公开字符串路径一致，区域会更新/注销；authoring Player 中命中位置与组件视觉一致，preview/capture/成品在没有 `ctx.editor` 时正常运行。
@@ -532,4 +553,5 @@ V4 DOM 表格、V4 Phaser 仪表以及按内容内联 Three.js 的完整对照�
 - [ ] 捕获按实例产生确定帧；单实例失败只生成该实例占位，成功快照不会被后续失败清空，批量 Three/WebGL 组件不会同时创建捕获宿主。
 - [ ] Three.js 如有使用，仅打包在组件内；GLB、loader、纹理和解码器离线；RAF、WebGL 与 GPU 资源可暂停、可捕获、可销毁。
 - [ ] ZIP 路径安全、大小写一致，组件包不超过 50 MB。
+- [ ] 完整工程已运行 `npm run --silent validate:project -- <file.h5lesson>`；真实内嵌文件、引用、离线规则和四格式预检没有未处理的确定性错误。
 - [ ] 工程检查没有阻断导出的组件错误；异常隔离与诊断报告路径可用。

@@ -8,6 +8,8 @@
 >
 > 范围：软件本体。未修改 `.agents/**`、创作工作流、Skills 或正式课例。
 
+> 当前性说明：本文冻结身份断代前的 AI-native 基建批次。产品身份与 Headless 校验先以 [身份断代验证记录](PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md) 为准；组件事实又被 [组件库收敛验证记录](COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md) 更新。不得把本文的九包数据或测试数字当作当前最终基线。
+
 ## 1. 结论边界
 
 本轮解决的是 AI 理解和修改软件工程时的基础可靠性：类型/Schema 漂移、E2E 类型盲区、素材引用与撤销不一致、不可达视觉实现造成的真假入口，以及能力发现成本。它没有把 AI 模型接进编辑器，也没有恢复 Project V8 课件生成 Skill。

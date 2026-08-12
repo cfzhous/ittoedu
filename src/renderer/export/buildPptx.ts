@@ -1,4 +1,5 @@
 import type { ExportPayload } from '../../shared/componentTypes'
+import { APP_COMPANY, APP_NAME } from '../../shared/constants'
 import { materializeScene } from '../../shared/presentation'
 import type { SceneNode } from '../../shared/projectTypes'
 import { bytesToDataUrl } from './base64'
@@ -189,10 +190,10 @@ export async function buildPptx(
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
-  pptx.author = 'Phaser 课件编辑器'
+  pptx.author = APP_NAME
   pptx.subject = '互动课件可编辑素材导出'
   pptx.title = project.title
-  pptx.company = 'Alepha'
+  pptx.company = APP_COMPANY
   pptx.theme = {
     headFontFace: 'Microsoft YaHei',
     bodyFontFace: 'Microsoft YaHei',

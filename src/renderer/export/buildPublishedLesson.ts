@@ -166,11 +166,13 @@ function publishOverride(
 
 function publishComponent(
   component: ExportPayload['components'][string],
+  contentSha256: string,
 ): PublishedComponent {
   return {
     id: component.manifest.id,
     name: component.manifest.name,
     version: component.manifest.version,
+    contentSha256,
     apiVersion: component.manifest.runtimeApiVersion,
     scopes: cloneJson(component.manifest.supportedScopes),
     renderMode: componentRenderMode(component.manifest),
@@ -218,7 +220,16 @@ export function buildPublishedLessonPayload(
     const packageId = usedKey.slice(0, separator)
     const version = usedKey.slice(separator + 1)
     const source = findComponent(payload, packageId, version)
-    publishedComponents[usedKey] = publishComponent(source)
+    const embedded = Object.values(payload.project.componentPackages).find(
+      (metadata) => metadata.packageId === packageId && metadata.version === version,
+    )
+    if (!embedded) {
+      throw new Error(`组件包“${usedKey}”缺少工程内容哈希`)
+    }
+    publishedComponents[usedKey] = publishComponent(
+      source,
+      embedded.contentSha256,
+    )
   }
   const globalRuntime = publishRuntime(payload.project.globalRuntime)
 

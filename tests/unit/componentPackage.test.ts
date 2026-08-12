@@ -73,6 +73,7 @@ describe('component package import', () => {
       manifestPath: 'components/com.example.counter@4.0.0/manifest.json',
       runtimePath: 'components/com.example.counter@4.0.0/runtime.js',
       thumbnailPath: 'components/com.example.counter@4.0.0/thumbnail.png',
+      contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     })
     for (const [path, bytes] of Object.entries(sourceFiles)) {
       expect([...imported.files[path]!]).toEqual([...bytes])

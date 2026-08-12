@@ -1,4 +1,4 @@
-# HTML 课件编辑器内部正式版 1.0 与多表面后续开发计划
+# 互动课件编辑器内部正式版 1.0 与多表面后续开发计划
 
 > 当前主干：Editor 1.0.0 收敛分支 / Project V8 / Runtime API 2 / Component API 4
 >
@@ -6,7 +6,7 @@
 >
 > 目标基线：内部正式版 Editor 1.0.0 / Project V8（仅幻灯片表面）
 >
-> 计划状态：里程碑 0、里程碑 1 已完成；里程碑 2 的首批九个 experimental 组件已通过最终隐藏 V8 矩阵 2/2，里程碑 3 的既有软件实现与 S6 同工作树验收结果为 `engineering candidate`。2026-08-12 追加的 AI-native 编辑器基建 P0–P4 已完成实现与自动化验收，P5 完成 RFC/测试原型并停在生产门禁；Skill/工作流、物理课例仓库、新课件表面与最终产品验收尚未开始
+> 计划状态：里程碑 0、里程碑 1 已完成；里程碑 2 的组件库已从九包收敛为四个 experimental 组件，并通过当前隐藏 V8 矩阵 2/2，里程碑 3 的既有软件实现与 S6 同工作树验收结果为 `engineering candidate`。2026-08-12 的 AI-native 基建 P0–P4 已完成，其声明式 courseState P5 仍停在 RFC；随后完成的 ittoedu 身份与 Headless 自检 P0–P5 已通过自动化和制品验收，P7 旧本地目录清理因执行环境禁止删除而待人工完成。Skill/工作流、物理课例仓库、新课件表面与最终产品验收尚未开始
 >
 > 决策日期：2026-08-07
 >
@@ -412,10 +412,36 @@ Project V8 的演示输入至少支持两种推进策略：
 - P1 为 Project V8 Zod 输出与 `ProjectDocument` 建立双向编译期门禁，并用独立 `tsconfig.e2e.json` 把 Playwright/Electron 验收代码纳入 `npm run typecheck`；两个方向的临时突变均被合同捕获，恢复后全量复验通过；
 - P2 用一份带位置、区分 direct/conservative 的素材引用图统一删除保护、工程检查、归档和网页发布投影；单项素材操作进入引用/元数据/字节同一撤销事务，诊断 code 收敛为类型化注册表；
 - P3 已删除不可达的原生节点 Phaser 视觉适配链、重复组件文字编辑浮层和无消费者布局/预览代码；隔离 Player 保持唯一视觉真相，透明 Phaser 只保留 `ProxyNodeAdapter` 几何/命中路径；
-- P4 生成 5,079 bytes 的 `artifacts/ai-capabilities/index.json` 与按需分域契约，读取 Schema、协议常量、诊断注册表和受校验 catalog；确定性、过期/超限、九包哈希和目录降级夹具均已通过。该索引不代表内置 AI 或 V8 实现 Skill，九组件仍是 `experimental` 并保留许可、来源和维护人阻断；
+- P4 在该批次生成 5,079 bytes 的 `artifacts/ai-capabilities/index.json` 与按需分域契约，读取 Schema、协议常量、诊断注册表和受校验 catalog；确定性、过期/超限、当时九包的哈希和目录降级夹具均已通过。该索引不代表内置 AI 或 V8 实现 Skill；当前组件事实由后续 6.12 覆盖；
 - P5 只形成 [声明式课程状态与导航守卫 RFC](docs/reviews/DECLARATIVE_COURSE_STATE_RFC_20260812.md) 与测试目录内存原型。它没有进入 Project Schema、InteractionEngine、作者 UI 或导出协议；Project V8/V9、capture 冻结和导航守卫组合仍需人类决定。
 
 P1–P4 的类型、123 文件/777 项 Vitest、生产构建、组件目录校验、能力清单 `--check` 和始终隐藏的 Electron E2E 27/27 均已回填，本增量签发为 `engineering candidate`。这不能解除组件发布阻断，也不能跳过 W1/W2 的工作流、Skill 和真实课例结果验收。
+
+### 6.11 ittoedu 身份断代与 Headless 自检增量（2026-08-12）
+
+本增量在 6.10 的基础上完成产品身份和 AI 自查闭环，详细证据见 [ittoedu 产品身份断代与 Headless 自检验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)：
+
+- 中文产品名冻结为“互动课件编辑器”，英文产品名、npm 包、Windows App ID、EXE、用户数据/临时路径、诊断与 Office 元数据统一为 ittoedu；Phaser 只保留为内部技术能力；
+- 在该时点，四个主仓组件和九个目录组件断代为 `com.ittoedu.*`，不保留旧 ID 别名；目录九包仍是 `experimental`，权属/许可证/素材来源/维护人阻断继续有效；
+- `sha256` 继续锁定原始 `.h5component` ZIP，新增必填 `contentSha256` 校验 canonical 嵌入文件集；按用户“不需要兼容”的授权，同一 Project V8 / PublishedLesson V1 内直接硬断，旧含组件归档必须重建且不提供迁移器；
+- 新增 `npm run --silent validate:project -- <file.h5lesson>`，在不启动 Electron、不执行运行时代码、不写工程的前提下输出稳定 JSON，覆盖 Schema、Project Health、真实资源/组件上下文和四格式 Export Preflight；
+- 能力生成物漂移与仅来源证据漂移分级说明但都阻断；`verify` 串行覆盖能力门禁、三配置类型、测试、隐藏 E2E 和桌面构建；
+- 最终冻结工作树通过 127 个 Vitest 文件 / 799 项、隐藏 E2E 27/27、Windows 打包和发布制品 16/16 核验；管线仍只签发为 `engineering candidate`。
+
+尚未收口的是本地 P7：旧 AppData、临时目录、Skill 管理清单和历史 release/debug 目录已经精确定位，但当前执行环境禁止删除。相邻 `courseware-components` 已在本地 `main` 建立首个可恢复提交 `af409af`，但尚无远端；远端备份以及当前四包的许可/维护人门禁仍不能用自动化绿灯掩盖。
+
+### 6.12 通用视觉组件收敛与画布文字完整化（2026-08-13）
+
+本增量遵循“行为/数据语义决定包边界，纯外观作为属性”：
+
+- 朗读标注和拼音标注保留为两个独立语文组件；
+- 透明玻璃、磨砂玻璃、便利贴、撕纸和文件夹合并为 `com.ittoedu.visual.text-container`；
+- 笔刷和贴纸合并为 `com.ittoedu.visual.image-frame`；
+- 七个旧 ID、源码、包和来源不明位图全部删除，不提供迁移或兼容别名；两个新视觉组件使用纯 CSS/SVG 程序视觉；
+- 四个当前内置包的可编辑稳定可见文字全部显式登记画布编辑目标，属性栏控件同时获得稳定可访问名称；
+- 隐藏 V8 矩阵 2/2 通过，覆盖 25×4=100 次压力导航、真实画布文字修改、便利贴/贴纸属性切换、保存重开、缩略图、Player、离线 HTML/网页包、4 页 PDF 与 4 页 PPTX。
+
+详细证据见 [组件库收敛验证记录](docs/reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md)。目录四包仍为 `experimental`；技术矩阵通过只移除当前矩阵阻断，不解除许可和维护人门禁。
 
 ## 7. 各表面的创作与实现工作流
 
@@ -553,7 +579,7 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 
 ### 里程碑 1：Project V8 与协议断代
 
-**状态：已完成。** 新建、保存、打开、恢复、Player Payload、运行时和组件生产路径只接受 Project V8、Runtime API 2 与 Component API 4；Project V1–V7、Runtime API 1、Component API 1–3 的迁移/宿主兼容分支、历史夹具和专属测试已移出当前主干。旧输入在解析或导入边界得到明确“不受支持”结果，不会部分载入或静默迁移。历史 S6 证据保留在 2026-08-11 报告，当前增量基线以 2026-08-12 的 123 文件/777 项 Vitest 与隐藏 E2E 27/27 为准。
+**状态：已完成。** 新建、保存、打开、恢复、Player Payload、运行时和组件生产路径只接受 Project V8、Runtime API 2 与 Component API 4；Project V1–V7、Runtime API 1、Component API 1–3 的迁移/宿主兼容分支、历史夹具和专属测试已移出当前主干。旧输入在解析或导入边界得到明确“不受支持”结果，不会部分载入或静默迁移。历史批次数字由 Git 历史和带日期报告保存；当前最终基线以 [2026-08-12 身份与 Headless 验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md) 的 127 文件/799 项 Vitest、隐藏 E2E 27/27 和制品 16/16 为准。
 
 目标：在不重写已稳定 Slide Player 的前提下建立只支持当前协议的干净工程核心。
 
@@ -575,7 +601,7 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 
 ### 里程碑 2：仓库职责冻结与本地组件库
 
-**状态：软件实现与作者入口重构均已通过当前 `engineering candidate` 自动化基线。** 相邻 `courseware-components` 目录、`catalog.json` 扫描/搜索/信任/哈希/锁定/显式更新链路和首批九个组件已经落地，九组件 V8 矩阵通过 2/2，并覆盖九包、225 次压力导航、9 页 PDF 与 9 张 PPTX。专业模式现以独立“组件”页承载全尺寸内置库、外部批量导入和合并管理后的工程组件；内置库按 catalog 动态生成通用/学科、学段和用途筛选，多选只加入包、不自动放置实例。catalog 的九项记录各登记 5 个验证 case，并只移除了 `current-v8-full-matrix-unverified`；朗读标注、拼音标注及七个视觉容器仍全部是 `experimental`，许可、素材来源和维护人发布阻断继续有效，不得标记为 `candidate` 或 `stable`。`courseware-cases` 在本阶段只冻结职责、目标布局和迁移清单，不物理建库或移动历史课例。
+**状态：软件实现与作者入口重构均已通过当前 `engineering candidate` 自动化基线。** 相邻 `courseware-components` 目录、`catalog.json` 扫描/搜索/信任/哈希/锁定/显式更新链路和当前四个组件已经落地。两项语文标注保持独立学科语义；七项旧通用视觉包按内容载体合并为“文字视觉容器”和“图片装饰容器”，外观由属性切换，旧 ID/包/来源不明位图已删除且不提供迁移。四组件 V8 矩阵 2/2 覆盖画布文字编辑、两个视觉样式实际切换、100 次压力导航、4 页 PDF 与 4 页 PPTX。专业模式以独立“组件”页承载全尺寸内置库、外部批量导入和合并管理后的工程组件；新外部/内置包在选定后直接校验并加入，不弹导入确认或成功摘要；会覆盖已用代码的更新/替换仍显式审阅。catalog 的四项记录各登记 5 个验证 case 并移除 `current-v8-full-matrix-unverified`；许可和维护人阻断继续有效，四包仍全部为 `experimental`。相邻仓已在本地 `main` 提交本轮收敛为 `b124dd5`，具备本地 Git 可恢复性；尚未配置远端。`courseware-cases` 在本阶段只冻结职责、目标布局和迁移清单，不物理建库或移动历史课例。
 
 目标：让编辑器核心、可复用组件和课例内容各自拥有清晰生命周期，同时维持工程自包含和离线交付。
 
@@ -600,7 +626,7 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 
 ### 里程碑 3：正式版高价值质量能力
 
-**状态：软件实现与作者体验增量已通过当前自动化基线，签发结果为 `engineering candidate`。** 教师控制器会话拖动、PresenterInput、受限线性公式编辑、四格式 Export Preflight、designTokens、安全区、只读信息释放、视觉密度、媒体/组件批量导入和连续插入已经进入当前代码。2026-08-12 同一工作树通过 123 文件/777 项 Vitest、生产构建、组件/能力清单校验与始终隐藏的 Electron E2E 27/27；九组件和 FormulaNode/着重号跨表面制品仍有可追溯证据。当前公式子集不等于任意 LaTeX 或 Word/MathLive 完整体验；真实教师任务、中文输入法、读屏、100 卡片 UI 性能、三仓物理拆分、干净 Windows 启动和真实翻页硬件人工冒烟仍未完成，不得宣称 `accepted` 或发布就绪。
+**状态：软件实现与作者体验增量已通过当前自动化基线，签发结果为 `engineering candidate`。** 教师控制器会话拖动、PresenterInput、受限线性公式编辑、四格式 Export Preflight、designTokens、安全区、只读信息释放、视觉密度、媒体/组件批量导入和连续插入已经进入当前代码。2026-08-12 同一冻结工作树通过 127 文件/799 项 Vitest、生产构建、组件/能力清单校验、始终隐藏的 Electron E2E 27/27 与 Windows 制品 16/16；九组件和 FormulaNode/着重号跨表面制品仍有可追溯证据。当前公式子集不等于任意 LaTeX 或 Word/MathLive 完整体验；真实教师任务、中文输入法、读屏、100 卡片 UI 性能、三仓物理拆分、真实翻页硬件与可见人工冒烟仍未完成，不得宣称 `accepted` 或发布就绪。
 
 目标：解决内部实际授课和数学内容中已经观察到的高价值问题。
 
@@ -796,7 +822,7 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 3. **已冻结：** `playback.presenter` 保存启用、`scene-navigation/authored-command` 策略与精确附加按键；默认 PageUp/PageDown，作者命令没有隐式翻页后备。
 4. **已冻结：** 按键检测、恢复/删除附加映射由属性栏完成，附加映射进入 Project 和 PublishedLesson，不是本机偏好。
 5. **已冻结：** `FormulaNode` 使用七类递归 AST、稳定 Formula ID 和无障碍文本；共享 Canvas 渲染，PPTX 转独立透明图片并报告差异。
-6. **已冻结：** 本地组件目录使用 `catalog.json`、SHA-256、精确版本锁定和显式更新；只有与发行版审核摘要完全匹配的内置 catalog 可免确认，外部组件多选导入以一个批次确认加入，更新、替换以及同 ID/版本不同哈希仍显式审阅或阻断。已嵌入的精确工程包可直接实例化，不重复读取目录或弹窗。
+6. **已冻结：** 本地组件目录使用 `catalog.json`、SHA-256、精确版本锁定和显式更新；只有与发行版审核摘要完全匹配的 catalog 获得内置信任。外部组件多选后直接校验并加入，不弹导入确认或成功摘要；更新、替换以及同 ID/版本不同哈希仍显式审阅或阻断。已嵌入的精确工程包可直接实例化，不重复读取目录或弹窗。
 7. **阶段性冻结：** S6 只物理落地当前软件依赖的相邻 `courseware-components`，并冻结 `courseware-cases` 的职责和迁移清单；用户批准 W1 后才建立课例根目录并原子迁移历史旗舰/失败课例。是否分别建立远程 Git 仓库不阻塞软件基线，但不得把领域组件和新课例成品重新硬编码进核心。
 8. **已冻结：** 当前主干只保留 Project V8/Runtime 2/Component 4 夹具；旧实现、样例与专属测试归档或删除。
 9. **已冻结：** Project Health、Export Preflight JSON 和不含课件素材的异常诊断报告三者职责分开；设计 Token、安全区和只读启发式不收集额外用户内容。
@@ -817,16 +843,16 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 
 ## 13. 下一批具体工作
 
-当前不再重复已经完成的断代和核心实现。AI-native 基建 P0–P4 已按 [2026-08-12 验证记录](docs/reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md) 完成类型检查、123 文件/777 项 Vitest、生产构建、组件 catalog 校验、AI 能力清单 `--check` 与始终隐藏的 Electron E2E 27/27；P5 仍只获准保留 RFC/测试原型。随后按以下顺序收口：
+当前不再重复已经完成的断代和核心实现。AI-native 基建 P0–P4 已按 [2026-08-12 基建验证记录](docs/reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md) 完成；其后的 [ittoedu 身份断代与 Headless 自检](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md) 已把软件、路径和 13 个当前组件身份统一到 ittoedu，并建立只读 `validate:project` 闭环。最终命令数量以后一份验证报告为准；产品仍是 `engineering candidate`。
 
-1. 首批九个 `experimental` 组件的最终隐藏 V8 矩阵已通过 2/2；catalog 已移除矩阵验证阻断，但继续保留许可、素材来源和维护人发布阻断，不提前晋升质量等级。
-2. 同一工作树的类型检查、115 文件/717 项单元与集成测试、始终隐藏窗口的 Electron E2E、Player/Renderer/Electron 生产构建均已通过；单 HTML、网页包、PDF、PPTX 已真实生成并复查。
-3. 历史 S6 的隐藏 Electron 26/26、组件矩阵 2/2、非 Electron 基线、生产构建、产物哈希、视觉结果和环境指纹已形成可追溯证据；当前增量基线更新为 123 文件/777 项 Vitest 与隐藏 E2E 27/27，软件本体仍只签发为 `engineering candidate`。
-4. README、用户指南、创作/运行时/组件规范、计划和示例已经按当前能力同步；后台自动化保持 BrowserWindow 始终隐藏，只有显式可视调试脚本可以显示。
-5. 软件本体达到 `engineering candidate` 并获用户批准后启动 W1：第一项建立 `courseware-cases`，按原状态原子迁移旗舰/失败课例及其脚本和证据；随后才启动 Project V8 实现 Skill 与通用/学科工作流，不得使用归档的 V7 Skill 生成当前工程。
-6. W2 使用干净上下文生产两个不同学科、不同互动机制的全新冷启动课例；历史旗舰和失败课例均不计数。
-7. W3 只在两个新课例完成 HTML、网页包、PDF、PPTX、截图、录屏和人工审阅并达到 `accepted` 后，才完成内部正式版 1.0 产品验收。
-8. 内部正式版 1.0 验收后，再选择真实长文内容启动 Flow 原型；之后依次评估 Project V9、混合工程和 Spatial 2D。
+1. 本轮冻结工作树已通过三配置类型检查、127 个 Vitest 文件 / 799 项测试、始终隐藏窗口的 Electron E2E 27/27、`build:desktop`、Windows 打包和发布制品 16/16 真实核验；单 HTML、网页包、PDF、PPTX 与离线互动均已生成并复查。它证明软件管线成立，不等于真实课例达到 `accepted`。
+2. 当前四个 `experimental` 组件的 ittoedu 身份、双哈希和可重现矩阵已通过；catalog 继续保留许可证和维护人阻断，并明确排除于正式发布范围。原七个视觉包已断代为两个可选样式容器，不保留迁移。相邻 `courseware-components` 已在本地 `main` 提交收敛结果 `b124dd5`，但没有远端；配置并推送到经用户确认的远端仍是发布前门禁。
+3. 本轮按未投产、无需兼容的授权，把 `contentSha256` 设为 Project V8 / PublishedLesson V1 含组件归档的必填字段。这是有意的同版本硬断：旧的含组件 V8 归档直接拒绝，不提供迁移或兼容分支，必须用当前组件包重建；`sha256` 仍表示原 ZIP，`contentSha256` 只证明嵌入文件字节完整性，不证明签名或权属。
+4. 旧 AppData、旧临时目录、旧 Skill 管理清单以及仓库中的历史 `release`/调试目录已精确定位，但当前执行环境拒绝删除操作，因此仍需人工按验证报告的精确路径清理。清理前不得把整个 `release/` 当作可分发目录；只能使用验证报告点名并绑定 SHA-256 的新 ittoedu 制品。
+5. README、用户指南、创作/运行时/组件规范、计划和示例已经按当前能力同步；后台自动化保持 BrowserWindow 始终隐藏，只有显式可视调试脚本可以显示。旧的 V7 Skill 仍是归档能力，不能充当 V8 的生成或校验入口。
+6. 用户完成上述本地清理、组件仓版本化和组件权属门禁，并批准进入工作流阶段后再启动 W1：第一项建立 `courseware-cases`，按原状态原子迁移仍需保留的课例及其脚本和证据；随后开发 Project V8 实现 Skill 与通用/学科工作流。
+7. W2 使用干净上下文生产两个不同学科、不同互动机制的全新冷启动课例；每个完整归档先通过 `validate:project` 自检，再完成真实 HTML、网页包、PDF、PPTX、截图、录屏与人工审阅。历史旗舰和失败课例均不计数。
+8. W3 只在两个新课例达到人工 `accepted` 后完成内部正式版 1.0 产品验收；之后再以真实长文内容启动 Flow 原型，并依次评估 Project V9、混合工程和 Spatial 2D。
 
 ## 14. 完成定义
 
@@ -842,6 +868,7 @@ PDF 排版必须处理分页、孤行寡行、标题与正文保持、表格和�
 - PageDown/PageUp 标准翻页笔在整课预览、单 HTML 和网页包中即插即用，简单切幕与作者规则都不绕过检查点；
 - 纵向分式、上下标和根式达到正式教学排版要求，所有导出降级可见；
 - 四格式 Export Preflight 可定位并保存 JSON，确定性错误阻断、启发式警告不越权；`designTokens`、安全区、信息释放和视觉密度均保持机器可读/只读边界，不自动修改节点；
+- 正式产品与 Windows 身份统一为 ittoedu，组件使用各自权利主体的反向域名；AI 能通过只读命令获得结构化 Schema、工程健康和四格式预检，并由 canonical 组件内容哈希发现嵌入文件篡改；
 - 自动测试与制品验证默认保持编辑器和预览 BrowserWindow 始终隐藏，不干扰用户桌面；
 - Skill 中文化通过冻结前向测试，并能从落盘制品恢复而不依赖聊天上下文；
 - 两个不同学科、不同互动机制的冷启动课例达到人工 `accepted`；

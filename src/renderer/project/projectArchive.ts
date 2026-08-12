@@ -29,6 +29,31 @@ import {
 const PROJECT_DOCUMENT_PATH = 'project.json'
 const MAX_PROJECT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 
+/** Structured cause retained for headless validators and other machine clients. */
+export class UnsupportedProjectVersionError extends Error {
+  constructor(public readonly schemaVersion: number) {
+    super(`Unsupported Project schema version: ${schemaVersion}`)
+    this.name = 'UnsupportedProjectVersionError'
+  }
+}
+
+export interface ProjectSchemaValidationIssue {
+  path: Array<string | number>
+  code: string
+  message: string
+}
+
+export class ProjectSchemaValidationError extends Error {
+  constructor(
+    public readonly schemaVersion: number | null,
+    public readonly issues: ProjectSchemaValidationIssue[],
+    cause: unknown,
+  ) {
+    super('Project schema validation failed', { cause })
+    this.name = 'ProjectSchemaValidationError'
+  }
+}
+
 export interface ProjectArchiveData {
   project: ProjectDocument
   /** Binary asset data keyed by AssetMeta.id. */
@@ -73,11 +98,17 @@ function readProjectDocument(bytes: Uint8Array): ProjectDocument {
     throw projectOpenError('project.json 不是有效的 UTF-8 JSON 文件。', error)
   }
 
-  if (typeof value === 'object' && value !== null) {
-    const schemaVersion = Reflect.get(value, 'schemaVersion')
+  const rawSchemaVersion = typeof value === 'object' && value !== null
+    ? Reflect.get(value, 'schemaVersion')
+    : undefined
+  const declaredSchemaVersion =
+    typeof rawSchemaVersion === 'number' && Number.isInteger(rawSchemaVersion)
+      ? rawSchemaVersion
+      : null
+  if (declaredSchemaVersion !== null) {
+    const schemaVersion = declaredSchemaVersion
     if (
       typeof schemaVersion === 'number' &&
-      Number.isInteger(schemaVersion) &&
       schemaVersion !== PROJECT_SCHEMA_VERSION
     ) {
       if (schemaVersion < PROJECT_SCHEMA_VERSION && schemaVersion >= 1) {
@@ -85,12 +116,14 @@ function readProjectDocument(bytes: Uint8Array): ProjectDocument {
           '旧工程格式不受支持',
           `该工程使用 Project V${schemaVersion}，内部正式版只接受 Project V${PROJECT_SCHEMA_VERSION}，不会自动迁移旧工程。`,
           '请使用对应的旧版编辑器打开，或使用单独的离线转换工具生成 Project V8。',
+          { cause: new UnsupportedProjectVersionError(schemaVersion) },
         )
       }
       throw new UserFacingError(
         '工程格式版本不支持',
         `该工程使用格式版本 ${schemaVersion}，当前编辑器仅支持版本 ${PROJECT_SCHEMA_VERSION}。`,
         '请升级编辑器后再打开，或使用原编辑器导出兼容版本。',
+        { cause: new UnsupportedProjectVersionError(schemaVersion) },
       )
     }
   }
@@ -101,9 +134,24 @@ function readProjectDocument(bytes: Uint8Array): ProjectDocument {
     const result = projectDocumentSchema.safeParse(value)
     const issue = result.success ? undefined : result.error.issues[0]
     const location = issue?.path.join('.') || 'project'
+    const structuredCause = result.success
+      ? error
+      : new ProjectSchemaValidationError(
+          declaredSchemaVersion,
+          result.error.issues.map((item) => ({
+            path: item.path.map((segment) => (
+              typeof segment === 'string' || typeof segment === 'number'
+                ? segment
+                : String(segment)
+            )),
+            code: item.code,
+            message: item.message,
+          })),
+          error,
+        )
     throw projectOpenError(
       `project.json 校验失败：${location} ${issue?.message ?? '字段无效'}。`,
-      error,
+      structuredCause,
     )
   }
 }
@@ -196,6 +244,11 @@ function validateEmbeddedMetadata(
 
   if (parsed.manifest.name !== meta.name) {
     const message = `组件“${recordKey}”的名称与 manifest.json 不一致。`
+    throw opening ? projectOpenError(message) : projectSaveError(message)
+  }
+
+  if (parsed.contentSha256 !== meta.contentSha256) {
+    const message = `组件“${recordKey}”的内容 SHA-256 与工程锁定值不一致。`
     throw opening ? projectOpenError(message) : projectSaveError(message)
   }
 

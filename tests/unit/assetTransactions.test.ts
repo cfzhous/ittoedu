@@ -124,6 +124,7 @@ describe('asset deletion safety', () => {
     project.componentPackages['com.test.asset'] = {
       packageId: 'com.test.asset', version: '4.0.0', name: 'Asset component',
       manifestPath: 'components/manifest.json', runtimePath: 'components/runtime.js',
+      contentSha256: '0'.repeat(64),
     }
     const packageData = {
       manifest: {

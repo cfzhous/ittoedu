@@ -61,7 +61,7 @@ function moveSlider(root: HTMLElement, value: number): void {
 
 describe('motion-function-lab linked-graph runtime', () => {
   it('registers the course-specific Component API 4 definition', () => {
-    expect(definition.id).toBe('com.alepha.math.motion-function-lab')
+    expect(definition.id).toBe('com.ittoedu.math.motion-function-lab')
     expect(definition.runtimeApiVersion).toBe(4)
   })
 

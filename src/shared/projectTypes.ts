@@ -488,6 +488,8 @@ export interface EmbeddedComponentPackageMeta {
   manifestPath: string
   runtimePath: string
   thumbnailPath?: string
+  /** Canonical SHA-256 of all embedded component paths and bytes. */
+  contentSha256: string
   /** SHA-256 of the exact .h5component bytes selected from a catalog or file. */
   sha256?: string
   /** ISO timestamp recorded when the executable package entered this project. */

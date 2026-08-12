@@ -20,6 +20,7 @@ import {
 import { useEffect, useState } from 'react'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { ProjectHealthSummary } from '../../shared/projectHealth'
+import { APP_NAME } from '../../shared/constants'
 import { useEditorStore } from '../store/editorStore'
 
 interface TopToolbarProps {
@@ -105,11 +106,11 @@ export function TopToolbar({
 
   return (
     <header className="toolbar" data-testid="top-toolbar">
-      <div className="toolbar__brand" title="Phaser 轻量交互课件编辑器">
+      <div className="toolbar__brand" title={APP_NAME}>
         <span className="toolbar__brand-mark">
           <Box size={18} strokeWidth={2.2} />
         </span>
-        <span>课件编辑器</span>
+        <span>{APP_NAME}</span>
       </div>
 
       <div className="editor-mode-switch" role="group" aria-label="编辑模式">

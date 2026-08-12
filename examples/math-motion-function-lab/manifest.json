@@ -5,7 +5,7 @@
   "supportedScopes": [
     "scene"
   ],
-  "id": "com.alepha.math.motion-function-lab",
+  "id": "com.ittoedu.math.motion-function-lab",
   "name": "动点问题·五步建模课",
   "version": "0.2.0",
   "description": "课程专用的预测、约束、建模、图式联动、定义域修复、迁移与总结互动",

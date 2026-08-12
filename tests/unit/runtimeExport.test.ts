@@ -155,6 +155,7 @@ function makeProject(): ProjectDocument {
           'components/com.example.global-controls@4.0.0/manifest.json',
         runtimePath:
           'components/com.example.global-controls@4.0.0/runtime.js',
+        contentSha256: '0'.repeat(64),
       },
     },
     globalLayer: [

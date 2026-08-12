@@ -1,14 +1,14 @@
 # 互动课件编辑器
 
-一个面向教师、教研团队和课件制作者的 Windows 桌面编辑器。项目以 Electron、React、TypeScript 和 Project V8 统一业务模型构建；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 可由运行时与组件按需接入。它可编辑多场景互动课件，保存完整的 `.h5lesson` 工程，并导出离线单 HTML、网页包、静态 PDF 和对象级可编辑 PPTX。
+ittoedu 开发的 Windows 桌面课件创作工具，英文产品名为 **ittoedu Courseware Editor**，面向教师、教研团队和课件制作者。项目以 Electron、React、TypeScript 和 Project V8 统一业务模型构建；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 可由运行时与组件按需接入。它可编辑多场景互动课件，保存完整的 `.h5lesson` 工程，并导出离线单 HTML、网页包、静态 PDF 和对象级可编辑 PPTX。
 
 当前源码版本：**1.0.0（内部正式版收敛中）**
 
-文档同步基线：**2026-08-12**。1.7.0 原型已冻结在 `internal-prototype-1.7.0`；主干正在按 [内部正式版与多表面计划](MULTI_SURFACE_DEVELOPMENT_PLAN.md) 收敛 Editor 1.0.0。工程、自由运行时和组件生产路径已断代到 Project V8、Runtime API 2、Component API 4；这项协议收敛不等于内部正式版全部门禁已经完成。阅读入口见 [文档导航](docs/README.md)，本轮 AI-native 编辑器基建证据见 [2026-08-12 验证记录](docs/reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md)。
+文档同步基线：**2026-08-13**。1.7.0 原型已冻结在 `internal-prototype-1.7.0`；主干正在按 [内部正式版与多表面计划](MULTI_SURFACE_DEVELOPMENT_PLAN.md) 收敛 Editor 1.0.0。工程、自由运行时和组件生产路径已断代到 Project V8、Runtime API 2、Component API 4；这项协议收敛不等于内部正式版全部门禁已经完成。阅读入口见 [文档导航](docs/README.md)；身份断代与 Headless 自检见 [2026-08-12 验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)，当前四组件目录见 [2026-08-13 组件库收敛验证](docs/reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md)。
 
-当前主干基线：Editor 1.0.0、Project V8、RuntimeDocument API 2、Component API 4、PublishedLesson V1。Project V8 JSON 是业务真相，DOM、Phaser 和按内容打包的 Three.js 都是可替换的呈现/交互能力，而不是工程模型本身。Project V1–V7、Runtime API 1 与 Component API 1–3 会在当前产品入口明确拒绝，不再自动迁移或由宿主兼容执行。详细处置合同见 [里程碑 0 冻结记录](docs/INTERNAL_1_0_MILESTONE_0.md)。
+当前主干基线：Editor 1.0.0、Project V8、RuntimeDocument API 2、Component API 4、PublishedLesson V1。Project V8 JSON 是业务真相，DOM、Phaser 和按内容打包的 Three.js 都是可替换的呈现/交互能力，而不是工程模型本身。ittoedu 第一方组件使用 `com.ittoedu.*`；第三方必须使用自身权利主体的反向域名。Project V1–V7、Runtime API 1 与 Component API 1–3 会在当前产品入口明确拒绝，不再自动迁移或由宿主兼容执行。详细处置合同见 [里程碑 0 冻结记录](docs/INTERNAL_1_0_MILESTONE_0.md)。
 
-AI-native 基建最终自动化基线（2026-08-12）：`typecheck`、**123 个 Vitest 文件 / 777 项测试**、`build:desktop`、九组件 catalog 与 AI 能力清单校验均通过；隐藏 Electron E2E **27/27**，其中组件矩阵 **2/2**、编辑器 **24/24**、render-host **1/1**，全程设置 `COURSEWARE_E2E_BACKGROUND=1`。当前结果仍只达到 `engineering candidate`；真实教师公式任务、中文输入法、读屏、100 卡片 UI 性能及其他人工结果门禁未完成，不代表 `accepted` 或发布就绪。本文后续出现的 2026-08-11 的 122/756 与 S6 的 26/26、115/717 均是历史基线，不覆盖本次结果。
+当前自动化基线（2026-08-13）：`typecheck`、**127 个 Vitest 文件 / 799 项测试**、`build:desktop`、四组件 catalog 与 AI 能力清单校验均通过；隐藏 Electron E2E 中的当前组件矩阵 **2/2** 通过。上一次整体隐藏 E2E **27/27** 和制品冒烟 **16/16** 仍是 2026-08-12 基线，不伪装为本增量已重跑的证据。所有 Electron 自动化使用 `COURSEWARE_E2E_BACKGROUND=1`。当前结果仍只达到 `engineering candidate`；真实教师任务、中文输入法、读屏、100 卡片 UI 性能及其他人工结果门禁未完成，不代表 `accepted` 或发布就绪。
 
 ## 快速开始
 
@@ -67,7 +67,7 @@ npm test
 - 中央工作区始终是同一个 1280 × 720 画布，只在“编辑状态 / 当前位置试运行”之间切换职责：Player 是两种状态的唯一视觉源；编辑状态在其上叠加透明 Phaser 原生节点交互层，当前位置试运行则把输入交还给真实 Player；
 - 编辑状态使用隔离的 authoring Player 挂载组件与场景/全局运行时，但冻结学生互动、声明式动作、音视频、导航和课程状态写入；因此可在原位置看见完整合成画面并安全拖改原生节点。当前位置试运行从当前场景和当前命名状态启动，顶部“整课预览”仍从课程起点播放；
 - Component API 4 `.h5component` 导入：支持场景/全局作用域、全部 `props.content` 文案、严格 `dom/phaser/hybrid` 能力、暂停/显隐和捕获生命周期；
-- 组件可显式开放画布双击文字编辑：DOM 使用 `data-courseware-edit-key`，Phaser/hybrid 使用可选的 `ctx.editor?.registerTextRegion()`；该桥只在编辑态提供，是 Component API 4 当前上下文的可选扩展，不是运行必需能力；
+- 组件可显式开放画布双击文字编辑：DOM 使用 `data-courseware-edit-key`，Phaser/hybrid 使用可选的 `ctx.editor?.registerTextRegion()`；当前四个内置实验组件已把画面上的可编辑稳定文字全部登记为画布目标，属性栏仍是完整基线；
 - 场景运行时可选择 `authoringApiVersion: 1`，用 `ctx.authoring.register()` 或 DOM `data-courseware-edit-key` / `data-courseware-asset-key` 显式开放文字和图片命中区；键必须已存在于 `content.values` 或 `assets`。未声明 authoring 目标的 API 2 运行时仍由 Player 正常显示，只继续通过属性面板修改；运行时内容与素材绑定由当前场景的全部命名状态共享；
 - 专业“开发”面板是加宽的单任务工作台，通过“运行时 / 对象 JSON / 规则 JSON / 组件代码”切换，一次只呈现一类编辑内容；代码区使用不折行的较大等宽编辑区。第三方组件代码默认只读，必须在场景“基础”或全局层创建带明确来源标记的新 ID/版本工程内副本，才可修改副本 manifest/runtime。修改进入撤销历史，并在应用前校验包路径、入口、缩略图、素材、运行时 API、注册身份和现有实例作用域；该面板不是通用 IDE，也不能访问文件系统、Shell、Node/Electron API 或编辑器自身源码；
 - 母版式统一“全局层”可直接编辑跨场景持久的文字、图片、图形和组件，并设置前后景与场景可见范围；
@@ -200,9 +200,9 @@ Project V8 的声明式交互规则是稳定状态与运行逻辑之间的首选
 
 组件包是工程的一等资源。专业模式“组件”页把高频插入和包管理合并为一份“工程组件”列表：卡片可插入实例或预设，次级菜单提供详情、更新、替换、定位使用位置和安全移除；仍被实例引用的包不能删除。同 ID 新包用于替换或升级前会校验现有实例作用域，失败时工程保持原状；成功后所有实例版本同步更新。单个组件运行失败由宿主隔离并记录诊断，不应使整页或其余组件失效。
 
-可复用组件源码与制品位于独立的本地 `courseware-components` 目录，不通过 Vite 虚拟模块或编辑器硬编码清单装入核心。专业模式“组件”→“打开内置组件库”以全尺寸界面扫描目录根部的 `catalog.json`，按通用/学科、学段和用途动态筛选，并可一次把多个包加入工程而不自动创建实例。加入前会重新读取并校验 `.h5component` 的 SHA-256，再把精确 ID、版本、哈希、导入时间和来源标签随完整包嵌入 `.h5lesson`。只有与发行版审核摘要完全匹配的内置 catalog 才免确认；“导入外部组件”允许多选，但整批只经过一次可执行代码确认。工程已经嵌入的精确包可直接反复实例化，不再读取目录或重复提醒；更新、替换及同 ID/版本哈希冲突仍显式审阅或阻断。哈希校验用于完整性与版本锁定，不等于恶意代码安全证明。
+可复用组件源码与制品位于独立的本地 `courseware-components` 目录，不通过 Vite 虚拟模块或编辑器硬编码清单装入核心。专业模式“组件”→“打开内置组件库”以全尺寸界面扫描目录根部的 `catalog.json`，按通用/学科、学段和用途动态筛选，并可一次把多个包加入工程而不自动创建实例。加入前会重新读取并校验 `.h5component` 的 SHA-256，再把精确 ID、版本、哈希、导入时间和来源标签随完整包嵌入 `.h5lesson`。只有与发行版审核摘要完全匹配的内置 catalog 才给予内置信任。“导入外部组件”允许多选，选定后直接校验并加入工程，不再对每个新包弹出确认或成功摘要。工程已经嵌入的精确包可直接反复实例化，不再读取目录或重复提醒；会覆盖现有代码的更新、替换及同 ID/版本哈希冲突仍显式审阅或阻断。哈希校验用于完整性与版本锁定，不等于恶意代码安全证明。
 
-目录有更高语义版本时只显示“审阅并更新”，不会静默替换。更新仍须保持同一组件 ID、覆盖现有作用域并通过导入校验；同一 ID/版本对应不同哈希时直接阻断，维护者必须提升版本号。首批朗读标注、拼音标注和七个视觉容器均登记为 `experimental`；最终隐藏 E2E 中的 V8 组件矩阵已通过 2/2，用九个包完成 225 次压力导航、9 页 PDF 与 9 张 PPTX 等技术断言。catalog 已据此移除 `current-v8-full-matrix-unverified`，但来源许可、素材来源和维护人阻断全部保留；页数、张数与自动断言不等于视觉结果 `accepted`，也不得据此宣称组件稳定或可商用。
+目录有更高语义版本时只显示“审阅并更新”，不会静默替换。更新仍须保持同一组件 ID、覆盖现有作用域并通过导入校验；同一 ID/版本对应不同哈希时直接阻断，维护者必须提升版本号。当前目录是朗读标注、拼音标注、文字视觉容器和图片装饰容器四个 `experimental` 包；后两者分别在属性栏切换 5 种文字外观和 2 种图片外观。隐藏 V8 矩阵 2/2 完成四组件画布文字编辑、样式切换、100 次压力导航、4 页 PDF 与 4 页 PPTX；catalog 因此移除 `current-v8-full-matrix-unverified`，但许可和维护人阻断保留。新视觉组件为 CSS/SVG 独立重做，已删除旧来源不明位图；这仍不等于权属或商用许可已完成。
 
 涉及工程格式的修改必须同步检查：
 
@@ -303,15 +303,18 @@ PPTX 映射规则：
 | `npm run build:electron` | 编译 Main 与 Preload |
 | `npm run build:desktop` | 只构建可由根目录入口直接启动的三个生产目录 |
 | `npm run generate:ai-capabilities` | 从权威 Schema、协议常量、诊断注册表和受校验组件目录生成分层 AI 能力契约 |
-| `npm run check:ai-capabilities` | 检查已生成能力契约是否确定、未过期且小型索引未超过 16 KiB |
+| `npm run check:ai-capabilities` | 只读检查能力内容、来源证据和 16 KiB 索引门禁；内容或证据任一过期都会失败，不自动写文件 |
+| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取 Project V8，向 stdout 输出 Schema、工程健康与四格式预检 JSON；退出码 0/1/2 |
 | `npm run build` | 先检查 AI 能力契约，再执行类型检查、测试并构建全部生产产物 |
 | `npm run build:examples` | 重新生成示例工程和示例组件包 |
 | `npm run build:lesson-demo` | 生成三页光合作用最小回归课例 |
 | `npm run build:render-benchmark` | 生成原生 / Phaser / DOM / Three.js / V4 Phaser 组件五路径离线基准 |
 | `npm run build:icons` | 从源图标重新生成应用图标 |
-| `npm run verify` | 执行类型检查、测试、E2E 和完整构建 |
+| `npm run verify` | 依次执行能力检查、三配置类型检查、Vitest、隐藏 E2E 和桌面构建，不重复调用 `build` |
 
-机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它只提供当前 Project V8、Runtime API 2、Component API 4、互动、诊断和导出面的低成本索引；需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。它不是编辑器内 AI、自动课件生成器、工作流或 Project V8 实现 Skill。外部组件 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可生成，但组件能力必须明确标记为 `unavailable`/降级；当前快照中的九个包仍全部是 `experimental`，许可、素材来源和维护人阻断没有被能力索引解除。
+机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它只提供当前 Project V8、Runtime API 2、Component API 4、互动、诊断和导出面的低成本索引；需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。它不是编辑器内 AI、自动课件生成器、工作流或 Project V8 实现 Skill。外部组件 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可生成，但组件能力必须明确标记为 `unavailable`/降级；当前快照中的四个包仍全部是 `experimental`，许可和维护人阻断没有被能力索引解除。
+
+AI/脚本的最低闭环是“生成工程 → `validate:project` → 按结构化路径修正 → 再验证 → 人工验收”。该命令不启动 Electron、不执行真实导出、不改写工程；Node 下文字/公式布局使用公开标注的确定性近似测量，近似溢出只给 warning，最终像素裁切仍必须以真实编辑器或导出为准。它不是编辑器内 AI、课件生成工作流或尚未完成的 Project V8 实现 Skill。
 
 E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口和课件预览窗口保持 `BrowserWindow.isVisible() === false`，不会调用 `show()`、出现在任务栏或抢占焦点；透明、离屏坐标与关闭后台渲染节流只是额外防护和稳定性设置，不再依赖“显示一个透明窗口”实现后台测试。生产构建/制品验证中的自动启动也显式使用同一环境变量。正常 `npm start`、开发启动和双击入口不读取该测试默认值，仍会照常显示窗口。常规验证不得使用可视 E2E；只有开发者明确需要观察单个故障时才手工运行 `npm run test:e2e:visible`。
 
@@ -321,11 +324,11 @@ E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口和课件
 
 ## 当前源码启动与历史版本边界
 
-当前 1.0.0 收敛分支不构建便携版或安装包。根目录 `启动课件编辑器.cmd` 是面向当前源码工作区的双击入口；它生成被 `.gitignore` 排除的 `dist-player/`、`dist-renderer/` 与 `dist-electron/`，然后直接使用项目锁定的 Electron 运行。拉取新提交后再次双击即可同步和重建，不需要复用旧 `release/`。
+根目录 `启动课件编辑器.cmd` 仍是面向当前源码工作区的标准双击入口；它生成被 `.gitignore` 排除的 `dist-player/`、`dist-renderer/` 与 `dist-electron/`，然后直接使用项目锁定的 Electron 运行。拉取新提交后再次双击即可同步和重建，不需要复用旧 `release/`。
 
-仓库仍保留打包配置和验证脚本，但当前没有经过签发的 1.0.0 Portable、目录版或安装包。历史 1.6.0/1.7.0 二进制、哈希和构建说明由 Git 历史与标签 `internal-prototype-1.7.0` 保存，不能作为当前版本启动入口或验证证据。`npm run verify:release` 会校验文件版本、内嵌包版本与制品哈希，旧 `win-unpacked` 因版本不符必须失败。
+本轮已在本地构建并验证 1.0.0 Portable 与目录版候选制品，但它们不随源码提交、未经商业代码签名，也不等于已对外签发。历史 1.6.0/1.7.0 二进制、哈希和构建说明只由 Git 历史与标签 `internal-prototype-1.7.0` 保存，不能作为当前版本启动入口或验证证据。
 
-`release/`、源码 ZIP、校验截图和其他可重建制品不随源码提交；正式分发时必须基于明确的当前工作树快照生成，并通过独立制品渠道交付。当前软件本体自动化结果见 [2026-08-12 验证记录](docs/reviews/AI_NATIVE_EDITOR_FOUNDATION_VERIFICATION_20260812.md)。尚未完成干净 Windows 启动、根目录入口人工冒烟、1.0.0 打包和真实翻页硬件人工冒烟。
+`release/`、源码 ZIP、校验截图和其他可重建制品不随源码提交；正式分发时必须基于明确的当前工作树快照生成，并通过独立制品渠道交付。当前软件本体、身份断代、Headless 校验和制品自动化结果见 [2026-08-12 最终验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)。尚未完成根目录入口可见人工冒烟、真实翻页硬件、真实教师任务和发布组件权属审查。
 
 ## 测试与提交要求
 

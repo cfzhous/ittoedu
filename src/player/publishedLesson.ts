@@ -236,6 +236,8 @@ export function publishedLessonToExportPayload(
       typeof component.id !== 'string' ||
       typeof component.name !== 'string' ||
       typeof component.version !== 'string' ||
+      typeof component.contentSha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(component.contentSha256) ||
       !isRecord(component.assets)
     ) {
       throw new Error(`发布组件“${recordKey}”格式无效`)
@@ -266,6 +268,7 @@ export function publishedLessonToExportPayload(
       name: component.name,
       manifestPath: `published-components/${String(index).padStart(3, '0')}`,
       runtimePath: `published-components/${String(index).padStart(3, '0')}`,
+      contentSha256: component.contentSha256,
     }
   })
 

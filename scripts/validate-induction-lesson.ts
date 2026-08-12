@@ -571,7 +571,7 @@ function validateComponents(
     if (!meta.thumbnailPath || !manifest.thumbnail || !component.files[manifest.thumbnail]) {
       details.push(`${recordKey} 缺少可用组件缩略图`)
     }
-    if (manifest.id === 'com.alepha.physics.induction-lab') {
+    if (manifest.id === 'com.ittoedu.physics.induction-lab') {
       const missingButtonTargets = INDUCTION_BUTTON_AUTHORING_KEYS.filter(
         (key) => !component.runtimeSource.includes(key),
       )

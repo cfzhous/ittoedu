@@ -6,6 +6,8 @@ import type {
 } from '../shared/componentCatalog'
 import type { ComponentPackageData } from '../shared/componentTypes'
 import {
+  APP_EXECUTABLE_NAME,
+  APP_NAME,
   RECOMMENDED_PROJECT_SCENES,
   RECOMMENDED_SCENE_NODES,
 } from '../shared/constants'
@@ -91,7 +93,7 @@ function desktopApi() {
     throw new UserFacingError(
       '桌面功能不可用',
       '当前页面未运行在课件编辑器桌面环境中。',
-      '请双击 PhaserCoursewareEditor.exe 启动软件。',
+      `请双击 ${APP_EXECUTABLE_NAME}.exe 启动软件。`,
     )
   }
   return window.desktopAPI
@@ -242,17 +244,11 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
     | {
-        mode: 'import'
-        packages: ComponentPackageData[]
-        selectedCount: number
-        issues: string[]
-      }
-    | {
-        mode: 'replace'
-        packageId: string
-        packageData: ComponentPackageData
-        sourceFileName: string
-      }
+      mode: 'replace'
+      packageId: string
+      packageData: ComponentPackageData
+      sourceFileName: string
+    }
     | null
   >(null)
   const [componentCatalog, setComponentCatalog] = useState<ComponentCatalogSnapshot>(
@@ -263,7 +259,7 @@ export default function App() {
     summary: string
   } | null>(null)
   const [catalogPackageRequest, setCatalogPackageRequest] = useState<{
-    mode: 'add' | 'update'
+    mode: 'update'
     entries: AvailableComponentCatalogPackage[]
   } | null>(null)
   const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
@@ -274,7 +270,6 @@ export default function App() {
   const [exportPreflightReport, setExportPreflightReport] =
     useState<ExportPreflightReport | null>(null)
   const saveInFlightRef = useRef(false)
-  const catalogPackageRequestResolverRef = useRef<((completed: boolean) => void) | null>(null)
   const pendingLargeHtmlRef = useRef<string | null>(null)
   const recoveryRevisionRef = useRef(0)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
@@ -663,29 +658,25 @@ export default function App() {
       const packages = [...packagesById.values()]
       if (packages.length === 0) {
         useEditorStore.getState().setStatus('外部组件导入未改变工程')
-        setBatchOperationSummary({
-          title: '外部组件批量导入结果',
-          summary: [
-            `选择文件：${batch.selectedCount}`,
-            '成功加入：0',
-            `跳过或失败：${issues.length}`,
-            '',
-            ...issues.map((issue) => `- ${issue}`),
-          ].join('\n'),
-        })
         if (issues.length > 0) {
           setError(`没有可加入工程的组件：\n${issues.slice(0, 8).join('\n')}`)
         }
         return
       }
-      setComponentPackageRequest({
-        mode: 'import',
-        packages,
-        selectedCount: batch.selectedCount,
-        issues,
-      })
+      importPackagesIntoStore(packages)
+      useEditorStore.getState().setStatus(
+        issues.length > 0
+          ? `已加入 ${packages.length} 个外部组件，${issues.length} 项未加入`
+          : `已加入 ${packages.length} 个外部组件`,
+      )
+      if (issues.length > 0) {
+        setError(
+          `已加入 ${packages.length} 个组件；另有 ${issues.length} 项未加入：\n` +
+          issues.slice(0, 8).join('\n'),
+        )
+      }
     }, '外部组件读取失败。请重新选择 .h5component 文件。')
-  }, [run, setError])
+  }, [importPackagesIntoStore, run, setError])
 
   const handleReplaceComponent = useCallback((packageId: string) => {
     void run(async () => {
@@ -715,42 +706,14 @@ export default function App() {
     }, '组件替换包读取失败，工程内原版本已保留。')
   }, [run])
 
-  const performComponentImport = useCallback(() => {
+  const performComponentReplacement = useCallback(() => {
     const request = componentPackageRequest
     setComponentPackageRequest(null)
     if (!request) return
-    if (request.mode === 'import') {
-      void run(async () => {
-        importPackagesIntoStore(request.packages)
-        setBatchOperationSummary({
-          title: '外部组件批量导入结果',
-          summary: [
-            `选择文件：${request.selectedCount}`,
-            `成功加入：${request.packages.length}`,
-            `跳过或失败：${request.issues.length}`,
-            '',
-            '已加入工程：',
-            ...request.packages.map((item) =>
-              `- ${item.manifest.name} (${item.manifest.id}) v${item.manifest.version}`,
-            ),
-            ...(request.issues.length > 0
-              ? ['', '未加入：', ...request.issues.map((issue) => `- ${issue}`)]
-              : []),
-          ].join('\n'),
-        })
-        if (request.issues.length > 0) {
-          setError(
-            `已加入 ${request.packages.length} 个组件；另有 ${request.issues.length} 项未加入：\n` +
-            request.issues.slice(0, 8).join('\n'),
-          )
-        }
-      }, '组件批量导入失败，工程未改变。')
-      return
-    }
     void run(async () => {
       replacePackageInStore(request.packageId, request.packageData)
     }, '组件替换失败，工程内原版本已保留。')
-  }, [componentPackageRequest, importPackagesIntoStore, replacePackageInStore, run, setError])
+  }, [componentPackageRequest, replacePackageInStore, run])
 
   const performCatalogPackageOperation = useCallback(async (
     entries: AvailableComponentCatalogPackage[],
@@ -827,16 +790,7 @@ export default function App() {
         }
       }
       importPackagesIntoStore(importedPackages)
-      setBatchOperationSummary({
-        title: '内置组件加入结果',
-        summary: [
-          `成功加入：${importedPackages.length}`,
-          '',
-          ...importedPackages.map((item) =>
-            `- ${item.manifest.name} (${item.manifest.id}) v${item.manifest.version} · ${item.provenance?.sourceLabel ?? '内置组件库'}`,
-          ),
-        ].join('\n'),
-      })
+      useEditorStore.getState().setStatus(`已加入 ${importedPackages.length} 个组件`)
       return true
     }, mode === 'update'
       ? '组件更新失败，工程内原版本已保留。'
@@ -854,15 +808,8 @@ export default function App() {
       state.setStatus('所选组件均已加入工程')
       return true
     }
-    if (plan.requiresTrustConfirmation) {
-      if (catalogPackageRequest) return false
-      return await new Promise<boolean>((resolve) => {
-        catalogPackageRequestResolverRef.current = resolve
-        setCatalogPackageRequest({ entries: pendingEntries, mode: 'add' })
-      })
-    }
     return performCatalogPackageOperation(pendingEntries, 'add')
-  }, [catalogPackageRequest, performCatalogPackageOperation])
+  }, [performCatalogPackageOperation])
 
   const requestCatalogPackageUpdate = useCallback((
     entry: AvailableComponentCatalogPackage,
@@ -1044,7 +991,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.title = `${project.title}${dirty ? ' *' : ''} - Phaser 课件编辑器`
+    document.title = `${project.title}${dirty ? ' *' : ''} - ${APP_NAME}`
     if (window.desktopAPI) {
       void window.desktopAPI.setDirtyState(dirty).catch((error) => {
         console.error('同步未保存状态失败', error)
@@ -1274,60 +1221,34 @@ export default function App() {
 
       <ConfirmDialog
         open={Boolean(componentPackageRequest)}
-        title={componentPackageRequest?.mode === 'replace'
-          ? '审阅组件包替换'
-          : '确认批量导入外部组件'}
-        message={componentPackageRequest?.mode === 'replace'
+        title="审阅组件包替换"
+        message={componentPackageRequest
           ? (() => {
               const current = componentPackages[componentPackageRequest.packageId]
               const next = componentPackageRequest.packageData
               return `组件：${next.manifest.name} (${next.manifest.id})\n当前版本：${current?.manifest.version ?? '未知'}\n新版本：${next.manifest.version}\n文件：${componentPackageRequest.sourceFileName}\nSHA-256：${next.provenance?.sha256 ?? '未登记'}\n\n确认后，场景与全局层中的全部实例会切换到该包并保留当前属性；此操作可以撤销。请只替换为已审阅的可信代码。`
             })()
-          : componentPackageRequest?.mode === 'import'
-            ? `本次选择 ${componentPackageRequest.selectedCount} 个文件，已验证 ${componentPackageRequest.packages.length} 个可加入组件${
-                componentPackageRequest.issues.length > 0
-                  ? `，另有 ${componentPackageRequest.issues.length} 项将跳过`
-                  : ''
-              }。\n\n${componentPackageRequest.packages.map((item) => `• ${item.manifest.name} v${item.manifest.version}`).join('\n')}\n\n组件包含可执行代码。请仅导入可信来源；隔离运行不等于完整恶意代码沙箱。`
-            : ''}
-        confirmLabel={componentPackageRequest?.mode === 'replace'
-          ? '确认替换'
-          : componentPackageRequest?.mode === 'import'
-            ? `加入工程（${componentPackageRequest.packages.length}）`
-            : '加入工程'}
+          : ''}
+        confirmLabel="确认替换"
         onCancel={() => setComponentPackageRequest(null)}
-        onConfirm={performComponentImport}
+        onConfirm={performComponentReplacement}
       />
       <ConfirmDialog
         open={Boolean(catalogPackageRequest)}
-        title={catalogPackageRequest?.mode === 'update'
-          ? '审阅目录组件更新'
-          : '确认加入外部目录组件'}
+        title="审阅目录组件更新"
         message={catalogPackageRequest
-          ? catalogPackageRequest.mode === 'update'
-            ? (() => {
-                const entry = catalogPackageRequest.entries[0]!
-                return `组件：${entry.name} v${entry.version}\n来源：${entry.sourceLabel}\nSHA-256：${entry.sha256}\n质量：${entry.quality}\n发布阻断：${entry.releaseBlockers?.join('、') || '无'}\n\n更新会改变工程锁定的组件代码和全部实例，必须明确审阅。读取时仍会重新校验哈希。`
-              })()
-            : `本批包含 ${catalogPackageRequest.entries.length} 个来自未信任目录的可执行组件：\n${catalogPackageRequest.entries.map((entry) => `• ${entry.name} v${entry.version} · ${entry.sourceLabel}`).join('\n')}\n\n本次只确认这一批；编辑器会逐包重新校验 SHA-256，但这不等于恶意代码安全证明。`
+          ? (() => {
+              const entry = catalogPackageRequest.entries[0]!
+              return `组件：${entry.name} v${entry.version}\n来源：${entry.sourceLabel}\nSHA-256：${entry.sha256}\n质量：${entry.quality}\n发布阻断：${entry.releaseBlockers?.join('、') || '无'}\n\n更新会改变工程锁定的组件代码和全部实例，必须明确审阅。读取时仍会重新校验哈希。`
+            })()
           : ''}
-        confirmLabel={catalogPackageRequest?.mode === 'update'
-          ? '确认更新'
-          : `确认加入（${catalogPackageRequest?.entries.length ?? 0}）`}
-        onCancel={() => {
-          setCatalogPackageRequest(null)
-          const resolve = catalogPackageRequestResolverRef.current
-          catalogPackageRequestResolverRef.current = null
-          resolve?.(false)
-        }}
+        confirmLabel="确认更新"
+        onCancel={() => setCatalogPackageRequest(null)}
         onConfirm={() => {
           const request = catalogPackageRequest
           setCatalogPackageRequest(null)
           if (!request) return
-          const resolve = catalogPackageRequestResolverRef.current
-          catalogPackageRequestResolverRef.current = null
           void performCatalogPackageOperation(request.entries, request.mode)
-            .then((completed) => resolve?.(completed))
         }}
       />
       <ProjectHealthPanel

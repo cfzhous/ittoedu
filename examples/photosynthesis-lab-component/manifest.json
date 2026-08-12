@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "runtimeApiVersion": 4,
-  "id": "com.alepha.photosynthesis-lab",
+  "id": "com.ittoedu.photosynthesis-lab",
   "name": "光合作用互动实验室",
   "version": "4.0.0",
   "description": "包含能量路径探索、参数实验和拖拽分类挑战的三模式互动教学组件",
