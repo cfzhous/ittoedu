@@ -1,4 +1,4 @@
 interface:
   display_name: "互动课件创作编排"
-  short_description: "把教学输入编排成可恢复、可哈希批准的互动课件体验合同"
-  default_prompt: "Use $orchestrate-courseware to turn this teaching request into an approved V2 experience contract with validator-derived implementation readiness."
+  short_description: "把教学输入冻结为含响应、判定、编辑与逃生合同的可批准课例"
+  default_prompt: "Use $orchestrate-courseware to turn this teaching request into an approved V2 experience contract with executable RESP/AUTH/ACT/ESC records and validator-derived implementation readiness."

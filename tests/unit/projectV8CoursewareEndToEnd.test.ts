@@ -64,9 +64,14 @@ interface E2EFixture {
 }
 
 interface ImplementationState {
+  schemaVersion: 2
+  caseId: string
   status: 'planned' | 'implemented' | 'verified'
+  coursewareContractSha256: string
   presentationScriptSha256: string
   capabilityIndexSha256: string
+  developmentPlanSha256: string
+  behaviorSpecSha256: string
   currentProjectSha256: string | null
 }
 
@@ -122,13 +127,15 @@ async function runPython(
   scriptsRoot: string,
   script: string,
   args: string[],
+  timeout = 120_000,
 ): Promise<{ stdout: string, stderr: string }> {
-  return execute(python, [path.join(scriptsRoot, script), ...args])
+  return execute(python, [path.join(scriptsRoot, script), ...args], timeout)
 }
 
 async function runTsx(
   script: string,
   args: string[] = [],
+  timeout = 120_000,
 ): Promise<{ stdout: string, stderr: string }> {
   return execute(process.execPath, [
     tsxCli,
@@ -136,7 +143,7 @@ async function runTsx(
     path.join(root, 'tsconfig.json'),
     script,
     ...args,
-  ])
+  ], timeout)
 }
 
 async function loadJson<T>(filename: string): Promise<T> {
@@ -164,20 +171,41 @@ function projectNodeIds(project: ProjectDocument): string[] {
 async function installFixtureImplementation(
   caseRoot: string,
   replacements: Record<string, string>,
-): Promise<void> {
+): Promise<{ developmentPlanSha256: string, behaviorSpecSha256: string }> {
+  const planTemplate = await readFile(
+    path.join(fixtureRoot, '03-development-plan.md'),
+    'utf8',
+  )
+  const renderedPlan = render(planTemplate, replacements)
+  expect(renderedPlan).not.toMatch(/\{\{[A-Z0-9_]+\}\}/)
+  await writeFile(path.join(caseRoot, '03-development-plan.md'), renderedPlan, 'utf8')
+  const developmentPlanSha256 = sha256(renderedPlan)
+  const boundReplacements = {
+    ...replacements,
+    '{{DEVELOPMENT_PLAN_SHA256}}': developmentPlanSha256,
+  }
   const destinations = new Map<string, string>([
-    ['03-development-plan.md', path.join(caseRoot, '03-development-plan.md')],
     ['authoring-inventory.json', path.join(caseRoot, 'implementation', 'authoring-inventory.json')],
+    ['behavior-spec.json', path.join(caseRoot, 'implementation', 'behavior-spec.json')],
     ['build.ts', path.join(caseRoot, 'implementation', 'build.ts')],
     ['human-edit.ts', path.join(caseRoot, 'implementation', 'human-edit.ts')],
     ['patch.ts', path.join(caseRoot, 'implementation', 'patch.ts')],
   ])
   for (const [sourceName, destination] of destinations) {
     const template = await readFile(path.join(fixtureRoot, sourceName), 'utf8')
-    const rendered = render(template, replacements)
+    const rendered = render(template, boundReplacements)
     expect(rendered).not.toMatch(/\{\{[A-Z0-9_]+\}\}/)
     await writeFile(destination, rendered, 'utf8')
   }
+  const behaviorSpecSha256 = sha256(await readFile(
+    path.join(caseRoot, 'implementation', 'behavior-spec.json'),
+  ))
+  const statePath = path.join(caseRoot, 'implementation', 'implementation-state.json')
+  const state = await loadJson<ImplementationState>(statePath)
+  state.developmentPlanSha256 = developmentPlanSha256
+  state.behaviorSpecSha256 = behaviorSpecSha256
+  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+  return { developmentPlanSha256, behaviorSpecSha256 }
 }
 
 describe('Project V8 Builder end-to-end contract', () => {
@@ -227,6 +255,8 @@ describe('Project V8 Builder end-to-end contract', () => {
         caseRoot,
         '--target',
         'implementation-ready',
+        '--capability-index',
+        path.join(root, 'artifacts', 'ai-capabilities', 'index.json'),
         '--promote',
         '--json',
       ])
@@ -260,8 +290,9 @@ describe('Project V8 Builder end-to-end contract', () => {
       const implementationRoot = path.join(caseRoot, 'implementation')
       let editorImportPrefix = path.relative(implementationRoot, root).replaceAll('\\', '/')
       if (!editorImportPrefix.startsWith('.')) editorImportPrefix = `./${editorImportPrefix}`
-      await installFixtureImplementation(caseRoot, {
+      const installedHashes = await installFixtureImplementation(caseRoot, {
         '{{EDITOR_IMPORT_PREFIX}}': editorImportPrefix,
+        '{{COURSEWARE_CONTRACT_SHA256}}': initializedState.coursewareContractSha256,
         '{{PRESENTATION_SHA256}}': initializedState.presentationScriptSha256,
         '{{CAPABILITY_SHA256}}': initializedState.capabilityIndexSha256,
       })
@@ -305,6 +336,206 @@ describe('Project V8 Builder end-to-end contract', () => {
         errors: [],
       })
 
+      const authoringReplayOnly = process.env.COURSEWARE_E2E_REAL_AUTHORING_REPLAY === '1'
+      if (process.env.COURSEWARE_E2E_REAL_EVIDENCE === '1' || authoringReplayOnly) {
+        const desktopBuild = await execute(
+          process.execPath,
+          [
+            path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+            'run', '--silent', 'build:desktop',
+          ],
+          300_000,
+        )
+        expect(desktopBuild.stdout).toContain('player.iife.js')
+        const authoring = await runTsx(path.join(root, 'scripts', 'run-courseware-authoring.ts'), [
+          '--case-dir', caseRoot,
+          '--editor-root', root,
+          '--delivery-html', 'delivery/lesson.html',
+          '--delivery-web-package', 'delivery/lesson-web.zip',
+          '--delivery-pdf', 'delivery/lesson.pdf',
+          '--delivery-pptx', 'delivery/lesson.pptx',
+          '--report', 'evidence/authoring-session-report.json',
+          '--write-deliveries',
+        ], 300_000)
+        expect(JSON.parse(authoring.stdout)).toMatchObject({ status: 'passed', errors: [] })
+        if (authoringReplayOnly) {
+          const authoringReplay = await runTsx(
+            path.join(root, 'scripts', 'run-courseware-authoring.ts'),
+            [
+              '--case-dir', caseRoot,
+              '--editor-root', root,
+              '--delivery-html', 'delivery/lesson.html',
+              '--delivery-web-package', 'delivery/lesson-web.zip',
+              '--delivery-pdf', 'delivery/lesson.pdf',
+              '--delivery-pptx', 'delivery/lesson.pptx',
+              '--report', 'evidence/authoring-session-report.json',
+              '--verify-report',
+            ],
+            300_000,
+          )
+          expect(JSON.parse(authoringReplay.stdout)).toMatchObject({ status: 'passed', errors: [] })
+        }
+        if (!authoringReplayOnly) {
+        const behavior = await runTsx(path.join(root, 'scripts', 'run-courseware-behavior.ts'), [
+          '--case-dir', caseRoot,
+          '--spec', 'implementation/behavior-spec.json',
+          '--target', 'delivery/lesson.html',
+          '--report', 'evidence/behavior-report.json',
+        ])
+        expect(JSON.parse(behavior.stdout)).toMatchObject({
+          status: 'passed',
+          summary: { passed: 12, failed: 0 },
+        })
+        const behaviorReport = await loadJson<{
+          tests: Array<{
+            id: string
+            status: string
+            hostEvidence: Array<Record<string, unknown>>
+          }>
+        }>(path.join(caseRoot, 'evidence', 'behavior-report.json'))
+        const requiredAction = behaviorReport.tests.find(test => test.id === 'BEH-003')
+        expect(requiredAction).toMatchObject({ status: 'passed' })
+        expect(requiredAction?.hostEvidence).toEqual(expect.arrayContaining([expect.objectContaining({
+          kind: 'action-recorded',
+          actId: 'ACT-001',
+          responseId: 'RESP-001',
+          actionKind: 'select',
+          eventType: 'click',
+          afterStepId: 'STEP-003',
+        })]))
+        const assessment = behaviorReport.tests.find(test => test.id === 'BEH-004')
+        expect(assessment).toMatchObject({ status: 'passed' })
+        expect(assessment?.hostEvidence).toEqual(expect.arrayContaining([expect.objectContaining({
+          kind: 'assessment-evaluated',
+          responseId: 'RESP-001',
+          evaluatorId: 'EVAL-finite-choice-v1',
+          input: 'A',
+          status: 'pass',
+          afterStepId: 'STEP-004',
+        })]))
+
+        const state = await loadJson<ImplementationState>(
+          path.join(caseRoot, 'implementation', 'implementation-state.json'),
+        )
+        const artifactEntries = [
+          ['project', 'project', `project/${fixture.caseId}.h5lesson`],
+          ['html', 'html', 'delivery/lesson.html'],
+          ['web-package', 'web-package', 'delivery/lesson-web.zip'],
+          ['pdf', 'pdf', 'delivery/lesson.pdf'],
+          ['pptx', 'pptx', 'delivery/lesson.pptx'],
+          ['behavior-spec', 'behavior-spec', 'implementation/behavior-spec.json'],
+          ['behavior-report', 'behavior-report', 'evidence/behavior-report.json'],
+          ['authoring-inventory', 'authoring-inventory', 'implementation/authoring-inventory.json'],
+          ['authoring-target-snapshot', 'authoring-target-snapshot', 'implementation/authoring-target-snapshot.json'],
+          ['authoring-session-report', 'authoring-session-report', 'evidence/authoring-session-report.json'],
+        ] as const
+        const artifacts = await Promise.all(artifactEntries.map(async ([id, kind, relativePath]) => ({
+          id,
+          kind,
+          path: relativePath,
+          sha256: sha256(await readFile(path.join(caseRoot, ...relativePath.split('/')))),
+        })))
+        const manifestPath = path.join(caseRoot, 'evidence', 'evidence-manifest.json')
+        const placeholderManifestBytes = await readFile(manifestPath)
+        try {
+          const manifest = JSON.parse(placeholderManifestBytes.toString('utf8')) as Record<string, unknown>
+          Object.assign(manifest, {
+            pipelineStatus: 'passed',
+            outcomeStatus: 'engineering candidate',
+            inputs: {
+              coursewareContractSha256: state.coursewareContractSha256,
+              presentationScriptSha256: state.presentationScriptSha256,
+              capabilityIndexSha256: state.capabilityIndexSha256,
+              developmentPlanSha256: state.developmentPlanSha256,
+              behaviorSpecSha256: state.behaviorSpecSha256,
+              projectSha256: state.currentProjectSha256,
+            },
+            commands: [],
+            artifacts,
+            editRoundTrips: [],
+            sceneEvidence: [{ sceneId: fixture.project.sceneId, sceneType: 'interactive' }],
+            requiredFrames: [],
+            differences: [],
+            remainingRisks: [],
+            verification: {
+              behaviorSpecArtifactId: 'behavior-spec',
+              behaviorReportArtifactId: 'behavior-report',
+              authoringInventoryArtifactId: 'authoring-inventory',
+              authoringTargetSnapshotArtifactId: 'authoring-target-snapshot',
+              authoringSessionReportArtifactId: 'authoring-session-report',
+            },
+            humanAcceptance: null,
+          })
+          await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+          const totalEvidence = await runPython(builderScripts, 'validate_v8_case.py', [
+            '--case-dir', caseRoot,
+            '--editor-root', root,
+            '--target', 'evidence',
+            '--json',
+          ], 360_000)
+          expect(JSON.parse(totalEvidence.stdout)).toMatchObject({
+            pipelineStatus: 'passed',
+            outcomeStatus: 'engineering candidate',
+            target: 'evidence',
+            errors: [],
+            blockedCapabilities: [],
+          })
+        } finally {
+          await writeFile(manifestPath, placeholderManifestBytes)
+        }
+        }
+      }
+
+      const snapshotPath = path.join(implementationRoot, 'authoring-target-snapshot.json')
+      const snapshotBytes = await readFile(snapshotPath)
+      const invalidSnapshot = JSON.parse(snapshotBytes.toString('utf8')) as {
+        captures: Array<{
+          captureMethod: string
+          selectionBounds: { x: number, y: number, width: number, height: number }
+        }>
+      }
+      invalidSnapshot.captures[0]!.captureMethod = 'runtime-authoring-target-v1'
+      invalidSnapshot.captures[0]!.selectionBounds = { x: 0, y: 0, width: 20, height: 20 }
+      await writeFile(snapshotPath, `${JSON.stringify(invalidSnapshot, null, 2)}\n`, 'utf8')
+      await expect(runPython(builderScripts, 'validate_authoring_target_snapshot.py', [
+        snapshotPath,
+        '--inventory', path.join(implementationRoot, 'authoring-inventory.json'),
+        '--project', projectPath,
+        '--case-dir', caseRoot,
+        '--json',
+      ])).rejects.toThrow(/IoU must be > 0\.85|captureMethod must be/)
+      await writeFile(snapshotPath, snapshotBytes)
+
+      const behaviorPath = path.join(implementationRoot, 'behavior-spec.json')
+      const behaviorBytes = await readFile(behaviorPath)
+      const inventedBehavior = JSON.parse(behaviorBytes.toString('utf8')) as {
+        assessments: Array<{ responseId: string }>
+      }
+      inventedBehavior.assessments[0]!.responseId = 'RESP-999'
+      await writeFile(behaviorPath, `${JSON.stringify(inventedBehavior, null, 2)}\n`, 'utf8')
+      await expect(runPython(builderScripts, 'validate_behavior_spec.py', [
+        behaviorPath,
+        '--case-dir', caseRoot,
+        '--capability-index', path.join(root, 'artifacts', 'ai-capabilities', 'index.json'),
+        '--json',
+      ])).rejects.toThrow(/RESP IDs differ from the approved contract/)
+      await writeFile(behaviorPath, behaviorBytes)
+
+      const inventoryPath = path.join(implementationRoot, 'authoring-inventory.json')
+      const inventoryBytes = await readFile(inventoryPath)
+      const inventedInventory = JSON.parse(inventoryBytes.toString('utf8')) as {
+        scenes: Array<{ entities: Array<{ authoringOutcomeId: string }> }>
+      }
+      inventedInventory.scenes[0]!.entities[0]!.authoringOutcomeId = 'AUTH-999'
+      await writeFile(inventoryPath, `${JSON.stringify(inventedInventory, null, 2)}\n`, 'utf8')
+      await expect(runPython(builderScripts, 'validate_authoring_inventory.py', [
+        inventoryPath,
+        '--project', projectPath,
+        '--case-dir', caseRoot,
+        '--json',
+      ])).rejects.toThrow(/authoringOutcomeId is not approved/)
+      await writeFile(inventoryPath, inventoryBytes)
+
       const capabilityHash = sha256(await readFile(
         path.join(root, 'artifacts', 'ai-capabilities', 'index.json'),
       ))
@@ -314,8 +545,16 @@ describe('Project V8 Builder end-to-end contract', () => {
         generatedFrom: {
           presentationScriptSha256: string
           capabilityIndexSha256: string
+          developmentPlanSha256: string
         }
-        scenes: Array<{ sceneId: string, entities: Array<{ binding: string }> }>
+        scenes: Array<{
+          sceneId: string
+          entities: Array<{
+            binding: string
+            editability: 'canvas-distinct' | 'authoring-view' | 'property' | 'developer' | 'blocked'
+            authoringOutcomeId: string
+          }>
+        }>
       }>(path.join(implementationRoot, 'authoring-inventory.json'))
       const builtState = await loadJson<ImplementationState>(
         path.join(implementationRoot, 'implementation-state.json'),
@@ -326,6 +565,7 @@ describe('Project V8 Builder end-to-end contract', () => {
         generatedFrom: {
           presentationScriptSha256: readyCase.artifacts.presentationScript.sha256,
           capabilityIndexSha256: capabilityHash,
+          developmentPlanSha256: installedHashes.developmentPlanSha256,
         },
         scenes: [{ sceneId: fixture.project.sceneId }],
       })
@@ -334,10 +574,17 @@ describe('Project V8 Builder end-to-end contract', () => {
         'native:scene:scene_fraction_choice:node_fraction_prompt:text',
         'native:scene:scene_fraction_choice:node_fraction_feedback:text',
       ])
+      expect(inventory.scenes[0]!.entities.map((entity) => entity.editability))
+        .toEqual(['canvas-distinct', 'canvas-distinct', 'canvas-distinct'])
+      expect(inventory.scenes[0]!.entities.map((entity) => entity.authoringOutcomeId))
+        .toEqual(['AUTH-001', 'AUTH-002', 'AUTH-003'])
       expect(builtState).toMatchObject({
+        schemaVersion: 2,
         status: 'implemented',
         presentationScriptSha256: readyCase.artifacts.presentationScript.sha256,
         capabilityIndexSha256: capabilityHash,
+        developmentPlanSha256: installedHashes.developmentPlanSha256,
+        behaviorSpecSha256: installedHashes.behaviorSpecSha256,
         currentProjectSha256: sha256(initialArchive),
       })
 
@@ -434,5 +681,5 @@ describe('Project V8 Builder end-to-end contract', () => {
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true })
     }
-  }, 180_000)
+  }, 600_000)
 })

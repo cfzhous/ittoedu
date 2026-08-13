@@ -69,7 +69,7 @@ describe('Project V8 FormulaNode contract', () => {
       base: { type: 'token', value: 'x' },
     }).success).toBe(false)
 
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes[0]!.nodes.push(createFormulaNode({
       id: 'formula-node-1',
       formulaId: 'lesson.quadratic:answer-1',
@@ -96,7 +96,7 @@ describe('Project V8 FormulaNode contract', () => {
   })
 
   it('preserves semantic identity through archive and PublishedLesson round trips', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const formula = createFormulaNode({
       id: 'formula-node-roundtrip',
       formulaId: 'math.energy.conservation',
@@ -183,7 +183,7 @@ describe('Project V8 FormulaNode contract', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       measuringContext(),
     )
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const fitting = createFormulaNode({
       id: 'formula-fitting',
       formulaId: 'formula.fitting',
@@ -225,7 +225,7 @@ describe('Project V8 FormulaNode contract', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       measuringContext(),
     )
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const clipped = createFormulaNode({
       id: 'formula-browser-clipped',
       width: 24,

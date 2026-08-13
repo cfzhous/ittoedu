@@ -264,7 +264,7 @@ describe('continuous insertion context', () => {
   })
 
   it('keeps the insertion tab when creating a missing teacher controller', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const store = useEditorStore.getState()
     store.loadProject(project, null)
     store.setActiveTab('elements')

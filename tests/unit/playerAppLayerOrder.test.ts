@@ -8,8 +8,16 @@ const appMocks = vi.hoisted(() => ({
   audioDestroy: vi.fn(),
   sceneLifecycleOrder: [] as string[],
   sceneSetDocumentVisible: vi.fn(),
+  sceneIndex: 0,
+  showSceneCalls: [] as unknown[][],
+  showSceneResults: [] as boolean[],
+  showSceneBlockedReasons: [] as string[],
+  runtimeEventHandlers: new Map<string, (event: unknown) => void>(),
+  presenterInputOptions: [] as unknown[],
   playerSceneConstructorArgs: [] as unknown[][],
   runtimeKernelOptions: [] as Array<Record<string, unknown> | undefined>,
+  hostConstructionOrder: [] as string[],
+  teacherEscapeEvidenceClicks: [] as unknown[][],
 }))
 
 vi.mock('phaser', () => ({
@@ -44,16 +52,36 @@ vi.mock('../../src/player/componentHostActions', () => ({
 vi.mock('../../src/player/CourseRuntimeKernel', () => ({
   CourseRuntimeKernel: class FakeRuntimeKernel {
     readonly events = {
-      on: () => () => {},
+      on: (eventName: string, handler: (event: unknown) => void) => {
+        appMocks.runtimeEventHandlers.set(eventName, handler)
+        return () => appMocks.runtimeEventHandlers.delete(eventName)
+      },
+      emit: () => {},
     }
     constructor(
       _payload: unknown,
       _actions: unknown,
       options?: Record<string, unknown>,
     ) {
+      appMocks.hostConstructionOrder.push('runtime-kernel')
       appMocks.runtimeKernelOptions.push(options)
     }
     destroy(): void { appMocks.runtimeDestroy() }
+  },
+}))
+
+vi.mock('../../src/player/HostEvidenceRecorder', () => ({
+  HostEvidenceRecorder: class FakeHostEvidenceRecorder {
+    constructor() {
+      appMocks.hostConstructionOrder.push('host-evidence-session')
+    }
+    recordAssessment(): void {}
+    recordAction(): void {}
+    beginTeacherEscapeClick(): (evidence: unknown) => void {
+      const records: unknown[] = []
+      appMocks.teacherEscapeEvidenceClicks.push(records)
+      return (evidence) => records.push(evidence)
+    }
   },
 }))
 
@@ -82,11 +110,28 @@ vi.mock('../../src/player/PlayerScene', () => ({
     async waitForCaptureReady(): Promise<void> {
       appMocks.sceneLifecycleOrder.push('prepare')
     }
+    getCurrentSceneIndex(): number { return appMocks.sceneIndex }
+    getCurrentPresentationStateId(): null { return null }
+    showScene(...args: unknown[]): boolean {
+      appMocks.showSceneCalls.push(args)
+      const accepted = appMocks.showSceneResults.shift() ?? true
+      if (accepted) appMocks.sceneIndex = args[0] as number
+      else {
+        const reason = appMocks.showSceneBlockedReasons.shift()
+        if (reason) {
+          appMocks.runtimeEventHandlers.get('navigation:blocked')?.({ reason })
+        }
+      }
+      return accepted
+    }
+    replayScene(): boolean { return true }
   },
 }))
 
 vi.mock('../../src/player/PlayerPresenterInput', () => ({
   PlayerPresenterInput: class FakePresenterInput {
+    constructor(options: unknown) { appMocks.presenterInputOptions.push(options) }
+    setIndex(): void {}
     destroy(): void {}
   },
 }))
@@ -101,7 +146,7 @@ vi.mock('../../src/player/ScenePickerOverlay', () => ({
 }))
 
 import { PlayerApp } from '../../src/player/PlayerApp'
-import { createProject } from '../../src/renderer/project/createProject'
+import { createProject, createScene } from '../../src/renderer/project/createProject'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -109,6 +154,14 @@ afterEach(() => {
   appMocks.sceneLifecycleOrder.length = 0
   appMocks.playerSceneConstructorArgs.length = 0
   appMocks.runtimeKernelOptions.length = 0
+  appMocks.hostConstructionOrder.length = 0
+  appMocks.teacherEscapeEvidenceClicks.length = 0
+  appMocks.sceneIndex = 0
+  appMocks.showSceneCalls.length = 0
+  appMocks.showSceneResults.length = 0
+  appMocks.showSceneBlockedReasons.length = 0
+  appMocks.runtimeEventHandlers.clear()
+  appMocks.presenterInputOptions.length = 0
   document.body.replaceChildren()
 })
 
@@ -117,7 +170,7 @@ describe('PlayerApp fixed renderer planes', () => {
     const root = document.createElement('div')
     document.body.append(root)
     const payload: ExportPayload = {
-      project: createProject({ includeDefaultController: false }),
+      project: createProject({ includeDefaultController: false, controls: 'none' }),
       assets: {},
       components: {},
     }
@@ -136,6 +189,22 @@ describe('PlayerApp fixed renderer planes', () => {
     expect(zIndex('.lesson-runtime-layer--scene-overlay')).toBe('3')
     expect(zIndex('.lesson-runtime-layer--global-overlay')).toBe('4')
     expect(appMocks.playerSceneConstructorArgs.at(-1)?.[13]).toBeUndefined()
+    expect(appMocks.hostConstructionOrder.slice(0, 2)).toEqual([
+      'host-evidence-session',
+      'runtime-kernel',
+    ])
+    expect(appMocks.runtimeKernelOptions.at(-1)?.onAssessmentEvaluated).toEqual(
+      expect.any(Function),
+    )
+    expect(appMocks.runtimeKernelOptions.at(-1)?.onActionRecorded).toEqual(
+      expect.any(Function),
+    )
+    expect(appMocks.runtimeKernelOptions.at(-1)).not.toHaveProperty(
+      'onTeacherEscapeRecorded',
+    )
+    expect(appMocks.runtimeKernelOptions.at(-1)).not.toHaveProperty(
+      'hostEvidenceRecorder',
+    )
 
     player.destroy()
     expect(root).toBeEmptyDOMElement()
@@ -147,7 +216,7 @@ describe('PlayerApp fixed renderer planes', () => {
     const root = document.createElement('div')
     document.body.append(root)
     const payload: ExportPayload = {
-      project: createProject({ includeDefaultController: false }),
+      project: createProject({ includeDefaultController: false, controls: 'none' }),
       assets: {},
       components: {},
     }
@@ -162,7 +231,7 @@ describe('PlayerApp fixed renderer planes', () => {
     const root = document.createElement('div')
     document.body.append(root)
     const payload: ExportPayload = {
-      project: createProject({ includeDefaultController: false }),
+      project: createProject({ includeDefaultController: false, controls: 'none' }),
       assets: {},
       components: {},
     }
@@ -181,7 +250,7 @@ describe('PlayerApp fixed renderer planes', () => {
   it('编辑宿主保留显式 null 基础态并屏蔽 Player 输入', () => {
     const root = document.createElement('div')
     document.body.append(root)
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const payload: ExportPayload = { project, assets: {}, components: {} }
     const onComponentAuthoringTargetsChanged = vi.fn()
 
@@ -211,7 +280,7 @@ describe('PlayerApp fixed renderer planes', () => {
 
   it('Project V8 不创建外层底栏，并按工程控制画布内控制器', () => {
     const noneRoot = document.createElement('div')
-    const noneProject = createProject({ includeDefaultController: false })
+    const noneProject = createProject({ includeDefaultController: false, controls: 'none' })
     const nonePlayer = new PlayerApp({
       project: noneProject,
       assets: {},
@@ -233,5 +302,121 @@ describe('PlayerApp fixed renderer planes', () => {
     expect(canvasRoot.querySelector('.lesson-footer')).toBeNull()
     expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(true)
     canvasPlayer.destroy()
+  })
+
+  it('只在交付播放且 presenter enabled 时创建最顶层教师逃生控制面', () => {
+    const enabledRoot = document.createElement('div')
+    const enabledProject = createProject()
+    const enabledPlayer = new PlayerApp({
+      project: enabledProject,
+      assets: {},
+      components: {},
+    }, enabledRoot)
+    expect(enabledRoot.querySelector('[data-testid="teacher-escape-controls"]'))
+      .toHaveStyle({ zIndex: '50', pointerEvents: 'auto' })
+    enabledPlayer.destroy()
+
+    const disabledRoot = document.createElement('div')
+    const disabledProject = createProject()
+    disabledProject.playback.presenter.enabled = false
+    const disabledPlayer = new PlayerApp({
+      project: disabledProject,
+      assets: {},
+      components: {},
+    }, disabledRoot)
+    expect(disabledRoot.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
+    disabledPlayer.destroy()
+
+    const noAuthoredControlsRoot = document.createElement('div')
+    const inputCount = appMocks.presenterInputOptions.length
+    const noAuthoredControlsPlayer = new PlayerApp({
+      project: createProject(),
+      assets: {},
+      components: {},
+    }, noAuthoredControlsRoot, { controls: false })
+    expect(noAuthoredControlsRoot.querySelector(
+      '[data-testid="teacher-escape-controls"]',
+    )).not.toBeNull()
+    expect(appMocks.presenterInputOptions).toHaveLength(inputCount + 1)
+    expect(appMocks.playerSceneConstructorArgs.at(-1)?.[8]).toBe(false)
+    noAuthoredControlsPlayer.destroy()
+
+    const noneRoot = document.createElement('div')
+    const nonePlayer = new PlayerApp({
+      project: createProject({ controls: 'none' }),
+      assets: {},
+      components: {},
+    }, noneRoot)
+    expect(noneRoot.querySelector('[data-testid="teacher-escape-controls"]')).not.toBeNull()
+    nonePlayer.destroy()
+
+    const captureRoot = document.createElement('div')
+    const captureInputCount = appMocks.presenterInputOptions.length
+    const capturePlayer = new PlayerApp({
+      project: createProject(),
+      assets: {},
+      components: {},
+    }, captureRoot, { controls: false, mode: 'capture' })
+    expect(captureRoot.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
+    expect(appMocks.presenterInputOptions).toHaveLength(captureInputCount)
+    capturePlayer.destroy()
+
+    const authoringRoot = document.createElement('div')
+    const authoringInputCount = appMocks.presenterInputOptions.length
+    const authoringPlayer = new PlayerApp({
+      project: createProject(),
+      assets: {},
+      components: {},
+    }, authoringRoot, { controls: false, hostMode: 'authoring' })
+    expect(authoringRoot.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
+    expect(appMocks.presenterInputOptions).toHaveLength(authoringInputCount)
+    authoringPlayer.destroy()
+  })
+
+  it('教师逃生翻页的第二次确认会显式传入 navigation guard bypass', () => {
+    const root = document.createElement('div')
+    const project = createProject()
+    project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
+    appMocks.showSceneResults.push(false, true)
+    appMocks.showSceneBlockedReasons.push('当前任务未完成')
+    const player = new PlayerApp({ project, assets: {}, components: {} }, root)
+    const next = root.querySelector<HTMLButtonElement>(
+      '[data-testid="teacher-escape-next"]',
+    )!
+
+    next.click()
+    next.click()
+
+    expect(appMocks.showSceneCalls).toEqual([
+      [1, false, undefined, false],
+      [1, false, undefined, true],
+    ])
+    expect(appMocks.teacherEscapeEvidenceClicks).toEqual([
+      [
+        expect.objectContaining({
+          action: 'next',
+          phase: 'requested',
+          bypassNavigationGuards: false,
+        }),
+        expect.objectContaining({
+          action: 'next',
+          phase: 'confirmation-required',
+          accepted: false,
+        }),
+      ],
+      [
+        expect.objectContaining({
+          action: 'next',
+          phase: 'requested',
+          bypassNavigationGuards: true,
+        }),
+        expect.objectContaining({
+          action: 'next',
+          phase: 'completed',
+          accepted: true,
+        }),
+      ],
+    ])
+    player.destroy()
   })
 })

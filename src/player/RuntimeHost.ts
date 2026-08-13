@@ -1,4 +1,8 @@
 import * as Phaser from 'phaser'
+import {
+  evaluateAssessment,
+  type AssessmentEvaluationRequest,
+} from '../shared/assessmentEvaluators'
 import { runtimeDocumentSchema } from '../shared/runtimeSchema'
 import type {
   CourseEventBus as CourseEventBusContract,
@@ -9,6 +13,7 @@ import type {
   RuntimeDocument,
   RuntimeEventDisposer,
   RuntimeEventListener,
+  RuntimeActionEvidenceRequest,
   RuntimeExecutionMode,
   RuntimeHostActions,
   RuntimeInstanceLifecycle,
@@ -19,6 +24,7 @@ import type {
   RuntimePresentationApi,
   RuntimeScope,
 } from '../shared/runtimeTypes'
+import { RUNTIME_EVIDENCE_ACTION_KINDS } from '../shared/runtimeTypes'
 import { CourseStateStore } from './CourseStateStore'
 import type { CourseEventBus } from './CourseEventBus'
 import type { RuntimeRegistry } from './RuntimeRegistry'
@@ -27,6 +33,111 @@ import {
   RuntimeAuthoringTargetRegistry,
   type RuntimeAuthoringTargetsChangedHandler,
 } from './RuntimeAuthoringTargetRegistry'
+import type {
+  RuntimeActionRecordedHandler,
+  RuntimeAssessmentEvaluatedHandler,
+} from './HostEvidenceRecorder'
+
+const capturedFreeze = Object.freeze.bind(Object)
+const capturedArrayIsArray = Array.isArray.bind(Array)
+const capturedArraySlice = Function.prototype.call.bind(Array.prototype.slice) as (
+  value: readonly unknown[],
+) => unknown[]
+const approvedActionKinds = new Set<string>(RUNTIME_EVIDENCE_ACTION_KINDS)
+const hasApprovedActionKind = approvedActionKinds.has.bind(approvedActionKinds)
+const actIdPattern = /^ACT-\d{3,}$/
+const responseIdPattern = /^RESP-\d{3,}$/
+const matchesActId = actIdPattern.test.bind(actIdPattern)
+const matchesResponseId = responseIdPattern.test.bind(responseIdPattern)
+const capturedEventComposedPath = Function.prototype.call.bind(
+  Event.prototype.composedPath,
+) as (event: Event) => EventTarget[]
+const eventTypeGetter = Object.getOwnPropertyDescriptor(Event.prototype, 'type')?.get
+const eventPhaseGetter = Object.getOwnPropertyDescriptor(
+  Event.prototype,
+  'eventPhase',
+)?.get
+
+if (!eventTypeGetter || !eventPhaseGetter) {
+  throw new Error('当前浏览器缺少宿主动作证据所需的 Event 属性')
+}
+
+const capturedEventType = Function.prototype.call.bind(eventTypeGetter) as (
+  event: Event,
+) => string
+const capturedEventPhase = Function.prototype.call.bind(eventPhaseGetter) as (
+  event: Event,
+) => number
+
+function snapshotAssessmentRequest(
+  request: AssessmentEvaluationRequest,
+): Readonly<AssessmentEvaluationRequest> {
+  const source = request as unknown as {
+    responseId?: unknown
+    evaluatorId?: unknown
+    input?: unknown
+    acceptedValues?: unknown
+  } | null | undefined
+  const responseId = source?.responseId
+  const evaluatorId = source?.evaluatorId
+  const input = source?.input
+  const acceptedValues = source?.acceptedValues
+  const acceptedValuesSnapshot = capturedArrayIsArray(acceptedValues)
+    ? capturedFreeze(capturedArraySlice(acceptedValues))
+    : acceptedValues
+  return capturedFreeze({
+    ...(responseId !== undefined ? { responseId } : {}),
+    evaluatorId,
+    input,
+    acceptedValues: acceptedValuesSnapshot,
+  }) as Readonly<AssessmentEvaluationRequest>
+}
+
+function validateAndSnapshotAction(
+  request: RuntimeActionEvidenceRequest,
+  scope: RuntimeScope,
+  sceneId?: string,
+): Readonly<import('./HostEvidenceRecorder').RuntimeActionRecordedEvidence> {
+  const source = request as unknown as {
+    actId?: unknown
+    responseId?: unknown
+    actionKind?: unknown
+    event?: unknown
+  } | null | undefined
+  const actId = source?.actId
+  const responseId = source?.responseId
+  const actionKind = source?.actionKind
+  const event = source?.event
+
+  try {
+    capturedEventComposedPath(event as Event)
+  } catch {
+    throw new TypeError('动作证据必须绑定真实的浏览器 Event')
+  }
+  if ((event as Event).isTrusted !== true || capturedEventPhase(event as Event) === 0) {
+    throw new TypeError('动作证据只接受当前正在分发且 Event.isTrusted=true 的用户事件')
+  }
+  if (typeof actId !== 'string' || !matchesActId(actId)) {
+    throw new TypeError('actId 必须是 ACT-* 稳定 ID')
+  }
+  if (responseId !== undefined &&
+      (typeof responseId !== 'string' || !matchesResponseId(responseId))) {
+    throw new TypeError('responseId 必须是 RESP-* 稳定 ID')
+  }
+  if (typeof actionKind !== 'string' || !hasApprovedActionKind(actionKind)) {
+    throw new TypeError(`未批准的动作类型：${String(actionKind)}`)
+  }
+  const eventType = capturedEventType(event as Event)
+  if (!eventType) throw new TypeError('动作证据事件类型不得为空')
+  return capturedFreeze({
+    scope,
+    ...(sceneId !== undefined ? { sceneId } : {}),
+    actId,
+    ...(responseId !== undefined ? { responseId } : {}),
+    actionKind,
+    eventType,
+  }) as Readonly<import('./HostEvidenceRecorder').RuntimeActionRecordedEvidence>
+}
 
 export interface RuntimeLayerTargets<T> {
   underlay: T
@@ -57,6 +168,10 @@ export interface RuntimeHostOptions {
   courseState: CourseStateStoreContract
   assetUrl(assetId: string): string
   registerNavigationGuard(guard: RuntimeNavigationGuard): RuntimeEventDisposer
+  /** Trusted host-only receipt sink. It is never exposed on Runtime context. */
+  onAssessmentEvaluated?: RuntimeAssessmentEvaluatedHandler
+  /** Trusted host-only action receipt sink. It is never exposed to Runtime. */
+  onActionRecorded?: RuntimeActionRecordedHandler
   /** Optional isolated-player authoring sink. Ordinary preview/capture omits it. */
   authoring?: RuntimeAuthoringHostOptions
 }
@@ -192,6 +307,10 @@ function errorOf(error: unknown): Error {
 }
 
 export class RuntimeHost {
+  private readonly options: Omit<
+    RuntimeHostOptions,
+    'onAssessmentEvaluated' | 'onActionRecorded'
+  >
   private readonly localState: CourseStateStore
   private readonly scopedEvents: ScopedEventBus
   private underlayMount: Phaser.GameObjects.Container | null = null
@@ -206,7 +325,13 @@ export class RuntimeHost {
   private failure: Error | null = null
   private destroyed = false
 
-  constructor(private readonly options: RuntimeHostOptions) {
+  constructor(options: RuntimeHostOptions) {
+    const {
+      onAssessmentEvaluated,
+      onActionRecorded,
+      ...storedOptions
+    } = options
+    this.options = storedOptions
     const runtime = runtimeDocumentSchema.parse(options.runtime)
     this.scopedEvents = new ScopedEventBus(options.events)
     this.localState = new CourseStateStore((change) => {
@@ -300,6 +425,35 @@ export class RuntimeHost {
             return disposer
           },
         },
+        assessment: Object.freeze({
+          evaluate: (request: AssessmentEvaluationRequest) => {
+            const requestSnapshot = snapshotAssessmentRequest(request)
+            const result = evaluateAssessment(requestSnapshot)
+            onAssessmentEvaluated?.({
+              scope: options.scope,
+              ...(options.sceneId !== undefined
+                ? { sceneId: options.sceneId }
+                : {}),
+              request: requestSnapshot,
+              result: capturedFreeze({
+                evaluatorId: result.evaluatorId,
+                normalizedInput: result.normalizedInput,
+                status: result.status,
+              }),
+            })
+            return result
+          },
+        }),
+        evidence: capturedFreeze({
+          recordAction: (request: RuntimeActionEvidenceRequest) => {
+            const snapshot = validateAndSnapshotAction(
+              request,
+              options.scope,
+              options.sceneId,
+            )
+            onActionRecorded?.(snapshot)
+          },
+        }),
         ...(this.authoringRegistry
           ? { authoring: this.authoringRegistry }
           : {}),

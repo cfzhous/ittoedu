@@ -637,6 +637,7 @@ async function buildAndVerifyMovedLesson(
     title: 'W3 可移植性隔离课件',
     now: reproducibleTimestamp,
     includeDefaultController: false,
+    controls: 'none',
     idFactory: (() => {
       let sequence = 0
       return () => `w3_${String(++sequence).padStart(3, '0')}`

@@ -4,7 +4,7 @@ import { createProject, createTextNode } from '../../src/renderer/project/create
 
 describe('visual density overview', () => {
   it('reports visible copy, occupied area and substantial overlap per state', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     scene.nodes = [
       createTextNode({ id: 'a', x: 0, y: 0, width: 640, height: 360, text: '甲'.repeat(120) }),
@@ -23,7 +23,7 @@ describe('visual density overview', () => {
   })
 
   it('labels a deliberately overloaded state as a heuristic, not an error', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes[0]!.nodes = Array.from({ length: 30 }, (_, index) => createTextNode({
       id: `node-${index}`,
       x: (index % 6) * 190,

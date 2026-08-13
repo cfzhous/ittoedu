@@ -15,6 +15,7 @@ import {
 import { sceneInteractionsSchema } from './interactionSchema'
 import { applySceneNodeOverride } from './presentation'
 import { runtimeDocumentSchema } from './runtimeSchema'
+import { hasDeliveryVisibleTeacherController } from './teacherControllerConsistency'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 const finiteNumber = z.number().finite()
@@ -845,6 +846,21 @@ export const projectDocumentSchema = z.object({
       code: 'custom',
       path: ['globalInteractions'],
       message: '全局交互规则 ID 不能重复',
+    })
+  }
+  const hasVisibleController = hasDeliveryVisibleTeacherController(project)
+  if (project.playback.controls === 'canvas' && !hasVisibleController) {
+    context.addIssue({
+      code: 'custom',
+      path: ['playback', 'controls'],
+      message: '画布控制模式必须至少有一个交付时可见的全局教师控制器',
+    })
+  }
+  if (project.playback.controls === 'none' && hasVisibleController) {
+    context.addIssue({
+      code: 'custom',
+      path: ['playback', 'controls'],
+      message: '不显示控制器时不能保留交付时可见的全局教师控制器',
     })
   }
 })

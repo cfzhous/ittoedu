@@ -144,6 +144,29 @@ interface RuntimeCreateContextBase {
   courseState: CourseStateStore
   capture: { waitUntil(promise: Promise<unknown>): void }
   navigation: { guard(guard: RuntimeNavigationGuard): () => void }
+  assessment: {
+    evaluate(request: {
+      responseId?: `RESP-${number}`
+      evaluatorId: 'EVAL-finite-choice-v1' | 'EVAL-normalized-short-v1'
+      input: string
+      acceptedValues: readonly string[]
+    }): {
+      evaluatorId: string
+      normalizedInput: string
+      status: 'pass' | 'fail'
+    }
+  }
+  evidence: {
+    recordAction(request: {
+      actId: `ACT-${number}`
+      actionKind:
+        | 'click' | 'select' | 'text-input' | 'formula-input'
+        | 'drag' | 'sort' | 'circle-text' | 'highlight'
+        | 'parameter-change' | 'oral' | 'paper' | 'teacher-command'
+      responseId?: `RESP-${number}`
+      event: Event
+    }): void
+  }
   authoring?: {
     register(target: RuntimeAuthoringTargetRegistration): () => void
     invalidate(): void
@@ -177,6 +200,44 @@ interface RuntimeCreateContextHybrid extends RuntimeCreateContextBase {
 `PhaserRoots` 提供 `scene/root/underlay/overlay`；`DomRoots` 提供 `root/underlay/overlay`。`ctx.phaser.root` 与 `ctx.dom.root` 是对应作用域的主挂载根；需要精确层级时直接写明 `underlay` 或 `overlay`。
 
 API 2 的联合类型是能力边界，不是类型提示：`dom` 模式不存在 `ctx.Phaser`、`ctx.phaser` 或 `ctx.nodes`，`phaser` 模式不存在 `ctx.dom`/`ctx.domRoot`。需要同时操作原生节点句柄和 DOM 时使用 `hybrid`。迁移历史源码时必须先盘点实际依赖，再选择最小的 `renderMode`。
+
+需要作为行为验收证据的自动判定，必须向 `assessment.evaluate`
+传入已批准的 `responseId`；省略它仅保留向后兼容调用，不会形成
+evidence-grade 候选。需要作为 `ACT-*` 证据的可见动作，应在实际 DOM
+事件处理器内调用 `ctx.evidence.recordAction({ ..., event })`。宿主只接受浏览器
+正在分发的 `isTrusted` 事件；`new Event(...)`、`dispatchEvent(...)` 或事后重用事件
+都会被拒绝。
+
+Player 还会在 Runtime 挂载前开启独立的宿主证据会话，并以
+`[courseware-host-evidence-v1] ` 前缀输出严格 JSON。`session-start` 的
+`sequence` 固定为 `0`；后续 `assessment-evaluated`、`action-recorded` 与
+`teacher-escape-recorded` 共用同一个 `sessionId` 和无间断递增的
+`sequence`。
+
+`teacher-escape-recorded` 不是 Runtime API。它只由 `PlayerApp` 私有持有的
+`HostEvidenceRecorder` 与最顶层原生 `TeacherEscapeControls` 写入，Runtime
+上下文、`window` 和工程 store 都拿不到写入口。记录的精确业务字段为：
+
+```ts
+{
+  kind: 'teacher-escape-recorded'
+  action: 'previous' | 'next' | 'scene-picker' | 'replay'
+  phase: 'requested' | 'confirmation-required' | 'completed'
+  sceneId: string | null
+  stateId: string | null
+  bypassNavigationGuards: boolean
+  accepted?: boolean
+  eventType: 'click'
+}
+```
+
+每次原生按钮点击只会打开一个当前 `isTrusted` click 分发期间有效的写入闭包；
+同一次点击的 `requested` 与后续阶段可复用它，事件处理器返回后重放会被拒绝。
+受课程 guard 阻止的 `next` 首次点击记录 `requested` +
+`confirmation-required`，教师第二次点击才记录新的 `requested` + `completed`；
+`scene-picker` 与 `replay` 在各自同一次点击中记录 `requested` + `completed`。
+`courseware-teacher-escape-action` CustomEvent 只供界面观察，Runtime 可自行派发，
+因此绝不能当作证据。
 
 ## 5. 所有人工可见文字
 

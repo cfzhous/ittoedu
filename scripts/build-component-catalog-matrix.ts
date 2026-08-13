@@ -164,6 +164,7 @@ async function main(): Promise<void> {
     title: 'Component Catalog V8 四组件矩阵',
     now: buildTimestamp,
     includeDefaultController: false,
+    controls: 'none',
   })
   project.scenes = catalog.packages.map((entry, index) => {
     const component = components[entry.packageId]!

@@ -87,10 +87,18 @@ import type {
 } from '../src/shared/runtimeTypes'
 import {
   RUNTIME_EXECUTION_MODES,
+  RUNTIME_EVIDENCE_ACTION_KINDS,
   RUNTIME_RENDER_MODES,
   RUNTIME_SCOPES,
 } from '../src/shared/runtimeTypes'
 import { PUBLISHED_LESSON_VERSION } from '../src/shared/publishedLessonTypes'
+import { ASSESSMENT_EVALUATOR_REGISTRY } from '../src/shared/assessmentEvaluators'
+import {
+  HOST_EVIDENCE_CONSOLE_PREFIX,
+  HOST_EVIDENCE_SCHEMA_VERSION,
+  HOST_TEACHER_ESCAPE_ACTIONS,
+  HOST_TEACHER_ESCAPE_PHASES,
+} from '../src/player/HostEvidenceRecorder'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
   SINGLE_HTML_WARNING_BYTES,
@@ -636,7 +644,13 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/renderer/project/createProject.ts',
     'src/renderer/project/projectArchive.ts',
     'src/renderer/project/validateProjectArchive.ts',
+    'src/player/RuntimeHost.ts',
+    'src/player/CourseRuntimeKernel.ts',
+    'src/player/HostEvidenceRecorder.ts',
+    'src/player/PlayerApp.ts',
+    'src/player/TeacherEscapeControls.ts',
     'src/shared/builtInComponentCatalog.ts',
+    'src/shared/assessmentEvaluators.ts',
     'src/shared/componentCatalog.ts',
     'src/shared/componentContentIntegrity.ts',
     'src/shared/componentSchema.ts',
@@ -772,6 +786,52 @@ export async function generateAiCapabilityArtifacts(
       renderModes: RUNTIME_RENDER_MODES,
       hostActions: runtimeHostActionNames,
       lifecycleHooks: runtimeLifecycleHooks,
+      assessment: {
+        invocation: 'ctx.assessment.evaluate',
+        evaluators: ASSESSMENT_EVALUATOR_REGISTRY.map(({ id }) => id),
+        hostEvidence: {
+          schemaVersion: HOST_EVIDENCE_SCHEMA_VERSION,
+          consolePrefix: HOST_EVIDENCE_CONSOLE_PREFIX,
+          sessionStartBeforeRuntimeMount: true,
+          recordKinds: [
+            'assessment-evaluated',
+            'action-recorded',
+            'teacher-escape-recorded',
+          ],
+          teacherEscape: {
+            recordKind: 'teacher-escape-recorded',
+            actions: HOST_TEACHER_ESCAPE_ACTIONS,
+            phases: HOST_TEACHER_ESCAPE_PHASES,
+            requiredFields: [
+              'action',
+              'phase',
+              'sceneId',
+              'stateId',
+              'bypassNavigationGuards',
+              'eventType',
+            ],
+            acceptedField: {
+              requested: 'omitted',
+              confirmationRequired: false,
+              completed: 'boolean',
+            },
+            eventType: 'click',
+            requiresTrustedDispatchedClick: true,
+            phaseWriterLifetime: 'current-click-dispatch-only',
+            runtimeExposure: 'none',
+            publicCustomEventIsEvidence: false,
+          },
+        },
+      },
+      evidence: {
+        invocation: 'ctx.evidence.recordAction',
+        actionKinds: RUNTIME_EVIDENCE_ACTION_KINDS,
+        requiresTrustedDispatchedEvent: true,
+        idPatterns: {
+          actId: '^ACT-\\d{3,}$',
+          responseId: '^RESP-\\d{3,}$',
+        },
+      },
       renderCapabilities: {
         phaser: ['phaser', 'nodes'],
         dom: ['dom'],
@@ -787,6 +847,11 @@ export async function generateAiCapabilityArtifacts(
     sourceOfTruth: [
       'src/shared/runtimeSchema.ts',
       'src/shared/runtimeTypes.ts',
+      'src/player/HostEvidenceRecorder.ts',
+      'src/player/RuntimeHost.ts',
+      'src/player/CourseRuntimeKernel.ts',
+      'src/player/PlayerApp.ts',
+      'src/player/TeacherEscapeControls.ts',
     ],
   }))
   files.set('schemas/component-api4.json', canonicalJson({
@@ -896,6 +961,7 @@ export async function generateAiCapabilityArtifacts(
       },
       scopes: RUNTIME_SCOPES,
     },
+    assessmentEvaluators: ASSESSMENT_EVALUATOR_REGISTRY,
     runtime: {
       schema: 'schemas/runtime-api2.json',
       authoringModes: ['professional'],

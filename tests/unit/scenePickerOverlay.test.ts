@@ -33,7 +33,7 @@ describe('ScenePickerOverlay', () => {
     picker.open('scene_practice')
     await Promise.resolve()
 
-    const dialog = stage.querySelector('[role="dialog"]')
+    const dialog = stage.querySelector('[role="dialog"][data-scene-picker]')
     const buttons = [...stage.querySelectorAll<HTMLButtonElement>(
       '.lesson-scene-picker__item',
     )]
@@ -55,7 +55,7 @@ describe('ScenePickerOverlay', () => {
 
     fireEvent.click(buttons[2]!)
     expect(onSelect).toHaveBeenCalledOnce()
-    expect(onSelect).toHaveBeenCalledWith('scene_summary')
+    expect(onSelect).toHaveBeenCalledWith('scene_summary', false)
     expect(picker.isOpen).toBe(false)
     expect(stage.querySelector('.lesson-scene-picker-layer')).not.toBeVisible()
     await Promise.resolve()
@@ -89,5 +89,28 @@ describe('ScenePickerOverlay', () => {
     picker.destroy()
     expect(stage.querySelector('.lesson-scene-picker-layer')).toBeNull()
     expect(onClose).toHaveBeenCalledTimes(3)
+  })
+
+  it('binds guard bypass to one open session and clears it on close', async () => {
+    const stage = createStage()
+    const onSelect = vi.fn()
+    const picker = new ScenePickerOverlay({ stage, scenes, onSelect })
+
+    picker.open('scene_intro', { bypassNavigationGuards: true })
+    picker.close()
+    picker.open('scene_intro')
+    await Promise.resolve()
+    fireEvent.click(stage.querySelector<HTMLButtonElement>(
+      '[data-scene-id="scene_summary"]',
+    )!)
+    expect(onSelect).toHaveBeenLastCalledWith('scene_summary', false)
+
+    picker.open('scene_intro', { bypassNavigationGuards: true })
+    await Promise.resolve()
+    fireEvent.click(stage.querySelector<HTMLButtonElement>(
+      '[data-scene-id="scene_practice"]',
+    )!)
+    expect(onSelect).toHaveBeenLastCalledWith('scene_practice', true)
+    picker.destroy()
   })
 })

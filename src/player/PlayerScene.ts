@@ -701,6 +701,7 @@ export class PlayerScene extends Phaser.Scene {
             }
           : {}),
         sceneId: sceneDocument.id,
+        currentStateId: () => this.currentPresentationStateId,
         emitComponentEvent: componentEvents.emit,
         canvasControlsEnabled: this.canvasControlsEnabled,
         accessibilityRoot: this.domLayers.scene.overlay,
@@ -1283,6 +1284,7 @@ export class PlayerScene extends Phaser.Scene {
               }
             : {}),
           emitComponentEvent: componentEvents.emit,
+          currentStateId: () => this.currentPresentationStateId,
           canvasControlsEnabled: this.canvasControlsEnabled,
           accessibilityRoot: this.domLayers.global.overlay,
           textureKey: (assetId) => this.textureKey(assetId),

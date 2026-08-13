@@ -1,4 +1,8 @@
 import type * as Phaser from 'phaser'
+import type {
+  AssessmentEvaluationRequest,
+  AssessmentEvaluationResult,
+} from './assessmentEvaluators'
 
 export type RuntimeApiVersion = 2
 export const RUNTIME_RENDER_MODES = ['phaser', 'dom', 'hybrid'] as const
@@ -151,6 +155,42 @@ export interface RuntimeNavigationApi {
   guard(guard: RuntimeNavigationGuard): RuntimeEventDisposer
 }
 
+/** Deterministic, offline evaluators published in the Capability Index. */
+export interface RuntimeAssessmentApi {
+  evaluate(request: AssessmentEvaluationRequest): AssessmentEvaluationResult
+}
+
+export const RUNTIME_EVIDENCE_ACTION_KINDS = [
+  'click',
+  'select',
+  'text-input',
+  'formula-input',
+  'drag',
+  'sort',
+  'circle-text',
+  'highlight',
+  'parameter-change',
+  'oral',
+  'paper',
+  'teacher-command',
+] as const
+
+export type RuntimeEvidenceActionKind =
+  typeof RUNTIME_EVIDENCE_ACTION_KINDS[number]
+
+export interface RuntimeActionEvidenceRequest {
+  actId: `ACT-${number}`
+  actionKind: RuntimeEvidenceActionKind
+  responseId?: `RESP-${number}`
+  /** The native browser event that directly caused this approved action. */
+  event: Event
+}
+
+/** Records approved actions only when directly caused by a trusted browser event. */
+export interface RuntimeEvidenceApi {
+  recordAction(request: RuntimeActionEvidenceRequest): void
+}
+
 export interface RuntimeContentReader {
   get(key: string): string
   all(): Readonly<Record<string, string>>
@@ -257,6 +297,8 @@ export interface RuntimeCreateContextBase {
   courseState: CourseStateStore
   capture: RuntimeCaptureContext
   navigation: RuntimeNavigationApi
+  assessment: Readonly<RuntimeAssessmentApi>
+  evidence: Readonly<RuntimeEvidenceApi>
   /** Present only when the definition and isolated host both opt into authoring V1. */
   authoring?: RuntimeAuthoringApi
   emit(eventName: string, payload?: unknown): void

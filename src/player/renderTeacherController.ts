@@ -114,6 +114,13 @@ export function invokeControllerAction(
   action: TeacherControllerAction,
   context: RenderNodeContext,
 ): void {
+  window.dispatchEvent(new CustomEvent('courseware-teacher-controller-action', {
+    detail: {
+      action: action.type,
+      sceneId: context.sceneId ?? null,
+      stateId: context.currentStateId?.() ?? null,
+    },
+  }))
   switch (action.type) {
     case 'scene.previous':
       context.actions.previousScene()

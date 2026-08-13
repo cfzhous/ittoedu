@@ -35,6 +35,7 @@ function fixture() {
     id: 'project-components',
     now: '2026-01-01T00:00:00.000Z',
     includeDefaultController: false,
+    controls: 'none',
   })
   project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
   project.componentPackages[`${PACKAGE_ID}@1.0.0`] = packageMeta('1.0.0')

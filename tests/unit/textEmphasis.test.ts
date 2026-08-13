@@ -42,7 +42,7 @@ afterEach(() => {
 
 describe('Project V8 native text emphasis', () => {
   it('normalizes a missing V8 node default and preserves run-level semantics', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createTextNode({
       text: '春风',
       runs: [{ start: 0, end: 1, style: { emphasis: true } }],
@@ -60,7 +60,7 @@ describe('Project V8 native text emphasis', () => {
   })
 
   it('stores node and run emphasis through a .h5lesson save/open round trip', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes[0]!.nodes.push(createTextNode({
       text: '重点内容',
       runs: [{ start: 2, end: 4, style: { emphasis: false } }],

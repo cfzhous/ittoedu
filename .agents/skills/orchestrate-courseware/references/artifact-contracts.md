@@ -5,7 +5,7 @@
 1. Minimal directory
 2. `case.json` shape
 3. Adaptive review profiles
-4. Exact-content closure
+4. Exact-content and executable-contract closure
 5. Hash, invalidation, and recovery
 6. V1 audit and migration
 
@@ -35,7 +35,9 @@ Top-level responsibilities:
 - `decisions`: embedded `DecisionPrompt` records and responses;
 - `blockingDecisionIds`: exact unresolved blocking decision IDs;
 - `derivedReadiness`: validator-owned readiness, hashes, exact-content locations, and blockers;
-- `resultStatus`: outcome vocabulary only; orchestration tools leave it `pending` and never create `accepted`.
+- `resultStatus`: orchestration accepts only `pending | rejected`; candidate and
+  accepted outcome claims belong to downstream evidence/human acceptance and
+  are rejected in a case contract.
 
 The artifact keys and paths are fixed:
 
@@ -85,7 +87,7 @@ python <skill-dir>/scripts/case_artifact.py <case> approve <review-key> --approv
 
 For standard/high-risk paths, approve upstream reviews before preparing downstream review scopes.
 
-## 4. Exact-content closure
+## 4. Exact-content and executable-contract closure
 
 Exact content may live in the contract, presentation script, or `content/*.md`, but every `CNT-*` definition must exist once and include:
 
@@ -96,7 +98,29 @@ Exact content may live in the contract, presentation script, or `content/*.md`, 
 - difficulty, prerequisite, source, and review status;
 - reveal order, instructional time, notation, unit, diagram, media, and accessibility needs.
 
-Use stable IDs: `SRC-*`, `DEC-*`, `OBJ-*`, `EVD-*`, `STG-*`, `CNT-*`, `ERR-*`, `FORM-*`, `SCN-*`, `STATE-*`, `VIS-*`. The script must reference every content item it presents and must not reference unknown objectives, evidence, or content.
+Use stable IDs: `SRC-*`, `DEC-*`, `OBJ-*`, `EVD-*`, `STG-*`, `CNT-*`, `ERR-*`, `FORM-*`, `SCN-*`, `STATE-*`, `VIS-*`, `RESP-*`, `TOL-*`, `AUTH-*`, `ACT-*`, `ESC-*`. Definitions are unique and references must resolve to a current definition. The script must reference every content item it presents and must not reference unknown objectives, evidence, content, response, tolerance case, action, state, or escape records.
+
+Each `SCN-*` independently contains at least one explicit `OBJ-*`, `EVD-*`, and
+`CNT-*` reference plus a scene-owned `STATE-*` definition. HTML comments never
+satisfy closure. `CNT-*#fragment` is not a definition: create a separate exact
+`CNT-*` item when a sub-item needs its own executable reference.
+
+The approved Markdown also carries four executable contracts:
+
+- `RESP-*` freezes evidence collection channel, response type, timing, assessment authority, navigation gate, evaluator/tolerance requirements, and teacher override;
+- `AUTH-*` freezes the authoring outcome for exact content without selecting a technical carrier;
+- `ACT-*` freezes each observable student, teacher, or system action and any response it produces;
+- `ESC-*` freezes scene-level teacher recovery and continuation from blank, error, and incomplete states.
+
+`01-courseware-contract.md` additionally declares the current product capability requirements and a versioned response-capacity summary. `02-presentation-script.md` locates `ACT-*` and `ESC-*` inside scenes. Detailed fixed fields and enums are defined in the directly linked response/assessment/authoring reference from `SKILL.md`; do not restate them differently in another artifact.
+
+`implementation-ready` requires semantic closure, not keyword presence: every evidence item has a response contract, every exact content item has an authoring contract, every digital response has a real action producer, every scene has both action and escape coverage, authority/gate combinations are legal, unsupported capabilities have an approved fallback/decision, and the conservative capacity calculation fits the lesson duration.
+
+When an action governs staged release, its structured
+`initiallyHiddenContentRefs` / `revealedContentRefs` sets must resolve to exact
+content explicitly declared by that same scene. The reveal set is a non-empty
+subset of the initial-hidden set, the pre-action visibility flag is `false`,
+and the visible reveal path is frozen in `revealBehavior`.
 
 A cold-start Builder must not need chat, an old implementation, or subject-matter guessing to recover visible text, correct answers, feedback, or reveal behavior. File layout may vary; semantic closure may not.
 
@@ -107,7 +131,9 @@ A review scope hash covers:
 1. the canonical `inputs` hash;
 2. the canonical embedded `decisions` hash;
 3. current hashes and presence/status of every covered file or directory;
-4. current upstream review scope hashes.
+4. current upstream review scope hashes;
+5. case identity and delivery invariants: `caseId`, `title`,
+   `durationMinutes`, `authoringMode`, target schema, and path mode.
 
 Directory hashes include sorted relative file names and every file hash. Changing inputs, a decision response, contract bytes, script bytes, any `content/` file, or visual bytes invalidates the direct review and every dependent review. Retain invalidated claims in `reviewHistory`; never keep them active.
 
@@ -116,7 +142,11 @@ Recover from files:
 1. Run `case_artifact.py <case> status` and `validate_case.py <case> --target draft --json`.
 2. Resolve blocking decisions from `case.json`.
 3. Reconcile changed artifacts, run `ready`, and re-review only invalidated scopes and their dependents.
-4. Run `validate_case.py <case> --target implementation-ready --promote`.
+4. Complete or revise `RESP/AUTH/ACT/ESC`, product profile, and capacity fields; these byte changes deliberately invalidate the covering review.
+5. From the editor root run `validate_case.py <case> --target
+   implementation-ready --promote`. For an installed Skill or an external case,
+   pass `--capability-index
+   <editor-root>/artifacts/ai-capabilities/index.json` explicitly.
 
 `--promote` persists either a fresh `implementation-ready` result or a fresh `not-ready` result. It never approves reviews and never changes `resultStatus` to `accepted`.
 
@@ -129,4 +159,4 @@ python <skill-dir>/scripts/migrate_case_v1.py <v1-case> audit
 python <skill-dir>/scripts/migrate_case_v1.py <v1-case> migrate --destination <new-v2-case> --path-mode <mode>
 ```
 
-Migration is copy-on-create: it refuses an existing destination, fingerprints and preserves the source, creates V2 draft files, copies every V1 source byte unchanged under `legacy-v1/` with a file/tree SHA-256 inventory, records legacy status/hash claims for audit, and sets all V2 reviews to pending. The `legacy-v1/` tree is evidence, never current V2 truth. Migration does not inherit approvals, decision responses, readiness, or acceptance. Reconcile migrated material into V2 sections, re-ask material decisions, remove placeholders/duplicates, and obtain fresh path reviews.
+Migration is copy-on-create: it refuses an existing destination, fingerprints and preserves the source, creates V2 draft files, copies every V1 source byte unchanged under `legacy-v1/` with a file/tree SHA-256 inventory, records legacy status/hash claims for audit, and sets all V2 reviews to pending. The `legacy-v1/` tree is evidence, never current V2 truth. Migration does not inherit approvals, decision responses, readiness, acceptance, or executable contracts. Reconcile migrated material into V2 sections, add current `RESP/AUTH/ACT/ESC` records and capability/capacity fields, re-ask material decisions, remove placeholders/duplicates, and obtain fresh path reviews.

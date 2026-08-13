@@ -50,7 +50,7 @@ describe('playback initial visibility static export semantics', () => {
       context as unknown as CanvasRenderingContext2D,
     )
 
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createTeacherControllerNode({
       id: 'animated-static-node',
       x: 300,

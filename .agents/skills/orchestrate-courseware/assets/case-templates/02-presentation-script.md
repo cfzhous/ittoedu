@@ -59,6 +59,32 @@
 - 表达教学因果的运动：[待填写；没有时明确写“无”]
 - 仅装饰运动：[待填写；没有时明确写“无”]
 
+#### 可执行动作与教师逃生
+
+##### ACT-001 [待填写真实学生/教师动作]
+
+- sceneRef: SCN-001
+- actor: [待填写 student/teacher/system]
+- kind: [待填写 click/select/text-input/formula-input/drag/sort/circle-text/highlight/parameter-change/oral/paper/teacher-command]
+- target: [待填写学生或教师实际可见、可操作的对象]
+- evidenceProduced: [待填写 RESP-*；不产出证据时写 none]
+- requiredForCompletion: [待填写 true/false]
+- initiallyHiddenContentRefs: [待填写该幕初态必须隐藏的 CNT-*；无则写 none]
+- revealedContentRefs: [待填写该动作完成后显示的上述 CNT-*；无则写 none]
+- preActionVisible: [有初态隐藏/揭示引用时必须写 false；否则写操作前必须可见的信息]
+- errorBehavior: [待填写错误后的可见结果；不适用写 none]
+- retryBehavior: [待填写重试路径；不适用写 none]
+- revealBehavior: [待填写揭示路径；不适用写 none]
+- stableResult: [待填写完成后的稳定、可复现结果]
+
+##### ESC-001 [待填写本场景教师逃生]
+
+- sceneRef: SCN-001
+- stateRefs: STATE-001, STATE-002
+- actions: [填写 retry/reveal/continue-incomplete/scene-picker/previous/replay 中至少一项]
+- confirmBeforeContinue: [包含 continue-incomplete 时必须 true；否则填写 true/false]
+- independentOfCorrectness: true
+
 #### 证据与静态审阅帧
 
 - 学习证据：[待填写]

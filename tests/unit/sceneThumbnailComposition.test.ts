@@ -39,7 +39,7 @@ function labels(
 
 describe('scene thumbnail runtime composition', () => {
   it('matches Player order for global underlay and scene overlay fallbacks', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     scene.nodes = [createTextNode({ id: 'scene-node' })]
     scene.runtime = runtime('scene-overlay', 'overlay', 'runtime-layer')
@@ -71,7 +71,7 @@ describe('scene thumbnail runtime composition', () => {
   })
 
   it('places scene underlay before scene nodes and global overlay last', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     scene.nodes = [createTextNode({ id: 'scene-node' })]
     scene.runtime = runtime('scene-underlay', 'underlay')
@@ -102,7 +102,7 @@ describe('scene thumbnail runtime composition', () => {
   })
 
   it('only badges enabled runtimes that have no static representation', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
 
     scene.runtime = runtime(null)
@@ -120,7 +120,7 @@ describe('scene thumbnail runtime composition', () => {
   })
 
   it('keeps playback-hidden nodes at their authored stable frame for thumbnail drawing', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createTextNode({
       id: 'animated-title',
       x: 320,

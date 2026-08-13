@@ -14,6 +14,21 @@
 - 教师与学生控制关系：教师发起，学生作答
 - 时间模型：阅读 2 分钟、思考 3 分钟、操作 2 分钟、反馈 2 分钟、总结 1 分钟
 
+## 产品能力剖面
+
+- single-device: required
+- single-deviceFallback: none
+- single-deviceDecisionRef: none
+- teacher-display: required
+- teacher-displayFallback: none
+- teacher-displayDecisionRef: none
+- offline: required
+- offlineFallback: none
+- offlineDecisionRef: none
+- multi-user-aggregation: not-required
+- multi-user-aggregationFallback: teacher-observed
+- multi-user-aggregationDecisionRef: none
+
 ## 学习目标与证据
 
 ### OBJ-001 解释部分—整体关系
@@ -77,6 +92,68 @@
 - 揭示顺序：初始只显示两图与问题，作答后显示整体轮廓，完成后显示定义
 - 预计用时（分钟）：10
 - 公式、符号、单位、图表、媒体与无障碍要求：图形需有文字替代说明
+
+## 响应、判定与容量
+
+### RESP-001 选择能表示四分之一的图形
+
+- evidenceRef: EVD-001
+- contentRef: CNT-001
+- mode: digital-required
+- responseType: choice
+- requiredForProgress: true
+- firstAttemptSeconds: 30
+- retrySeconds: 15
+- teacherDiscussionSeconds: 15
+- authority: finite-auto
+- navigationGate: hard
+- teacherOverrideRef: ESC-001
+- evaluatorCapabilityRef: EVAL-finite-choice-v1
+- toleranceCaseRefs: TOL-001, TOL-002, TOL-003, TOL-004, TOL-005, TOL-006
+- capacityOverrideDecisionRef: none
+
+## 自动判定容差矩阵
+
+| toleranceCaseId | responseRef | category | input | expected |
+| --- | --- | --- | --- | --- |
+| TOL-001 | RESP-001 | canonical-correct | A | pass |
+| TOL-002 | RESP-001 | correct-variant-1 | 图A | pass |
+| TOL-003 | RESP-001 | correct-variant-2 | 选择图 A | pass |
+| TOL-004 | RESP-001 | blank | EMPTY | fail |
+| TOL-005 | RESP-001 | typical-near-miss | B | fail |
+| TOL-006 | RESP-001 | substring-false-positive | AB | fail |
+
+## 响应容量汇总
+
+- capacityPolicyVersion: 1
+- readingObservationSeconds: 300
+- sceneTransitionSeconds: 15
+
+## 编辑结果合同
+
+### AUTH-001 任务标题可在画布直接维护
+
+- contentRef: CNT-001
+- access: direct-canvas
+- layoutAdjustment: optional
+- styleAdjustment: basic
+- requiredForAcceptance: true
+
+### AUTH-002 完整题面可在画布直接维护
+
+- contentRef: CNT-001
+- access: direct-canvas
+- layoutAdjustment: required
+- styleAdjustment: basic
+- requiredForAcceptance: true
+
+### AUTH-003 错误修复反馈可在画布直接维护
+
+- contentRef: CNT-001
+- access: direct-canvas
+- layoutAdjustment: optional
+- styleAdjustment: basic
+- requiredForAcceptance: true
 
 ## 评价、反馈与约束
 

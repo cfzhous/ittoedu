@@ -78,6 +78,8 @@ export interface RenderNodeContext {
   onComponentAuthoringTargetsChanged?:
     ComponentAuthoringTargetsChangedHandler
   sceneId?: string
+  /** Host-owned current state resolver for public, read-only action evidence. */
+  currentStateId?(): string | null
   /** Lets PlayerScene defer mount-time component events until bindings exist. */
   emitComponentEvent?(detail: ComponentEventDetail): void
   /** False when the host explicitly suppresses delivery-time canvas controls. */

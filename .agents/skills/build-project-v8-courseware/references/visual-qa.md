@@ -4,4 +4,4 @@
 
 检查文字溢出/裁切、遮挡、主次焦点、投影可读性、操作发现性、因果反馈、错误/成功/重试、相邻幕节奏、模板化卡片重复、Runtime 中间态和静态帧意义。发现问题直接修复并重拍。
 
-生成整课 contact sheet 并标注 scene/state。复杂 Runtime 还需真实操作录屏；随机或时间相关视觉必须能准备一个确定捕获帧。
+生成整课 contact sheet 并标注 scene/state。这些本地 QA 图不写入 `engineering candidate.requiredFrames`，也不能自行提升 `art candidate`；视觉提升由仓库外可信审阅绑定。只有获批合同明确要求动态录屏时，复杂 Runtime 才要求真实操作录屏；随机或时间相关视觉必须能准备一个确定捕获帧。

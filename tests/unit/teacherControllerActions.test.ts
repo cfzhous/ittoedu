@@ -11,6 +11,9 @@ import type { RenderNodeContext } from '../../src/player/renderNode'
 describe('teacher controller actions', () => {
   it('opens the runtime scene directory without binding a scene or state', () => {
     const emit = vi.fn()
+    const witnessed: unknown[] = []
+    const collect = (event: Event) => witnessed.push((event as CustomEvent).detail)
+    window.addEventListener('courseware-teacher-controller-action', collect)
     const actions = {
       goToScene: vi.fn(),
       nextScene: vi.fn(),
@@ -21,6 +24,9 @@ describe('teacher controller actions', () => {
     const context = {
       actions,
       events: { emit },
+      sceneId: 'scene-intro',
+      currentStateId: () => 'state-intro',
+      payload: { project: { scenes: [{ id: 'scene-intro' }] } },
     } as unknown as RenderNodeContext
 
     invokeControllerAction({ type: 'scene.open-picker' }, context)
@@ -28,5 +34,11 @@ describe('teacher controller actions', () => {
     expect(emit).toHaveBeenCalledOnce()
     expect(emit).toHaveBeenCalledWith(SCENE_PICKER_OPEN_EVENT)
     expect(actions.goToScene).not.toHaveBeenCalled()
+    expect(witnessed).toEqual([{
+      action: 'scene.open-picker',
+      sceneId: 'scene-intro',
+      stateId: 'state-intro',
+    }])
+    window.removeEventListener('courseware-teacher-controller-action', collect)
   })
 })

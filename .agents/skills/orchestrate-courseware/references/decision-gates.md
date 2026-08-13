@@ -42,14 +42,19 @@ Tool absence is not a permanent `decision-blocked` state. Reuse the same decisio
     }
   ],
   "safeDefaultOptionId": null,
+  "scopeRefs": ["RESP-001#capacity"],
   "response": null
 }
 ```
 
+Use `scopeRefs` only for machine-enforced overrides. Capacity decisions bind to
+the exact `RESP-*#capacity`; capability decisions bind to the exact
+`capability:<name>`. A related-sounding question or answer is not sufficient.
+
 Use the helper:
 
 ```text
-python <skill-dir>/scripts/case_decision.py <case> add --id DEC-001 --stage intake --question <q> --reason <why> --option DEC-001-A <label> <impact> true --option DEC-001-B <label> <impact> false
+python <skill-dir>/scripts/case_decision.py <case> add --id DEC-001 --stage intake --question <q> --reason <why> --scope-ref RESP-001#capacity --option DEC-001-A <label> <impact> true --option DEC-001-B <label> <impact> false
 python <skill-dir>/scripts/case_decision.py <case> answer DEC-001 --answered-by user-structured --selected DEC-001-A
 python <skill-dir>/scripts/case_decision.py <case> answer DEC-001 --answered-by safe-default --selected DEC-001-A
 python <skill-dir>/scripts/case_decision.py <case> answer DEC-001 --answered-by user-text --text <answer>

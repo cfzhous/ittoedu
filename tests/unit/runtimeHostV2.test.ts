@@ -128,6 +128,8 @@ function createHost(
   documentRuntime: RuntimeDocument,
   testEnvironment = createEnvironment(),
   authoring?: RuntimeHostOptions['authoring'],
+  onAssessmentEvaluated?: RuntimeHostOptions['onAssessmentEvaluated'],
+  onActionRecorded?: RuntimeHostOptions['onActionRecorded'],
 ): { host: RuntimeHost; testEnvironment: TestEnvironment; registry: RuntimeRegistry } {
   const registry = new RuntimeRegistry()
   const events = new CourseEventBus()
@@ -154,6 +156,8 @@ function createHost(
     assetUrl: (assetId) => `asset://${assetId}`,
     registerNavigationGuard: () => () => undefined,
     ...(authoring ? { authoring } : {}),
+    ...(onAssessmentEvaluated ? { onAssessmentEvaluated } : {}),
+    ...(onActionRecorded ? { onActionRecorded } : {}),
   }
   return { host: new RuntimeHost(options), testEnvironment, registry }
 }
@@ -274,6 +278,11 @@ describe('RuntimeHost API 2', () => {
 
       expect(context.runtimeApiVersion).toBe(2)
       expect(context.renderMode).toBe(renderMode)
+      expect(context).toHaveProperty('assessment')
+      expect(context).toHaveProperty('evidence')
+      expect(context).not.toHaveProperty('teacherEscape')
+      expect(context).not.toHaveProperty('hostEvidenceRecorder')
+      expect(Object.keys(context.evidence as object)).toEqual(['recordAction'])
       expect('Phaser' in context).toBe(exposesPhaser)
       expect('phaser' in context).toBe(exposesPhaser)
       expect('domRoot' in context).toBe(exposesDom)
@@ -296,6 +305,217 @@ describe('RuntimeHost API 2', () => {
       registry.dispose()
     },
   )
+
+  it('公开调用 Capability Index 登记的离线判定器并拒绝伪造 ID', () => {
+    const onAssessmentEvaluated = vi.fn()
+    const { host, registry } = createHost(
+      runtime(2, 'dom'),
+      createEnvironment(),
+      undefined,
+      onAssessmentEvaluated,
+    )
+    const assessment = capturedContext().assessment as {
+      evaluate(request: {
+        responseId?: string
+        evaluatorId: string
+        input: string
+        acceptedValues: string[]
+      }): { status: string; normalizedInput: string }
+    }
+
+    expect(assessment.evaluate({
+      responseId: 'RESP-001',
+      evaluatorId: 'EVAL-normalized-short-v1',
+      input: '  Ａ   B  ',
+      acceptedValues: ['a b'],
+    })).toMatchObject({ status: 'pass', normalizedInput: 'a b' })
+    expect(onAssessmentEvaluated).toHaveBeenCalledOnce()
+    expect(onAssessmentEvaluated).toHaveBeenCalledWith({
+      scope: 'scene',
+      sceneId: 'scene-one',
+      request: {
+        responseId: 'RESP-001',
+        evaluatorId: 'EVAL-normalized-short-v1',
+        input: '  Ａ   B  ',
+        acceptedValues: ['a b'],
+      },
+      result: {
+        evaluatorId: 'EVAL-normalized-short-v1',
+        normalizedInput: 'a b',
+        status: 'pass',
+      },
+    })
+    const receipt = onAssessmentEvaluated.mock.calls[0]?.[0]
+    expect(Object.isFrozen(receipt.request)).toBe(true)
+    expect(Object.isFrozen(receipt.request.acceptedValues)).toBe(true)
+    expect(Object.isFrozen(receipt.result)).toBe(true)
+    expect(() => assessment.evaluate({
+      evaluatorId: 'EVAL-invented-v1',
+      input: 'A',
+      acceptedValues: ['A'],
+    })).toThrow('未发布的判定器')
+    expect(() => assessment.evaluate({
+      responseId: 'RESP-1',
+      evaluatorId: 'EVAL-finite-choice-v1',
+      input: 'A',
+      acceptedValues: ['A'],
+    })).toThrow('responseId')
+    expect(onAssessmentEvaluated).toHaveBeenCalledOnce()
+
+    host.destroy()
+    registry.dispose()
+  })
+
+  it('只为浏览器正在分发的可信事件记录批准动作', () => {
+    const onActionRecorded = vi.fn()
+    const { host, registry } = createHost(
+      runtime(2, 'dom'),
+      createEnvironment(),
+      undefined,
+      undefined,
+      onActionRecorded,
+    )
+    const evidence = capturedContext().evidence as {
+      recordAction(request: Record<string, unknown>): void
+    }
+
+    expect(() => evidence.recordAction({
+      actId: 'ACT-001',
+      responseId: 'RESP-001',
+      actionKind: 'click',
+      event: new Event('click'),
+    })).toThrow('isTrusted')
+    expect(() => evidence.recordAction({
+      actId: 'ACT-001',
+      actionKind: 'click',
+      event: { isTrusted: true, type: 'click' },
+    })).toThrow('Event')
+
+    const button = document.createElement('button')
+    document.body.append(button)
+    button.addEventListener('click', (event) => {
+      const implementation = Object.getOwnPropertySymbols(event)
+        .map((symbol) => Reflect.get(event, symbol))
+        .find((value) => value && typeof value === 'object' &&
+          'isTrusted' in (value as object)) as { isTrusted: boolean } | undefined
+      // jsdom never emits trusted input. Mutate its private implementation only
+      // to exercise the same native isTrusted getter/brand path as Chromium.
+      if (!implementation) throw new Error('jsdom Event implementation missing')
+      implementation.isTrusted = true
+      evidence.recordAction({
+        actId: 'ACT-001',
+        responseId: 'RESP-001',
+        actionKind: 'click',
+        event,
+      })
+    })
+    button.click()
+
+    expect(onActionRecorded).toHaveBeenCalledOnce()
+    expect(onActionRecorded).toHaveBeenCalledWith({
+      scope: 'scene',
+      sceneId: 'scene-one',
+      actId: 'ACT-001',
+      responseId: 'RESP-001',
+      actionKind: 'click',
+      eventType: 'click',
+    })
+    expect(Object.isFrozen(onActionRecorded.mock.calls[0]?.[0])).toBe(true)
+
+    host.destroy()
+    registry.dispose()
+  })
+
+  it('动作证据拒绝非法 ID、类型与事后重用的事件', () => {
+    const onActionRecorded = vi.fn()
+    const { host, registry } = createHost(
+      runtime(2, 'dom'),
+      createEnvironment(),
+      undefined,
+      undefined,
+      onActionRecorded,
+    )
+    const evidence = capturedContext().evidence as {
+      recordAction(request: Record<string, unknown>): void
+    }
+    const button = document.createElement('button')
+    let capturedEvent: Event | undefined
+    document.body.append(button)
+    button.addEventListener('click', (event) => {
+      const implementation = Object.getOwnPropertySymbols(event)
+        .map((symbol) => Reflect.get(event, symbol))
+        .find((value) => value && typeof value === 'object' &&
+          'isTrusted' in (value as object)) as { isTrusted: boolean } | undefined
+      if (!implementation) throw new Error('jsdom Event implementation missing')
+      implementation.isTrusted = true
+      capturedEvent = event
+      expect(() => evidence.recordAction({
+        actId: 'ACT-1', actionKind: 'click', event,
+      })).toThrow('actId')
+      expect(() => evidence.recordAction({
+        actId: 'ACT-001', responseId: 'RESP-1', actionKind: 'click', event,
+      })).toThrow('responseId')
+      expect(() => evidence.recordAction({
+        actId: 'ACT-001', actionKind: 'invented', event,
+      })).toThrow('未批准')
+    })
+    button.click()
+    expect(capturedEvent).toBeDefined()
+    expect(() => evidence.recordAction({
+      actId: 'ACT-001', actionKind: 'click', event: capturedEvent,
+    })).toThrow('正在分发')
+    expect(onActionRecorded).not.toHaveBeenCalled()
+
+    host.destroy()
+    registry.dispose()
+  })
+
+  it('评估请求只读取一次 getter 并使评估与回执共用快照', () => {
+    const onAssessmentEvaluated = vi.fn()
+    const { host, registry } = createHost(
+      runtime(2, 'dom'),
+      createEnvironment(),
+      undefined,
+      onAssessmentEvaluated,
+    )
+    const assessment = capturedContext().assessment as {
+      evaluate(request: object): unknown
+    }
+    const reads = { responseId: 0, evaluatorId: 0, input: 0, acceptedValues: 0 }
+    const request = Object.fromEntries(Object.keys(reads).map((key) => [
+      key,
+      {
+        get: () => {
+          reads[key as keyof typeof reads] += 1
+          return ({
+            responseId: 'RESP-001',
+            evaluatorId: 'EVAL-finite-choice-v1',
+            input: 'A',
+            acceptedValues: ['A'],
+          } as const)[key as keyof typeof reads]
+        },
+        enumerable: true,
+      },
+    ]))
+    const getterRequest = Object.defineProperties({}, request)
+
+    expect(assessment.evaluate(getterRequest)).toMatchObject({ status: 'pass' })
+    expect(reads).toEqual({
+      responseId: 1,
+      evaluatorId: 1,
+      input: 1,
+      acceptedValues: 1,
+    })
+    expect(onAssessmentEvaluated.mock.calls[0]?.[0].request).toEqual({
+      responseId: 'RESP-001',
+      evaluatorId: 'EVAL-finite-choice-v1',
+      input: 'A',
+      acceptedValues: ['A'],
+    })
+
+    host.destroy()
+    registry.dispose()
+  })
 
   it('代理完整生命周期，prepareCapture 后会继续等待新登记的承诺', async () => {
     const source = `

@@ -15,6 +15,23 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('presenter settings editor', () => {
+  it('关闭画布控制器后显示警告，并可一键修复', () => {
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('导航控制方式'), {
+      target: { value: 'none' },
+    })
+    expect(screen.getByTestId('controller-consistency-notice'))
+      .toHaveTextContent('已从成品中隐藏')
+    expect(useEditorStore.getState().project.playback.controls).toBe('none')
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '恢复并显示教师控制器',
+    }))
+    expect(useEditorStore.getState().project.playback.controls).toBe('canvas')
+    expect(screen.queryByTestId('controller-consistency-notice')).not.toBeInTheDocument()
+  })
+
   it('updates the enabled state and the authored-command strategy', () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 

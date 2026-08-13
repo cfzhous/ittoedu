@@ -14,6 +14,10 @@ import {
   type RuntimeAuthoringHostOptions,
   type RuntimeMountEnvironment,
 } from './RuntimeHost'
+import type {
+  RuntimeActionRecordedHandler,
+  RuntimeAssessmentEvaluatedHandler,
+} from './HostEvidenceRecorder'
 import { RuntimeRegistry } from './RuntimeRegistry'
 import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
 
@@ -23,6 +27,10 @@ export interface CourseRuntimeKernelOptions {
   freezeCourseState?: boolean
   /** Optional target sink supplied only by the isolated unified editor host. */
   authoring?: RuntimeAuthoringHostOptions
+  /** Private Player host receipt sink; never forwarded into Runtime context. */
+  onAssessmentEvaluated?: RuntimeAssessmentEvaluatedHandler
+  /** Private Player host action sink; never forwarded into Runtime context. */
+  onActionRecorded?: RuntimeActionRecordedHandler
 }
 
 class FrozenCourseStateStore extends CourseStateStore {
@@ -40,6 +48,7 @@ export class CourseRuntimeKernel {
   private readonly runtimeRegistry = new RuntimeRegistry()
   private readonly navigationGuards = new Set<RuntimeNavigationGuard>()
   private readonly mode: RuntimeExecutionMode
+  readonly #options: Readonly<CourseRuntimeKernelOptions>
   private globalHost: RuntimeHost | null = null
   private sceneHost: RuntimeHost | null = null
   private currentSceneId: string | undefined
@@ -52,8 +61,9 @@ export class CourseRuntimeKernel {
   constructor(
     private readonly payload: ExportPayload,
     private readonly actions: Readonly<RuntimeHostActions>,
-    private readonly options: CourseRuntimeKernelOptions = {},
+    options: CourseRuntimeKernelOptions = {},
   ) {
+    this.#options = Object.freeze({ ...options })
     this.mode = options.mode ?? 'preview'
     this.width = payload.project.canvas.width
     this.height = payload.project.canvas.height
@@ -211,6 +221,8 @@ export class CourseRuntimeKernel {
     sceneId?: string,
   ): RuntimeHost | null {
     if (!runtime?.enabled) return null
+    const onAssessmentEvaluated = this.#options.onAssessmentEvaluated
+    const onActionRecorded = this.#options.onActionRecorded
     const host = new RuntimeHost({
       registry: this.runtimeRegistry,
       runtime,
@@ -230,7 +242,27 @@ export class CourseRuntimeKernel {
         return asset.dataUrl
       },
       registerNavigationGuard: (guard) => this.registerNavigationGuard(guard),
-      ...(this.options.authoring ? { authoring: this.options.authoring } : {}),
+      ...(onAssessmentEvaluated
+        ? {
+            onAssessmentEvaluated: (evidence) => onAssessmentEvaluated({
+              ...evidence,
+              ...(evidence.sceneId === undefined && this.currentSceneId
+                ? { sceneId: this.currentSceneId }
+                : {}),
+            }),
+          }
+        : {}),
+      ...(onActionRecorded
+        ? {
+            onActionRecorded: (evidence) => onActionRecorded({
+              ...evidence,
+              ...(evidence.sceneId === undefined && this.currentSceneId
+                ? { sceneId: this.currentSceneId }
+                : {}),
+            }),
+          }
+        : {}),
+      ...(this.#options.authoring ? { authoring: this.#options.authoring } : {}),
     })
     if (!this.visible) host.setVisible(false)
     if (this.suspended) host.suspend()

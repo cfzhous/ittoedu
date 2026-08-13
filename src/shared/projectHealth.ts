@@ -27,6 +27,7 @@ import {
 } from './assetReferences'
 import type { ProjectHealthCode } from './diagnosticCodes'
 import { compareStableStrings } from './stableOrder'
+import { hasDeliveryVisibleTeacherController } from './teacherControllerConsistency'
 
 export type ProjectHealthSeverity = 'error' | 'warning' | 'info'
 export type ProjectHealthScope =
@@ -949,6 +950,29 @@ function checkPresenter(project: ProjectDocument, collector: HealthCollector): v
   })
 }
 
+function checkControllerConsistency(
+  project: ProjectDocument,
+  collector: HealthCollector,
+): void {
+  const hasVisibleController = hasDeliveryVisibleTeacherController(project)
+  if (project.playback.controls === 'canvas' && !hasVisibleController) {
+    collector.add(
+      'error',
+      'controller-required-for-canvas',
+      '成品已启用画布控制，但没有任何交付时可见的全局教师控制器。',
+      { scope: 'project', path: ['playback', 'controls'] },
+    )
+  }
+  if (project.playback.controls === 'none' && hasVisibleController) {
+    collector.add(
+      'error',
+      'controller-visible-while-disabled',
+      '成品设置为不显示控制器，但全局层仍有交付时可见的教师控制器。',
+      { scope: 'project', path: ['playback', 'controls'] },
+    )
+  }
+}
+
 function checkInformationRelease(
   project: ProjectDocument,
   collector: HealthCollector,
@@ -994,6 +1018,14 @@ export function collectProjectHealth(
 ): ProjectHealthDiagnostic[] {
   const collector = createCollector()
   const sceneIds = new Set(project.scenes.map((scene) => scene.id))
+  if (project.scenes.length === 0) {
+    collector.add(
+      'error',
+      'scene-required',
+      '工程至少需要一个场景。',
+      { scope: 'project', path: ['scenes'] },
+    )
+  }
   for (const duplicate of duplicateValues(project.scenes.map((scene) => scene.id))) {
     collector.add(
       'error',
@@ -1137,6 +1169,7 @@ export function collectProjectHealth(
   }
 
   checkPackages(project, collector)
+  checkControllerConsistency(project, collector)
   checkPresenter(project, collector)
   checkInformationRelease(project, collector)
   collectProjectDiagnostics(project).forEach((diagnostic) => collector.add(

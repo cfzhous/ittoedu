@@ -215,6 +215,9 @@ def review_scope_payload(
     return {
         "schemaVersion": SCHEMA_VERSION,
         "caseId": manifest.get("caseId"),
+        "title": manifest.get("title"),
+        "durationMinutes": manifest.get("durationMinutes"),
+        "authoringMode": manifest.get("authoringMode"),
         "targetProjectSchemaVersion": manifest.get("targetProjectSchemaVersion"),
         "pathMode": manifest.get("pathMode"),
         "reviewKey": review_key,

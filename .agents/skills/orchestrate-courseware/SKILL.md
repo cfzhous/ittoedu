@@ -10,7 +10,7 @@ description: 将 teaching topic、教材、教案、题目、课程标准或既�
 ## 不变量
 
 1. 先建立或恢复课例，再写实质内容。
-2. 先确定目标、证据与精确内容，再冻结学生看见、执行和得到的反馈；不要先选组件、Runtime 或页面模板。
+2. 先确定目标、证据与精确内容，再冻结学生看见、执行、如何提交证据、由谁判定、如何逃生和得到的反馈；不要先选组件、Runtime 或页面模板。
 3. 只询问会实质改变结果的问题。工具可用即直接调用 `request_user_input`，不检查 Plan mode。
 4. 人类批准必须绑定当前 review scope SHA-256。输入、决策或覆盖制品变化时使该审批及下游审批失效。
 5. `implementation-ready` 只由 V2 校验器派生；它不是独立文档或人工批准。
@@ -57,10 +57,14 @@ python <skill-dir>/scripts/validate_case.py <case> --target draft --json
 
 - 受众、先修、场景、时长与教师/学生控制；
 - `OBJ-* → EVD-* → STG-*` 覆盖；
+- 显式产品能力剖面，以及每个 `EVD-*` 的 `RESP-*` 采集通道、容量和三档 assessment authority；
+- 每个 `CNT-*` 的 `AUTH-*` 编辑结果，不预选 Native、Runtime、Component 或具体属性面板；
 - 内容边界、困难、误概念、评价、约束、来源和假设；
 - 每个 `CNT-*` 的逐字可见内容、答案/产出、完整解释、替代与拒绝边界、错误与反馈、难度、先修、揭示、时间和专业表示。
 
 精确内容可位于合同、脚本或 `content/*.md`，但只能定义一次，必须由 `CNT-*` 定位，且不能依赖旧聊天。数学、诵读、文学证据等学科专有规则从相应学科 Skill/用户材料取得；通用 Skill 不臆造学科约束。
+
+编写记录前阅读 [response-assessment-authoring.md](references/response-assessment-authoring.md)。开放解释、证据引用、概括、论证和写作使用 `human`，不得机器硬锁；自动档必须绑定真实 evaluator capability、容差矩阵和 `ESC-*`。容量按版本化类型下限、重试、讨论、阅读/观察和切换总计，超过课时即阻断。
 
 ## 4. 编写场景/状态呈现脚本
 
@@ -69,11 +73,13 @@ python <skill-dir>/scripts/validate_case.py <case> --target draft --json
 - 引用的 `CNT-*`、`OBJ-*`、`EVD-*` 与用时；
 - 初态和第一次操作前的完整可见信息；
 - 教师/学生动作、即时反馈、成功/错误/未完成/重试/揭示与恢复；
+- 每个真实动作的 `ACT-*` 与每幕覆盖空白、错误、未完成态的 `ESC-*`；
+- 由动作触发的信息释放用 ACT 的 `initiallyHiddenContentRefs → revealedContentRefs` 冻结，不用自由文本声称“不会提前给出”；
 - 可达 `STATE-*`、稳定结果、转换、返回、重播和重开；
 - 信息逐步释放、学生视角与教师检查点；
 - 交互前、反馈态、稳定结果态，以及 HTML/PDF/PPTX 静态审阅帧。
 
-动作必须服务目标、误概念修复或学习证据。脚本不得选择 Project 节点、组件、Runtime 或渲染技术。
+动作必须服务目标、误概念修复或学习证据，数字响应必须由真实 `ACT-*` 产生，教师逃生不得依赖学生先答对或 human 响应被机器判对。脚本不得选择 Project 节点、组件、Runtime 或渲染技术。
 
 ## 5. 高风险视觉方向
 
@@ -101,12 +107,16 @@ python <skill-dir>/scripts/case_artifact.py <case> approve <review-key> --approv
 所有路径审批完成后运行：
 
 ```text
-python <skill-dir>/scripts/validate_case.py <case> --target implementation-ready --promote
+python <skill-dir>/scripts/validate_case.py <case> --target implementation-ready --promote [--capability-index <editor-root>/artifacts/ai-capabilities/index.json]
 ```
 
-只有语义闭合、无 unresolved blocking decision、制品哈希与 review scope 当前有效时，校验器才把 `case.json.stage` 和 `derivedReadiness.status` 写成 `implementation-ready`。失败时保留 `not-ready`、具体 blocker 和最早返工阶段。
+只有精确内容、`RESP/AUTH/ACT/ESC` 引用、产品能力、容量与判定权威均语义闭合，无 unresolved blocking decision，且制品哈希与 review scope 当前有效时，校验器才把 `case.json.stage` 和 `derivedReadiness.status` 写成 `implementation-ready`。失败时保留 `not-ready`、具体 blocker 和最早返工阶段。
 
-随后交给 `$build-project-v8-courseware`。Builder 若发现新的用户可见取舍，返回本 Skill 追加/更新决策和受影响制品；不要在实现阶段猜写。
+在编辑器仓库根目录运行时会自动发现 Capability Index；安装在用户目录的
+Skill 或课例位于仓库外时，传显式 `--capability-index`，不把用户主目录
+猜成 editor root。
+
+随后交给 `$build-project-v8-courseware`。Builder 必须保持获批的采集通道、assessment authority、教师接管、编辑结果和容量；若当前能力不能实现、需要降级 `AUTH-*` 或出现新的用户可见取舍，返回本 Skill 追加/更新决策和受影响制品，不得在实现阶段猜写或仅记 `differences` 放行。
 
 ## V1 输入
 

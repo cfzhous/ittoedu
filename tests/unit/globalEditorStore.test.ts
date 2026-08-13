@@ -64,6 +64,64 @@ beforeEach(() => {
 })
 
 describe('Project V8 global-layer editor store', () => {
+  it('在隐藏、关闭与恢复教师控制器时始终维持双向一致', () => {
+    const store = useEditorStore.getState()
+    store.setEditingScope('global')
+    const controller = useEditorStore.getState().project.globalLayer.find(
+      (item) => item.node.type === 'teacher-controller',
+    )!.node
+
+    store.updateNode(controller.id, { visible: false })
+    expect(useEditorStore.getState().project.playback.controls).toBe('none')
+
+    useEditorStore.getState().ensureTeacherController()
+    let project = useEditorStore.getState().project
+    expect(project.playback.controls).toBe('canvas')
+    expect(project.globalLayer.find((item) => item.node.id === controller.id)?.node)
+      .toMatchObject({ visible: true, playbackInitialVisibility: 'inherit' })
+
+    useEditorStore.getState().updatePlayback({ controls: 'none' })
+    project = useEditorStore.getState().project
+    expect(project.playback.controls).toBe('none')
+    expect(project.globalLayer.find((item) => item.node.id === controller.id)?.node)
+      .toMatchObject({ playbackInitialVisibility: 'hidden' })
+
+    useEditorStore.getState().ensureTeacherController()
+    expect(useEditorStore.getState().project.playback.controls).toBe('canvas')
+
+    const currentController = useEditorStore.getState().project.globalLayer.find(
+      (item) => item.node.id === controller.id,
+    )!.node
+    if (currentController.type !== 'teacher-controller') throw new Error('缺少教师控制器')
+    useEditorStore.getState().updateNode(controller.id, {
+      x: 2000,
+      opacity: 0,
+      buttons: currentController.buttons.map((button) => ({
+        ...button,
+        visible: false,
+      })),
+    })
+    useEditorStore.getState().updateGlobalLayerSettings(controller.id, {
+      layer: 'underlay',
+    })
+    expect(useEditorStore.getState().project.playback.controls).toBe('none')
+
+    useEditorStore.getState().ensureTeacherController()
+    project = useEditorStore.getState().project
+    const repaired = project.globalLayer.find(
+      (item) => item.node.id === controller.id,
+    )!
+    expect(project.playback.controls).toBe('canvas')
+    expect(repaired).toMatchObject({
+      layer: 'overlay',
+      visibility: { mode: 'all', sceneIds: [] },
+      node: { opacity: 1, visible: true },
+    })
+    if (repaired.node.type !== 'teacher-controller') throw new Error('缺少教师控制器')
+    expect(repaired.node.x).toBeLessThan(1280)
+    expect(repaired.node.buttons.some((button) => button.visible)).toBe(true)
+  })
+
   it('accepts only global-capable V4 packages and creates an undoable placement', () => {
     const store = useEditorStore.getState()
     const global = componentPackage('com.example.global', ['scene', 'global'])
@@ -189,6 +247,33 @@ describe('Project V8 global-layer editor store', () => {
 
     expect(useEditorStore.getState().project.globalLayer[0]!.visibility)
       .toEqual({ mode: 'include', sceneIds: [firstSceneId] })
+  })
+
+  it('canonicalizes include/exclude visibility when its last referenced scene is deleted', () => {
+    const store = useEditorStore.getState()
+    store.addScene()
+    let [firstScene, secondScene] = useEditorStore.getState().project.scenes
+    const controllerId = useEditorStore.getState().project.globalLayer.find(
+      (item) => item.node.type === 'teacher-controller',
+    )!.node.id
+
+    store.updateGlobalLayerSettings(controllerId, {
+      visibility: { mode: 'include', sceneIds: [secondScene!.id] },
+    })
+    expect(store.deleteScene(secondScene!.id)).toBe(true)
+    expect(useEditorStore.getState().project.globalLayer.find(
+      (item) => item.node.id === controllerId,
+    )?.visibility).toEqual({ mode: 'include', sceneIds: [firstScene!.id] })
+
+    useEditorStore.getState().addScene()
+    ;[firstScene, secondScene] = useEditorStore.getState().project.scenes
+    useEditorStore.getState().updateGlobalLayerSettings(controllerId, {
+      visibility: { mode: 'exclude', sceneIds: [secondScene!.id] },
+    })
+    expect(useEditorStore.getState().deleteScene(secondScene!.id)).toBe(true)
+    expect(useEditorStore.getState().project.globalLayer.find(
+      (item) => item.node.id === controllerId,
+    )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
   })
 
   it('authors native text, image, and shape nodes in the persistent global layer', () => {

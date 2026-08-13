@@ -53,6 +53,15 @@ def parse_args() -> argparse.Namespace:
         help="Repeat 2-3 times; RECOMMENDED is true or false",
     )
     add.add_argument("--safe-default", help="Option ID usable only when the host tool is unavailable")
+    add.add_argument(
+        "--scope-ref",
+        action="append",
+        default=[],
+        help=(
+            "Repeat to bind this decision to an executable scope, for example "
+            "RESP-001#capacity or capability:multi-user-aggregation"
+        ),
+    )
 
     answer = subparsers.add_parser("answer")
     answer.add_argument("decision_id")
@@ -120,6 +129,16 @@ def main() -> int:
                 raise ValueError("the recommended option must be first")
             if args.safe_default and args.safe_default not in option_ids:
                 raise ValueError("--safe-default must name one of the options")
+            scope_refs = list(dict.fromkeys(args.scope_ref))
+            invalid_scope_refs = [
+                value for value in scope_refs
+                if not re.fullmatch(r"(?:RESP-\d{3,}#capacity|capability:[a-z0-9]+(?:-[a-z0-9]+)*)", value)
+            ]
+            if invalid_scope_refs:
+                raise ValueError(
+                    "--scope-ref must match RESP-001#capacity or capability:<name>: "
+                    + ", ".join(invalid_scope_refs)
+                )
             manifest["decisions"].append({
                 "schemaVersion": 1,
                 "id": args.id,
@@ -131,6 +150,7 @@ def main() -> int:
                 "maxSelections": args.max_selections,
                 "options": options,
                 "safeDefaultOptionId": args.safe_default,
+                "scopeRefs": scope_refs,
                 "response": None,
                 "createdAt": now_iso(),
             })

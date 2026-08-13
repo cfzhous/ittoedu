@@ -13,6 +13,7 @@ function projectWithVideo(
   const project = createProject({
     id: 'project',
     includeDefaultController: false,
+    controls: 'none',
     now: '2026-07-22T00:00:00.000Z',
     idFactory: () => 'fixed',
   })

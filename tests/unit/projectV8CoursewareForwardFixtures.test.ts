@@ -103,6 +103,38 @@ interface ForwardFixture {
   }
 }
 
+type InventoryEditability =
+  | 'canvas-distinct'
+  | 'authoring-view'
+  | 'property'
+  | 'developer'
+  | 'blocked'
+
+interface AuthoringInventoryV2 {
+  schemaVersion: 2
+  caseId: string
+  projectPath: string
+  generatedFrom: {
+    presentationScriptSha256: string
+    capabilityIndexSha256: string
+    developmentPlanSha256: string
+  }
+  globalEntities: unknown[]
+  scenes: Array<{
+    sceneId: string
+    ownership: 'native-owned' | 'runtime-owned' | 'hybrid-owned' | 'component-composed'
+    entities: Array<{
+      id: string
+      binding: string
+      editability: InventoryEditability
+      intent: string
+      authoringEntry: string
+      expectedOutcome: string
+      authoringOutcomeId: string
+    }>
+  }>
+}
+
 type PythonFailure = Error & { stdout?: string, stderr?: string }
 
 async function loadJson<T>(...segments: string[]): Promise<T> {
@@ -124,6 +156,7 @@ function buildNativeProject(fixture: ForwardFixture): ProjectDocument {
     title: fixture.project.title,
     now: archiveTimestamp,
     includeDefaultController: false,
+    controls: 'none',
   })
   const scene = createScene({
     id: fixture.project.sceneId,
@@ -184,6 +217,7 @@ async function buildHybridArchive(
     title: fixture.project.title,
     now: archiveTimestamp,
     includeDefaultController: false,
+    controls: 'none',
   })
   const scene = createScene({
     id: fixture.project.sceneId,
@@ -348,6 +382,7 @@ async function validateInventory(
       inventoryPath,
       '--project',
       projectPath,
+      '--structural-only',
       '--json',
     ])
     return JSON.parse(result.stdout) as Record<string, unknown>
@@ -363,7 +398,7 @@ function nodeIds(project: ProjectDocument): string[] {
 describe('Project V8 courseware forward fixtures', () => {
   it('builds and locally patches the native formula fixture through real V8 APIs', async () => {
     const fixture = await loadJson<ForwardFixture>('native-simple', 'fixture.json')
-    const inventory = await loadJson<unknown>(
+    const inventory = await loadJson<AuthoringInventoryV2>(
       'native-simple',
       'authoring-inventory.json',
     )
@@ -377,6 +412,16 @@ describe('Project V8 courseware forward fixtures', () => {
       carrierDecision: { selected: 'native-owned' },
     })
     expect(fixture.carrierDecision.rejected).toHaveLength(2)
+    expect(inventory).toMatchObject({
+      schemaVersion: 2,
+      generatedFrom: { developmentPlanSha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      scenes: [{
+        ownership: 'native-owned',
+        entities: expect.arrayContaining([
+          expect.objectContaining({ editability: 'canvas-distinct', authoringOutcomeId: 'AUTH-001' }),
+        ]),
+      }],
+    })
     expect(reopened.project.schemaVersion).toBe(8)
     expect(reopened.project.scenes[0]!.presentation).toMatchObject({
       initialStateId: 'state_native_hidden',
@@ -433,7 +478,7 @@ describe('Project V8 courseware forward fixtures', () => {
       'runtime-hybrid-high-risk',
       'fixture.json',
     )
-    const inventory = await loadJson<unknown>(
+    const inventory = await loadJson<AuthoringInventoryV2>(
       'runtime-hybrid-high-risk',
       'authoring-inventory.json',
     )
@@ -445,6 +490,17 @@ describe('Project V8 courseware forward fixtures', () => {
       pathMode: 'high-risk',
       fixturePurpose: 'mechanism-only',
       carrierDecision: { selected: 'hybrid-owned' },
+    })
+    expect(inventory).toMatchObject({
+      schemaVersion: 2,
+      generatedFrom: { developmentPlanSha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      scenes: [{
+        ownership: 'hybrid-owned',
+        entities: expect.arrayContaining([
+          expect.objectContaining({ editability: 'authoring-view', authoringOutcomeId: 'AUTH-003' }),
+          expect.objectContaining({ editability: 'property', authoringOutcomeId: 'AUTH-004' }),
+        ]),
+      }],
     })
     expect(scene.runtime).toMatchObject({
       runtimeApiVersion: 2,
@@ -538,6 +594,7 @@ describe('Project V8 courseware forward fixtures', () => {
           inventoryPath,
           '--project',
           projectPath,
+          '--structural-only',
           '--json',
         ], true)
         const report = JSON.parse(result.stdout) as { errors: string[] }

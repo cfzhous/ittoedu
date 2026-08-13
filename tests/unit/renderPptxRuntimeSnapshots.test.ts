@@ -176,7 +176,7 @@ beforeEach(() => {
 
 describe('PPTX runtime snapshot isolation', () => {
   it('保留真实初始 presentation 和节点语义，但不执行外部组件', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const title = createTextNode({
       id: 'runtime-title',
@@ -273,7 +273,7 @@ describe('PPTX runtime snapshot isolation', () => {
   })
 
   it('为 global runtime 保留原生全局节点，仅在像素捕获窗口隐藏它们', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const nativeGlobal = createTextNode({
       id: 'global-runtime-label',
       x: 48,
@@ -366,7 +366,7 @@ describe('PPTX runtime snapshot isolation', () => {
   })
 
   it('单个场景运行时准备失败时保留前后条目的成功快照', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes.push(
       createScene({ id: 'scene-2', name: '场景 2' }),
       createScene({ id: 'scene-3', name: '场景 3' }),
@@ -416,7 +416,7 @@ describe('PPTX runtime snapshot isolation', () => {
   })
 
   it('单层合成失败时保留同条目和后续条目的成功图层', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
     for (const scene of project.scenes) {
       scene.runtime = {

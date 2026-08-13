@@ -1,0 +1,414 @@
+{
+  "schemaVersion": 2,
+  "caseId": "e2e-native-fast",
+  "coursewareContractSha256": "{{COURSEWARE_CONTRACT_SHA256}}",
+  "presentationScriptSha256": "{{PRESENTATION_SHA256}}",
+  "developmentPlanSha256": "{{DEVELOPMENT_PLAN_SHA256}}",
+  "assessments": [
+    {
+      "responseId": "RESP-001",
+      "collectionMode": "digital-required",
+      "responseType": "choice",
+      "mode": "finite-auto",
+      "authority": "system",
+      "navigationGate": "hard",
+      "teacherOverrideRef": "ESC-001",
+      "evaluatorRef": "EVAL-finite-choice-v1",
+      "acceptedValues": ["A", "图A", "选择图 A"],
+      "toleranceCaseRefs": ["TOL-001", "TOL-002", "TOL-003", "TOL-004", "TOL-005", "TOL-006"]
+    }
+  ],
+  "responseCapacity": {
+    "durationSeconds": 600,
+    "nonResponseSeconds": 315,
+    "items": [
+      {
+        "responseId": "RESP-001",
+        "baselineCount": 1,
+        "baselineSecondsEach": 30,
+        "retryCount": 1,
+        "retrySecondsEach": 15,
+        "discussionCount": 1,
+        "discussionSecondsEach": 15
+      }
+    ]
+  },
+  "gateRequirements": {
+    "teacherControl": ["BEH-001"],
+    "teacherEscape": ["BEH-002", "BEH-011", "BEH-012"],
+    "requiredActions": ["BEH-003"],
+    "assessmentTolerance": ["BEH-004", "BEH-005", "BEH-006", "BEH-008", "BEH-009", "BEH-010"],
+    "authoringOutcome": ["BEH-007"],
+    "responseCapacity": []
+  },
+  "tests": [
+    {
+      "id": "BEH-001",
+      "gate": "teacherControl",
+      "contractRefs": ["ESC-001"],
+      "sceneId": "scene_fraction_choice",
+      "projectStateId": "state_fraction_initial",
+      "steps": [
+        {
+          "id": "STEP-001",
+          "action": "click",
+          "selector": "[data-teacher-escape='scene-picker']"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "AST-001",
+          "type": "visible",
+          "selector": "[role='dialog'][data-scene-picker]"
+        }
+      ],
+      "witnessedEvents": [
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": { "action": "scene-picker", "phase": "requested", "sceneId": "scene_fraction_choice", "stateId": "state_fraction_initial" },
+          "afterStepId": "STEP-001"
+        },
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": { "action": "scene-picker", "phase": "completed", "accepted": true, "sceneId": "scene_fraction_choice", "stateId": "state_fraction_initial" },
+          "afterStepId": "STEP-001"
+        }
+      ]
+    },
+    {
+      "id": "BEH-002",
+      "gate": "teacherEscape",
+      "contractRefs": ["ESC-001"],
+      "sceneId": "scene_fraction_choice",
+      "scriptSceneRef": "SCN-001",
+      "stateRef": "STATE-002",
+      "projectStateId": "state_fraction_error",
+      "escapeAction": "scene-picker",
+      "confirmBeforeContinue": true,
+      "independentOfCorrectness": true,
+      "steps": [
+        {
+          "id": "STEP-020",
+          "action": "click",
+          "selector": "[data-response-id='RESP-001'][data-value='B']"
+        },
+        {
+          "id": "STEP-002",
+          "action": "click",
+          "selector": "[data-teacher-escape='scene-picker']"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "AST-002",
+          "type": "visible",
+          "selector": "[role='dialog'][data-scene-picker]"
+        }
+      ],
+      "witnessedEvents": [
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": {
+            "sceneId": "scene_fraction_choice", "stateId": "state_fraction_error",
+            "action": "scene-picker", "phase": "requested"
+          },
+          "afterStepId": "STEP-002"
+        },
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": {
+            "sceneId": "scene_fraction_choice", "stateId": "state_fraction_error", "action": "scene-picker", "phase": "completed", "accepted": true
+          },
+          "afterStepId": "STEP-002"
+        }
+      ]
+    },
+    {
+      "id": "BEH-011",
+      "gate": "teacherEscape",
+      "contractRefs": ["ESC-001"],
+      "sceneId": "scene_fraction_choice",
+      "scriptSceneRef": "SCN-001",
+      "stateRef": "STATE-001",
+      "projectStateId": "state_fraction_initial",
+      "escapeAction": "scene-picker",
+      "confirmBeforeContinue": true,
+      "independentOfCorrectness": true,
+      "steps": [
+        { "id": "STEP-021", "action": "click", "selector": "[data-teacher-escape='scene-picker']" }
+      ],
+      "assertions": [{ "id": "AST-021", "type": "visible", "selector": "[role='dialog'][data-scene-picker]" }],
+      "witnessedEvents": [
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": { "sceneId": "scene_fraction_choice", "stateId": "state_fraction_initial", "action": "scene-picker", "phase": "requested" },
+          "afterStepId": "STEP-021"
+        },
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": { "sceneId": "scene_fraction_choice", "stateId": "state_fraction_initial", "action": "scene-picker", "phase": "completed", "accepted": true },
+          "afterStepId": "STEP-021"
+        }
+      ]
+    },
+    {
+      "id": "BEH-012",
+      "gate": "teacherEscape",
+      "contractRefs": ["ESC-001"],
+      "sceneId": "scene_fraction_choice",
+      "scriptSceneRef": "SCN-001",
+      "stateRef": "STATE-003",
+      "projectStateId": "state_fraction_result",
+      "escapeAction": "scene-picker",
+      "confirmBeforeContinue": true,
+      "independentOfCorrectness": true,
+      "steps": [
+        { "id": "STEP-025", "action": "click", "selector": "[data-response-id='RESP-001'][data-value='A']" },
+        { "id": "STEP-023", "action": "click", "selector": "[data-teacher-escape='scene-picker']" }
+      ],
+      "assertions": [{ "id": "AST-023", "type": "visible", "selector": "[role='dialog'][data-scene-picker]" }],
+      "witnessedEvents": [
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": { "sceneId": "scene_fraction_choice", "stateId": "state_fraction_result", "action": "scene-picker", "phase": "requested" },
+          "afterStepId": "STEP-023"
+        },
+        {
+          "name": "courseware-teacher-escape-action",
+          "match": { "sceneId": "scene_fraction_choice", "stateId": "state_fraction_result", "action": "scene-picker", "phase": "completed", "accepted": true },
+          "afterStepId": "STEP-023"
+        }
+      ]
+    },
+    {
+      "id": "BEH-003",
+      "gate": "requiredActions",
+      "contractRefs": ["ACT-001", "RESP-001"],
+      "sceneId": "scene_fraction_choice",
+      "scriptSceneRef": "SCN-001",
+      "actionKind": "select",
+      "actor": "student",
+      "steps": [
+        {
+          "id": "STEP-003",
+          "action": "click",
+          "selector": "[data-response-id='RESP-001'][data-value='A']"
+        }
+      ],
+      "preAssertions": [{
+        "id": "AST-011",
+        "type": "hidden",
+        "selector": "[data-content-ref='CNT-001'][data-release='answer']",
+        "contentRef": "CNT-001"
+      }],
+      "assertions": [
+        {
+          "id": "AST-003",
+          "type": "visible",
+          "selector": "[data-response-result='RESP-001']",
+          "contentRef": "CNT-001"
+        }
+      ],
+      "witnessedEvents": [
+        {
+          "name": "courseware-action-completed",
+          "match": { "actId": "ACT-001", "sceneRef": "SCN-001", "actionKind": "select" },
+          "afterStepId": "STEP-003"
+        },
+        {
+          "name": "courseware-response-submitted",
+          "match": { "responseId": "RESP-001" },
+          "afterStepId": "STEP-003"
+        }
+      ]
+    },
+    {
+      "id": "BEH-004",
+      "gate": "assessmentTolerance",
+      "contractRefs": ["RESP-001", "TOL-001"],
+      "sceneId": "scene_fraction_choice",
+      "variant": "exact",
+      "toleranceCaseId": "TOL-001",
+      "input": "A",
+      "expectedResult": "pass",
+      "steps": [
+        {
+          "id": "STEP-004",
+          "action": "click",
+          "selector": "[data-response-id='RESP-001'][data-value='A']"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "AST-004",
+          "type": "visible",
+          "selector": "[data-assessment='pass']"
+        }
+      ],
+      "witnessedEvents": [
+        {
+          "name": "courseware-assessment-result",
+          "match": { "responseId": "RESP-001", "passed": true },
+          "afterStepId": "STEP-004"
+        }
+      ]
+    },
+    {
+      "id": "BEH-005",
+      "gate": "assessmentTolerance",
+      "contractRefs": ["RESP-001", "TOL-002"],
+      "sceneId": "scene_fraction_choice",
+      "variant": "accepted-variant",
+      "toleranceCaseId": "TOL-002",
+      "input": "图A",
+      "expectedResult": "pass",
+      "steps": [
+        {
+          "id": "STEP-005",
+          "action": "click",
+          "selector": "[data-response-id='RESP-001'][data-value='figure-a']"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "AST-005",
+          "type": "visible",
+          "selector": "[data-assessment='pass']"
+        }
+      ],
+      "witnessedEvents": [
+        {
+          "name": "courseware-assessment-result",
+          "match": { "responseId": "RESP-001", "passed": true },
+          "afterStepId": "STEP-005"
+        }
+      ]
+    },
+    {
+      "id": "BEH-006",
+      "gate": "assessmentTolerance",
+      "contractRefs": ["RESP-001", "TOL-003"],
+      "sceneId": "scene_fraction_choice",
+      "variant": "accepted-variant",
+      "toleranceCaseId": "TOL-003",
+      "input": "选择图 A",
+      "expectedResult": "pass",
+      "steps": [
+        {
+          "id": "STEP-006",
+          "action": "click",
+          "selector": "[data-response-id='RESP-001'][data-value='select-figure-a']"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "AST-006",
+          "type": "visible",
+          "selector": "[data-assessment='pass']"
+        }
+      ],
+      "witnessedEvents": [
+        {
+          "name": "courseware-assessment-result",
+          "match": { "responseId": "RESP-001", "passed": true },
+          "afterStepId": "STEP-006"
+        }
+      ]
+    },
+    {
+      "id": "BEH-007",
+      "gate": "authoringOutcome",
+      "contractRefs": ["AUTH-001", "AUTH-002", "AUTH-003"],
+      "sceneId": "scene_fraction_choice",
+      "steps": [
+        {
+          "id": "STEP-007",
+          "action": "reload"
+        }
+      ],
+      "assertions": [
+        {
+          "id": "AST-007",
+          "type": "visible",
+          "selector": "[data-inventory-entity-id='fraction-title']"
+        }
+      ],
+      "witnessedEvents": []
+    },
+    {
+      "id": "BEH-008",
+      "gate": "assessmentTolerance",
+      "contractRefs": ["RESP-001", "TOL-004"],
+      "sceneId": "scene_fraction_choice",
+      "variant": "rejected",
+      "toleranceCaseId": "TOL-004",
+      "input": "EMPTY",
+      "expectedResult": "fail",
+      "steps": [{
+        "id": "STEP-008",
+        "action": "click",
+        "selector": "[data-response-id='RESP-001'][data-value='EMPTY']"
+      }],
+      "assertions": [{
+        "id": "AST-008",
+        "type": "visible",
+        "selector": "[data-assessment='fail']"
+      }],
+      "witnessedEvents": [{
+        "name": "courseware-assessment-result",
+        "match": { "responseId": "RESP-001", "passed": false },
+        "afterStepId": "STEP-008"
+      }]
+    },
+    {
+      "id": "BEH-009",
+      "gate": "assessmentTolerance",
+      "contractRefs": ["RESP-001", "TOL-005"],
+      "sceneId": "scene_fraction_choice",
+      "variant": "rejected",
+      "toleranceCaseId": "TOL-005",
+      "input": "B",
+      "expectedResult": "fail",
+      "steps": [{
+        "id": "STEP-009",
+        "action": "click",
+        "selector": "[data-response-id='RESP-001'][data-value='B']"
+      }],
+      "assertions": [{
+        "id": "AST-009",
+        "type": "visible",
+        "selector": "[data-assessment='fail']"
+      }],
+      "witnessedEvents": [{
+        "name": "courseware-assessment-result",
+        "match": { "responseId": "RESP-001", "passed": false },
+        "afterStepId": "STEP-009"
+      }]
+    },
+    {
+      "id": "BEH-010",
+      "gate": "assessmentTolerance",
+      "contractRefs": ["RESP-001", "TOL-006"],
+      "sceneId": "scene_fraction_choice",
+      "variant": "rejected",
+      "toleranceCaseId": "TOL-006",
+      "input": "AB",
+      "expectedResult": "fail",
+      "steps": [{
+        "id": "STEP-010",
+        "action": "click",
+        "selector": "[data-response-id='RESP-001'][data-value='AB']"
+      }],
+      "assertions": [{
+        "id": "AST-010",
+        "type": "visible",
+        "selector": "[data-assessment='fail']"
+      }],
+      "witnessedEvents": [{
+        "name": "courseware-assessment-result",
+        "match": { "responseId": "RESP-001", "passed": false },
+        "afterStepId": "STEP-010"
+      }]
+    }
+  ]
+}

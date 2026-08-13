@@ -25,14 +25,25 @@ const DEFAULT_FONT_FAMILY = '"Microsoft YaHei", "PingFang SC", sans-serif'
 
 export type IdFactory = () => string
 
-export interface CreateProjectOptions {
+interface CreateProjectBaseOptions {
   id?: string
   title?: string
   now?: string | Date
   idFactory?: IdFactory
-  /** User-facing editor projects include an editable in-canvas controller by default. */
-  includeDefaultController?: boolean
 }
+
+export type CreateProjectOptions = CreateProjectBaseOptions & (
+  | {
+  /** User-facing editor projects include an editable in-canvas controller by default. */
+      includeDefaultController?: true
+      controls?: ProjectDocument['playback']['controls']
+    }
+  | {
+      /** Omitting the controller requires an explicit non-canvas delivery mode. */
+      includeDefaultController: false
+      controls: 'none'
+    }
+)
 
 export interface CreateSceneOptions {
   id?: string
@@ -112,8 +123,18 @@ export function createProject(options: CreateProjectOptions = {}): ProjectDocume
   const idFactory = options.idFactory ?? nanoid
   const timestamp = toIsoString(options.now)
   const includeDefaultController = options.includeDefaultController ?? true
+  if (options.includeDefaultController === false && options.controls === undefined) {
+    throw new Error('不包含默认教师控制器时必须显式设置 controls')
+  }
+  const controls = options.controls ?? 'canvas'
+  if (controls === 'canvas' && !includeDefaultController) {
+    throw new Error('画布控制模式必须包含默认教师控制器')
+  }
   const controller = includeDefaultController
-    ? createTeacherControllerNode({ idFactory })
+    ? createTeacherControllerNode({
+        idFactory,
+        playbackInitialVisibility: controls === 'canvas' ? 'inherit' : 'hidden',
+      })
     : null
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
@@ -173,7 +194,7 @@ export function createProject(options: CreateProjectOptions = {}): ProjectDocume
       },
     },
     playback: {
-      controls: includeDefaultController ? 'canvas' : 'none',
+      controls,
       keyboardNavigation: true,
       presenter: {
         enabled: true,

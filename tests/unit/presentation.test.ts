@@ -80,7 +80,7 @@ describe('scene presentation materialization', () => {
     })
     expect(deriveSceneNodeOverride(base, effective)).toEqual({ visible: true })
 
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     scene.nodes = [base]
     scene.presentation!.states[0]!.nodeOverrides[base.id] = { visible: true }

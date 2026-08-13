@@ -15,6 +15,7 @@ if (!inputPath || !outputPath) {
 }
 const caseRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const statePath = path.join(caseRoot, 'implementation', 'implementation-state.json')
+const targetSnapshotPath = path.join(caseRoot, 'implementation', 'authoring-target-snapshot.json')
 
 async function main() {
   const opened = openProjectArchive(await fs.readFile(path.resolve(inputPath)))
@@ -54,7 +55,13 @@ async function main() {
 
   const state = JSON.parse(await fs.readFile(statePath, 'utf8')) as Record<string, unknown>
   state.status = 'verified'
-  state.currentProjectSha256 = createHash('sha256').update(archive).digest('hex')
+  const projectSha256 = createHash('sha256').update(archive).digest('hex')
+  state.currentProjectSha256 = projectSha256
+  const targetSnapshot = JSON.parse(await fs.readFile(targetSnapshotPath, 'utf8')) as Record<string, unknown>
+  targetSnapshot.projectSha256 = projectSha256
+  const snapshotBytes = Buffer.from(`${JSON.stringify(targetSnapshot, null, 2)}\n`, 'utf8')
+  await fs.writeFile(targetSnapshotPath, snapshotBytes)
+  state.authoringTargetSnapshotSha256 = createHash('sha256').update(snapshotBytes).digest('hex')
   state.tasks = [{ id: 'TASK-001', status: 'verified' }]
   await fs.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
 }

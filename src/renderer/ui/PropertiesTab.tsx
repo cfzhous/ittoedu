@@ -1562,16 +1562,15 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
   >(null)
   useEffect(() => {
     setPendingVisibilityMode(null)
-  }, [nodeId])
+  }, [nodeId, placement?.visibility.mode])
   if (!placement) return null
 
   const setVisibility = (visibility: GlobalLayerVisibility) => {
     updateSettings(nodeId, { visibility })
   }
+  const effectiveVisibilityMode = pendingVisibilityMode ?? placement.visibility.mode
   const selected = new Set(
-    pendingVisibilityMode === placement.visibility.mode
-      ? []
-      : placement.visibility.sceneIds,
+    pendingVisibilityMode === null ? placement.visibility.sceneIds : [],
   )
 
   return (
@@ -1591,7 +1590,7 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
       />
       <SelectField<GlobalLayerVisibility['mode']>
         label="场景可见范围"
-        value={placement.visibility.mode}
+        value={effectiveVisibilityMode}
         options={[
           { value: 'all', label: '全部场景' },
           { value: 'include', label: '仅所选场景' },
@@ -1605,17 +1604,20 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
           }
           const startsEmpty = placement.visibility.mode === 'all' ||
             placement.visibility.sceneIds.length === 0
-          setPendingVisibilityMode(startsEmpty ? mode : null)
-          setVisibility({
-            mode,
-            sceneIds: startsEmpty ? [] : placement.visibility.sceneIds,
-          })
+          if (startsEmpty) {
+            // A non-all visibility with no scenes is not a project state. Keep
+            // this as local UI intent until the first scene is selected.
+            setPendingVisibilityMode(mode)
+            return
+          }
+          setPendingVisibilityMode(null)
+          setVisibility({ mode, sceneIds: placement.visibility.sceneIds })
         }}
       />
-      {placement.visibility.mode !== 'all' && (
+      {effectiveVisibilityMode !== 'all' && (
         <fieldset className="visibility-scene-list">
           <legend>
-            {placement.visibility.mode === 'include' ? '显示于' : '隐藏于'}
+            {effectiveVisibilityMode === 'include' ? '显示于' : '隐藏于'}
           </legend>
           {scenes.map((scene) => (
             <label key={scene.id}>
@@ -1624,19 +1626,26 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
                 checked={selected.has(scene.id)}
                 onChange={(event) => {
                   const sceneIds = new Set(
-                    pendingVisibilityMode === placement.visibility.mode
-                      ? []
-                      : placement.visibility.sceneIds,
+                    pendingVisibilityMode === null
+                      ? placement.visibility.sceneIds
+                      : [],
                   )
                   if (event.target.checked) sceneIds.add(scene.id)
                   else sceneIds.delete(scene.id)
-                  setPendingVisibilityMode(
-                    sceneIds.size === 0 && placement.visibility.mode !== 'all'
-                      ? placement.visibility.mode
-                      : null,
-                  )
+                  // Do not invent a fallback selection in the Store and do
+                  // not persist schema-invalid include/exclude + [].
+                  if (sceneIds.size === 0) {
+                    if (effectiveVisibilityMode === 'exclude') {
+                      setPendingVisibilityMode(null)
+                      setVisibility({ mode: 'all', sceneIds: [] })
+                    } else {
+                      event.currentTarget.checked = true
+                    }
+                    return
+                  }
+                  setPendingVisibilityMode(null)
                   setVisibility({
-                    mode: placement.visibility.mode,
+                    mode: effectiveVisibilityMode,
                     sceneIds: [...sceneIds],
                   })
                 }}
@@ -1645,6 +1654,11 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
             </label>
           ))}
         </fieldset>
+      )}
+      {pendingVisibilityMode !== null && (
+        <p className="property-hint" role="status">
+          选择至少一个场景后，可见范围才会生效。
+        </p>
       )}
       <p className="property-hint">
         全局元素只创建一次并跨场景持续存在；切换场景只更新显隐，组件内部状态不会因此重置。
@@ -1734,13 +1748,28 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
                   else updatePlayback({ controls })
                 }}
               />
+              <p className="property-hint">
+                选择“不显示控制器”会保留可编辑节点，但在交付播放时将其初始隐藏。
+              </p>
+              {project.playback.controls === 'none' &&
+                project.globalLayer.some((item) => item.node.type === 'teacher-controller') && (
+                <div
+                  className="property-hint"
+                  data-testid="controller-consistency-notice"
+                  role="status"
+                >
+                  画布教师控制器已从成品中隐藏。如果需要恢复，请使用下方按钮一键修复其可见性与控制模式。
+                </div>
+              )}
               <ToggleRow label="键盘左右键翻页" checked={project.playback.keyboardNavigation} onChange={(keyboardNavigation) => updatePlayback({ keyboardNavigation })} />
               <PresenterSettingsEditor
                 value={project.playback.presenter}
                 onChange={(presenter) => updatePlayback({ presenter })}
               />
               <button type="button" className="secondary-button" onClick={ensureTeacherController}>
-                <SlidersHorizontal size={14} />添加或定位教师控制器
+                <SlidersHorizontal size={14} />{project.playback.controls === 'none'
+                  ? '恢复并显示教师控制器'
+                  : '添加或定位教师控制器'}
               </button>
             </section>
             {editorMode === 'professional' && (

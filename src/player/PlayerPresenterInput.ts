@@ -85,6 +85,12 @@ function isKeyboardOwnedTarget(target: EventTarget | null): boolean {
   ].join(', ')))
 }
 
+function isKeyboardOwnedEvent(event: KeyboardEvent): boolean {
+  // Events leaving a shadow root are retargeted to its host. The composed path
+  // retains the actual editable/control node and is therefore authoritative.
+  return event.composedPath().some(isKeyboardOwnedTarget)
+}
+
 function normalizeResult(
   result: boolean | PresenterInputResult,
   fallbackMessage: string,
@@ -183,7 +189,7 @@ export class PlayerPresenterInput {
       this.destroyed ||
       event.defaultPrevented ||
       event.isComposing ||
-      isKeyboardOwnedTarget(event.target) ||
+      isKeyboardOwnedEvent(event) ||
       this.isModalOpen()
     ) {
       return

@@ -16,7 +16,7 @@ beforeEach(() => {
 
 describe('minimal project design tokens', () => {
   it('supplies deterministic defaults when an earlier V8 document omits tokens', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const withoutTokens = structuredClone(project) as unknown as Record<string, unknown>
     delete withoutTokens.designTokens
 
@@ -31,7 +31,7 @@ describe('minimal project design tokens', () => {
   })
 
   it('rejects duplicate stable IDs inside one token family', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.designTokens.colors.push({
       id: 'accent',
       label: '重复强调',
@@ -65,7 +65,7 @@ describe('minimal project design tokens', () => {
   })
 
   it('does not let add controls exceed schema token limits', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.designTokens.fonts = Array.from({ length: 16 }, (_, index) => ({
       id: `font_${index}`,
       label: `字体 ${index + 1}`,

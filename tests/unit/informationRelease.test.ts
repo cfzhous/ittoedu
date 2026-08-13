@@ -33,7 +33,7 @@ function revealRule(
 
 describe('information release inspector', () => {
   it('finds a reachable staged reveal from an initially visible trigger', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const button = createTextNode({ id: 'button', name: '继续', text: '继续' })
     const detail = createTextNode({
@@ -62,7 +62,7 @@ describe('information release inspector', () => {
   })
 
   it('does not treat clicking an invisible node as a reachable self reveal', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const hidden = createTextNode({
       id: 'hidden',
@@ -82,7 +82,7 @@ describe('information release inspector', () => {
   })
 
   it('evaluates presentation conditions per authored state', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const hidden = createTextNode({
       id: 'conditional',
@@ -108,7 +108,7 @@ describe('information release inspector', () => {
   })
 
   it('treats scene.enter as reachable when navigation targets a non-initial state', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const hidden = createTextNode({
       id: 'direct-target-detail',

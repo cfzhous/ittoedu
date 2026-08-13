@@ -152,6 +152,11 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.change(screen.getByLabelText('场景可见范围'), {
       target: { value: 'include' },
     })
+    expect(useEditorStore.getState().project.globalLayer.find(
+      (item) => item.node.id === globalNode.id,
+    )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
+    expect(screen.getByText('选择至少一个场景后，可见范围才会生效。'))
+      .toHaveAttribute('role', 'status')
     fireEvent.click(screen.getByLabelText(secondScene!.name))
     fireEvent.change(screen.getByLabelText('导航标题'), {
       target: { value: '教师全局导航' },

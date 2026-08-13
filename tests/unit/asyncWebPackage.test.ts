@@ -13,7 +13,7 @@ import type { PublishedLessonPayload } from '@/shared/publishedLessonTypes'
 afterEach(() => vi.restoreAllMocks())
 
 function makeSources(byteLength: number) {
-  const project = createProject({ includeDefaultController: false })
+  const project = createProject({ includeDefaultController: false, controls: 'none' })
   const video = new Uint8Array(byteLength)
   video[0] = 17
   video[video.length - 1] = 29

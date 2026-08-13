@@ -9,6 +9,8 @@ import { CourseRuntimeKernel } from './CourseRuntimeKernel'
 import { PreparedCanvasSnapshots } from './PreparedCanvasSnapshots'
 import { PlayerPresenterInput } from './PlayerPresenterInput'
 import { AudioManager } from './AudioManager'
+import { TeacherEscapeControls } from './TeacherEscapeControls'
+import { HostEvidenceRecorder } from './HostEvidenceRecorder'
 import {
   SCENE_PICKER_OPEN_EVENT,
   ScenePickerOverlay,
@@ -89,6 +91,8 @@ function createRuntimeDomLayer(
 export class PlayerApp {
   readonly game: Phaser.Game
 
+  readonly #hostEvidenceRecorder = new HostEvidenceRecorder()
+
   private readonly presenterInput: PlayerPresenterInput | null
   readonly audio: AudioManager
   private readonly disposeAudioToggle: () => void
@@ -100,6 +104,7 @@ export class PlayerApp {
   private readonly presenterStatus: HTMLDivElement
   private readonly runtimeDomLayers: PlayerRuntimeDomLayers
   private readonly scenePicker: ScenePickerOverlay | null
+  private teacherEscapeControls: TeacherEscapeControls | null = null
   private readonly scenePickerEventDisposers: Array<() => void> = []
   private readonly captureMode: boolean
   private readonly hostMode: PlayerHostMode
@@ -253,6 +258,12 @@ export class PlayerApp {
       // runtimes do not start preview-only timers, media or autonomous motion.
       mode: this.authoringMode ? 'capture' : options.mode,
       freezeCourseState: this.authoringMode,
+      onAssessmentEvaluated: (evidence) => {
+        this.#hostEvidenceRecorder.recordAssessment(evidence)
+      },
+      onActionRecorded: (evidence) => {
+        this.#hostEvidenceRecorder.recordAction(evidence)
+      },
       ...(this.authoringMode && options.onRuntimeAuthoringTargetsChanged
         ? {
             authoring: {
@@ -288,7 +299,6 @@ export class PlayerApp {
     )
     const presenterSettings = payload.project.playback.presenter
     this.presenterInput = !this.captureMode && !this.authoringMode &&
-      options.controls !== false &&
       (payload.project.playback.keyboardNavigation || presenterSettings.enabled)
       ? new PlayerPresenterInput({
           totalPages: payload.project.scenes.length,
@@ -321,6 +331,7 @@ export class PlayerApp {
       this.componentRegistry,
       (index) => {
         this.scenePicker?.close()
+        this.teacherEscapeControls?.resetConfirmation()
         this.presenterInput?.setIndex(index)
         window.dispatchEvent(new CustomEvent('courseware-scene-change', {
           detail: {
@@ -356,8 +367,8 @@ export class PlayerApp {
       : new ScenePickerOverlay({
           stage,
           scenes: payload.project.scenes,
-          onSelect: (sceneId) => {
-            this.goToSceneById(sceneId)
+          onSelect: (sceneId, bypassNavigationGuards) => {
+            this.goToSceneById(sceneId, undefined, bypassNavigationGuards)
           },
         })
     if (this.scenePicker) {
@@ -373,6 +384,47 @@ export class PlayerApp {
         ),
       )
     }
+    this.teacherEscapeControls = !this.captureMode && !this.authoringMode &&
+      presenterSettings.enabled
+      ? new TeacherEscapeControls({
+          stage,
+          totalScenes: payload.project.scenes.length,
+          getCurrentIndex: () => this.getCurrentSceneIndex(),
+          getCurrentSceneId: () => this.getCurrentSceneId(),
+          getCurrentStateId: () => this.getCurrentPresentationStateId(),
+          navigate: (direction, bypassNavigationGuards) => {
+            const currentIndex = this.getCurrentSceneIndex()
+            const targetIndex = direction === 'previous'
+              ? currentIndex - 1
+              : currentIndex + 1
+            if (targetIndex < 0 || targetIndex >= payload.project.scenes.length) {
+              this.showPresenterFeedback(
+                direction === 'previous' ? '已经是第一个场景' : '已经是最后一个场景',
+              )
+              return { accepted: false, guardBlocked: false }
+            }
+            this.lastNavigationBlockedReason = null
+            const accepted = this.goToScene(
+              targetIndex,
+              undefined,
+              bypassNavigationGuards,
+            )
+            return {
+              accepted,
+              guardBlocked: !accepted && this.lastNavigationBlockedReason !== null,
+            }
+          },
+          openScenePicker: () => {
+            this.scenePicker?.open(this.getCurrentSceneId(), {
+              bypassNavigationGuards: true,
+            })
+          },
+          replay: () => this.replayScene(),
+          beginEvidenceClick: (event) => (
+            this.#hostEvidenceRecorder.beginTeacherEscapeClick(event)
+          ),
+        })
+      : null
 
     const renderWidth = Math.max(
       1,
@@ -433,7 +485,11 @@ export class PlayerApp {
     }
   }
 
-  goToScene(index: number, targetStateId?: string | null): boolean {
+  goToScene(
+    index: number,
+    targetStateId?: string | null,
+    bypassNavigationGuards = false,
+  ): boolean {
     if (this.destroyed) {
       return false
     }
@@ -442,16 +498,24 @@ export class PlayerApp {
       index,
       false,
       targetStateId,
-      this.authoringMode,
+      this.authoringMode || bypassNavigationGuards,
     )
   }
 
-  goToSceneById(sceneId: string, targetStateId?: string | null): boolean {
+  goToSceneById(
+    sceneId: string,
+    targetStateId?: string | null,
+    bypassNavigationGuards = false,
+  ): boolean {
     if (this.destroyed) return false
     const index = this.payload.project.scenes.findIndex(
       (scene) => scene.id === sceneId,
     )
-    return index >= 0 && this.goToScene(index, targetStateId)
+    return index >= 0 && this.goToScene(
+      index,
+      targetStateId,
+      bypassNavigationGuards,
+    )
   }
 
   previous(): boolean {
@@ -635,6 +699,8 @@ export class PlayerApp {
     if (this.presenterStatusTimer !== null) clearTimeout(this.presenterStatusTimer)
     this.presenterStatusTimer = null
     this.scenePickerEventDisposers.splice(0).forEach((dispose) => dispose())
+    this.teacherEscapeControls?.destroy()
+    this.teacherEscapeControls = null
     this.scenePicker?.destroy()
     this.disposeAudioToggle()
     this.audio.destroy()

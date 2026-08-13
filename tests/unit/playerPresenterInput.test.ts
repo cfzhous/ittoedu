@@ -78,6 +78,22 @@ describe('PlayerPresenterInput', () => {
     expect(authored).not.toHaveBeenCalled()
   })
 
+  it('keeps Arrow keys enabled when presenter controls are disabled', () => {
+    const { navigate } = createInput({
+      keyboardNavigation: true,
+      presenter: {
+        enabled: false,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
+    })
+
+    expect(keydown('PageDown').defaultPrevented).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(keydown('ArrowRight').defaultPrevented).toBe(true)
+    expect(navigate).toHaveBeenCalledWith(1, 'next')
+  })
+
   it('dispatches authored commands without an implicit scene fallback', () => {
     const { navigate, authored } = createInput({
       keyboardNavigation: false,
@@ -198,6 +214,19 @@ describe('PlayerPresenterInput', () => {
     mount(target)
 
     const event = keydown('PageDown', {}, target)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('uses the composed path so presenter keys stay inside Shadow DOM inputs', () => {
+    const { navigate } = createInput()
+    const host = mount(document.createElement('div'))
+    const shadowRoot = host.attachShadow({ mode: 'open' })
+    const input = document.createElement('input')
+    shadowRoot.append(input)
+
+    const event = keydown('PageDown', { composed: true }, input)
 
     expect(event.defaultPrevented).toBe(false)
     expect(navigate).not.toHaveBeenCalled()

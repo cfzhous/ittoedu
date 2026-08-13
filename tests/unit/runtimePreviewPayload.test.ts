@@ -4,7 +4,7 @@ import { createRuntimePreviewPayloadResources } from '@/renderer/preview/runtime
 
 describe('runtime preview Blob payload', () => {
   it('始终把大媒体作为 transferable bytes 交给 sandbox', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const videoBytes = new Uint8Array(1024 * 1024)
     project.assets.video = {
       id: 'video',
@@ -32,7 +32,7 @@ describe('runtime preview Blob payload', () => {
   })
 
   it('创建中途失败时不返回半成品传输列表', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.first = {
       id: 'first',
       filename: 'first.png',
@@ -57,7 +57,7 @@ describe('runtime preview Blob payload', () => {
   })
 
   it('为隔离画布传输素材，由 iframe 在自身来源创建 Blob URL', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.image = {
       id: 'image',
       filename: 'pixel.png',

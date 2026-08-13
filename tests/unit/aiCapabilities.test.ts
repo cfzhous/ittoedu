@@ -83,6 +83,13 @@ describe('AI capability manifest generation', () => {
       components: {
         packageAdmission: Record<string, unknown>
       }
+      assessmentEvaluators: Array<{
+        id: string
+        status: string
+        authorities: string[]
+        responseTypes: string[]
+        invocation: { module: string; export: string; runtime: string }
+      }>
       headlessBuild: {
         language: string
         runner: string
@@ -99,6 +106,30 @@ describe('AI capability manifest generation', () => {
     expect(index.interactions.triggerTypes).toEqual(INTERACTION_TRIGGER_TYPES)
     expect(index.interactions.conditionTypes).toEqual(INTERACTION_CONDITION_TYPES)
     expect(index.interactions.actionTypes).toEqual(INTERACTION_ACTION_TYPES)
+    expect(index.assessmentEvaluators).toEqual([
+      expect.objectContaining({
+        id: 'EVAL-finite-choice-v1',
+        status: 'stable',
+        authorities: ['finite-auto'],
+        responseTypes: ['choice'],
+        invocation: {
+          module: 'src/shared/assessmentEvaluators.ts',
+          export: 'evaluateAssessment',
+          runtime: 'ctx.assessment.evaluate',
+        },
+      }),
+      expect.objectContaining({
+        id: 'EVAL-normalized-short-v1',
+        status: 'stable',
+        authorities: ['normalized-auto'],
+        responseTypes: ['normalized-short'],
+        invocation: {
+          module: 'src/shared/assessmentEvaluators.ts',
+          export: 'evaluateAssessment',
+          runtime: 'ctx.assessment.evaluate',
+        },
+      }),
+    ])
     expect(index.validation).toMatchObject({
       command: 'npm run --silent validate:project -- <project.h5lesson>',
       output: 'stable-json',
@@ -529,10 +560,58 @@ describe('AI capability manifest generation', () => {
     expect(project.root.properties.schemaVersion.const).toBe(PROJECT_SCHEMA_VERSION)
     const runtime = parseFile<{
       documentSchema: { properties: { runtimeApiVersion: { const: number } } }
+      hostContract: {
+        assessment: {
+          hostEvidence: {
+            schemaVersion: number
+            recordKinds: string[]
+            sessionStartBeforeRuntimeMount: boolean
+            teacherEscape: {
+              actions: string[]
+              phases: string[]
+              eventType: string
+              requiresTrustedDispatchedClick: boolean
+              runtimeExposure: string
+              publicCustomEventIsEvidence: boolean
+            }
+          }
+        }
+        evidence: {
+          invocation: string
+          actionKinds: string[]
+          requiresTrustedDispatchedEvent: boolean
+        }
+      }
     }>(generated.files, 'schemas/runtime-api2.json')
     expect(runtime.documentSchema.properties.runtimeApiVersion.const).toBe(
       RUNTIME_API_VERSION,
     )
+    expect(runtime.hostContract.assessment.hostEvidence).toMatchObject({
+      schemaVersion: 1,
+      recordKinds: [
+        'assessment-evaluated',
+        'action-recorded',
+        'teacher-escape-recorded',
+      ],
+      sessionStartBeforeRuntimeMount: true,
+      teacherEscape: {
+        actions: ['previous', 'next', 'scene-picker', 'replay'],
+        phases: ['requested', 'confirmation-required', 'completed'],
+        eventType: 'click',
+        requiresTrustedDispatchedClick: true,
+        runtimeExposure: 'none',
+        publicCustomEventIsEvidence: false,
+      },
+    })
+    expect(runtime.hostContract.evidence).toMatchObject({
+      invocation: 'ctx.evidence.recordAction',
+      actionKinds: [
+        'click', 'select', 'text-input', 'formula-input', 'drag', 'sort',
+        'circle-text', 'highlight', 'parameter-change', 'oral', 'paper',
+        'teacher-command',
+      ],
+      requiresTrustedDispatchedEvent: true,
+    })
     const component = parseFile<{
       manifestSchema: {
         properties: {

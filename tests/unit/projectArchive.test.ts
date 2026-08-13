@@ -59,6 +59,7 @@ function makeArchiveData(): ProjectArchiveData {
     now: '2026-07-20T12:00:00.000Z',
     idFactory: () => 'scene_1',
     includeDefaultController: false,
+    controls: 'none',
   })
   const imageBytes = new Uint8Array([137, 80, 78, 71, 0, 255, 128])
   project.assets.asset_image = {

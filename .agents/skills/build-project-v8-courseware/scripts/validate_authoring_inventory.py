@@ -11,9 +11,11 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from v8_common import contract_boolean, load_contract_facts
+
 
 OWNERSHIPS = {"native-owned", "runtime-owned", "hybrid-owned", "component-composed"}
-EDITABILITY = {"visible", "property-only", "blocked"}
+EDITABILITY = {"canvas-distinct", "authoring-view", "property", "developer", "blocked"}
 KINDS = {"text", "asset", "number", "boolean", "color", "select", "formula"}
 RUNTIME_KINDS = {"text", "asset"}
 SEGMENT = r"[A-Za-z0-9_.-]+"
@@ -24,10 +26,14 @@ BINDING_PATTERNS = [
     re.compile(rf"^component:global:({SEGMENT}):({SEGMENT})$"),
     re.compile(rf"^runtime:scene:({SEGMENT}):({'|'.join(sorted(RUNTIME_KINDS))}):({SEGMENT})$"),
     re.compile(rf"^runtime:global:({'|'.join(sorted(RUNTIME_KINDS))}):({SEGMENT})$"),
+    re.compile(rf"^source:scene:({SEGMENT}):({SEGMENT})$"),
+    re.compile(rf"^source:global:({SEGMENT})$"),
 ]
 SESSION_MARKERS = ("registered:", "dom:", "targetId")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_PATTERN = re.compile(r"^CNT-\d{3,}(?:[#/:.].+)?$")
+OUTCOME_PATTERN = re.compile(r"^AUTH-\d{3,}$")
+ENTITY_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def load_project(path: Path) -> dict[str, Any]:
@@ -43,6 +49,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate a Project V8 Authoring Inventory")
     parser.add_argument("inventory")
     parser.add_argument("--project")
+    parser.add_argument("--case-dir")
+    parser.add_argument("--structural-only", action="store_true")
     parser.add_argument("--target", choices=("engineering-candidate", "accepted"), default="engineering-candidate")
     parser.add_argument("--json", action="store_true", dest="as_json")
     return parser.parse_args()
@@ -110,9 +118,16 @@ def main() -> int:
     warnings: list[str] = []
     try:
         inventory = json.loads(Path(args.inventory).read_text(encoding="utf-8"))
-        if not isinstance(inventory, dict) or inventory.get("schemaVersion") != 1:
-            raise ValueError("inventory must be a schemaVersion 1 object")
+        if not isinstance(inventory, dict) or inventory.get("schemaVersion") != 2:
+            raise ValueError("inventory must be a schemaVersion 2 object")
         project = load_project(Path(args.project)) if args.project else None
+        if not args.case_dir and not args.structural_only:
+            raise ValueError(
+                "candidate Authoring Inventory validation requires --case-dir for approved AUTH truth; "
+                "use --structural-only only for mechanism fixtures"
+            )
+        contract = load_contract_facts(Path(args.case_dir)) if args.case_dir else None
+        approved_authoring = contract["authoring"] if contract is not None else {}
         if project and project.get("schemaVersion") != 8:
             errors.append("project must use Project V8")
         case_id = inventory.get("caseId")
@@ -129,9 +144,17 @@ def main() -> int:
         if not isinstance(generated_from, dict):
             errors.append("generatedFrom is required")
         else:
-            for key in ("presentationScriptSha256", "capabilityIndexSha256"):
+            for key in (
+                "coursewareContractSha256", "presentationScriptSha256",
+                "capabilityIndexSha256", "developmentPlanSha256",
+            ):
                 if not isinstance(generated_from.get(key), str) or not SHA256_PATTERN.fullmatch(generated_from[key]):
                     errors.append(f"generatedFrom.{key} must be a lowercase SHA-256")
+            if contract is not None:
+                if generated_from.get("coursewareContractSha256") != contract.get("coursewareContractSha256"):
+                    errors.append("generatedFrom.coursewareContractSha256 is stale")
+                if generated_from.get("presentationScriptSha256") != contract.get("presentationScriptSha256"):
+                    errors.append("generatedFrom.presentationScriptSha256 is stale")
         scene_map = {
             scene.get("id"): scene
             for scene in (project.get("scenes", []) if project else [])
@@ -144,6 +167,7 @@ def main() -> int:
         }
         seen_ids: set[str] = set()
         seen_bindings: set[str] = set()
+        authoring_outcomes: dict[str, list[str]] = {}
 
         def validate_entity(entity: Any, expected_scope: str, scene_id: str | None = None) -> None:
             if not isinstance(entity, dict):
@@ -155,8 +179,14 @@ def main() -> int:
             label = entity.get("label")
             kind = entity.get("kind")
             source_ref = entity.get("sourceRef")
-            if not isinstance(entity_id, str) or not entity_id:
-                errors.append(f"{scene_id or 'global'}: entity has no stable id")
+            intent = entity.get("intent")
+            authoring_entry = entity.get("authoringEntry")
+            expected_outcome = entity.get("expectedOutcome")
+            authoring_outcome_id = entity.get("authoringOutcomeId")
+            if not isinstance(entity_id, str) or not ENTITY_ID_PATTERN.fullmatch(entity_id):
+                errors.append(
+                    f"{scene_id or 'global'}: entity id must be a portable filename-safe identifier"
+                )
                 return
             if entity_id in seen_ids:
                 errors.append(f"duplicate entity id: {entity_id}")
@@ -167,6 +197,31 @@ def main() -> int:
                 errors.append(f"{entity_id}: invalid kind")
             if not isinstance(source_ref, str) or not SOURCE_PATTERN.fullmatch(source_ref):
                 errors.append(f"{entity_id}: sourceRef must locate one CNT-* definition")
+            if not isinstance(intent, str) or not intent.strip():
+                errors.append(f"{entity_id}: intent is required")
+            if not isinstance(authoring_entry, str) or not authoring_entry.strip():
+                errors.append(f"{entity_id}: authoringEntry is required")
+            if not isinstance(expected_outcome, str) or not expected_outcome.strip():
+                errors.append(f"{entity_id}: expectedOutcome is required")
+            if not isinstance(authoring_outcome_id, str) or not OUTCOME_PATTERN.fullmatch(authoring_outcome_id):
+                errors.append(f"{entity_id}: authoringOutcomeId must be AUTH-*")
+            else:
+                authoring_outcomes.setdefault(authoring_outcome_id, []).append(entity_id)
+                if contract is not None:
+                    approved = approved_authoring.get(authoring_outcome_id)
+                    if approved is None:
+                        errors.append(f"{entity_id}: authoringOutcomeId is not approved: {authoring_outcome_id}")
+                    else:
+                        if source_ref != approved.get("contentRef"):
+                            errors.append(
+                                f"{entity_id}: sourceRef must equal {authoring_outcome_id}.contentRef "
+                                f"{approved.get('contentRef')!r}"
+                            )
+                        expected_required = contract_boolean(approved.get("requiredForAcceptance"))
+                        if entity.get("requiredForAcceptance") is not expected_required:
+                            errors.append(
+                                f"{entity_id}: requiredForAcceptance differs from {authoring_outcome_id}"
+                            )
             if not isinstance(binding, str) or not any(pattern.fullmatch(binding) for pattern in BINDING_PATTERNS):
                 errors.append(f"{entity_id}: invalid persistent binding {binding!r}")
                 return
@@ -177,13 +232,28 @@ def main() -> int:
             seen_bindings.add(binding)
             if editability not in EDITABILITY:
                 errors.append(f"{entity_id}: invalid editability")
-            if editability == "blocked":
+            elif contract is not None and isinstance(authoring_outcome_id, str):
+                approved = approved_authoring.get(authoring_outcome_id)
+                if isinstance(approved, dict):
+                    allowed_editability = {
+                        "direct-canvas": {"canvas-distinct"},
+                        "authoring-view": {"authoring-view"},
+                        "structured-property": {"property"},
+                        "developer-only": {"developer", "blocked"},
+                    }.get(approved.get("access"), set())
+                    if editability not in allowed_editability:
+                        errors.append(
+                            f"{entity_id}: editability {editability!r} does not implement "
+                            f"{authoring_outcome_id}.access {approved.get('access')!r}"
+                        )
+            if not isinstance(entity.get("requiredForAcceptance"), bool):
+                errors.append(f"{entity_id}: requiredForAcceptance must be boolean")
+            if editability in {"developer", "blocked"}:
                 limitation = entity.get("limitation")
                 if not isinstance(limitation, str) or not limitation.strip():
-                    errors.append(f"{entity_id}: blocked entry needs limitation")
+                    errors.append(f"{entity_id}: {editability} entry needs limitation")
                 if entity.get("requiredForAcceptance") is True:
-                    message = f"{entity_id}: required content remains blocked"
-                    (errors if args.target == "accepted" else warnings).append(message)
+                    errors.append(f"{entity_id}: required content cannot remain {editability} for a candidate")
 
             parts = binding.split(":")
             owner = parts[0]
@@ -193,6 +263,10 @@ def main() -> int:
                 return
             if owner == "runtime" and kind != parts[-2]:
                 errors.append(f"{entity_id}: runtime binding kind does not match entity kind")
+            if owner == "source" and editability not in {"developer", "blocked"}:
+                errors.append(f"{entity_id}: source binding requires developer or blocked editability")
+            if owner != "source" and editability == "developer":
+                errors.append(f"{entity_id}: developer editability requires a source binding")
             if not project:
                 return
             if scope == "scene":
@@ -216,6 +290,8 @@ def main() -> int:
                         errors.append(f"{entity_id}: native binding field does not match entity kind")
                 elif owner == "runtime":
                     validate_runtime_key(entity_id, bound_scene.get("runtime"), parts[3], parts[4], errors)
+                elif owner == "source" and parts[2] != scene_id:
+                    errors.append(f"{entity_id}: source binding scene does not match inventory scene")
             elif scope == "global":
                 if owner in ("native", "component"):
                     node_id = parts[2]
@@ -273,11 +349,22 @@ def main() -> int:
             global_entities = []
         for entity in global_entities:
             validate_entity(entity, "global")
+
+        if contract is not None:
+            actual_outcomes = set(authoring_outcomes)
+            expected_outcomes = set(approved_authoring)
+            if actual_outcomes != expected_outcomes:
+                errors.append(
+                    "Authoring Inventory AUTH coverage must exactly match approved contracts; "
+                    f"missing={sorted(expected_outcomes - actual_outcomes)!r}, "
+                    f"unknown={sorted(actual_outcomes - expected_outcomes)!r}"
+                )
     except (OSError, ValueError, json.JSONDecodeError, KeyError, zipfile.BadZipFile) as exc:
         errors.append(str(exc))
 
     report = {
-        "validator": "project-v8-authoring-inventory-v1",
+        "validator": "project-v8-authoring-inventory-v2",
+        "assurance": "structural-only" if args.structural_only else "contract-bound",
         "status": "passed" if not errors else "failed",
         "errors": errors,
         "warnings": warnings,

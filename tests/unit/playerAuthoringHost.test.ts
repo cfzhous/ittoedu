@@ -27,7 +27,7 @@ import {
 import type { ExportPayload } from '../../src/shared/componentTypes'
 
 function createSceneHarness() {
-  const project = createProject({ includeDefaultController: false })
+  const project = createProject({ includeDefaultController: false, controls: 'none' })
   const scene = project.scenes[0]!
   const first = createRectangleNode({ id: 'first', name: '节点 A', x: 40 })
   const second = createRectangleNode({ id: 'second', name: '节点 B', x: 240 })
@@ -87,7 +87,7 @@ function createSceneHarness() {
 
 describe('unified Player authoring host', () => {
   it('keeps explicit null as the base authoring state without changing playback fallback', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const initialStateId = scene.presentation!.initialStateId
 
@@ -128,7 +128,7 @@ describe('unified Player authoring host', () => {
   })
 
   it('lets editor synchronization bypass runtime navigation guards', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const playerScene = Object.create(PlayerScene.prototype) as PlayerScene
     const resolveNavigation = vi.fn(() => null)
     const processPendingNavigation = vi.fn()
@@ -366,7 +366,7 @@ describe('unified Player authoring host', () => {
   })
 
   it('freezes runtime course-state writes only in authoring hosts', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const payload: ExportPayload = { project, assets: {}, components: {} }
     const actions = {
       goToScene: () => false,

@@ -8,7 +8,7 @@ import {
 import { saveProjectAsync } from '@/renderer/project/saveProject'
 
 function makeLargeArchiveData(byteLength = 12 * 1024 * 1024): ProjectArchiveData {
-  const project = createProject({ includeDefaultController: false })
+  const project = createProject({ includeDefaultController: false, controls: 'none' })
   const bytes = new Uint8Array(byteLength)
   project.assets.largeVideo = {
     id: 'largeVideo',

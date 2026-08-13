@@ -37,7 +37,7 @@ describe('image safe-area metadata', () => {
     delete legacy.safeAreas
     expect(sceneNodeSchema.parse(legacy)).toMatchObject({ safeAreas: [] })
 
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     image.safeAreas = [{
       id: 'subject',
       label: '人物主体',

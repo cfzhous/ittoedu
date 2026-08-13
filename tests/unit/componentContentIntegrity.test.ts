@@ -78,7 +78,7 @@ describe('component canonical content integrity', () => {
 
   it('rejects an archive whose embedded executable bytes no longer match Project V8', () => {
     const parsed = parseComponentPackageFiles(packageFiles())
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.componentPackages[parsed.key] = parsed.metadata
     const archive = createProjectArchive({
       project,

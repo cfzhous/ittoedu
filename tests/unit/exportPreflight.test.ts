@@ -10,7 +10,7 @@ const emptyResources = { assetFiles: {}, components: {} }
 
 describe('export preflight', () => {
   it('aggregates unused assets without changing publishing semantics', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.first = {
       id: 'first', filename: 'first.png', mimeType: 'image/png',
       kind: 'image', path: 'assets/first.png', byteLength: 20,
@@ -37,7 +37,7 @@ describe('export preflight', () => {
   })
 
   it('reports missing embedded asset bytes as a blocking error', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.hero = {
       id: 'hero',
       filename: 'hero.png',
@@ -72,7 +72,7 @@ describe('export preflight', () => {
     const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
       .mockReturnValue(context)
     vi.stubGlobal('navigator', { userAgent: 'Chrome' })
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const outside = createTextNode({ x: 1400, y: 20, width: 200, height: 80 })
     outside.text = '画布外文字'
     const overflow = createTextNode({ x: 20, y: 20, width: 120, height: 28 })
@@ -97,7 +97,7 @@ describe('export preflight', () => {
   })
 
   it('blocks explicit external network dependencies in enabled runtimes', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.globalRuntime = {
       runtimeApiVersion: 2,
       enabled: true,
@@ -116,7 +116,7 @@ describe('export preflight', () => {
   })
 
   it('blocks relative and dynamically resolved network API calls', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.globalRuntime = {
       runtimeApiVersion: 2,
       enabled: true,
@@ -134,7 +134,7 @@ describe('export preflight', () => {
   })
 
   it('warns but does not block a URL that is only displayed as attribution text', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.globalRuntime = {
       runtimeApiVersion: 2,
       enabled: true,
@@ -161,7 +161,7 @@ describe('export preflight', () => {
   })
 
   it('does not mistake SVG namespaces or authored double-slash text for network access', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.globalRuntime = {
       runtimeApiVersion: 2,
       enabled: true,
@@ -186,7 +186,7 @@ describe('export preflight', () => {
   })
 
   it('explains static-format behavior without blocking a valid project', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes[0]!.interactions.push({
       id: 'enter',
       name: '进入',

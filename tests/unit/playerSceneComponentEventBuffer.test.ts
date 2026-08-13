@@ -179,7 +179,7 @@ function componentNode(id: string) {
   })
 }
 
-function createHarness(project = createProject({ includeDefaultController: false })) {
+function createHarness(project = createProject({ includeDefaultController: false, controls: 'none' })) {
   const playerScene = Object.create(PlayerScene.prototype) as PlayerScene
   const events = new CourseEventBus()
   const domLayers = {
@@ -247,7 +247,7 @@ describe('PlayerScene component mount event buffering', () => {
   })
 
   it('replays scene component events only after the scene engine binds, in mount order', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     scene.nodes = [componentNode('scene-a'), componentNode('scene-b')]
     scene.interactions = [componentRule('scene-a'), componentRule('scene-b')]
@@ -267,7 +267,7 @@ describe('PlayerScene component mount event buffering', () => {
   })
 
   it('keeps global mount ordering and ignores an emitter retained by a destroyed mount', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.globalLayer = [
       {
         node: componentNode('global-a'),
@@ -313,7 +313,7 @@ describe('PlayerScene component mount event buffering', () => {
   })
 
   it('隐藏且暂停期间新建的场景与全局组件继承宿主生命周期状态', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     scene.nodes = [componentNode('scene-hidden')]
     project.globalLayer = [{

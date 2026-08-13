@@ -2,6 +2,7 @@
 
 - 课例 ID：`{{CASE_ID}}`
 - 标题：{{TITLE}}
+- 课件合同 SHA-256：`{{COURSEWARE_CONTRACT_SHA256}}`
 - 呈现脚本 SHA-256：`{{PRESENTATION_SHA256}}`
 - Capability Index SHA-256：`{{CAPABILITY_SHA256}}`
 - 状态：planned
@@ -16,6 +17,12 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | [待填写] | [待填写] | native-owned/runtime-owned/hybrid-owned/component-composed | [待填写] | [待填写] | [待填写] | [待填写] | [待填写] | [待填写] |
 
+## 意图—作者入口—结果映射
+
+| AUTH | Inventory Entity | 编辑意图 | 编辑入口 | 预期 Project 变化 | 重开结果 | Player/导出结果 | 行为测试 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| [待填写 AUTH-*] | [待填写] | [待填写] | canvas-distinct/authoring-view/property | [待填写] | [待填写] | [待填写] | [待填写 BEH-*] | [待填写] |
+
 ## 共享机制
 
 [待填写 Runtime 模板、组件、规则、状态、素材和复用理由；没有时写“无”。]
@@ -23,6 +30,17 @@
 ## Runtime / Component 合同
 
 [待填写目的、作用域、内容、素材、参数、事件、生命周期、Replay/Restart、Capture、Inventory、后备和失败行为。]
+
+## 行为门禁映射
+
+| Gate | 合同来源 | Behavior Tests | 可见操作 | 可观察断言/事件 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| teacherControl | [待填写] | [待填写] | [待填写] | [待填写] | planned |
+| teacherEscape | [待填写 ESC-*] | [待填写] | [待填写] | [待填写] | planned |
+| requiredActions | [待填写 ACT-*] | [待填写] | [待填写] | [待填写] | planned |
+| assessmentTolerance | [待填写 RESP-*] | [待填写] | [待填写] | [待填写] | planned |
+| authoringOutcome | [待填写 AUTH-*] | [待填写] | [待填写] | [待填写] | planned |
+| responseCapacity | [待填写 RESP-*] | validator | 不适用 | 重算总时长 | planned |
 
 ## 任务图
 

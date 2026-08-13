@@ -11,8 +11,11 @@ import sys
 import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import Any
 
-from v8_common import sha256_file, within
+from validate_behavior_spec import GATES, validate_spec
+from validate_authoring_target_snapshot import validate_snapshot
+from v8_common import load_contract_facts, sha256_file, within
 
 
 OUTCOMES = {"unusable", "placeholder", "engineering candidate", "art candidate", "accepted"}
@@ -20,6 +23,11 @@ PIPELINE_STATUSES = {"not-run", "failed", "passed"}
 DELIVERY_ARTIFACT_KINDS = {
     "project", "html", "web-package", "pdf", "pptx", "screenshot", "contact-sheet", "recording",
 }
+VERIFICATION_ARTIFACT_KINDS = {
+    "behavior-spec", "behavior-report", "authoring-inventory", "authoring-target-snapshot",
+    "authoring-session-report",
+}
+ARTIFACT_KINDS = DELIVERY_ARTIFACT_KINDS | VERIFICATION_ARTIFACT_KINDS
 AUTOMATION_REVIEWERS = {"automation", "codex", "chatgpt", "gpt", "ai", "builder", "agent"}
 AUTOMATION_REVIEWER_PHRASES = {
     "人工智能", "大模型", "自动化", "自动审批", "自动验收", "智能体", "机器人", "聊天机器人",
@@ -27,6 +35,12 @@ AUTOMATION_REVIEWER_PHRASES = {
 ARTIFACT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 ARTIFACT_KIND_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$", re.IGNORECASE)
+DELIVERY_FINGERPRINT_ALGORITHMS = {
+    "html": "raw-sha256-v1",
+    "webPackage": "zip-members-sha256-v1",
+    "pdf": "pdf-info-time-normalized-sha256-v1",
+    "pptx": "pptx-members-core-time-normalized-sha256-v1",
+}
 SCENE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 RECORDING_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi"}
@@ -52,7 +66,542 @@ def acceptance_scope(value: dict) -> str:
         "requiredFrames": value.get("requiredFrames"),
         "differences": value.get("differences"),
         "remainingRisks": value.get("remainingRisks"),
+        "verification": value.get("verification"),
     })
+
+
+def value_matches(expected: Any, actual: Any) -> bool:
+    """Return true when actual contains the expected JSON subset."""
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and value_matches(child, actual[key]) for key, child in expected.items()
+        )
+    if isinstance(expected, list):
+        return expected == actual
+    return expected == actual
+
+
+def normalized_assessment_input(evaluator_id: str, value: str) -> str:
+    if evaluator_id == "EVAL-normalized-short-v1":
+        return " ".join(unicodedata.normalize("NFKC", value).strip().split()).casefold()
+    return value.strip()
+
+
+def validate_host_evidence_session(
+    test_id: str,
+    result: dict[str, Any],
+    errors: list[str],
+) -> list[dict[str, Any]] | None:
+    records = result.get("hostEvidence")
+    if not isinstance(records, list) or not records:
+        errors.append(f"behavior report {test_id} has no host-owned evidence session")
+        return None
+    session_keys = {"schemaVersion", "kind", "sessionId", "sequence", "afterStepId"}
+    assessment_keys = {
+        "schemaVersion", "kind", "sessionId", "sequence", "scope", "sceneId", "responseId",
+        "evaluatorId", "input", "acceptedValues", "normalizedInput", "status", "afterStepId",
+    }
+    action_keys = {
+        "schemaVersion", "kind", "sessionId", "sequence", "scope", "sceneId", "actId",
+        "responseId", "actionKind", "eventType", "afterStepId",
+    }
+    teacher_keys = {
+        "schemaVersion", "kind", "sessionId", "sequence", "action", "phase", "sceneId",
+        "stateId", "bypassNavigationGuards", "eventType", "afterStepId",
+    }
+    action_kinds = {
+        "click", "select", "text-input", "formula-input", "drag", "sort", "circle-text",
+        "highlight", "parameter-change", "oral", "paper", "teacher-command",
+    }
+    session_starts = [record for record in records if isinstance(record, dict) and record.get("kind") == "session-start"]
+    session_id = session_starts[0].get("sessionId") if len(session_starts) == 1 else None
+    uuid_v4 = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    )
+    session_valid = (
+        len(session_starts) == 1
+        and isinstance(records[0], dict)
+        and records[0] is session_starts[0]
+        and set(session_starts[0]) == session_keys
+        and session_starts[0].get("schemaVersion") == 1
+        and session_starts[0].get("sequence") == 0
+        and session_starts[0].get("afterStepId") is None
+        and isinstance(session_id, str)
+        and uuid_v4.fullmatch(session_id) is not None
+    )
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            session_valid = False
+            continue
+        if record.get("sessionId") != session_id or record.get("sequence") != index:
+            session_valid = False
+        kind = record.get("kind")
+        if kind == "assessment-evaluated":
+            if (
+                set(record) != assessment_keys
+                or record.get("schemaVersion") != 1
+                or record.get("scope") not in {"scene", "global"}
+                or (record.get("scope") == "scene" and not isinstance(record.get("sceneId"), str))
+                or (record.get("scope") == "global" and record.get("sceneId") is not None)
+                or not isinstance(record.get("responseId"), str)
+                or not re.fullmatch(r"RESP-\d{3,}", record["responseId"])
+                or not isinstance(record.get("evaluatorId"), str)
+                or not isinstance(record.get("input"), str)
+                or not isinstance(record.get("acceptedValues"), list)
+                or any(not isinstance(item, str) for item in record["acceptedValues"])
+                or not isinstance(record.get("normalizedInput"), str)
+                or record.get("status") not in {"pass", "fail"}
+                or (record.get("afterStepId") is not None and not isinstance(record.get("afterStepId"), str))
+            ):
+                session_valid = False
+        elif kind == "action-recorded":
+            if (
+                set(record) != action_keys
+                or record.get("schemaVersion") != 1
+                or record.get("scope") not in {"scene", "global"}
+                or (record.get("scope") == "scene" and not isinstance(record.get("sceneId"), str))
+                or (record.get("scope") == "global" and record.get("sceneId") is not None)
+                or not isinstance(record.get("actId"), str)
+                or not re.fullmatch(r"ACT-\d{3,}", record["actId"])
+                or (
+                    record.get("responseId") is not None
+                    and (
+                        not isinstance(record.get("responseId"), str)
+                        or not re.fullmatch(r"RESP-\d{3,}", record["responseId"])
+                    )
+                )
+                or record.get("actionKind") not in action_kinds
+                or not isinstance(record.get("eventType"), str)
+                or re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,127}", record["eventType"]) is None
+                or (record.get("afterStepId") is not None and not isinstance(record.get("afterStepId"), str))
+            ):
+                session_valid = False
+        elif kind == "teacher-escape-recorded":
+            phase = record.get("phase")
+            expected_keys = teacher_keys | ({"accepted"} if phase != "requested" else set())
+            if (
+                set(record) != expected_keys
+                or record.get("schemaVersion") != 1
+                or record.get("action") not in {"previous", "next", "scene-picker", "replay"}
+                or phase not in {"requested", "confirmation-required", "completed"}
+                or (
+                    record.get("sceneId") is not None
+                    and (not isinstance(record.get("sceneId"), str) or not record["sceneId"])
+                )
+                or (
+                    record.get("stateId") is not None
+                    and (not isinstance(record.get("stateId"), str) or not record["stateId"])
+                )
+                or not isinstance(record.get("bypassNavigationGuards"), bool)
+                or (phase == "requested" and "accepted" in record)
+                or (phase == "confirmation-required" and record.get("accepted") is not False)
+                or (phase == "completed" and not isinstance(record.get("accepted"), bool))
+                or record.get("eventType") != "click"
+                or (record.get("afterStepId") is not None and not isinstance(record.get("afterStepId"), str))
+            ):
+                session_valid = False
+        elif kind != "session-start":
+            session_valid = False
+    if not session_valid:
+        errors.append(f"behavior report {test_id} host evidence session/sequence/shape is invalid")
+        return None
+    return records
+
+
+def validate_host_assessment_trace(
+    test_id: str,
+    expected: dict[str, Any],
+    result: dict[str, Any],
+    assessment: dict[str, Any],
+    errors: list[str],
+) -> bool:
+    records = validate_host_evidence_session(test_id, result, errors)
+    if records is None:
+        return False
+
+    action_step_ids = [
+        step.get("id") for step in expected.get("steps", [])
+        if isinstance(step, dict) and step.get("action") not in {"wait-visible", "reload"}
+    ]
+    response_id = assessment.get("responseId")
+    evaluator_id = assessment.get("evaluatorRef")
+    input_value = expected.get("input")
+    expected_status = expected.get("expectedResult")
+    accepted_values = assessment.get("acceptedValues")
+    if not (
+        len(action_step_ids) == 1
+        and isinstance(response_id, str)
+        and isinstance(evaluator_id, str)
+        and isinstance(input_value, str)
+        and expected_status in {"pass", "fail"}
+        and isinstance(accepted_values, list)
+    ):
+        errors.append(f"behavior report {test_id} cannot derive an exact host assessment expectation")
+        return False
+    expected_normalized = normalized_assessment_input(evaluator_id, input_value)
+    matches = [
+        record for record in records
+        if isinstance(record, dict)
+        and record.get("kind") == "assessment-evaluated"
+        and record.get("responseId") == response_id
+        and record.get("evaluatorId") == evaluator_id
+        and record.get("input") == input_value
+        and record.get("acceptedValues") == accepted_values
+        and record.get("normalizedInput") == expected_normalized
+        and record.get("status") == expected_status
+        and record.get("afterStepId") == action_step_ids[0]
+        and (
+            record.get("scope") == "global" and record.get("sceneId") is None
+            or record.get("scope") == "scene" and record.get("sceneId") == expected.get("sceneId")
+        )
+    ]
+    if len(matches) != 1:
+        errors.append(
+            f"behavior report {test_id} lacks exactly one host assessment trace bound to RESP/TOL/step"
+        )
+        return False
+    return True
+
+
+def validate_host_action_trace(
+    test_id: str,
+    expected: dict[str, Any],
+    result: dict[str, Any],
+    errors: list[str],
+) -> bool:
+    records = validate_host_evidence_session(test_id, result, errors)
+    if records is None:
+        return False
+    act_refs = [
+        ref for ref in expected.get("contractRefs", [])
+        if isinstance(ref, str) and ref.startswith("ACT-")
+    ]
+    response_refs = [
+        ref for ref in expected.get("contractRefs", [])
+        if isinstance(ref, str) and ref.startswith("RESP-")
+    ]
+    action_kind = expected.get("actionKind")
+    allowed_step_actions = {
+        "click": {"click"},
+        "select": {"click", "select-option"},
+        "text-input": {"fill"},
+        "formula-input": {"fill"},
+        "drag": {"drag"},
+        "sort": {"drag"},
+        "circle-text": {"click", "drag"},
+        "highlight": {"click", "drag"},
+        "parameter-change": {"fill", "select-option", "press"},
+        "teacher-command": {"click", "press"},
+    }
+    action_step_ids = [
+        step.get("id") for step in expected.get("steps", [])
+        if isinstance(step, dict) and step.get("action") in allowed_step_actions.get(action_kind, set())
+    ]
+    action_steps = {
+        step.get("id"): step for step in expected.get("steps", [])
+        if isinstance(step, dict) and step.get("id") in action_step_ids
+    }
+    event_types_by_step_action = {
+        "click": {"click"},
+        "fill": {"input", "change"},
+        "press": {"keydown", "keyup"},
+        "select-option": {"input", "change"},
+        "check": {"click", "change"},
+        "drag": {
+            "pointerdown", "pointermove", "pointerup", "mousedown", "mousemove", "mouseup",
+            "dragstart", "drag", "drop", "dragend",
+        },
+    }
+    expected_response_id = response_refs[0] if len(response_refs) == 1 else None
+    if len(act_refs) != 1 or len(action_step_ids) != 1:
+        errors.append(f"behavior report {test_id} cannot derive an exact host action expectation")
+        return False
+    matches = [
+        record for record in records
+        if record.get("kind") == "action-recorded"
+        and record.get("actId") == act_refs[0]
+        and record.get("responseId") == expected_response_id
+        and record.get("actionKind") == action_kind
+        and record.get("afterStepId") == action_step_ids[0]
+        and record.get("eventType") in event_types_by_step_action.get(
+            action_steps[action_step_ids[0]].get("action"), set()
+        )
+        and (
+            record.get("scope") == "global" and record.get("sceneId") is None
+            or record.get("scope") == "scene" and record.get("sceneId") == expected.get("sceneId")
+        )
+    ]
+    if len(matches) != 1:
+        errors.append(f"behavior report {test_id} lacks exactly one host action trace bound to ACT/RESP/step")
+        return False
+    return True
+
+
+def _expected_teacher_bypass(
+    event: dict[str, Any],
+    teacher_events: list[dict[str, Any]],
+) -> bool | None:
+    match = event.get("match") if isinstance(event.get("match"), dict) else {}
+    action = match.get("action")
+    if action in {"previous", "scene-picker", "replay"}:
+        return True
+    if action != "next":
+        return None
+    confirmation_steps = {
+        item.get("afterStepId")
+        for item in teacher_events
+        if isinstance(item.get("match"), dict)
+        and item["match"].get("action") == "next"
+        and item["match"].get("phase") == "confirmation-required"
+    }
+    if not confirmation_steps:
+        return False
+    return event.get("afterStepId") not in confirmation_steps
+
+
+def validate_host_teacher_escape_trace(
+    test_id: str,
+    expected: dict[str, Any],
+    result: dict[str, Any],
+    errors: list[str],
+) -> bool:
+    records = validate_host_evidence_session(test_id, result, errors)
+    if records is None:
+        return False
+    teacher_events = [
+        event for event in expected.get("witnessedEvents", [])
+        if isinstance(event, dict)
+        and event.get("name") == "courseware-teacher-escape-action"
+    ]
+    teacher_records = [
+        record for record in records
+        if record.get("kind") == "teacher-escape-recorded"
+    ]
+    if not teacher_events or len(teacher_records) != len(teacher_events):
+        errors.append(
+            f"behavior report {test_id} lacks an exact host teacher escape trace count"
+        )
+        return False
+    for event, record in zip(teacher_events, teacher_records, strict=True):
+        expected_bypass = _expected_teacher_bypass(event, teacher_events)
+        event_match = event.get("match") if isinstance(event.get("match"), dict) else {}
+        if not (
+            record.get("afterStepId") == event.get("afterStepId")
+            and record.get("eventType") == "click"
+            and expected_bypass is not None
+            and record.get("bypassNavigationGuards") is expected_bypass
+            and value_matches(event_match, record)
+        ):
+            errors.append(
+                f"behavior report {test_id} host teacher escape trace is out of order or is not "
+                "bound to source scene/state/action/phase/step"
+            )
+            return False
+    return True
+
+
+def computed_behavior_gates(
+    spec: dict[str, Any],
+    spec_file_hash: str,
+    report: Any,
+    case_root: Path,
+    editor_root: Path | None,
+    errors: list[str],
+) -> dict[str, dict[str, Any]]:
+    gate_results = {gate: {"status": "failed", "testIds": []} for gate in GATES}
+    try:
+        contract = (
+            load_contract_facts(case_root)
+            if (case_root / "01-courseware-contract.md").is_file()
+            else None
+        )
+        capability_index = (
+            json.loads((editor_root / "artifacts" / "ai-capabilities" / "index.json").read_text(encoding="utf-8"))
+            if editor_root is not None
+            else None
+        )
+        spec_errors, _, computed = validate_spec(spec, contract, capability_index)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        spec_errors, computed = [str(exc)], {}
+    for error in spec_errors:
+        errors.append("behavior spec: " + error)
+    capacity = computed.get("capacity") if isinstance(computed, dict) else None
+    gate_results["responseCapacity"] = {
+        "status": capacity.get("status") if isinstance(capacity, dict) else "failed",
+        "testIds": [],
+    }
+    if not isinstance(report, dict) or report.get("schemaVersion") != 2:
+        errors.append("behavior report must be a schemaVersion 2 object")
+        return gate_results
+    if report.get("caseId") != spec.get("caseId"):
+        errors.append("behavior report caseId does not match spec")
+    if report.get("specSha256") != spec_file_hash:
+        errors.append("behavior report specSha256 is stale")
+    for key in ("coursewareContractSha256", "presentationScriptSha256", "developmentPlanSha256"):
+        if report.get(key) != spec.get(key):
+            errors.append(f"behavior report {key} does not match spec")
+    runner_hash = report.get("runnerSha256")
+    if not isinstance(runner_hash, str) or not SHA256_RE.fullmatch(runner_hash):
+        errors.append("behavior report runnerSha256 is required")
+    elif editor_root is None:
+        errors.append("--editor-root is required to verify behavior report runnerSha256")
+    else:
+        runner_path = editor_root / "scripts" / "run-courseware-behavior.ts"
+        if not runner_path.is_file() or runner_hash != sha256_file(runner_path):
+            errors.append("behavior report runnerSha256 is stale")
+    runtime_errors = report.get("errors")
+    if runtime_errors != []:
+        errors.append("behavior report must contain an empty top-level errors array")
+    target = report.get("target")
+    if not isinstance(target, dict):
+        errors.append("behavior report target is required")
+    else:
+        target_path = target.get("path")
+        target_hash = target.get("sha256")
+        if not isinstance(target_path, str) or not isinstance(target_hash, str) or not SHA256_RE.fullmatch(target_hash):
+            errors.append("behavior report target requires path and SHA-256")
+        else:
+            try:
+                portable = portable_relative_path(target_path)
+                resolved = within(case_root, case_root.joinpath(*portable.parts))
+                if not resolved.is_file():
+                    errors.append("behavior report target file is missing")
+                elif sha256_file(resolved) != target_hash.lower():
+                    errors.append("behavior report target hash is stale")
+            except ValueError as exc:
+                errors.append(f"behavior report target: {exc}")
+
+    expected_tests = {
+        test.get("id"): test
+        for test in spec.get("tests", [])
+        if isinstance(test, dict) and isinstance(test.get("id"), str)
+    }
+    report_tests_raw = report.get("tests")
+    report_tests: dict[str, dict[str, Any]] = {}
+    if not isinstance(report_tests_raw, list):
+        errors.append("behavior report tests must be an array")
+        report_tests_raw = []
+    for index, result in enumerate(report_tests_raw):
+        if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+            errors.append(f"behavior report tests[{index}] has no id")
+            continue
+        test_id = result["id"]
+        if test_id in report_tests:
+            errors.append(f"behavior report repeats test: {test_id}")
+        report_tests[test_id] = result
+    missing = sorted(set(expected_tests) - set(report_tests))
+    extra = sorted(set(report_tests) - set(expected_tests))
+    if missing:
+        errors.append("behavior report is missing tests: " + ", ".join(missing))
+    if extra:
+        errors.append("behavior report contains unknown tests: " + ", ".join(extra))
+
+    passed_test_ids: set[str] = set()
+    assessments = {
+        item.get("responseId"): item
+        for item in spec.get("assessments", [])
+        if isinstance(item, dict) and isinstance(item.get("responseId"), str)
+    }
+    for test_id, expected in expected_tests.items():
+        result = report_tests.get(test_id)
+        if not isinstance(result, dict):
+            continue
+        test_ok = result.get("status") == "passed" and result.get("gate") == expected.get("gate")
+        expected_steps = [item.get("id") for item in expected.get("steps", []) if isinstance(item, dict)]
+        actual_steps = result.get("steps")
+        if not isinstance(actual_steps, list):
+            errors.append(f"behavior report {test_id} steps must be an array")
+            test_ok = False
+            actual_steps = []
+        actual_step_map = {
+            item.get("id"): item for item in actual_steps
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if set(actual_step_map) != set(expected_steps):
+            errors.append(f"behavior report {test_id} step IDs do not match spec")
+            test_ok = False
+        if any(item.get("status") != "passed" for item in actual_step_map.values()):
+            errors.append(f"behavior report {test_id} contains a failed step")
+            test_ok = False
+        expected_assertions = [
+            item.get("id")
+            for item in [*expected.get("preAssertions", []), *expected.get("assertions", [])]
+            if isinstance(item, dict)
+        ]
+        actual_assertions = result.get("assertions")
+        if not isinstance(actual_assertions, list):
+            errors.append(f"behavior report {test_id} assertions must be an array")
+            test_ok = False
+            actual_assertions = []
+        actual_assertion_map = {
+            item.get("id"): item for item in actual_assertions
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        if set(actual_assertion_map) != set(expected_assertions):
+            errors.append(f"behavior report {test_id} assertion IDs do not match spec")
+            test_ok = False
+        if any(item.get("status") != "passed" for item in actual_assertion_map.values()):
+            errors.append(f"behavior report {test_id} contains a failed assertion")
+            test_ok = False
+        witnessed = result.get("witnessedEvents", [])
+        if not isinstance(witnessed, list):
+            errors.append(f"behavior report {test_id} witnessedEvents must be an array")
+            witnessed = []
+            test_ok = False
+        for expected_event in expected.get("witnessedEvents", []):
+            if not isinstance(expected_event, dict):
+                continue
+            matching = [
+                event for event in witnessed
+                if isinstance(event, dict)
+                and event.get("name") == expected_event.get("name")
+                and value_matches(expected_event.get("match", {}), event.get("detail", {}))
+                and event.get("afterStepId") == expected_event.get("afterStepId")
+            ]
+            if not matching:
+                errors.append(f"behavior report {test_id} did not witness {expected_event.get('name')}")
+                test_ok = False
+        if result.get("runtimeErrors", []) != []:
+            errors.append(f"behavior report {test_id} contains page/console errors")
+            test_ok = False
+        if expected.get("gate") == "assessmentTolerance":
+            response_refs = [
+                ref for ref in expected.get("contractRefs", [])
+                if isinstance(ref, str) and ref.startswith("RESP-")
+            ]
+            assessment = assessments.get(response_refs[0]) if len(response_refs) == 1 else None
+            if isinstance(assessment, dict) and assessment.get("mode") in {"finite-auto", "normalized-auto"}:
+                if not validate_host_assessment_trace(test_id, expected, result, assessment, errors):
+                    test_ok = False
+        if expected.get("gate") == "requiredActions":
+            if not validate_host_action_trace(test_id, expected, result, errors):
+                test_ok = False
+        if expected.get("gate") in {"teacherControl", "teacherEscape"}:
+            if not validate_host_teacher_escape_trace(test_id, expected, result, errors):
+                test_ok = False
+        if test_ok:
+            passed_test_ids.add(test_id)
+
+    requirements = spec.get("gateRequirements", {})
+    for gate in GATES:
+        if gate == "responseCapacity":
+            continue
+        required = requirements.get(gate, []) if isinstance(requirements, dict) else []
+        status = "passed" if required and all(test_id in passed_test_ids for test_id in required) else "failed"
+        gate_results[gate] = {"status": status, "testIds": list(required) if isinstance(required, list) else []}
+
+    reported_gates = report.get("gates")
+    if reported_gates != gate_results:
+        errors.append("behavior report gates do not match validator-computed gates")
+    summary = report.get("summary")
+    expected_summary = {
+        "passed": len(passed_test_ids),
+        "failed": len(expected_tests) - len(passed_test_ids),
+    }
+    if summary != expected_summary:
+        errors.append("behavior report summary does not match test results")
+    return gate_results
 
 
 def reviewer_is_automated(reviewer: str) -> bool:
@@ -344,6 +893,10 @@ def validate_image_artifact(path: Path, kind: str) -> list[str]:
         return [f"{kind} artifact is unreadable: {exc}"]
     if dimensions is None or dimensions[0] <= 0 or dimensions[1] <= 0:
         return [f"{kind} artifact has no recognizable image header and dimensions"]
+    if kind == "screenshot" and dimensions != (1280, 720):
+        return [
+            f"screenshot artifact must be exactly 1280x720, got {dimensions[0]}x{dimensions[1]}"
+        ]
     return []
 
 
@@ -420,6 +973,8 @@ def validate_delivery_artifact(kind: str, path: Path) -> list[str]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate a Project V8 evidence manifest")
     parser.add_argument("manifest")
+    parser.add_argument("--structural-only", action="store_true")
+    parser.add_argument("--editor-root")
     parser.add_argument("--json", action="store_true", dest="as_json")
     return parser.parse_args()
 
@@ -429,9 +984,11 @@ def main() -> int:
     errors: list[str] = []
     try:
         manifest_path = Path(args.manifest).resolve()
+        editor_root = Path(args.editor_root).resolve() if args.editor_root else None
         value = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if not isinstance(value, dict) or value.get("schemaVersion") != 1:
-            raise ValueError("evidence manifest must use schemaVersion 1")
+        if not isinstance(value, dict) or value.get("schemaVersion") not in {1, 2}:
+            raise ValueError("evidence manifest must use schemaVersion 1 or 2")
+        schema_version = value.get("schemaVersion")
         outcome = value.get("outcomeStatus")
         if outcome not in OUTCOMES:
             errors.append(f"invalid outcomeStatus: {outcome!r}")
@@ -439,6 +996,16 @@ def main() -> int:
         if pipeline_status not in PIPELINE_STATUSES:
             errors.append(f"invalid pipelineStatus: {pipeline_status!r}")
         candidate_or_higher = outcome in {"engineering candidate", "art candidate", "accepted"}
+        if candidate_or_higher and not args.structural_only:
+            errors.append(
+                "candidate evidence requires validate_v8_case trusted behavior replay; "
+                "standalone validate_evidence is structural-only"
+            )
+        if outcome in {"art candidate", "accepted"}:
+            errors.append(
+                f"{outcome} cannot be issued by the local evidence validator without an "
+                "external trusted human review receipt"
+            )
         case_root_value = value.get("caseRoot", "..")
         if case_root_value != "..":
             errors.append("caseRoot must be exactly '..' from the evidence directory")
@@ -446,6 +1013,45 @@ def main() -> int:
         if manifest_path.parent.name != "evidence":
             errors.append("evidence manifest must live in the case evidence/ directory")
         case_root = (manifest_path.parent / case_root_value).resolve()
+        inputs = value.get("inputs")
+        if not isinstance(inputs, dict):
+            errors.append("inputs must be an object")
+            inputs = {}
+        required_input_keys = (
+            (
+                "coursewareContractSha256", "presentationScriptSha256", "capabilityIndexSha256",
+                "developmentPlanSha256", "behaviorSpecSha256", "projectSha256",
+            )
+            if schema_version == 2
+            else ()
+        )
+        for key in required_input_keys:
+            if (
+                key == "projectSha256"
+                and not candidate_or_higher
+                and inputs.get(key) is None
+            ):
+                continue
+            if not isinstance(inputs.get(key), str) or not SHA256_RE.fullmatch(inputs[key]):
+                errors.append(f"inputs.{key} must be a SHA-256")
+        if schema_version == 2:
+            try:
+                approved_contract = load_contract_facts(case_root)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                errors.append(f"approved contract cannot be loaded: {exc}")
+            else:
+                for key in ("coursewareContractSha256", "presentationScriptSha256"):
+                    if inputs.get(key) != approved_contract.get(key):
+                        errors.append(f"inputs.{key} is stale")
+            if editor_root is not None:
+                capability_path = editor_root / "artifacts" / "ai-capabilities" / "index.json"
+                if not capability_path.is_file() or inputs.get("capabilityIndexSha256") != sha256_file(capability_path):
+                    errors.append("inputs.capabilityIndexSha256 is stale")
+            development_plan_path = case_root / "03-development-plan.md"
+            if not development_plan_path.is_file():
+                errors.append("03-development-plan.md is missing")
+            elif inputs.get("developmentPlanSha256") != sha256_file(development_plan_path):
+                errors.append("inputs.developmentPlanSha256 is stale")
         artifacts = value.get("artifacts")
         if not isinstance(artifacts, list):
             errors.append("artifacts must be an array")
@@ -456,6 +1062,7 @@ def main() -> int:
         artifact_paths_by_id: dict[str, str] = {}
         artifact_kinds_by_id: dict[str, str] = {}
         artifact_hashes_by_id: dict[str, str] = {}
+        artifact_files_by_id: dict[str, Path] = {}
         delivered_project_scene_ids: set[str] | None = None
         for artifact in artifacts:
             if not isinstance(artifact, dict):
@@ -473,6 +1080,8 @@ def main() -> int:
             seen_ids.add(artifact_id)
             if not isinstance(artifact_kind, str) or not ARTIFACT_KIND_RE.fullmatch(artifact_kind):
                 errors.append(f"{artifact_id}: kind is required and must be a portable lower-case identifier")
+            elif schema_version == 2 and artifact_kind not in ARTIFACT_KINDS:
+                errors.append(f"{artifact_id}: unsupported schemaVersion 2 artifact kind: {artifact_kind}")
             else:
                 delivered_kinds.add(artifact_kind)
                 artifact_kinds_by_id.setdefault(artifact_id, artifact_kind)
@@ -496,6 +1105,7 @@ def main() -> int:
             else:
                 seen_paths[path_key] = artifact_id
             artifact_paths_by_id[artifact_id] = relative
+            artifact_files_by_id[artifact_id] = path
             if not path.is_file():
                 errors.append(f"{artifact_id}: evidence file is missing")
             else:
@@ -508,48 +1118,418 @@ def main() -> int:
                     if artifact_kind == "project" and not format_errors:
                         delivered_project_scene_ids = project_scene_ids(path)
 
+        behavior_gates = {gate: {"status": "not-evaluated", "testIds": []} for gate in GATES}
         if candidate_or_higher:
+            if schema_version != 2:
+                errors.append("schemaVersion 1 evidence is historical only and cannot become a candidate")
             if pipeline_status != "passed":
                 errors.append("candidate or accepted outcome requires pipelineStatus passed")
-            missing_kinds = sorted(DELIVERY_ARTIFACT_KINDS - delivered_kinds)
+            required_delivery_kinds = {"project", "html", "web-package", "pdf", "pptx"}
+            if outcome in {"art candidate", "accepted"}:
+                required_delivery_kinds.update({"screenshot", "contact-sheet"})
+            if value.get("recordingRequired") is True:
+                required_delivery_kinds.add("recording")
+            missing_kinds = sorted(required_delivery_kinds - delivered_kinds)
             if missing_kinds:
                 errors.append("delivery evidence is missing artifact kinds: " + ", ".join(missing_kinds))
+            project_artifact_ids = [
+                artifact_id for artifact_id in seen_ids
+                if artifact_kinds_by_id.get(artifact_id) == "project"
+            ]
+            expected_project_path = f"project/{value.get('caseId')}.h5lesson"
+            if len(project_artifact_ids) != 1:
+                errors.append("candidate evidence must declare exactly one Project V8 artifact")
+            else:
+                project_artifact_id = project_artifact_ids[0]
+                if artifact_paths_by_id.get(project_artifact_id) != expected_project_path:
+                    errors.append(f"project artifact path must be exactly {expected_project_path}")
+                if artifact_hashes_by_id.get(project_artifact_id) != inputs.get("projectSha256"):
+                    errors.append("inputs.projectSha256 does not match the project artifact")
+                state_path = case_root / "implementation" / "implementation-state.json"
+                try:
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    errors.append(f"implementation state is unreadable: {exc}")
+                else:
+                    if not isinstance(state, dict):
+                        errors.append("implementation state must be an object")
+                    elif state.get("currentProjectSha256") != inputs.get("projectSha256"):
+                        errors.append("inputs.projectSha256 does not match implementation state")
             commands = value.get("commands")
-            if not isinstance(commands, list) or not commands:
-                errors.append("candidate or accepted outcome requires command evidence")
+            if commands != []:
+                errors.append(
+                    "self-reported command results are forbidden; commands must be the closed empty set "
+                    "and validate_v8_case must execute the trusted validation plan in the current process"
+                )
+
+            verification = value.get("verification")
+            if not isinstance(verification, dict):
+                errors.append("candidate or accepted outcome requires verification bindings")
+                verification = {}
+
+            def verification_json(
+                key: str,
+                expected_kind: str,
+                expected_path: str,
+            ) -> tuple[dict[str, Any] | None, str | None]:
+                artifact_id = verification.get(key)
+                if not isinstance(artifact_id, str) or artifact_id not in seen_ids:
+                    errors.append(f"verification.{key} must reference an artifact")
+                    return None, None
+                if artifact_kinds_by_id.get(artifact_id) != expected_kind:
+                    errors.append(f"verification.{key} must reference kind {expected_kind}")
+                    return None, artifact_id
+                if artifact_paths_by_id.get(artifact_id) != expected_path:
+                    errors.append(f"verification.{key} must reference {expected_path}")
+                path = artifact_files_by_id.get(artifact_id)
+                if path is None or not path.is_file():
+                    return None, artifact_id
+                try:
+                    loaded = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    errors.append(f"{artifact_id}: invalid JSON verification artifact: {exc}")
+                    return None, artifact_id
+                if not isinstance(loaded, dict):
+                    errors.append(f"{artifact_id}: verification JSON root must be an object")
+                    return None, artifact_id
+                return loaded, artifact_id
+
+            behavior_spec, behavior_spec_id = verification_json(
+                "behaviorSpecArtifactId", "behavior-spec", "implementation/behavior-spec.json"
+            )
+            behavior_report, _ = verification_json(
+                "behaviorReportArtifactId", "behavior-report", "evidence/behavior-report.json"
+            )
+            inventory, inventory_artifact_id = verification_json(
+                "authoringInventoryArtifactId", "authoring-inventory", "implementation/authoring-inventory.json"
+            )
+            target_snapshot, _ = verification_json(
+                "authoringTargetSnapshotArtifactId",
+                "authoring-target-snapshot",
+                "implementation/authoring-target-snapshot.json",
+            )
+            authoring_session, _ = verification_json(
+                "authoringSessionReportArtifactId",
+                "authoring-session-report",
+                "evidence/authoring-session-report.json",
+            )
+            if behavior_spec is not None and behavior_spec_id is not None:
+                behavior_spec_hash = artifact_hashes_by_id.get(behavior_spec_id, "")
+                if inputs.get("behaviorSpecSha256") != behavior_spec_hash:
+                    errors.append("inputs.behaviorSpecSha256 does not match the behavior-spec artifact")
+                if behavior_spec.get("caseId") != value.get("caseId"):
+                    errors.append("behavior spec caseId does not match evidence manifest")
+                if behavior_spec.get("presentationScriptSha256") != inputs.get("presentationScriptSha256"):
+                    errors.append("behavior spec presentationScriptSha256 does not match evidence inputs")
+                if behavior_spec.get("coursewareContractSha256") != inputs.get("coursewareContractSha256"):
+                    errors.append("behavior spec coursewareContractSha256 does not match evidence inputs")
+                if behavior_spec.get("developmentPlanSha256") != inputs.get("developmentPlanSha256"):
+                    errors.append("behavior spec developmentPlanSha256 does not match evidence inputs")
+                behavior_gates = computed_behavior_gates(
+                    behavior_spec,
+                    behavior_spec_hash,
+                    behavior_report,
+                    case_root,
+                    editor_root,
+                    errors,
+                )
+                report_target = behavior_report.get("target") if isinstance(behavior_report, dict) else None
+                if isinstance(report_target, dict):
+                    matching_html = [
+                        artifact_id for artifact_id in seen_ids
+                        if artifact_kinds_by_id.get(artifact_id) == "html"
+                        and artifact_paths_by_id.get(artifact_id) == report_target.get("path")
+                        and artifact_hashes_by_id.get(artifact_id) == str(report_target.get("sha256", "")).lower()
+                    ]
+                    if not matching_html:
+                        errors.append("behavior report target is not the delivered HTML artifact")
+
+            inventory_entities: dict[str, dict[str, Any]] = {}
+            required_entity_ids: set[str] = set()
+            if inventory is None or inventory.get("schemaVersion") != 2:
+                errors.append("authoring inventory verification artifact must use schemaVersion 2")
             else:
-                for index, command in enumerate(commands):
-                    if not isinstance(command, dict):
-                        errors.append(f"commands[{index}] must be an object")
+                generated_from = inventory.get("generatedFrom")
+                if not isinstance(generated_from, dict):
+                    errors.append("authoring inventory generatedFrom is missing")
+                else:
+                    for input_key in (
+                        "coursewareContractSha256",
+                        "presentationScriptSha256",
+                        "capabilityIndexSha256",
+                        "developmentPlanSha256",
+                    ):
+                        if generated_from.get(input_key) != inputs.get(input_key):
+                            errors.append(f"authoring inventory {input_key} does not match evidence inputs")
+                raw_entities: list[Any] = []
+                raw_entities.extend(inventory.get("globalEntities", []) if isinstance(inventory.get("globalEntities"), list) else [])
+                for scene in inventory.get("scenes", []) if isinstance(inventory.get("scenes"), list) else []:
+                    if isinstance(scene, dict) and isinstance(scene.get("entities"), list):
+                        raw_entities.extend(scene["entities"])
+                for entity in raw_entities:
+                    if not isinstance(entity, dict) or not isinstance(entity.get("id"), str):
                         continue
-                    if not str(command.get("command") or "").strip():
-                        errors.append(f"commands[{index}] has no command")
-                    if command.get("exitCode") != 0:
-                        errors.append(f"commands[{index}] did not pass")
+                    inventory_entities[entity["id"]] = entity
+                    if entity.get("requiredForAcceptance") is True:
+                        category = entity.get("editability")
+                        if category in {"developer", "blocked"}:
+                            errors.append(f"required authoring entity remains {category}: {entity['id']}")
+                        else:
+                            required_entity_ids.add(entity["id"])
+                if not inventory_entities:
+                    errors.append("authoring inventory has no entities to verify")
+                if not required_entity_ids:
+                    errors.append("authoring inventory has no candidate-required editable entities")
+
+            session_entity_ids: set[str] = set()
+            authoring_session_error_start = len(errors)
+            if not isinstance(authoring_session, dict):
+                errors.append("candidate requires an editor-authoring-session-v1 receipt")
+            else:
+                if authoring_session.get("schemaVersion") != 1 or authoring_session.get("receiptType") != "editor-authoring-session-v1":
+                    errors.append("authoring session receipt has an unsupported schema/type")
+                if authoring_session.get("caseId") != value.get("caseId"):
+                    errors.append("authoring session receipt caseId does not match manifest")
+                session_inputs = authoring_session.get("inputs")
+                expected_session_inputs = {
+                    "projectSha256": inputs.get("projectSha256"),
+                    "inventorySha256": (
+                        artifact_hashes_by_id.get(inventory_artifact_id, "")
+                        if inventory_artifact_id is not None else None
+                    ),
+                    "coursewareContractSha256": inputs.get("coursewareContractSha256"),
+                    "presentationScriptSha256": inputs.get("presentationScriptSha256"),
+                    "developmentPlanSha256": inputs.get("developmentPlanSha256"),
+                    "capabilityIndexSha256": inputs.get("capabilityIndexSha256"),
+                }
+                if session_inputs != expected_session_inputs:
+                    errors.append("authoring session receipt inputs do not match current evidence bytes")
+                if authoring_session.get("errors") != []:
+                    errors.append("authoring session receipt contains errors")
+                runner_hash = authoring_session.get("runnerSha256")
+                if not isinstance(runner_hash, str) or not SHA256_RE.fullmatch(runner_hash):
+                    errors.append("authoring session receipt runnerSha256 is invalid")
+                if editor_root is not None:
+                    runner_path = editor_root / "scripts" / "run-courseware-authoring.ts"
+                    if not runner_path.is_file() or runner_hash != sha256_file(runner_path):
+                        errors.append("authoring session receipt runnerSha256 is stale")
+                editor_build = authoring_session.get("editorBuild")
+                if (
+                    not isinstance(editor_build, dict)
+                    or set(editor_build) != {"renderer", "main", "player"}
+                    or any(
+                        not isinstance(item, str) or not SHA256_RE.fullmatch(item)
+                        for item in editor_build.values()
+                    )
+                ):
+                    errors.append("authoring session editorBuild must bind renderer/main/player SHA-256 values")
+                session_entities = authoring_session.get("entities")
+                if not isinstance(session_entities, list):
+                    errors.append("authoring session entities must be an array")
+                    session_entities = []
+                for entity in session_entities:
+                    if not isinstance(entity, dict) or entity.get("status") != "passed":
+                        errors.append("authoring session receipt contains a failed/unsupported entity")
+                        continue
+                    entity_id = entity.get("inventoryEntityId")
+                    if not isinstance(entity_id, str) or entity_id in session_entity_ids:
+                        errors.append(f"authoring session has invalid/duplicate entity id: {entity_id}")
+                        continue
+                    inventory_entity = inventory_entities.get(entity_id)
+                    if inventory_entity is None or entity.get("binding") != inventory_entity.get("binding"):
+                        errors.append(f"authoring session entity is not bound to inventory: {entity_id}")
+                        continue
+                    if entity.get("carrier") != "native-scene-text":
+                        errors.append(f"authoring session entity uses an unsupported carrier: {entity_id}")
+                    binding_parts = str(entity.get("binding", "")).split(":")
+                    expected_node_id = binding_parts[3] if len(binding_parts) == 5 else None
+                    if entity.get("selectedNodeId") != expected_node_id:
+                        errors.append(f"authoring session selected node does not match binding: {entity_id}")
+                    if (
+                        entity.get("canvasSelectionVerified") is not True
+                        or entity.get("saved") is not True
+                        or entity.get("reopened") is not True
+                        or entity.get("errors") != []
+                    ):
+                        errors.append(f"authoring session lacks selection/save/reopen proof: {entity_id}")
+                    probe_value = entity.get("probeValue")
+                    if not isinstance(probe_value, str) or not probe_value:
+                        errors.append(f"authoring session has no deterministic probe value: {entity_id}")
+                    bounds = entity.get("renderedBounds")
+                    if not isinstance(bounds, dict) or set(bounds) != {"x", "y", "width", "height"}:
+                        errors.append(f"authoring session renderedBounds is invalid: {entity_id}")
+                    else:
+                        x, y, width, height = (
+                            bounds.get("x"), bounds.get("y"), bounds.get("width"), bounds.get("height")
+                        )
+                        if (
+                            any(not isinstance(number, (int, float)) or isinstance(number, bool) for number in (x, y, width, height))
+                            or width <= 0 or height <= 0 or x < 0 or y < 0
+                            or x + width > 1280 or y + height > 720
+                        ):
+                            errors.append(f"authoring session renderedBounds exceeds 1280x720: {entity_id}")
+                    observation_state_id = entity.get("observationStateId")
+                    if observation_state_id is not None and (
+                        not isinstance(observation_state_id, str) or not observation_state_id
+                    ):
+                        errors.append(f"authoring session observationStateId is invalid: {entity_id}")
+                    player_observation = entity.get("player")
+                    html_observation = entity.get("html")
+                    if (
+                        not isinstance(player_observation, dict)
+                        or player_observation.get("changed") is not True
+                        or not isinstance(html_observation, dict)
+                        or html_observation.get("changed") is not True
+                    ):
+                        errors.append(f"authoring session lacks Player/HTML visual change proof: {entity_id}")
+                    else:
+                        player_hashes = (
+                            player_observation.get("beforeSha256"),
+                            player_observation.get("afterSha256"),
+                        )
+                        html_hashes = (
+                            html_observation.get("beforeSha256"),
+                            html_observation.get("afterSha256"),
+                        )
+                        if any(not isinstance(item, str) or not SHA256_RE.fullmatch(item) for item in player_hashes):
+                            errors.append(f"authoring session Player screenshot hashes are invalid: {entity_id}")
+                        elif player_hashes[0] == player_hashes[1]:
+                            errors.append(f"authoring session Player screenshots did not change: {entity_id}")
+                        if any(not isinstance(item, str) or not SHA256_RE.fullmatch(item) for item in html_hashes):
+                            errors.append(f"authoring session HTML hashes are invalid: {entity_id}")
+                        elif html_hashes[0] == html_hashes[1]:
+                            errors.append(f"authoring session HTML screenshots did not change: {entity_id}")
+                    session_entity_ids.add(entity_id)
+                if session_entity_ids != required_entity_ids:
+                    errors.append(
+                        "authoring session required entity coverage differs from inventory; "
+                        f"missing={sorted(required_entity_ids - session_entity_ids)!r}, "
+                        f"unknown={sorted(session_entity_ids - required_entity_ids)!r}"
+                    )
+                exporter = authoring_session.get("exporter")
+                if not isinstance(exporter, dict) or exporter.get("kind") != "editor-single-html-ui-v1":
+                    errors.append("authoring session has no trusted Editor single-HTML export receipt")
+                elif exporter.get("viewport") != {"width": 1280, "height": 720}:
+                    errors.append("authoring export receipt viewport must be exactly 1280x720")
+                elif any(
+                    not isinstance(exporter.get(key), str)
+                    or not SHA256_RE.fullmatch(exporter.get(key))
+                    for key in ("exportedSha256", "deliverySha256")
+                ):
+                    errors.append("authoring export receipt hashes are invalid")
+                elif exporter.get("deliveryMatches") is not True:
+                    errors.append("fresh Editor UI export does not match the delivered HTML")
+                else:
+                    deliveries = exporter.get("deliveries")
+                    expected_deliveries = {
+                        "html": "html",
+                        "webPackage": "web-package",
+                        "pdf": "pdf",
+                        "pptx": "pptx",
+                    }
+                    if not isinstance(deliveries, dict) or set(deliveries) != set(expected_deliveries):
+                        errors.append("authoring export receipt must bind exactly HTML/web-package/PDF/PPTX")
+                        deliveries = {}
+                    for receipt_kind, artifact_kind in expected_deliveries.items():
+                        delivery = deliveries.get(receipt_kind)
+                        if not isinstance(delivery, dict):
+                            errors.append(f"authoring export receipt is missing {receipt_kind}")
+                            continue
+                        fresh_hash = delivery.get("exportedSha256")
+                        delivered_hash = delivery.get("deliverySha256")
+                        canonical_hash = delivery.get("canonicalSha256")
+                        if (
+                            not isinstance(fresh_hash, str)
+                            or not SHA256_RE.fullmatch(fresh_hash)
+                            or not isinstance(delivered_hash, str)
+                            or not SHA256_RE.fullmatch(delivered_hash)
+                            or fresh_hash != delivered_hash
+                            or delivery.get("matches") is not True
+                        ):
+                            errors.append(f"authoring export receipt {receipt_kind} hashes do not match")
+                            continue
+                        if (
+                            delivery.get("algorithm") != DELIVERY_FINGERPRINT_ALGORITHMS[receipt_kind]
+                            or not isinstance(canonical_hash, str)
+                            or not SHA256_RE.fullmatch(canonical_hash)
+                        ):
+                            errors.append(
+                                f"authoring export receipt {receipt_kind} canonical fingerprint is invalid"
+                            )
+                        matching_delivery = [
+                            artifact_id for artifact_id in seen_ids
+                            if artifact_kinds_by_id.get(artifact_id) == artifact_kind
+                            and artifact_paths_by_id.get(artifact_id) == delivery.get("path")
+                            and artifact_hashes_by_id.get(artifact_id) == fresh_hash
+                        ]
+                        if len(matching_delivery) != 1:
+                            errors.append(
+                                f"authoring export receipt {receipt_kind} is not bound to exactly one artifact"
+                            )
+                    matching_html = [
+                        artifact_id for artifact_id in seen_ids
+                        if artifact_kinds_by_id.get(artifact_id) == "html"
+                        and artifact_paths_by_id.get(artifact_id) == exporter.get("checkedDeliveryPath")
+                        and artifact_hashes_by_id.get(artifact_id) == exporter.get("exportedSha256")
+                        and artifact_hashes_by_id.get(artifact_id) == exporter.get("deliverySha256")
+                    ]
+                    if len(matching_html) != 1:
+                        errors.append("authoring export receipt is not bound to exactly one delivered HTML artifact")
+                    html_delivery = deliveries.get("html") if isinstance(deliveries, dict) else None
+                    if not isinstance(html_delivery, dict) or (
+                        html_delivery.get("path") != exporter.get("checkedDeliveryPath")
+                        or html_delivery.get("exportedSha256") != exporter.get("exportedSha256")
+                        or html_delivery.get("deliverySha256") != exporter.get("deliverySha256")
+                        or html_delivery.get("matches") != exporter.get("deliveryMatches")
+                    ):
+                        errors.append("authoring export receipt legacy HTML projection differs from deliveries.html")
+                    report_target = behavior_report.get("target") if isinstance(behavior_report, dict) else None
+                    if not isinstance(report_target, dict) or (
+                        report_target.get("path") != exporter.get("checkedDeliveryPath")
+                        or report_target.get("sha256") != exporter.get("exportedSha256")
+                    ):
+                        errors.append(
+                            "Behavior target must be the exact HTML freshly exported by the trusted authoring runner"
+                        )
+
+            if len(errors) != authoring_session_error_start or session_entity_ids != required_entity_ids:
+                behavior_gates["authoringOutcome"] = {
+                    "status": "failed",
+                    "testIds": behavior_gates.get("authoringOutcome", {}).get("testIds", []),
+                }
+
+            if target_snapshot is not None and inventory is not None and inventory_artifact_id is not None:
+                project_ids = [
+                    artifact_id for artifact_id in seen_ids
+                    if artifact_kinds_by_id.get(artifact_id) == "project"
+                ]
+                project_file = artifact_files_by_id.get(project_ids[0]) if len(project_ids) == 1 else None
+                if project_file is not None:
+                    try:
+                        contract = load_contract_facts(case_root)
+                        errors.extend(
+                            "authoring target snapshot: " + error
+                            for error in validate_snapshot(
+                                target_snapshot,
+                                inventory,
+                                project_file,
+                                contract,
+                                artifact_hashes_by_id.get(inventory_artifact_id, ""),
+                                "implementation",
+                            )
+                        )
+                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        errors.append(f"authoring target snapshot contract validation failed: {exc}")
+
+            # Legacy manifest-authored round-trip narratives remain in the acceptance scope, but are
+            # deliberately non-authoritative. Only the currently replayed editor-authoring-session-v1
+            # receipt above may satisfy authoringOutcome coverage.
             round_trips = value.get("editRoundTrips")
-            if not isinstance(round_trips, list) or not round_trips:
-                errors.append("candidate or accepted outcome requires a real edit round trip")
-            else:
-                for index, round_trip in enumerate(round_trips):
-                    if not isinstance(round_trip, dict):
-                        errors.append(f"editRoundTrips[{index}] must be an object")
-                        continue
-                    for key in ("binding", "beforeProjectSha256", "afterProjectSha256", "evidenceArtifactIds"):
-                        if key not in round_trip:
-                            errors.append(f"editRoundTrips[{index}] is missing {key}")
-                    before_hash = round_trip.get("beforeProjectSha256")
-                    after_hash = round_trip.get("afterProjectSha256")
-                    if not isinstance(before_hash, str) or not SHA256_RE.fullmatch(before_hash):
-                        errors.append(f"editRoundTrips[{index}] has invalid beforeProjectSha256")
-                    if not isinstance(after_hash, str) or not SHA256_RE.fullmatch(after_hash):
-                        errors.append(f"editRoundTrips[{index}] has invalid afterProjectSha256")
-                    if isinstance(before_hash, str) and before_hash == after_hash:
-                        errors.append(f"editRoundTrips[{index}] did not change the project bytes")
-                    evidence_ids = round_trip.get("evidenceArtifactIds")
-                    if not isinstance(evidence_ids, list) or not evidence_ids or any(item not in seen_ids for item in evidence_ids):
-                        errors.append(f"editRoundTrips[{index}] references missing evidence artifacts")
-                    elif len(evidence_ids) != len(set(evidence_ids)):
-                        errors.append(f"editRoundTrips[{index}] repeats evidence artifact ids")
+            if not isinstance(round_trips, list):
+                errors.append("editRoundTrips must be an array (descriptive only; trusted authoring receipt is authoritative)")
+            for gate, result in behavior_gates.items():
+                if result.get("status") != "passed":
+                    errors.append(f"engineering candidate gate failed: {gate}")
             scene_evidence = value.get("sceneEvidence")
             declared_scenes: dict[str, str] = {}
             if not isinstance(scene_evidence, list) or not scene_evidence:
@@ -585,7 +1565,13 @@ def main() -> int:
                             + ", ".join(unknown_scene_declarations)
                         )
             required_frames = value.get("requiredFrames")
-            if not isinstance(required_frames, list) or not required_frames:
+            if outcome == "engineering candidate":
+                if required_frames != []:
+                    errors.append(
+                        "engineering candidate requiredFrames must be empty; locally unverifiable visual "
+                        "claims belong to external art review"
+                    )
+            elif not isinstance(required_frames, list) or not required_frames:
                 errors.append("candidate or accepted outcome requires requiredFrames evidence")
             else:
                 seen_frame_keys: set[tuple[str, str]] = set()
@@ -599,10 +1585,22 @@ def main() -> int:
                     scene_id = frame.get("sceneId")
                     role = frame.get("role")
                     artifact_id = frame.get("artifactId")
+                    state_id = frame.get("stateId")
+                    capture_method = frame.get("captureMethod")
                     if not isinstance(scene_id, str) or not scene_id:
                         errors.append(f"requiredFrames[{index}] has no sceneId")
                     if role not in ("pre-interaction", "feedback", "stable-result", "static-stable"):
                         errors.append(f"requiredFrames[{index}] has invalid role")
+                    if not isinstance(state_id, str) or not SCENE_ID_RE.fullmatch(state_id):
+                        errors.append(f"requiredFrames[{index}] requires a stable stateId")
+                    if capture_method not in {
+                        "behavior-runner-v2", "editor-ui-capture-v1", "static-export-capture-v1",
+                    }:
+                        errors.append(f"requiredFrames[{index}] has invalid captureMethod provenance")
+                    if frame.get("projectSha256") != inputs.get("projectSha256"):
+                        errors.append(f"requiredFrames[{index}] projectSha256 is stale")
+                    if frame.get("viewport") != {"width": 1280, "height": 720}:
+                        errors.append(f"requiredFrames[{index}] viewport must be exactly 1280x720")
                     if not isinstance(artifact_id, str) or artifact_id not in seen_ids:
                         errors.append(f"requiredFrames[{index}] references missing artifact")
                     elif artifact_id not in artifact_paths_by_id:
@@ -668,9 +1666,16 @@ def main() -> int:
         errors.append(str(exc))
 
     report = {
-        "validator": "project-v8-evidence-v1",
+        "validator": "project-v8-evidence-v2",
+        "assurance": "structural-only" if args.structural_only else "standalone",
         "status": "passed" if not errors else "failed",
         "currentAcceptanceScopeSha256": current_scope if "current_scope" in locals() else None,
+        "computedGates": behavior_gates if "behavior_gates" in locals() else {},
+        "blockedCapabilities": (
+            ["editor-authoring-session-replay-v1"]
+            if candidate_or_higher and schema_version == 2
+            else []
+        ) if "candidate_or_higher" in locals() else [],
         "errors": errors,
     }
     if args.as_json:

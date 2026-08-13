@@ -33,7 +33,7 @@ function privateMethod<Args extends unknown[], Result>(
 }
 
 function createPresentationHarness() {
-  const project = createProject({ includeDefaultController: false })
+  const project = createProject({ includeDefaultController: false, controls: 'none' })
   const sceneDocument = project.scenes[0]!
   const node = createRectangleNode({
     id: 'feedback',

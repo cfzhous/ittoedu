@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -86,6 +87,21 @@ class V2WorkflowTests(unittest.TestCase):
 - 教师与学生控制关系：教师发起，学生作答
 - 时间模型：阅读 2 分钟、思考 3 分钟、操作 2 分钟、反馈 2 分钟、总结 1 分钟
 
+## 产品能力剖面
+
+- single-device: required
+- single-deviceFallback: none
+- single-deviceDecisionRef: none
+- teacher-display: required
+- teacher-displayFallback: none
+- teacher-displayDecisionRef: none
+- offline: required
+- offlineFallback: none
+- offlineDecisionRef: none
+- multi-user-aggregation: not-required
+- multi-user-aggregationFallback: teacher-observed
+- multi-user-aggregationDecisionRef: none
+
 ## 学习目标与证据
 
 ### OBJ-001 解释部分—整体关系
@@ -115,6 +131,52 @@ class V2WorkflowTests(unittest.TestCase):
 ## 精确内容
 
 {exact}
+
+## 响应、判定与容量
+
+### RESP-001 选择并说明四分之一
+
+- evidenceRef: EVD-001
+- contentRef: CNT-001
+- mode: digital-required
+- responseType: choice
+- requiredForProgress: true
+- firstAttemptSeconds: 20
+- retrySeconds: 10
+- teacherDiscussionSeconds: 15
+- authority: finite-auto
+- navigationGate: hard
+- teacherOverrideRef: ESC-001
+- evaluatorCapabilityRef: EVAL-finite-choice-v1
+- toleranceCaseRefs: TOL-001, TOL-002, TOL-003, TOL-004, TOL-005, TOL-006
+- capacityOverrideDecisionRef: none
+
+## 自动判定容差矩阵
+
+| toleranceCaseId | responseRef | category | input | expected |
+| --- | --- | --- | --- | --- |
+| TOL-001 | RESP-001 | canonical-correct | A | pass |
+| TOL-002 | RESP-001 | correct-variant-1 | a | pass |
+| TOL-003 | RESP-001 | correct-variant-2 | 图 A | pass |
+| TOL-004 | RESP-001 | blank | EMPTY | fail |
+| TOL-005 | RESP-001 | typical-near-miss | B | fail |
+| TOL-006 | RESP-001 | substring-false-positive | 答案不是 A | fail |
+
+## 响应容量汇总
+
+- capacityPolicyVersion: 1
+- readingObservationSeconds: 525
+- sceneTransitionSeconds: 30
+
+## 编辑结果合同
+
+### AUTH-001 核心题面与反馈
+
+- contentRef: CNT-001
+- access: authoring-view
+- layoutAdjustment: required
+- styleAdjustment: basic
+- requiredForAcceptance: true
 
 ## 评价、反馈与约束
 
@@ -238,6 +300,32 @@ class V2WorkflowTests(unittest.TestCase):
 - 表达教学因果的运动：整体轮廓与等分线按解释顺序淡入
 - 仅装饰运动：无
 
+#### 可执行动作与教师逃生
+
+##### ACT-001 选择答案
+
+- sceneRef: SCN-001
+- actor: student
+- kind: click
+- target: 可见的图 A 与图 B 选择按钮
+- evidenceProduced: RESP-001
+- requiredForCompletion: true
+- initiallyHiddenContentRefs: CNT-001
+- revealedContentRefs: CNT-001
+- preActionVisible: false
+- errorBehavior: 保留错误选择并显示整体轮廓提示
+- retryBehavior: 原选择按钮保持可用并允许重新选择
+- revealBehavior: 教师可揭示整体、等分和定义
+- stableResult: 选择、理由、整体轮廓和定义稳定可见
+
+##### ESC-001 错误或未完成时接管
+
+- sceneRef: SCN-001
+- stateRefs: STATE-001, STATE-002, STATE-003
+- actions: retry, reveal, continue-incomplete, scene-picker, previous, replay
+- confirmBeforeContinue: true
+- independentOfCorrectness: true
+
 #### 证据与静态审阅帧
 
 - 学习证据：选择结果、理由与修复后回答
@@ -312,6 +400,235 @@ class V2WorkflowTests(unittest.TestCase):
                 "case_artifact.py", str(case), "approve", "visualDirection",
                 "--approved-by", "课程负责人", "--evidence", "用户明确批准视觉与样机范围",
             )
+
+    def write_cold_start_profile(self, case: Path, profile: str) -> None:
+        """Write one fresh contract profile without manufacturing review approval."""
+
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        contract_path = case / "01-courseware-contract.md"
+        script_path = case / "02-presentation-script.md"
+        contract = contract_path.read_text(encoding="utf-8").replace(
+            "- 课例 ID：`test-case`", f"- 课例 ID：`{case.name}`",
+        )
+        script = script_path.read_text(encoding="utf-8").replace(
+            "- 课例 ID：`test-case`", f"- 课例 ID：`{case.name}`",
+        )
+
+        if profile == "finite-choice":
+            pass
+        elif profile == "normalized-short":
+            replacements = (
+                ("### RESP-001 选择并说明四分之一", "### RESP-001 输入四分之一的规范化短答案"),
+                ("- 学生行为：选择并口头说明整体", "- 学生行为：输入四分之一的等值短答案并说明整体"),
+                ("- responseType: choice", "- responseType: normalized-short"),
+                ("- firstAttemptSeconds: 20", "- firstAttemptSeconds: 35"),
+                ("- retrySeconds: 10", "- retrySeconds: 20"),
+                ("- teacherDiscussionSeconds: 15", "- teacherDiscussionSeconds: 20"),
+                ("- authority: finite-auto", "- authority: normalized-auto"),
+                ("- evaluatorCapabilityRef: EVAL-finite-choice-v1", "- evaluatorCapabilityRef: EVAL-normalized-short-v1"),
+                ("| TOL-001 | RESP-001 | canonical-correct | A | pass |", "| TOL-001 | RESP-001 | canonical-correct | 1/4 | pass |"),
+                ("| TOL-002 | RESP-001 | correct-variant-1 | a | pass |", "| TOL-002 | RESP-001 | correct-variant-1 | 0.25 | pass |"),
+                ("| TOL-003 | RESP-001 | correct-variant-2 | 图 A | pass |", "| TOL-003 | RESP-001 | correct-variant-2 | ¼ | pass |"),
+                ("| TOL-005 | RESP-001 | typical-near-miss | B | fail |", "| TOL-005 | RESP-001 | typical-near-miss | 1/3 | fail |"),
+                ("| TOL-006 | RESP-001 | substring-false-positive | 答案不是 A | fail |", "| TOL-006 | RESP-001 | substring-false-positive | 答案不是 1/4 | fail |"),
+                ("- readingObservationSeconds: 525", "- readingObservationSeconds: 495"),
+            )
+            for old, new in replacements:
+                self.assertEqual(contract.count(old), 1, f"normalized-short fixture lost marker: {old}")
+                contract = contract.replace(old, new)
+            script_replacements = (
+                ("##### ACT-001 选择答案", "##### ACT-001 输入规范化短答案"),
+                ("- kind: click", "- kind: text-input"),
+                ("- target: 可见的图 A 与图 B 选择按钮", "- target: 可见的四分之一短答案输入框"),
+            )
+            for old, new in script_replacements:
+                self.assertEqual(script.count(old), 1, f"normalized-short script lost marker: {old}")
+                script = script.replace(old, new)
+        elif profile == "human-open-expression":
+            replacements = (
+                ("### RESP-001 选择并说明四分之一", "### RESP-001 开放解释部分—整体关系"),
+                ("- 学生行为：选择并口头说明整体", "- 学生行为：用开放文本解释整体与等分关系"),
+                ("- mode: digital-required", "- mode: digital-optional"),
+                ("- responseType: choice", "- responseType: open-text"),
+                ("- requiredForProgress: true", "- requiredForProgress: false"),
+                ("- firstAttemptSeconds: 20", "- firstAttemptSeconds: 90"),
+                ("- retrySeconds: 10", "- retrySeconds: 0"),
+                ("- teacherDiscussionSeconds: 15", "- teacherDiscussionSeconds: 45"),
+                ("- authority: finite-auto", "- authority: human"),
+                ("- navigationGate: hard", "- navigationGate: soft"),
+                ("- evaluatorCapabilityRef: EVAL-finite-choice-v1", "- evaluatorCapabilityRef: none"),
+                ("- toleranceCaseRefs: TOL-001, TOL-002, TOL-003, TOL-004, TOL-005, TOL-006", "- toleranceCaseRefs: none"),
+                ("- readingObservationSeconds: 525", "- readingObservationSeconds: 435"),
+            )
+            for old, new in replacements:
+                self.assertEqual(contract.count(old), 1, f"human fixture lost marker: {old}")
+                contract = contract.replace(old, new)
+            contract = re.sub(r"^\| TOL-\d{3} \|.*\n", "", contract, flags=re.MULTILINE)
+            script_replacements = (
+                ("##### ACT-001 选择答案", "##### ACT-001 提交开放解释"),
+                ("- kind: click", "- kind: text-input"),
+                ("- target: 可见的图 A 与图 B 选择按钮", "- target: 可见的开放解释输入框与提交按钮"),
+                ("- requiredForCompletion: true", "- requiredForCompletion: false"),
+                ("- errorBehavior: 保留错误选择并显示整体轮廓提示", "- errorBehavior: 保留学生原文并显示教师复核提示"),
+            )
+            for old, new in script_replacements:
+                self.assertEqual(script.count(old), 1, f"human script lost marker: {old}")
+                script = script.replace(old, new)
+        elif profile == "fullscreen-runtime-authoring-view":
+            # Orchestration freezes the visible full-screen experience, top-level
+            # teacher control, and authoring outcome. Runtime ownership remains a
+            # downstream Builder choice rather than a product-profile field.
+            replacements = (
+                ("- 使用场景与语言：教师投影，中文", "- 使用场景与语言：教师投影的全屏互动界面，中文"),
+                ("- 教师与学生控制关系：教师发起，学生作答", "- 教师与学生控制关系：顶层教师控制始终可达，学生在全屏互动界面作答"),
+                ("### AUTH-001 核心题面与反馈", "### AUTH-001 全屏核心题面、反馈与隐藏编辑入口"),
+            )
+            for old, new in replacements:
+                self.assertEqual(contract.count(old), 1, f"fullscreen fixture lost marker: {old}")
+                contract = contract.replace(old, new)
+            self.assertEqual(script.count("- 教师/学生控制关系：教师进入任务，学生选择并说明"), 1)
+            script = script.replace(
+                "- 教师/学生控制关系：教师进入任务，学生选择并说明",
+                "- 教师/学生控制关系：全屏互动时顶层教师控制始终可达，学生选择并说明",
+            )
+        else:
+            self.fail(f"unknown cold-start profile: {profile}")
+
+        contract_path.write_text(contract, encoding="utf-8")
+        script_path.write_text(script, encoding="utf-8")
+
+    def test_fresh_cold_start_contract_profiles_are_closed_without_approval(self) -> None:
+        profiles = {
+            "finite-choice": {
+                "authority": "finite-auto",
+                "responseType": "choice",
+                "evaluator": "EVAL-finite-choice-v1",
+                "actionKind": "click",
+                "toleranceCount": 6,
+            },
+            "normalized-short": {
+                "authority": "normalized-auto",
+                "responseType": "normalized-short",
+                "evaluator": "EVAL-normalized-short-v1",
+                "actionKind": "text-input",
+                "toleranceCount": 6,
+            },
+            "human-open-expression": {
+                "authority": "human",
+                "responseType": "open-text",
+                "evaluator": "none",
+                "actionKind": "text-input",
+                "toleranceCount": 0,
+            },
+            "fullscreen-runtime-authoring-view": {
+                "authority": "finite-auto",
+                "responseType": "choice",
+                "evaluator": "EVAL-finite-choice-v1",
+                "actionKind": "click",
+                "toleranceCount": 6,
+            },
+        }
+        for index, (profile, expected) in enumerate(profiles.items(), start=1):
+            with self.subTest(profile=profile):
+                case = self.init_case("fast", case_id=f"cold-start-{index}")
+                self.write_cold_start_profile(case, profile)
+
+                parsed_result = self.run_script(
+                    "contract_records.py",
+                    str(case / "01-courseware-contract.md"),
+                    str(case / "02-presentation-script.md"),
+                )
+                parsed = json.loads(parsed_result.stdout)
+                self.assertEqual(parsed["parseErrors"], [])
+                response = parsed["records"]["RESP-001"]["fields"]
+                action = parsed["records"]["ACT-001"]["fields"]
+                escape = parsed["records"]["ESC-001"]["fields"]
+                authoring = parsed["records"]["AUTH-001"]["fields"]
+                self.assertEqual(response["authority"], expected["authority"])
+                self.assertEqual(response["responseType"], expected["responseType"])
+                self.assertEqual(response["evaluatorCapabilityRef"], expected["evaluator"])
+                self.assertEqual(action["kind"], expected["actionKind"])
+                self.assertEqual(action["initiallyHiddenContentRefs"], "CNT-001")
+                self.assertEqual(action["revealedContentRefs"], "CNT-001")
+                self.assertEqual(action["preActionVisible"], "false")
+                self.assertEqual(authoring["access"], "authoring-view")
+                self.assertEqual(escape["independentOfCorrectness"], "true")
+                self.assertIn("continue-incomplete", escape["actions"])
+                self.assertEqual(len(parsed["toleranceCases"]), expected["toleranceCount"])
+                if profile == "human-open-expression":
+                    self.assertEqual(response["navigationGate"], "soft")
+                    self.assertEqual(response["teacherOverrideRef"], "ESC-001")
+                if profile == "fullscreen-runtime-authoring-view":
+                    self.assertEqual(parsed["productProfile"]["teacher-display"], "required")
+                    self.assertNotIn("runtime-owned", parsed["productProfile"])
+
+                result = self.run_script(
+                    "validate_case.py", str(case),
+                    "--target", "implementation-ready", "--json", expected=1,
+                )
+                report = json.loads(result.stdout)
+                self.assertEqual(
+                    report["errors"],
+                    ["required review is not approved: experience"],
+                    f"{profile} has semantic blockers beyond the intentionally pending human review",
+                )
+                manifest = json.loads((case / "case.json").read_text(encoding="utf-8"))
+                self.assertEqual(manifest["reviews"]["experience"]["status"], "pending")
+
+    def test_fresh_cold_start_contract_profiles_reject_core_boundary_violations(self) -> None:
+        cases = (
+            (
+                "finite-choice",
+                "contract",
+                lambda text: text.replace(
+                    "EVAL-finite-choice-v1", "EVAL-normalized-short-v1",
+                ),
+                "RESP-001 evaluator EVAL-normalized-short-v1 is incompatible with finite-auto/choice",
+            ),
+            (
+                "normalized-short",
+                "script",
+                lambda text: text.replace("- kind: text-input", "- kind: click"),
+                "ACT-001.kind click is incompatible with digital responseType normalized-short",
+            ),
+            (
+                "human-open-expression",
+                "script",
+                lambda text: text.replace(
+                    "- independentOfCorrectness: true", "- independentOfCorrectness: false",
+                ),
+                "ESC-001 must remain available independently of response correctness",
+            ),
+            (
+                "fullscreen-runtime-authoring-view",
+                "contract",
+                lambda text: text.replace("- access: authoring-view", "- access: runtime-internal"),
+                "AUTH-001.access has invalid value: runtime-internal",
+            ),
+        )
+        for index, (profile, target, mutate, expected_message) in enumerate(cases, start=1):
+            with self.subTest(profile=profile):
+                case = self.init_case("fast", case_id=f"cold-start-negative-{index}")
+                self.write_cold_start_profile(case, profile)
+                path = case / (
+                    "01-courseware-contract.md" if target == "contract"
+                    else "02-presentation-script.md"
+                )
+                original = path.read_text(encoding="utf-8")
+                mutated = mutate(original)
+                self.assertNotEqual(mutated, original, f"{profile} negative mutation did not apply")
+                path.write_text(mutated, encoding="utf-8")
+
+                result = self.run_script(
+                    "validate_case.py", str(case),
+                    "--target", "implementation-ready", "--json", expected=1,
+                )
+                report = json.loads(result.stdout)
+                self.assertIn(expected_message, report["errors"])
+                self.assertIn("required review is not approved: experience", report["errors"])
+                manifest = json.loads((case / "case.json").read_text(encoding="utf-8"))
+                self.assertEqual(manifest["reviews"]["experience"]["status"], "pending")
 
     def test_fast_initializes_only_three_files_and_aggregate_review(self) -> None:
         case = self.init_case("fast")
@@ -416,7 +733,7 @@ class V2WorkflowTests(unittest.TestCase):
         }
         (case / "case.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         validation = self.run_script("validate_case.py", str(case), "--target", "draft", "--json", expected=1)
-        self.assertIn("automated identities cannot accept outcomes", validation.stdout)
+        self.assertIn("orchestration resultStatus may only be pending or rejected", validation.stdout)
 
     def test_standard_requires_two_sequential_approvals(self) -> None:
         case = self.init_case("standard")
@@ -553,6 +870,438 @@ class V2WorkflowTests(unittest.TestCase):
             expected=1,
         )
         self.assertIn("CNT-001 has no completed exact-content section", result.stdout)
+
+    def test_response_capacity_overflow_blocks_readiness(self) -> None:
+        case = self.init_case("fast")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        contract = case / "01-courseware-contract.md"
+        contract.write_text(
+            contract.read_text(encoding="utf-8").replace(
+                "readingObservationSeconds: 525", "readingObservationSeconds: 526"
+            ),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+            expected=1,
+        )
+        self.assertIn("response capacity requires 601s", result.stdout)
+
+    def test_human_authority_cannot_hard_lock_navigation(self) -> None:
+        case = self.init_case("fast")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        contract = case / "01-courseware-contract.md"
+        contract.write_text(
+            contract.read_text(encoding="utf-8").replace(
+                "authority: finite-auto", "authority: human"
+            ),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+            expected=1,
+        )
+        self.assertIn("uses human authority and cannot be a hard navigation gate", result.stdout)
+
+    def test_automatic_assessment_requires_complete_exact_tolerance_matrix(self) -> None:
+        case = self.init_case("fast")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        contract = case / "01-courseware-contract.md"
+        contract.write_text(
+            contract.read_text(encoding="utf-8").replace(
+                "TOL-001, TOL-002, TOL-003, TOL-004, TOL-005, TOL-006",
+                "TOL-001, TOL-002, TOL-003, TOL-004, TOL-005",
+            ),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+            expected=1,
+        )
+        self.assertIn("substring-false-positive", result.stdout)
+        self.assertIn("tolerance cases are not referenced", result.stdout)
+
+    def test_unknown_response_from_action_blocks_readiness(self) -> None:
+        case = self.init_case("fast")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        script = case / "02-presentation-script.md"
+        script.write_text(
+            script.read_text(encoding="utf-8").replace(
+                "evidenceProduced: RESP-001", "evidenceProduced: RESP-999"
+            ),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+            expected=1,
+        )
+        self.assertIn("ACT-001 references unknown response: RESP-999", result.stdout)
+
+    def test_action_reveal_policy_allows_explicit_none(self) -> None:
+        case = self.init_case("fast", case_id="reveal-none")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        script = case / "02-presentation-script.md"
+        script.write_text(
+            script.read_text(encoding="utf-8")
+            .replace("initiallyHiddenContentRefs: CNT-001", "initiallyHiddenContentRefs: none")
+            .replace("revealedContentRefs: CNT-001", "revealedContentRefs: none")
+            .replace(
+                "preActionVisible: false",
+                "preActionVisible: 完整题面、两个整体、分割线和两个选择按钮",
+            )
+            .replace("revealBehavior: 教师可揭示整体、等分和定义", "revealBehavior: none"),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+        )
+        report = json.loads(result.stdout)
+        self.assertEqual(
+            report["contractRecordSummary"]["recordIds"]["ACT"],
+            ["ACT-001"],
+        )
+
+    def test_action_reveal_policy_rejects_leakage_mutations(self) -> None:
+        cases = [
+            (
+                "missing-hidden-field",
+                lambda text: text.replace("- initiallyHiddenContentRefs: CNT-001\n", ""),
+                "ACT-001 is missing fields: initiallyHiddenContentRefs",
+            ),
+            (
+                "missing-revealed-content",
+                lambda text: text.replace(
+                    "revealedContentRefs: CNT-001", "revealedContentRefs: none"
+                ),
+                "revealedContentRefs must be non-empty",
+            ),
+            (
+                "reveal-not-in-initial-set",
+                lambda text: text.replace(
+                    "initiallyHiddenContentRefs: CNT-001", "initiallyHiddenContentRefs: none"
+                ),
+                "revealedContentRefs must be a subset of initiallyHiddenContentRefs: CNT-001",
+            ),
+            (
+                "pre-action-claims-visible",
+                lambda text: text.replace(
+                    "preActionVisible: false", "preActionVisible: 已经显示完整定义"
+                ),
+                "preActionVisible must be false",
+            ),
+            (
+                "missing-visible-reveal-path",
+                lambda text: text.replace(
+                    "revealBehavior: 教师可揭示整体、等分和定义",
+                    "revealBehavior: none",
+                ),
+                "revealBehavior must freeze the visible reveal path",
+            ),
+            (
+                "unknown-content",
+                lambda text: text
+                .replace("initiallyHiddenContentRefs: CNT-001", "initiallyHiddenContentRefs: CNT-999")
+                .replace("revealedContentRefs: CNT-001", "revealedContentRefs: CNT-999"),
+                "initiallyHiddenContentRefs references unknown content: CNT-999",
+            ),
+            (
+                "content-not-declared-by-scene",
+                lambda text: text.replace("- 内容引用：CNT-001", "- 内容引用：none"),
+                "initiallyHiddenContentRefs references content not declared by SCN-001: CNT-001",
+            ),
+            (
+                "duplicate-hidden-content",
+                lambda text: text.replace(
+                    "initiallyHiddenContentRefs: CNT-001",
+                    "initiallyHiddenContentRefs: CNT-001, CNT-001",
+                ),
+                "initiallyHiddenContentRefs contains duplicate IDs",
+            ),
+        ]
+        for index, (name, mutate, expected_message) in enumerate(cases, start=1):
+            with self.subTest(name=name):
+                case = self.init_case("fast", case_id=f"reveal-audit-{index}")
+                self.write_valid_contract(case)
+                self.write_valid_script(case)
+                script = case / "02-presentation-script.md"
+                script.write_text(
+                    mutate(script.read_text(encoding="utf-8")),
+                    encoding="utf-8",
+                )
+                self.prepare_and_approve(case, "fast")
+                result = self.run_script(
+                    "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+                    expected=1,
+                )
+                self.assertIn(expected_message, result.stdout)
+
+    def test_each_scene_requires_an_independent_escape(self) -> None:
+        case = self.init_case("fast")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        script = case / "02-presentation-script.md"
+        script.write_text(
+            script.read_text(encoding="utf-8").replace("##### ESC-001", "##### RECOVERY-NOTE"),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+            expected=1,
+        )
+        self.assertIn("no ESC-* executable contract records found", result.stdout)
+        self.assertIn("scenes lack ESC-* coverage: SCN-001", result.stdout)
+
+    def test_unsupported_required_capability_needs_fallback_or_decision(self) -> None:
+        case = self.init_case("fast")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        contract = case / "01-courseware-contract.md"
+        contract.write_text(
+            contract.read_text(encoding="utf-8")
+            .replace("multi-user-aggregation: not-required", "multi-user-aggregation: required")
+            .replace("multi-user-aggregationFallback: teacher-observed", "multi-user-aggregationFallback: none"),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+            expected=1,
+        )
+        self.assertIn("unsupported required capability multi-user-aggregation", result.stdout)
+
+    def test_reverse_audit_mutations_are_rejected(self) -> None:
+        cases = [
+            (
+                "duplicate-objective", "contract",
+                lambda text: text + "\n### OBJ-001 duplicate definition\n\n- duplicate: true\n",
+                "duplicate OBJ definitions: OBJ-001",
+            ),
+            (
+                "commented-scene-refs", "script",
+                lambda text: text
+                .replace("- 内容引用：CNT-001", "<!-- - 内容引用：CNT-001 -->")
+                .replace("- 目标与证据：OBJ-001, EVD-001", "<!-- - 目标与证据：OBJ-001, EVD-001 -->")
+                .replace("动作目的：生成 EVD-001", "动作目的：生成可观察证据")
+                .replace("- 学习证据：选择结果、理由与修复后回答", "- 学习证据：选择结果、理由与修复后回答"),
+                "SCN-001 has no explicit OBJ-* reference",
+            ),
+            (
+                "unknown-free-prose", "script",
+                lambda text: text + "\n自由文本误引 RESP-999, TOL-999, ACT-999, ESC-999, STATE-999。\n",
+                "semantic files reference unknown RESP IDs: RESP-999",
+            ),
+            (
+                "unknown-supporting-ids", "contract",
+                lambda text: text + "\n自由文本误引 DEC-999, SRC-999, ERR-999, FORM-999, VIS-999。\n",
+                "semantic files reference unknown DEC IDs: DEC-999",
+            ),
+            (
+                "content-fragment", "contract",
+                lambda text: text.replace("contentRef: CNT-001", "contentRef: CNT-001#not-defined"),
+                "unstructured fragments are forbidden",
+            ),
+            (
+                "authority-type-mismatch", "contract",
+                lambda text: text.replace("authority: finite-auto", "authority: normalized-auto"),
+                "authority normalized-auto is incompatible with responseType choice",
+            ),
+            (
+                "unpublished-evaluator", "contract",
+                lambda text: text.replace("EVAL-finite-choice-v1", "EVAL-does-not-exist"),
+                "references unpublished evaluator capability: EVAL-does-not-exist",
+            ),
+            (
+                "system-digital-producer", "script",
+                lambda text: text.replace("actor: student", "actor: system"),
+                "actor must be student",
+            ),
+            (
+                "internal-api-target", "script",
+                lambda text: text.replace(
+                    "target: 可见的图 A 与图 B 选择按钮",
+                    "target: page.evaluate(setPresentationState)",
+                ),
+                "target exposes an internal API",
+            ),
+            (
+                "retry-only-hard-escape", "script",
+                lambda text: text.replace(
+                    "actions: retry, reveal, continue-incomplete, scene-picker, previous, replay",
+                    "actions: retry",
+                ),
+                "hard gate override ESC-001 must include continue-incomplete",
+            ),
+            (
+                "hard-escape-other-scene", "script",
+                lambda text: text.replace(
+                    "##### ESC-001 错误或未完成时接管\n\n- sceneRef: SCN-001",
+                    "##### ESC-001 错误或未完成时接管\n\n- sceneRef: SCN-999",
+                ),
+                "hard gate override ESC-001 must be in the same scene",
+            ),
+            (
+                "foreign-scene-state", "script",
+                lambda text: text.replace(
+                    "stateRefs: STATE-001, STATE-002, STATE-003",
+                    "stateRefs: STATE-001, STATE-002, STATE-003, STATE-999",
+                ) + "\n### SCN-002 其他场景\n\n- STATE-999 其他场景状态：只属于 SCN-002\n",
+                "references states from another scene: STATE-999",
+            ),
+            (
+                "no-scene-state", "script",
+                lambda text: text
+                .replace("- STATE-001 初始画面：", "- 初始画面：")
+                .replace("- STATE-002 错误修复态：", "- 错误修复态：")
+                .replace("- STATE-003 稳定结果：", "- 稳定结果："),
+                "SCN-001 has no STATE-* definition",
+            ),
+            (
+                "deferred-explanation", "contract",
+                lambda text: text.replace(
+                    "选择图 A。四分之一要求先确定同一个整体，再把整体平均分成四份，涂色部分恰好是一份；图 B 的两块不相等，不能仅凭“一块被涂色”判断。",
+                    "The complete explanation will be supplied later in class.",
+                ),
+                "CNT-001 has no completed exact-content section",
+            ),
+            (
+                "self-fallback", "contract",
+                lambda text: text
+                .replace("multi-user-aggregation: not-required", "multi-user-aggregation: required")
+                .replace("multi-user-aggregationFallback: teacher-observed", "multi-user-aggregationFallback: multi-user-aggregation"),
+                "cannot claim the unsupported capability itself",
+            ),
+        ]
+        for index, (name, target, mutate, expected_message) in enumerate(cases, start=1):
+            with self.subTest(name=name):
+                case = self.init_case("fast", case_id=f"audit-{index}")
+                self.write_valid_contract(case)
+                self.write_valid_script(case)
+                path = case / ("01-courseware-contract.md" if target == "contract" else "02-presentation-script.md")
+                path.write_text(mutate(path.read_text(encoding="utf-8")), encoding="utf-8")
+                self.prepare_and_approve(case, "fast")
+                result = self.run_script(
+                    "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+                    expected=1,
+                )
+                self.assertIn(expected_message, result.stdout)
+
+    def test_tolerance_inputs_are_unique_and_blank_uses_empty_sentinel(self) -> None:
+        for case_id, replacement, expected_message in (
+            (
+                "same-inputs",
+                lambda text: re.sub(
+                    r"(\| TOL-\d{3} \| RESP-001 \| [^|]+ \|) [^|]+ (\| (?:pass|fail) \|)",
+                    r"\1 SAME \2",
+                    text,
+                ),
+                "all six tolerance inputs must be distinct",
+            ),
+            (
+                "bad-empty",
+                lambda text: text.replace("| blank | EMPTY | fail |", "| blank | 空白 | fail |"),
+                "blank input must use the exact EMPTY sentinel",
+            ),
+        ):
+            with self.subTest(case_id=case_id):
+                case = self.init_case("fast", case_id=case_id)
+                self.write_valid_contract(case)
+                self.write_valid_script(case)
+                contract = case / "01-courseware-contract.md"
+                contract.write_text(replacement(contract.read_text(encoding="utf-8")), encoding="utf-8")
+                self.prepare_and_approve(case, "fast")
+                result = self.run_script(
+                    "validate_case.py", str(case), "--target", "implementation-ready", "--json",
+                    expected=1,
+                )
+                self.assertIn(expected_message, result.stdout)
+
+    def test_capacity_override_decision_requires_exact_scope(self) -> None:
+        case = self.init_case("fast", case_id="capacity-scope")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        self.run_script(
+            "case_decision.py", str(case), "add", "--id", "DEC-001", "--stage", "contract",
+            "--question", "是否减少作答时间？", "--reason", "改变容量下限",
+            "--scope-ref", "capability:offline",
+            "--option", "DEC-001-A", "减少", "将首次作答缩短", "true",
+            "--option", "DEC-001-B", "保持", "保持政策下限", "false",
+        )
+        self.run_script(
+            "case_decision.py", str(case), "answer", "DEC-001",
+            "--answered-by", "user-structured", "--selected", "DEC-001-A",
+        )
+        contract = case / "01-courseware-contract.md"
+        contract.write_text(
+            contract.read_text(encoding="utf-8")
+            .replace("firstAttemptSeconds: 20", "firstAttemptSeconds: 1")
+            .replace("capacityOverrideDecisionRef: none", "capacityOverrideDecisionRef: DEC-001"),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json", expected=1,
+        )
+        self.assertIn("is not scoped to RESP-001#capacity", result.stdout)
+
+    def test_capability_decision_requires_exact_capability_scope(self) -> None:
+        case = self.init_case("fast", case_id="capability-scope")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        self.run_script(
+            "case_decision.py", str(case), "add", "--id", "DEC-001", "--stage", "contract",
+            "--question", "是否要求多人聚合？", "--reason", "改变产品能力",
+            "--scope-ref", "RESP-001#capacity",
+            "--option", "DEC-001-A", "要求", "需要多人聚合", "true",
+            "--option", "DEC-001-B", "不要求", "使用单设备", "false",
+        )
+        self.run_script(
+            "case_decision.py", str(case), "answer", "DEC-001",
+            "--answered-by", "user-structured", "--selected", "DEC-001-A",
+        )
+        contract = case / "01-courseware-contract.md"
+        contract.write_text(
+            contract.read_text(encoding="utf-8")
+            .replace("multi-user-aggregation: not-required", "multi-user-aggregation: required")
+            .replace("multi-user-aggregationFallback: teacher-observed", "multi-user-aggregationFallback: none")
+            .replace("multi-user-aggregationDecisionRef: none", "multi-user-aggregationDecisionRef: DEC-001"),
+            encoding="utf-8",
+        )
+        self.prepare_and_approve(case, "fast")
+        result = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json", expected=1,
+        )
+        self.assertIn("is not scoped to capability:multi-user-aggregation", result.stdout)
+
+    def test_review_scope_includes_case_identity_and_orchestration_outcome_is_closed(self) -> None:
+        case = self.init_case("fast", case_id="scope-identity")
+        self.write_valid_contract(case)
+        self.write_valid_script(case)
+        self.prepare_and_approve(case, "fast")
+        manifest_path = case / "case.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["title"] = "未批准的新标题"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        stale = self.run_script(
+            "validate_case.py", str(case), "--target", "implementation-ready", "--json", expected=1,
+        )
+        self.assertIn("review scope is stale: experience", stale.stdout)
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["resultStatus"] = "engineering candidate"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        closed = self.run_script("validate_case.py", str(case), "--target", "draft", "--json", expected=1)
+        self.assertIn("orchestration resultStatus may only be pending or rejected", closed.stdout)
 
     def test_v1_migration_preserves_source_and_inherits_no_approval(self) -> None:
         source = self.root / "legacy"

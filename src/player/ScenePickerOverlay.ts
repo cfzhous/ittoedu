@@ -15,8 +15,12 @@ export interface TeacherControllerCollapseEvent {
 export interface ScenePickerOverlayOptions {
   stage: HTMLElement
   scenes: readonly ScenePickerScene[]
-  onSelect(sceneId: string): void
+  onSelect(sceneId: string, bypassNavigationGuards: boolean): void
   onClose?(): void
+}
+
+export interface ScenePickerOpenOptions {
+  bypassNavigationGuards?: boolean
 }
 
 let scenePickerSequence = 0
@@ -38,10 +42,14 @@ export class ScenePickerOverlay {
   private readonly closeButton: HTMLButtonElement
   private readonly sceneButtons: HTMLButtonElement[] = []
   private readonly sceneIds: string[] = []
-  private readonly onSelect: (sceneId: string) => void
+  private readonly onSelect: (
+    sceneId: string,
+    bypassNavigationGuards: boolean,
+  ) => void
   private readonly onClose: (() => void) | undefined
   private restoreFocusTo: HTMLElement | null = null
   private openValue = false
+  private bypassNavigationGuards = false
   private destroyed = false
 
   constructor(options: ScenePickerOverlayOptions) {
@@ -69,6 +77,7 @@ export class ScenePickerOverlay {
 
     const dialog = document.createElement('section')
     dialog.className = 'lesson-scene-picker'
+    dialog.dataset.scenePicker = 'true'
     dialog.setAttribute('role', 'dialog')
     dialog.setAttribute('aria-modal', 'true')
     dialog.setAttribute('aria-labelledby', titleId)
@@ -197,8 +206,9 @@ export class ScenePickerOverlay {
       button.append(number, name)
       button.addEventListener('click', () => {
         if (this.destroyed) return
+        const bypassNavigationGuards = this.bypassNavigationGuards
         this.close()
-        this.onSelect(scene.id)
+        this.onSelect(scene.id, bypassNavigationGuards)
       })
       list.append(button)
       this.sceneButtons.push(button)
@@ -220,8 +230,12 @@ export class ScenePickerOverlay {
     return this.openValue
   }
 
-  open(currentSceneId: string | null): void {
+  open(
+    currentSceneId: string | null,
+    options: ScenePickerOpenOptions = {},
+  ): void {
     if (this.destroyed) return
+    this.bypassNavigationGuards = options.bypassNavigationGuards ?? false
     if (!this.openValue) {
       this.restoreFocusTo = document.activeElement instanceof HTMLElement &&
         document.activeElement !== document.body
@@ -261,8 +275,12 @@ export class ScenePickerOverlay {
   }
 
   close(restoreFocus = true): void {
-    if (!this.openValue) return
+    if (!this.openValue) {
+      this.bypassNavigationGuards = false
+      return
+    }
     this.openValue = false
+    this.bypassNavigationGuards = false
     this.layer.hidden = true
     this.layer.style.display = 'none'
     this.onClose?.()

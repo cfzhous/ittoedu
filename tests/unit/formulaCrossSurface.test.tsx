@@ -198,7 +198,7 @@ describe('FormulaNode shared renderer surfaces', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context2d)
     const formula = createFormulaNode({ id: 'formula-player' })
     const harness = playerSceneHarness()
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const renderContext = {
       payload: { project, assets: {}, components: {} },
       registry: {},
@@ -227,7 +227,7 @@ describe('FormulaNode shared renderer surfaces', () => {
   it('renders FormulaNode in static HTML/PDF capture and scene thumbnails', async () => {
     const context2d = canvasContext()
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context2d)
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const formula = createFormulaNode({ id: 'formula-static' })
     project.scenes[0]!.nodes.push(formula)
     useEditorStore.getState().loadProject(project, null, {}, {})

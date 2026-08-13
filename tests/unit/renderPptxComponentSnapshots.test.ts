@@ -126,7 +126,7 @@ afterEach(() => {
 
 describe('PPTX component snapshot capture semantics', () => {
   it('starts the isolated Player in capture mode so playback-only hiding cannot leak into snapshots', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createExternalComponentNode({
       id: 'animated-component',
       component: { packageId: 'com.example.animated', version: '1.0.0' },
@@ -161,7 +161,7 @@ describe('PPTX component snapshot capture semantics', () => {
   })
 
   it('逐实例销毁 Player，避免场景与全局组件并发持久化', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes.push(createScene({ id: 'scene-2', name: '场景 2' }))
     const sceneNodes = project.scenes.map((scene, index) => {
       const node = createExternalComponentNode({
@@ -218,7 +218,7 @@ describe('PPTX component snapshot capture semantics', () => {
   })
 
   it('单个组件快照失败时保留前后实例，并只报告失败实例', async () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.scenes.push(
       createScene({ id: 'scene-2', name: '场景 2' }),
       createScene({ id: 'scene-3', name: '场景 3' }),

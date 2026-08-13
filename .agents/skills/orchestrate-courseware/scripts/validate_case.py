@@ -28,15 +28,25 @@ from courseware_case_v2 import (
     review_scope_sha256,
     save_manifest,
 )
+from contract_records import parse_contract_records, validate_executable_contracts
 
 
 PLACEHOLDERS = ("[待填写", "{{", "TODO", "TBD")
-UNDERSPECIFIED = ("见聊天", "见旧实现", "参考旧课件", "同上", "按需处理", "后续补充", "由实现决定")
+UNDERSPECIFIED = (
+    "见聊天", "见旧实现", "参考旧课件", "同上", "按需处理", "后续补充", "由实现决定",
+    "稍后补充", "稍后说明", "课堂中补充", "课上补充", "待课堂说明",
+    "later in class", "explain later", "to be supplied later",
+)
 CONTRACT_HEADINGS = (
     "## 受众、场景与时间",
+    "## 产品能力剖面",
     "## 学习目标与证据",
     "## 内容边界与教学序列",
     "## 精确内容",
+    "## 响应、判定与容量",
+    "## 自动判定容差矩阵",
+    "## 响应容量汇总",
+    "## 编辑结果合同",
     "## 评价、反馈与约束",
     "## 来源与假设",
 )
@@ -48,6 +58,7 @@ SCRIPT_HEADINGS = (
     "#### 即时反馈、错误与恢复",
     "#### 稳定状态与转换",
     "#### 信息释放与教师视角",
+    "#### 可执行动作与教师逃生",
     "#### 证据与静态审阅帧",
 )
 CONTENT_HEADINGS = (
@@ -82,6 +93,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target", choices=("draft", "implementation-ready"), default="draft")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument(
+        "--capability-index",
+        help=(
+            "Explicit product Capability Index path. Otherwise discover an editor root "
+            "from cwd, the case, or a repository-backed skill location."
+        ),
+    )
+    parser.add_argument(
         "--promote",
         action="store_true",
         help="Persist the derived readiness result; never creates an approval or accepted outcome",
@@ -91,6 +109,70 @@ def parse_args() -> argparse.Namespace:
 
 def ids(text: str, prefix: str) -> set[str]:
     return set(re.findall(rf"\b{re.escape(prefix)}-\d{{3,}}\b", text))
+
+
+def heading_ids(text: str, prefix: str) -> set[str]:
+    return set(
+        re.findall(
+            rf"^#{{3,6}}\s+({re.escape(prefix)}-\d{{3,}})\b",
+            text,
+            re.MULTILINE,
+        )
+    )
+
+
+def heading_id_list(text: str, prefix: str) -> list[str]:
+    return re.findall(
+        rf"^#{{3,6}}\s+({re.escape(prefix)}-\d{{3,}})\b",
+        text,
+        re.MULTILINE,
+    )
+
+
+def strip_nonsemantic_comments(text: str) -> str:
+    """Remove HTML comments so commented-out IDs cannot satisfy closure."""
+
+    return re.sub(r"<!--[\s\S]*?-->", "", text)
+
+
+def state_definition_ids(text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"^\s*-\s*(STATE-\d{3,})\b[^\n：:]*[：:]",
+            text,
+            re.MULTILINE,
+        )
+    )
+
+
+def state_definition_list(text: str) -> list[str]:
+    return re.findall(
+        r"^\s*-\s*(STATE-\d{3,})\b[^\n：:]*[：:]",
+        text,
+        re.MULTILINE,
+    )
+
+
+def marker_definition_list(text: str, prefix: str) -> list[str]:
+    """Find explicitly structured heading, bullet-field, or first-table-cell definitions."""
+
+    identifier = rf"{re.escape(prefix)}-\d{{3,}}"
+    values = re.findall(rf"^#{{3,6}}\s+({identifier})\b", text, re.MULTILINE)
+    values.extend(
+        re.findall(
+            rf"^\s*-\s*({identifier})\b[^\n：:]*[：:]",
+            text,
+            re.MULTILINE,
+        )
+    )
+    values.extend(
+        re.findall(
+            rf"^\|\s*`?({identifier})`?\s*\|",
+            text,
+            re.MULTILINE,
+        )
+    )
+    return values
 
 
 def field_minutes(text: str, label: str) -> list[int]:
@@ -129,6 +211,86 @@ def content_definitions(files: dict[str, str]) -> tuple[dict[str, str], dict[str
     return blocks, locations, duplicates
 
 
+def discover_capability_index(
+    case_dir: Path,
+    explicit_path: str | None,
+    errors: list[str],
+) -> Path | None:
+    if explicit_path:
+        path = Path(explicit_path).resolve()
+        if not path.is_file():
+            errors.append(f"explicit Capability Index does not exist: {path}")
+            return None
+        return path
+
+    roots: list[Path] = []
+    for origin in (Path.cwd().resolve(), case_dir.resolve(), Path(__file__).resolve().parent):
+        for candidate_root in (origin, *origin.parents):
+            if candidate_root not in roots:
+                roots.append(candidate_root)
+    for root in roots:
+        index_path = root / "artifacts" / "ai-capabilities" / "index.json"
+        # The product source marker prevents an installed ~/.agents Skill from
+        # accidentally treating the user's home directory as the editor root.
+        if (
+            index_path.is_file()
+            and (root / "package.json").is_file()
+            and (root / "src" / "shared" / "assessmentEvaluators.ts").is_file()
+        ):
+            return index_path
+    errors.append(
+        "cannot discover the repository Capability Index; run from the editor root "
+        "or pass --capability-index <editor-root>/artifacts/ai-capabilities/index.json"
+    )
+    return None
+
+
+def load_evaluator_registry(
+    errors: list[str],
+    index_path: Path | None,
+) -> dict[str, dict[str, Any]]:
+    """Load only published, callable assessment evaluators from the product index."""
+
+    if index_path is None:
+        return {}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"cannot load assessment evaluator registry {index_path}: {exc}")
+        return {}
+    entries = index.get("assessmentEvaluators")
+    if not isinstance(entries, list):
+        errors.append("capability index has no assessmentEvaluators registry")
+        return {}
+    registry: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            errors.append("assessmentEvaluators entries must be objects")
+            continue
+        evaluator_id = entry.get("id")
+        invocation = entry.get("invocation")
+        valid = (
+            isinstance(evaluator_id, str)
+            and re.fullmatch(r"EVAL-[A-Za-z0-9._-]+", evaluator_id)
+            and entry.get("version") == 1
+            and entry.get("status") == "stable"
+            and isinstance(entry.get("authorities"), list)
+            and isinstance(entry.get("responseTypes"), list)
+            and isinstance(invocation, dict)
+            and invocation.get("module") == "src/shared/assessmentEvaluators.ts"
+            and invocation.get("export") == "evaluateAssessment"
+            and invocation.get("runtime") == "ctx.assessment.evaluate"
+        )
+        if not valid:
+            errors.append(f"assessment evaluator registry entry is not published/callable: {evaluator_id!r}")
+            continue
+        if evaluator_id in registry:
+            errors.append(f"duplicate assessment evaluator registry ID: {evaluator_id}")
+            continue
+        registry[evaluator_id] = entry
+    return registry
+
+
 def validate_decisions(manifest: dict[str, Any], errors: list[str]) -> list[str]:
     decisions = manifest.get("decisions")
     if not isinstance(decisions, list):
@@ -158,6 +320,18 @@ def validate_decisions(manifest: dict[str, Any], errors: list[str]) -> list[str]
         if recommended != [0]:
             errors.append(f"{decision_id} must put exactly one recommended option first")
         response = decision.get("response")
+        scope_refs = decision.get("scopeRefs", [])
+        if not isinstance(scope_refs, list) or any(
+            not isinstance(value, str)
+            or not re.fullmatch(
+                r"(?:RESP-\d{3,}#capacity|capability:[a-z0-9]+(?:-[a-z0-9]+)*)",
+                value,
+            )
+            for value in scope_refs
+        ):
+            errors.append(f"{decision_id} has invalid scopeRefs")
+        elif len(scope_refs) != len(set(scope_refs)):
+            errors.append(f"{decision_id} has duplicate scopeRefs")
         if decision.get("blocking") is True and not response:
             unresolved.append(decision_id)
         if response:
@@ -274,7 +448,13 @@ def validate_reviews(case_dir: Path, manifest: dict[str, Any], errors: list[str]
     return approved_hashes, stale_reviews
 
 
-def semantic_closure(case_dir: Path, manifest: dict[str, Any], errors: list[str], warnings: list[str]) -> dict[str, str]:
+def semantic_closure(
+    case_dir: Path,
+    manifest: dict[str, Any],
+    errors: list[str],
+    warnings: list[str],
+    capability_index_path: Path | None,
+) -> tuple[dict[str, str], dict[str, Any]]:
     contract_path = case_dir / "01-courseware-contract.md"
     script_path = case_dir / "02-presentation-script.md"
     try:
@@ -282,7 +462,7 @@ def semantic_closure(case_dir: Path, manifest: dict[str, Any], errors: list[str]
         script = script_path.read_text(encoding="utf-8")
     except OSError as exc:
         errors.append(f"cannot read required Markdown: {exc}")
-        return {}
+        return {}, {}
     for heading in CONTRACT_HEADINGS:
         if heading not in contract:
             errors.append(f"01-courseware-contract.md is missing heading: {heading}")
@@ -308,11 +488,25 @@ def semantic_closure(case_dir: Path, manifest: dict[str, Any], errors: list[str]
             if not completed_section(block, heading):
                 errors.append(f"{content_id} has no completed exact-content section: {heading}")
 
-    objective_ids = ids(contract, "OBJ")
-    evidence_ids = ids(contract, "EVD")
-    stage_ids = ids(contract, "STG")
-    scene_ids = ids(script, "SCN")
-    state_ids = ids(script, "STATE")
+    semantic_contract = strip_nonsemantic_comments(contract)
+    semantic_script = strip_nonsemantic_comments(script)
+    objective_ids = heading_ids(semantic_contract, "OBJ")
+    evidence_ids = heading_ids(semantic_contract, "EVD")
+    stage_ids = heading_ids(semantic_contract, "STG")
+    scene_ids = heading_ids(semantic_script, "SCN")
+    state_ids = state_definition_ids(semantic_script)
+    for label, values in (
+        ("OBJ", heading_id_list(semantic_contract, "OBJ")),
+        ("EVD", heading_id_list(semantic_contract, "EVD")),
+        ("STG", heading_id_list(semantic_contract, "STG")),
+        ("SCN", heading_id_list(semantic_script, "SCN")),
+        ("STATE", state_definition_list(semantic_script)),
+    ):
+        duplicates_for_type = sorted({value for value in values if values.count(value) > 1})
+        if duplicates_for_type:
+            errors.append(
+                f"duplicate {label} definitions: " + ", ".join(duplicates_for_type)
+            )
     for label, values in (
         ("learning objective", objective_ids),
         ("learning evidence", evidence_ids),
@@ -322,24 +516,52 @@ def semantic_closure(case_dir: Path, manifest: dict[str, Any], errors: list[str]
     ):
         if not values:
             errors.append(f"no {label} IDs found")
-    script_content_refs = ids(script, "CNT")
+    script_content_refs = ids(semantic_script, "CNT")
     unknown_content = script_content_refs - set(blocks)
     if unknown_content:
         errors.append("presentation script references unknown content IDs: " + ", ".join(sorted(unknown_content)))
     unused_content = set(blocks) - script_content_refs
     if unused_content:
         errors.append("exact content items unused by the presentation script: " + ", ".join(sorted(unused_content)))
-    unknown_objectives = ids(script, "OBJ") - objective_ids
-    unknown_evidence = ids(script, "EVD") - evidence_ids
+    unknown_objectives = ids(semantic_script, "OBJ") - objective_ids
+    unknown_evidence = ids(semantic_script, "EVD") - evidence_ids
     if unknown_objectives:
         errors.append("presentation script references unknown objectives: " + ", ".join(sorted(unknown_objectives)))
     if unknown_evidence:
         errors.append("presentation script references unknown evidence: " + ", ".join(sorted(unknown_evidence)))
 
-    scene_blocks = re.split(r"(?=^### SCN-\d{3,}\b)", script, flags=re.MULTILINE)[1:]
+    scene_blocks = re.split(r"(?=^### SCN-\d{3,}\b)", semantic_script, flags=re.MULTILINE)[1:]
+    state_scene_map: dict[str, str] = {}
+    scene_content_map: dict[str, set[str]] = {}
     for block in scene_blocks:
         match = re.match(r"### (SCN-\d{3,})", block)
         scene_id = match.group(1) if match else "<unknown-scene>"
+        scene_objectives = ids(block, "OBJ")
+        scene_evidence = ids(block, "EVD")
+        scene_content = set().union(*(
+            ids(value, "CNT")
+            for value in re.findall(
+                r"^\s*-\s*内容引用\s*[：:]\s*(.*?)\s*$",
+                block,
+                re.MULTILINE,
+            )
+        ))
+        scene_content_map[scene_id] = scene_content
+        scene_states = state_definition_list(block)
+        if not scene_objectives:
+            errors.append(f"{scene_id} has no explicit OBJ-* reference")
+        if not scene_evidence:
+            errors.append(f"{scene_id} has no explicit EVD-* reference")
+        if not scene_content:
+            errors.append(f"{scene_id} has no explicit CNT-* reference")
+        if not scene_states:
+            errors.append(f"{scene_id} has no STATE-* definition")
+        for state_id in scene_states:
+            existing_scene = state_scene_map.get(state_id)
+            if existing_scene and existing_scene != scene_id:
+                errors.append(f"{state_id} is defined in more than one scene")
+            else:
+                state_scene_map[state_id] = scene_id
         for heading in SCRIPT_HEADINGS[2:]:
             if not completed_section(block, heading):
                 errors.append(f"{scene_id} has no completed section: {heading}")
@@ -360,6 +582,72 @@ def semantic_closure(case_dir: Path, manifest: dict[str, Any], errors: list[str]
                 errors.append(f"{location} still contains placeholder marker {marker!r}")
                 break
 
+    parsed_contracts = parse_contract_records(semantic_contract, semantic_script)
+    reference_files = dict(semantic_files)
+    visual_path_for_index = case_dir / "visual-direction.md"
+    if visual_path_for_index.is_file():
+        reference_files["visual-direction.md"] = visual_path_for_index.read_text(encoding="utf-8")
+    semantic_corpus = "\n".join(
+        strip_nonsemantic_comments(text) for text in reference_files.values()
+    )
+    structured_marker_ids: dict[str, set[str]] = {}
+    for prefix in ("SRC", "ERR", "FORM", "VIS"):
+        definitions = marker_definition_list(semantic_corpus, prefix)
+        duplicates_for_type = sorted({value for value in definitions if definitions.count(value) > 1})
+        if duplicates_for_type:
+            errors.append(
+                f"duplicate {prefix} definitions: " + ", ".join(duplicates_for_type)
+            )
+        structured_marker_ids[prefix] = set(definitions)
+
+    known_ids_by_prefix = {
+        "DEC": {
+            decision.get("id") for decision in manifest.get("decisions", [])
+            if isinstance(decision, dict) and isinstance(decision.get("id"), str)
+        },
+        "OBJ": objective_ids,
+        "EVD": evidence_ids,
+        "STG": stage_ids,
+        "SCN": scene_ids,
+        "STATE": state_ids,
+        "CNT": set(blocks),
+        "TOL": set(parsed_contracts.tolerance_cases),
+        "RESP": {record.record_id for record in parsed_contracts.of_type("RESP")},
+        "AUTH": {record.record_id for record in parsed_contracts.of_type("AUTH")},
+        "ACT": {record.record_id for record in parsed_contracts.of_type("ACT")},
+        "ESC": {record.record_id for record in parsed_contracts.of_type("ESC")},
+        **structured_marker_ids,
+    }
+    for prefix, known_ids in known_ids_by_prefix.items():
+        unknown_ids = ids(semantic_corpus, prefix) - known_ids
+        if unknown_ids:
+            errors.append(
+                f"semantic files reference unknown {prefix} IDs: "
+                + ", ".join(sorted(unknown_ids))
+            )
+    fragment_refs = sorted(set(re.findall(r"\bCNT-\d{3,}#[A-Za-z0-9._-]+", semantic_corpus)))
+    if fragment_refs:
+        errors.append(
+            "unstructured CNT-* fragments are forbidden; define exact CNT-* items instead: "
+            + ", ".join(fragment_refs)
+        )
+    evaluator_registry = load_evaluator_registry(errors, capability_index_path)
+    record_errors, record_warnings, record_summary = validate_executable_contracts(
+        parsed_contracts,
+        objective_ids=objective_ids,
+        evidence_ids=evidence_ids,
+        content_ids=set(blocks),
+        scene_ids=scene_ids,
+        scene_content_map=scene_content_map,
+        state_ids=state_ids,
+        state_scene_map=state_scene_map,
+        decisions=manifest.get("decisions", []),
+        duration_minutes=manifest.get("durationMinutes"),
+        evaluator_registry=evaluator_registry,
+    )
+    errors.extend(record_errors)
+    warnings.extend(record_warnings)
+
     visual = manifest.get("artifacts", {}).get("visualDirection", {})
     if visual.get("required"):
         visual_path = case_dir / "visual-direction.md"
@@ -376,7 +664,7 @@ def semantic_closure(case_dir: Path, manifest: dict[str, Any], errors: list[str]
                     break
         else:
             errors.append("high-risk path is missing visual-direction.md")
-    return locations
+    return locations, record_summary
 
 
 def main() -> int:
@@ -395,6 +683,12 @@ def main() -> int:
     unresolved = validate_decisions(manifest, errors)
     approved_hashes, stale_reviews = validate_reviews(case_dir, manifest, errors)
     exact_locations: dict[str, str] = {}
+    contract_record_summary: dict[str, Any] = {}
+    capability_index_path = discover_capability_index(
+        case_dir,
+        args.capability_index,
+        errors,
+    ) if args.target == "implementation-ready" else None
 
     if args.target == "implementation-ready":
         if unresolved:
@@ -402,17 +696,15 @@ def main() -> int:
         for review_key in review_order(manifest):
             if manifest.get("reviews", {}).get(review_key, {}).get("status") != "approved":
                 errors.append(f"required review is not approved: {review_key}")
-        exact_locations = semantic_closure(case_dir, manifest, errors, warnings)
+        exact_locations, contract_record_summary = semantic_closure(
+            case_dir, manifest, errors, warnings, capability_index_path
+        )
 
     result_status = manifest.get("resultStatus")
-    if result_status not in ("pending", "engineering candidate", "art candidate", "accepted", "rejected"):
-        errors.append(f"invalid resultStatus: {result_status}")
-    if result_status == "accepted":
-        human = manifest.get("humanAcceptance")
-        if not isinstance(human, dict) or not all(str(human.get(key) or "").strip() for key in ("reviewer", "acceptedAt", "evidence")):
-            errors.append("accepted requires an explicit humanAcceptance reviewer, time, and evidence")
-        elif is_automated_identity(human.get("reviewer")):
-            errors.append("accepted reviewer must be human; automated identities cannot accept outcomes")
+    if result_status not in ("pending", "rejected"):
+        errors.append(
+            f"orchestration resultStatus may only be pending or rejected, got: {result_status}"
+        )
 
     artifact_hashes = {}
     for key, artifact in manifest.get("artifacts", {}).items():
@@ -451,6 +743,7 @@ def main() -> int:
         "errors": list(dict.fromkeys(errors)),
         "warnings": list(dict.fromkeys(warnings)),
         "exactContentLocations": exact_locations,
+        "contractRecordSummary": contract_record_summary,
     }
     if args.as_json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

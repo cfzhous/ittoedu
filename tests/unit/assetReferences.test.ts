@@ -28,7 +28,7 @@ function asset(id: string, kind: AssetMeta['kind'] = 'image'): AssetMeta {
 
 describe('project asset reference graph', () => {
   it('covers base/state/global/sound/runtime and reports exact locations', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const ids = [
       'scene-bg', 'state-bg', 'base-image', 'state-image', 'global-video',
@@ -83,7 +83,7 @@ describe('project asset reference graph', () => {
   })
 
   it('covers nested component props, manifest image defaults and runtime source', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     ;['prop-image', 'state-prop-image', 'default-image', 'source-image', 'unrelated'].forEach((id) => {
       project.assets[id] = asset(id)
     })
@@ -137,7 +137,7 @@ describe('project asset reference graph', () => {
   })
 
   it('does not treat missing component context as permission to delete', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.protected = asset('protected')
     const node = createExternalComponentNode({
       component: { packageId: 'missing', version: '4.0.0' },
@@ -155,7 +155,7 @@ describe('project asset reference graph', () => {
   })
 
   it('keeps explicit manifest image fields direct even when the asset is missing', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createExternalComponentNode({
       component: { packageId: 'com.test.missing-image', version: '4.0.0' },
       props: { cover: 'missing-project-asset' },
@@ -183,7 +183,7 @@ describe('project asset reference graph', () => {
   })
 
   it('keeps graph, deletion, unused diagnostics, and publishing projection aligned', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const referenced = asset('referenced')
     const unused = asset('unused')
     project.assets.referenced = referenced

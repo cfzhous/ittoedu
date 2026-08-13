@@ -28,8 +28,26 @@ function codes(project: ReturnType<typeof createProject>) {
 }
 
 describe('工程健康检查', () => {
+  it('把画布控制模式与交付可见教师控制器的双向不一致报为错误', () => {
+    const missing = createProject({ includeDefaultController: false, controls: 'none' })
+    missing.playback.controls = 'canvas'
+    expect(collectProjectHealth(missing)).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'controller-required-for-canvas',
+      path: ['playback', 'controls'],
+    }))
+
+    const disabled = createProject()
+    disabled.playback.controls = 'none'
+    expect(collectProjectHealth(disabled)).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'controller-visible-while-disabled',
+      path: ['playback', 'controls'],
+    }))
+  })
+
   it('reports unused assets with an addressable asset location', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.unused = {
       id: 'unused', filename: 'unused.png', mimeType: 'image/png',
       kind: 'image', path: 'assets/unused.png', byteLength: 42,
@@ -45,7 +63,7 @@ describe('工程健康检查', () => {
   })
 
   it('reports a missing asset from an explicit component image property', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const node = createExternalComponentNode({
       component: { packageId: 'com.test.image', version: '4.0.0' },
       props: { cover: 'missing-cover' },
@@ -79,6 +97,7 @@ describe('工程健康检查', () => {
       id: 'health-invalid',
       now: '2026-01-01T00:00:00.000Z',
       includeDefaultController: false,
+      controls: 'none',
     })
     const scene = project.scenes[0]!
     const image = createImageNode({ id: 'missing-image', assetId: 'image-missing' })
@@ -124,6 +143,7 @@ describe('工程健康检查', () => {
       id: 'health-interactions',
       now: '2026-01-01T00:00:00.000Z',
       includeDefaultController: false,
+      controls: 'none',
     })
     const scene = project.scenes[0]!
     project.scenes.push(createScene({ id: 'second-scene', name: '第二场景' }))
@@ -243,6 +263,7 @@ describe('工程健康检查', () => {
       id: 'health-video',
       now: '2026-01-01T00:00:00.000Z',
       includeDefaultController: false,
+      controls: 'none',
     })
     const video = createVideoNode({ id: 'video', assetId: 'clip' })
     video.clickToToggle = true
@@ -272,7 +293,7 @@ describe('工程健康检查', () => {
   })
 
   it('检查动画动作引用、重复 ID、终结导航与初始可见性', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const scene = project.scenes[0]!
     const node = createRectangleNode({ id: 'motion-node' })
     scene.nodes.push(node)
@@ -355,7 +376,7 @@ describe('工程健康检查', () => {
   })
 
   it('检查作者命令翻页笔是否有可执行规则', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.playback.presenter = {
       enabled: true,
       strategy: 'authored-command',
@@ -382,7 +403,7 @@ describe('工程健康检查', () => {
   })
 
   it('把无法到达的初始隐藏节点纳入只读信息释放诊断', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const hidden = createTextNode({
       id: 'hidden-copy',
       name: '隐藏结论',

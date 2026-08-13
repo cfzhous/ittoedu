@@ -69,6 +69,10 @@ import {
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
+  restoreTeacherControllerForDelivery,
+  synchronizeTeacherControllerControls,
+} from '../../shared/teacherControllerConsistency'
+import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
   MAX_PROJECT_SCENES,
@@ -476,6 +480,9 @@ function normalizedVisibility(
   )
   if (selectedIds.length > 0) {
     return { mode: visibility.mode, sceneIds: selectedIds }
+  }
+  if (visibility.mode === 'exclude') {
+    return { mode: 'all', sceneIds: [] }
   }
   const fallbackSceneId = validIds[0]
   if (!fallbackSceneId) return { mode: 'all', sceneIds: [] }
@@ -1398,7 +1405,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         : []
       const [nextProject, patches, inversePatches] = produceWithPatches(
         prepared.project,
-        recipe,
+        (draft) => {
+          recipe(draft)
+          synchronizeTeacherControllerControls(draft)
+        },
       )
       if (nextProject === prepared.project && componentPackageMutations.length === 0) return prepared
       const componentPackageChanges = componentPackageMutations.map((mutation) => ({
@@ -1527,7 +1537,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       const [nextProject, patches, inversePatches] = produceWithPatches(
         prepared.project,
-        recipe,
+        (draft) => {
+          recipe(draft)
+          synchronizeTeacherControllerControls(draft)
+        },
       )
       if (nextProject === prepared.project && assetFileChanges.length === 0) {
         return prepared
@@ -1940,9 +1953,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
         state.project.scenes[index - 1] ?? state.project.scenes[index + 1]
       commit((draft) => {
         draft.scenes = draft.scenes.filter((scene) => scene.id !== sceneId)
+        const remainingSceneIds = draft.scenes.map((scene) => scene.id)
         for (const item of draft.globalLayer) {
-          item.visibility.sceneIds = item.visibility.sceneIds.filter(
-            (id) => id !== sceneId,
+          item.visibility = normalizedVisibility(
+            remainingSceneIds,
+            {
+              ...item.visibility,
+              sceneIds: item.visibility.sceneIds.filter((id) => id !== sceneId),
+            },
           )
         }
         for (const remainingScene of draft.scenes) {
@@ -2992,8 +3010,29 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updatePlayback(patch) {
+      const requestedControls = patch.controls
       commit((draft) => {
         draft.playback = { ...draft.playback, ...patch }
+        if (requestedControls === 'none') {
+          for (const item of draft.globalLayer) {
+            if (item.node.type === 'teacher-controller') {
+              item.node.playbackInitialVisibility = 'hidden'
+            }
+          }
+        } else if (requestedControls === 'canvas') {
+          let controller = draft.globalLayer.find(
+            (item) => item.node.type === 'teacher-controller',
+          )
+          if (!controller) {
+            controller = {
+              node: createTeacherControllerNode(),
+              layer: 'overlay',
+              visibility: { mode: 'all', sceneIds: [] },
+            }
+            draft.globalLayer.push(controller)
+          }
+          restoreTeacherControllerForDelivery(controller)
+        }
       })
       set({ statusMessage: '成品控制设置已更新' })
     },
@@ -3010,6 +3049,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         (item) => item.node.type === 'teacher-controller',
       )
       if (existing) {
+        commit((draft) => {
+          const controller = draft.globalLayer.find(
+            (item) => item.node.id === existing.node.id,
+          )
+          if (!controller || controller.node.type !== 'teacher-controller') return
+          restoreTeacherControllerForDelivery(controller)
+        }, existing.node.id)
         set({
           editingScope: 'global',
           selectedNodeId: existing.node.id,
@@ -3021,7 +3067,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
       const node = createTeacherControllerNode()
       commit((draft) => {
-        draft.playback.controls = 'canvas'
         draft.globalLayer.push({
           node,
           layer: 'overlay',

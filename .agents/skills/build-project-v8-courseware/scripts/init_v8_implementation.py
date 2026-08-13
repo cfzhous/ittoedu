@@ -13,7 +13,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from v8_common import sha256_file, validate_capabilities, validate_case_readiness, within
+from v8_common import (
+    load_contract_facts,
+    sha256_file,
+    validate_capabilities,
+    validate_case_readiness,
+    within,
+)
 
 
 def now_iso() -> str:
@@ -38,6 +44,20 @@ def render(source: Path, destination: Path, replacements: dict[str, str]) -> Non
     destination.write_text(text, encoding="utf-8")
 
 
+def typescript_import_prefix(editor_root: Path, implementation_dir: Path) -> str:
+    """Return an import prefix that stays valid when case/editor use different drives.
+
+    ``os.path.relpath`` raises ``ValueError`` for cross-drive Windows paths.  Node's
+    ESM resolver accepts absolute ``file:`` URLs, so use one whenever a relative
+    path cannot honestly represent the editor root.
+    """
+    try:
+        relative = os.path.relpath(editor_root, implementation_dir).replace("\\", "/")
+    except ValueError:
+        return editor_root.resolve().as_uri()
+    return relative if relative.startswith(".") else "./" + relative
+
+
 def main() -> int:
     args = parse_args()
     case_dir = Path(args.case_dir).resolve()
@@ -48,7 +68,8 @@ def main() -> int:
             raise ValueError(f"case directory is missing: {case_dir}")
         if not (editor_root / "package.json").is_file():
             raise ValueError(f"editor root is invalid: {editor_root}")
-        case = validate_case_readiness(case_dir, skill_dir)
+        case = validate_case_readiness(case_dir, skill_dir, editor_root=editor_root)
+        contract = load_contract_facts(case_dir, case=case, skill_dir=skill_dir)
         _, capability_hash = validate_capabilities(editor_root)
 
         artifacts = case.get("artifacts")
@@ -87,9 +108,7 @@ def main() -> int:
                 (staging / name).mkdir()
             templates = skill_dir / "assets" / "case-templates"
             implementation_dir = case_dir / "implementation"
-            import_prefix = os.path.relpath(editor_root, implementation_dir).replace("\\", "/")
-            if not import_prefix.startswith("."):
-                import_prefix = "./" + import_prefix
+            import_prefix = typescript_import_prefix(editor_root, implementation_dir)
             case_id = str(case.get("caseId"))
             title = str(case.get("title"))
             replacements = {
@@ -98,44 +117,74 @@ def main() -> int:
                 "{{TITLE}}": title,
                 "{{TITLE_JSON}}": json.dumps(title, ensure_ascii=False),
                 "{{PRESENTATION_SHA256}}": presentation_hash,
+                "{{COURSEWARE_CONTRACT_SHA256}}": contract["coursewareContractSha256"],
                 "{{CAPABILITY_SHA256}}": capability_hash,
                 "{{EDITOR_IMPORT_PREFIX}}": import_prefix,
             }
             render(templates / "03-development-plan.md", staging / "03-development-plan.md", replacements)
+            development_plan_hash = sha256_file(staging / "03-development-plan.md")
+            replacements["{{DEVELOPMENT_PLAN_SHA256}}"] = development_plan_hash
             render(templates / "build.ts", staging / "implementation" / "build.ts", replacements)
             render(templates / "patch.ts", staging / "implementation" / "patch.ts", replacements)
+            render(
+                templates / "behavior-spec.json",
+                staging / "implementation" / "behavior-spec.json",
+                replacements,
+            )
+            behavior_spec_hash = sha256_file(staging / "implementation" / "behavior-spec.json")
 
             write_json(staging / "implementation" / "authoring-inventory.json", {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "caseId": case_id,
                 "projectPath": f"project/{case_id}.h5lesson",
                 "generatedFrom": {
+                    "coursewareContractSha256": contract["coursewareContractSha256"],
                     "presentationScriptSha256": presentation_hash,
                     "capabilityIndexSha256": capability_hash,
+                    "developmentPlanSha256": development_plan_hash,
                 },
                 "globalEntities": [],
                 "scenes": [],
             })
+            inventory_hash = sha256_file(staging / "implementation" / "authoring-inventory.json")
+            replacements["{{AUTHORING_INVENTORY_SHA256}}"] = inventory_hash
+            render(
+                templates / "authoring-target-snapshot.json",
+                staging / "implementation" / "authoring-target-snapshot.json",
+                replacements,
+            )
+            target_snapshot_hash = sha256_file(
+                staging / "implementation" / "authoring-target-snapshot.json"
+            )
             write_json(staging / "implementation" / "implementation-state.json", {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "caseId": case_id,
                 "status": "planned",
                 "createdAt": now_iso(),
+                "coursewareContractSha256": contract["coursewareContractSha256"],
                 "presentationScriptSha256": presentation_hash,
                 "capabilityIndexSha256": capability_hash,
+                "developmentPlanSha256": development_plan_hash,
+                "behaviorSpecSha256": behavior_spec_hash,
+                "authoringInventorySha256": inventory_hash,
+                "authoringTargetSnapshotSha256": target_snapshot_hash,
                 "currentProjectSha256": None,
                 "tasks": [],
             })
             write_json(staging / "evidence" / "evidence-manifest.json", {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "caseId": case_id,
                 "caseRoot": "..",
                 "pipelineStatus": "not-run",
                 "outcomeStatus": "placeholder",
                 "generatedBy": "build-project-v8-courseware",
                 "inputs": {
+                    "coursewareContractSha256": contract["coursewareContractSha256"],
                     "presentationScriptSha256": presentation_hash,
                     "capabilityIndexSha256": capability_hash,
+                    "developmentPlanSha256": development_plan_hash,
+                    "behaviorSpecSha256": behavior_spec_hash,
+                    "projectSha256": None,
                 },
                 "commands": [],
                 "artifacts": [],
@@ -143,6 +192,13 @@ def main() -> int:
                 "requiredFrames": [],
                 "differences": [],
                 "remainingRisks": [],
+                "verification": {
+                    "behaviorSpecArtifactId": None,
+                    "behaviorReportArtifactId": None,
+                    "authoringInventoryArtifactId": None,
+                    "authoringTargetSnapshotArtifactId": None,
+                    "authoringSessionReportArtifactId": None,
+                },
                 "humanAcceptance": None,
             })
 
@@ -164,7 +220,10 @@ def main() -> int:
             "status": "initialized",
             "caseDir": str(case_dir),
             "presentationScriptSha256": presentation_hash,
+            "coursewareContractSha256": contract["coursewareContractSha256"],
             "capabilityIndexSha256": capability_hash,
+            "developmentPlanSha256": development_plan_hash,
+            "behaviorSpecSha256": behavior_spec_hash,
         }, ensure_ascii=False))
         return 0
     except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as exc:

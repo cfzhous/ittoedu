@@ -82,7 +82,7 @@ describe('single asset history transactions', () => {
 
 describe('asset deletion safety', () => {
   it('blocks named-state background and node override references with locations', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     const state = project.scenes[0]!.presentation!.states[0]!
     const background = meta('state-bg')
     const override = meta('state-node')
@@ -106,7 +106,7 @@ describe('asset deletion safety', () => {
   })
 
   it('blocks runtime fallback/source and nested component prop references', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     ;['fallback', 'source', 'component'].forEach((id) => {
       project.assets[id] = meta(id)
     })
@@ -150,7 +150,7 @@ describe('asset deletion safety', () => {
   })
 
   it('conservatively blocks deletion when component executable context is absent', () => {
-    const project = createProject({ includeDefaultController: false })
+    const project = createProject({ includeDefaultController: false, controls: 'none' })
     project.assets.possible = meta('possible')
     project.scenes[0]!.nodes.push(createExternalComponentNode({
       component: { packageId: 'com.test.missing', version: '4.0.0' },

@@ -24,7 +24,7 @@ import { runValidateProjectCli } from '../../scripts/validate-project'
 
 function emptyArchiveData(): ProjectArchiveData {
   return {
-    project: createProject({ includeDefaultController: false }),
+    project: createProject({ includeDefaultController: false, controls: 'none' }),
     assetFiles: {},
     componentFiles: {},
   }

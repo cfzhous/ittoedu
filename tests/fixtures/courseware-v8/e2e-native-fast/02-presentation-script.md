@@ -61,6 +61,32 @@
 - 表达教学因果的运动：反馈按回答结果出现
 - 仅装饰运动：无
 
+#### 可执行动作与教师逃生
+
+##### ACT-001 学生选择能表示四分之一的图形
+
+- sceneRef: SCN-001
+- actor: student
+- kind: select
+- target: 学生可见的图 A 和图 B 选择控件
+- evidenceProduced: RESP-001
+- requiredForCompletion: true
+- preActionVisible: false
+- initiallyHiddenContentRefs: CNT-001
+- revealedContentRefs: CNT-001
+- errorBehavior: 选择图 B 时显示“再次作答前，请先圈出同一个整体。”
+- retryBehavior: 保留题面与两个选项，允许学生重新选择
+- revealBehavior: 教师可先揭示整体轮廓，再让学生重试
+- stableResult: 选择图 A 后保留题面并显示“同一个整体被平均分成四份”的完整定义
+
+##### ESC-001 未完成时的教师逃生路径
+
+- sceneRef: SCN-001
+- stateRefs: STATE-001, STATE-002, STATE-003
+- actions: retry, reveal, continue-incomplete, scene-picker, previous, replay
+- confirmBeforeContinue: true
+- independentOfCorrectness: true
+
 #### 证据与静态审阅帧
 
 - 学习证据：选择结果、理由与修复后回答
