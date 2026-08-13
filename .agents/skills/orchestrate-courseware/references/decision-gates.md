@@ -1,26 +1,33 @@
 # Decision gates
 
-## Decide what to ask
+## Ask only material questions
 
-Ask only when the answer materially changes one or more of:
+Ask when the answer changes a learning objective/evidence, exact-content boundary, learner control, error/retry/reveal behavior, primary visual representation, costly asset route, static-export expectation, safety, authority, licensing, paid service, or online dependency.
 
-- learning objective, evidence, or content boundary;
-- teacher-led versus learner-led experience;
-- error, branch, retry, reveal, or checkpoint behavior;
-- visual metaphor, primary representation, or costly asset route;
-- HTML interaction versus static-export expectation;
-- safety, authority, licensing, paid service, or online dependency.
+Do not ask users to choose Project fields, DOM/Canvas/Phaser, component APIs, IDs, state organization, or ordinary implementation details. Record an explicit safe default for low-impact uncertainty.
 
-Use an explicit, traceable default for low-impact uncertainty. Do not ask users to choose Project fields, DOM/Phaser, component APIs, IDs, or ordinary code organization.
+## Use the available host surface
 
-## Persist `DecisionPrompt`
+When `request_user_input` is exposed, call it directly. Do not check for or require Plan mode. Ask 1–3 questions per call, with 2–3 mutually exclusive options each. Put the recommendation first, label it as recommended, and describe the real result consequence in one sentence.
 
-Store each prompt in `decisions.json`:
+Persist each `DecisionPrompt` in `case.json` before asking. After a valid tool response, immediately persist the answer with `case_decision.py`; do not rely on chat history.
+
+When the tool is unavailable:
+
+- apply and record `safe-default` only when the case already contains a genuinely safe option that does not materially alter the requested outcome;
+- otherwise keep the decision pending and ask one concise equivalent text question;
+- persist the text answer as `user-text`;
+- pause only while an unresolved blocking decision has no safe default and no user answer.
+
+Tool absence is not a permanent `decision-blocked` state. Reuse the same decision ID when a response arrives.
+
+## Embedded decision shape
 
 ```json
 {
+  "schemaVersion": 1,
   "id": "DEC-001",
-  "stage": "teaching-design-review",
+  "stage": "intake",
   "question": "...",
   "reason": "...",
   "blocking": true,
@@ -34,29 +41,24 @@ Store each prompt in `decisions.json`:
       "recommended": true
     }
   ],
+  "safeDefaultOptionId": null,
   "response": null
 }
 ```
 
-Options must be mutually exclusive when only one may be selected. Put the recommendation first and explain the product consequence, not a vague quality label.
+Use the helper:
 
-## Preflight the host
+```text
+python <skill-dir>/scripts/case_decision.py <case> add --id DEC-001 --stage intake --question <q> --reason <why> --option DEC-001-A <label> <impact> true --option DEC-001-B <label> <impact> false
+python <skill-dir>/scripts/case_decision.py <case> answer DEC-001 --answered-by user-structured --selected DEC-001-A
+python <skill-dir>/scripts/case_decision.py <case> answer DEC-001 --answered-by safe-default --selected DEC-001-A
+python <skill-dir>/scripts/case_decision.py <case> answer DEC-001 --answered-by user-text --text <answer>
+```
 
-For Codex, structured choices require a mode and tool surface that exposes `request_user_input`. The Skill cannot switch modes. When unavailable:
+Adding or changing any decision invalidates current and downstream review scopes because decision hashes participate in every approval scope.
 
-1. persist the prompt unchanged;
-2. set `stage` to `decision-blocked`;
-3. tell the user which capability is missing and how to resume;
-4. do not paste the choices as an ordinary question and pretend the gate passed.
+## Approval questions
 
-On resume, reuse the same decision ID. Record selected option IDs, `answeredBy`, and `answeredAt`. Keep superseded decisions for audit with a clear supersession link.
+For a review gate, show the exact scope hash plus a concise summary of what the human must judge. State what approval unlocks and that any covered input, decision, or byte change requires re-review.
 
-## Artifact approval prompts
-
-For a review gate, show a concise artifact summary and ask one decision:
-
-- approve this exact version;
-- request revision;
-- reject/stop where materially distinct.
-
-State what approval unlocks and which future changes invalidate it. Do not combine approval of teaching design, content spec, and presentation script into one ambiguous decision.
+Run `approve` only after the named human explicitly approves that exact presented scope. Never manufacture the reviewer or evidence. Fast mode may aggregate contract and script approval; standard and high-risk must preserve their sequential review scopes.

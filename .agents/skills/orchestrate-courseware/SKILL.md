@@ -1,122 +1,113 @@
 ---
 name: orchestrate-courseware
-description: Design, review, persist, and approve interactive courseware before implementation. Use when Codex receives a teaching topic, lesson plan,教材、题目、课程标准或素材，需要诊断上下文、提出结构化高影响决策、生成或修订教学设计、教学内容规格、教学呈现脚本、视觉方向和 implementation-ready 交接记录，或从落盘课例档案恢复这些阶段。不得用此 Skill 直接生成 Project V7 工程。
+description: 将 teaching topic、教材、教案、题目、课程标准或既有课件收敛为可恢复、可哈希批准的互动课件体验合同；design, review, persist, and derive implementation readiness before Project V8 implementation. Use when Codex needs to诊断输入、询问高影响选择、冻结精确教学内容、编写场景/状态呈现脚本、处理高风险视觉方向、恢复课例档案或安全审计 V1 课例。不得用此 Skill 选择工程载体、生成 Project/代码/导出或自动授予 accepted。
 ---
 
-# Orchestrate Courseware
+# 互动课件创作编排
 
-Turn a teaching request into an approved, file-backed experience contract. Treat chat as transport, never as the only source of truth.
+把聊天输入变成可由冷启动实现者恢复的体验合同。聊天只是传输通道；`case.json` 与获批 Markdown 是真相。
 
-## Non-negotiable rules
+## 不变量
 
-1. Persist before progressing. Create or resume a case directory before drafting substantive content.
-2. Read the workspace `AGENTS.md`. When present, fully read `docs/AI_COURSEWARE_ORCHESTRATION.md`; read subject packs and authoritative sources selected for this case.
-3. Keep the order `context → decisions → teaching design → content spec → presentation script → visual direction → handoff`.
-4. Never generate Project nodes, runtime code, component code, or exports in this Skill.
-5. Write only `draft` or `ready-for-review`. Record `approved` only after explicit human approval of that exact artifact version.
-6. Bind approval to SHA-256. Any content change invalidates that approval and downstream readiness.
-7. Do not infer missing approved content from old chat, a compressed summary, an implementation, a template, or a component.
-8. Never label pipeline checks as teaching, visual, or outcome acceptance.
+1. 先建立或恢复课例，再写实质内容。
+2. 先确定目标、证据与精确内容，再冻结学生看见、执行和得到的反馈；不要先选组件、Runtime 或页面模板。
+3. 只询问会实质改变结果的问题。工具可用即直接调用 `request_user_input`，不检查 Plan mode。
+4. 人类批准必须绑定当前 review scope SHA-256。输入、决策或覆盖制品变化时使该审批及下游审批失效。
+5. `implementation-ready` 只由 V2 校验器派生；它不是独立文档或人工批准。
+6. 不从聊天摘要、旧实现、模板或失败样机补写缺失内容。
+7. 本 Skill 不选择技术载体、不写 Project/运行时/组件代码、不执行导出，也不把自动化结果写成 `accepted`。
 
-## Start or resume a case
+## 1. 建立或恢复 V2 课例
 
-If no case exists, run:
+新课例先判断路径：
 
-```text
-python <skill-dir>/scripts/init_case.py --root <workspace> --case-id <stable-id> --title <title> --duration-minutes <minutes>
-```
+- `fast`：用户材料已闭合目标、证据、逐字内容和呈现意图，可一次集中批准；
+- `standard`：先批准课程设计合同，再批准呈现脚本；默认选择；
+- `high-risk`：标准路径外，视觉、核心互动、复杂行为或错误反馈有高返工风险，增加视觉/样机批准。
 
-If a case exists:
-
-1. Read `case.json` and `decisions.json`.
-2. Run `validate_case.py <case-dir> --target draft`.
-3. Recompute artifact hashes and detect stale approvals.
-4. Load only the approved upstream artifacts and current-stage draft needed now.
-5. State the recovered stage and blockers briefly; continue from files, not memory.
-
-Read [artifact-contracts.md](references/artifact-contracts.md) before creating or changing case artifacts.
-
-## Stage 1: Context and decisions
-
-Record the original request, source register, authority order, constraints, missing information, conflicts, and explicit assumptions in `00-context.md`.
-
-Create a `DecisionPrompt` only for choices that materially change learning goals, evidence, content scope, learner control, key presentation, visual direction, delivery semantics, cost, licensing, or safety. Read [decision-gates.md](references/decision-gates.md) before asking.
-
-Before displaying structured choices, preflight the host. For Codex, require a mode exposing `request_user_input`. If unavailable:
-
-- persist the complete prompt in `decisions.json`;
-- set the case stage to `decision-blocked`;
-- explain how to resume;
-- do not silently convert the options into ordinary prose;
-- do not claim that the Skill can switch host mode.
-
-## Stage 2: Teaching design
-
-Draft `01-teaching-design.md` without technical carriers. Require:
-
-- audience, prerequisites, use context, and duration;
-- observable objectives and evidence IDs;
-- content boundary, misconceptions, strategy, sequence, assessment, and constraints;
-- explicit `objective → evidence → teaching stage` coverage;
-- a plausible total-time model.
-
-Run structural validation, mark the artifact ready, present a human-readable review, and wait for explicit approval. Use `case_artifact.py` to record readiness and approval.
-
-## Stage 3: Content specification
-
-Draft `02-content-spec.md` as the authoritative answer to “what exactly is taught.” Do not proceed with titles or activity labels alone.
-
-For every `CNT-*` item include the complete learner-facing prompt, all givens, expected response, reasoning, accepted alternatives, misconceptions, feedback principles, difficulty justification, prerequisites, reveal policy, timing, source, and notation/media requirements. Include a whole-course capacity table.
-
-For exact-content subjects, independently verify facts, solutions, distractors, units, and answer boundaries before review. When current or high-stakes sources are needed, use authoritative sources and record them.
-
-## Stage 4: Presentation script
-
-Draft `03-presentation-script.md`. Every `BEAT-*` must reference approved content and state:
-
-- teaching purpose and objective/evidence references;
-- initial view and all information visible before learner action;
-- teacher action, learner action, immediate response, branches, and recovery;
-- stable end state and transition;
-- visible content, reveal policy, media, motion, teacher checkpoint, and time budget;
-- evidence to capture and an intentional HTML/PDF/PPTX review frame.
-
-Reject any action that starts before the learner has enough information. Reject orphan classification, ordering, dragging, or selection that does not contribute to an objective, misconception repair, or evidence. A final summary must derive from prior evidence.
-
-## Stage 5: Visual direction
-
-Draft `04-visual-direction.md` when visual or interaction risk is material. Otherwise record `not-required` with a concrete low-risk reason; do not silently skip it.
-
-Freeze visual hierarchy, subject-specific representation, composition differences, interaction causality, typography, key frames, asset/licensing needs, and avoidances. Treat concepts and reference images as targets, not completion evidence.
-
-## Stage 6: Handoff
-
-Draft `05-implementation-handoff.md` only after the upstream artifacts are approved. Include exact paths, versions, approved hashes, decision IDs, authoritative content, assets, editability, delivery formats, expected static differences, acceptance evidence, and change-control rules.
-
-Run:
+初始化：
 
 ```text
-python <skill-dir>/scripts/validate_case.py <case-dir> --target implementation-ready --promote
+python <skill-dir>/scripts/init_case.py --root <workspace> --case-id <id> --title <title> --brief <request-summary> --duration-minutes <n> --path-mode <fast|standard|high-risk> [--with-content]
 ```
 
-Only after it passes may the case stage become `implementation-ready`. Hand off to `$build-project-v7-courseware`; do not start implementation here.
+最小只创建 `case.json`、`01-courseware-contract.md` 和 `02-presentation-script.md`。内容较大或需逐字追溯时才用 `--with-content`；只有 `high-risk` 创建 `visual-direction.md`。
 
-## Approval operations
-
-Use the helper rather than hand-editing hashes:
+恢复时运行：
 
 ```text
-python <skill-dir>/scripts/case_artifact.py <case-dir> ready <artifact-key>
-python <skill-dir>/scripts/case_artifact.py <case-dir> approve <artifact-key> --evidence <explicit-user-approval>
-python <skill-dir>/scripts/case_artifact.py <case-dir> reject <artifact-key> --evidence <user-feedback>
-python <skill-dir>/scripts/case_artifact.py <case-dir> not-required visualDirection --reason <low-risk-reason>
-python <skill-dir>/scripts/case_artifact.py <case-dir> status
+python <skill-dir>/scripts/case_artifact.py <case> status
+python <skill-dir>/scripts/validate_case.py <case> --target draft --json
 ```
 
-Run `approve` only after the user explicitly approves the exact artifact presented. Never manufacture approval evidence or approve on the user's behalf.
+报告当前路径、阶段、阻断决策、失效审批和最早需修订范围；从文件继续。创建、恢复、变更路径或迁移 V1 时阅读 [artifact-contracts.md](references/artifact-contracts.md)。
 
-## Review discipline
+## 2. 处理实质决策
 
-Read [review-rubrics.md](references/review-rubrics.md) before each human gate. Present only what the user must judge, what approval unlocks, and what later changes would invalidate it.
+把每轮最重要的 1–3 个问题先嵌入 `case.json`。需要提问、默认或文本降级时阅读 [decision-gates.md](references/decision-gates.md)，并使用 `case_decision.py`。
 
-Stop when blocked. Do not solve a process failure by polishing a downstream implementation.
+- `request_user_input` 存在：直接呈现 2–3 个互斥选项，收到有效回答立即落盘；
+- 工具不存在但已有安全默认：记录 `safe-default` 后继续；
+- 工具不存在且没有安全默认：保留 blocking 决策，用一个简短等价文本问题暂停；收到回答后记录 `user-text`；
+- 不建立永久 `decision-blocked` 状态，不因宿主能力缺失丢弃同一决策 ID。
+
+## 3. 编写课程设计合同
+
+在 `01-courseware-contract.md` 冻结：
+
+- 受众、先修、场景、时长与教师/学生控制；
+- `OBJ-* → EVD-* → STG-*` 覆盖；
+- 内容边界、困难、误概念、评价、约束、来源和假设；
+- 每个 `CNT-*` 的逐字可见内容、答案/产出、完整解释、替代与拒绝边界、错误与反馈、难度、先修、揭示、时间和专业表示。
+
+精确内容可位于合同、脚本或 `content/*.md`，但只能定义一次，必须由 `CNT-*` 定位，且不能依赖旧聊天。数学、诵读、文学证据等学科专有规则从相应学科 Skill/用户材料取得；通用 Skill 不臆造学科约束。
+
+## 4. 编写场景/状态呈现脚本
+
+在 `02-presentation-script.md` 为每个 `SCN-*` 写清：
+
+- 引用的 `CNT-*`、`OBJ-*`、`EVD-*` 与用时；
+- 初态和第一次操作前的完整可见信息；
+- 教师/学生动作、即时反馈、成功/错误/未完成/重试/揭示与恢复；
+- 可达 `STATE-*`、稳定结果、转换、返回、重播和重开；
+- 信息逐步释放、学生视角与教师检查点；
+- 交互前、反馈态、稳定结果态，以及 HTML/PDF/PPTX 静态审阅帧。
+
+动作必须服务目标、误概念修复或学习证据。脚本不得选择 Project 节点、组件、Runtime 或渲染技术。
+
+## 5. 高风险视觉方向
+
+仅对 `high-risk` 编写 `visual-direction.md`：冻结主体表征、层级、构图差异、专业排版、互动因果、代表性样机、`VIS-*` 关键帧、素材许可、无障碍和静态差异。视觉方向是用户可感知设计，不是技术载体选择。
+
+## 6. 准备并取得人类 review approval
+
+审阅前阅读 [review-rubrics.md](references/review-rubrics.md)。先使覆盖制品 ready，再使 review-ready：
+
+```text
+python <skill-dir>/scripts/case_artifact.py <case> ready <artifact-key>
+python <skill-dir>/scripts/case_artifact.py <case> review-ready <review-key>
+```
+
+向用户展示 scope hash、需判断的摘要、批准后解锁内容及失效条件。只有用户明确批准该精确范围后运行：
+
+```text
+python <skill-dir>/scripts/case_artifact.py <case> approve <review-key> --approved-by <named-human> --evidence <explicit-approval>
+```
+
+`fast` 批准 `experience`；`standard` 依次批准 `contract`、`presentationScript`；`high-risk` 再批准 `visualDirection`。不得制造 reviewer/evidence，不得把 Codex、AI、agent、builder、bot 或自动化身份写成人类审批人，不得用自动校验代替批准。
+
+## 7. 派生实现就绪
+
+所有路径审批完成后运行：
+
+```text
+python <skill-dir>/scripts/validate_case.py <case> --target implementation-ready --promote
+```
+
+只有语义闭合、无 unresolved blocking decision、制品哈希与 review scope 当前有效时，校验器才把 `case.json.stage` 和 `derivedReadiness.status` 写成 `implementation-ready`。失败时保留 `not-ready`、具体 blocker 和最早返工阶段。
+
+随后交给 `$build-project-v8-courseware`。Builder 若发现新的用户可见取舍，返回本 Skill 追加/更新决策和受影响制品；不要在实现阶段猜写。
+
+## V1 输入
+
+V1 只能作为未批准输入。先运行 `migrate_case_v1.py <v1-case> audit`；需要迁移时创建全新 V2 目录，并把原始字节完整保存在只读证据目录 `legacy-v1/`。迁移不得继承 V1 批准、决策响应、readiness 或 acceptance，必须完成语义重整和全部当前路径审批。

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "caseId": "e2e-native-fast",
+  "projectPath": "project/e2e-native-fast.h5lesson",
+  "generatedFrom": {
+    "presentationScriptSha256": "{{PRESENTATION_SHA256}}",
+    "capabilityIndexSha256": "{{CAPABILITY_SHA256}}"
+  },
+  "globalEntities": [],
+  "scenes": [
+    {
+      "sceneId": "scene_fraction_choice",
+      "ownership": "native-owned",
+      "entities": [
+        {
+          "id": "fraction-title",
+          "label": "任务标题",
+          "kind": "text",
+          "sourceRef": "CNT-001#learner-visible",
+          "binding": "native:scene:scene_fraction_choice:node_fraction_title:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "fraction-prompt",
+          "label": "任务说明",
+          "kind": "text",
+          "sourceRef": "CNT-001#learner-visible",
+          "binding": "native:scene:scene_fraction_choice:node_fraction_prompt:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "fraction-feedback",
+          "label": "错误修复反馈",
+          "kind": "text",
+          "sourceRef": "CNT-001#typical-error",
+          "binding": "native:scene:scene_fraction_choice:node_fraction_feedback:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        }
+      ]
+    }
+  ]
+}

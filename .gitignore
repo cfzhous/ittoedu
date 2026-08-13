@@ -13,6 +13,8 @@ tmp/
 logs/
 .playwright-cli/
 coverage/
+__pycache__/
+*.py[cod]
 
 *.log
 *.tmp

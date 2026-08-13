@@ -90,14 +90,13 @@ describe('product identity configuration', () => {
     expect(installer).toContain("$sourceId = 'ittoedu-courseware-editor'")
   })
 
-  it('injects the shared product name into HTML and keeps the scripted PDF author current', async () => {
-    const [html, rendererConfig, playerConfig, toolbar, launcher, pdfExporter] = await Promise.all([
+  it('injects the shared product name into the current product surfaces', async () => {
+    const [html, rendererConfig, playerConfig, toolbar, launcher] = await Promise.all([
       readFile(path.join(root, 'index.html'), 'utf8'),
       readFile(path.join(root, 'vite.renderer.config.ts'), 'utf8'),
       readFile(path.join(root, 'vite.player.config.ts'), 'utf8'),
       readFile(path.join(root, 'src', 'renderer', 'ui', 'TopToolbar.tsx'), 'utf8'),
       readFile(path.join(root, '启动课件编辑器.cmd'), 'utf8'),
-      readFile(path.join(root, 'scripts', 'export_math_motion_pdf.py'), 'utf8'),
     ])
 
     expect(html).toContain('<title>__APP_NAME__</title>')
@@ -109,6 +108,5 @@ describe('product identity configuration', () => {
     expect(toolbar).not.toContain('Phaser 轻量交互课件编辑器')
     expect(launcher).toContain('[ittoedu Courseware Editor]')
     expect(launcher).not.toContain('[Courseware Editor]')
-    expect(pdfExporter).toContain(`document.setAuthor("${APP_NAME}")`)
   })
 })

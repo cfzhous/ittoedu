@@ -1,12 +1,12 @@
 # AI 互动课件创作与接入规范（Editor 1.0.0 / Project V8）
 
-> 读者：把已经批准的教学设计、教学内容规格、教学呈现脚本和视觉方向实现为课件的 AI。
+> 读者：维护 Project V8 工程协议、审阅生成结果或需要理解实现边界的人类；AI 的机器执行入口是仓库 Skill。
 >
-> 前置规范：开始实现前必须完整执行 [AI 互动课件通用创作编排规范](AI_COURSEWARE_ORCHESTRATION.md)，取得文件路径、版本和哈希均有效的 `implementation-ready` 交接记录。当前主干已只接受 Project V8，而仓库中的 `build-project-v7-courseware` 仅适用于归档标签 `internal-prototype-1.7.0`；新的 V8 实现 Skill 尚未完成，因此新课例必须暂停在实现门禁，不能用旧 Skill 生成后再伪改版本号。
+> 机器路由：先由 [orchestrate-courseware Skill](../.agents/skills/orchestrate-courseware/SKILL.md) 形成 V2 课例并派生哈希有效的 `implementation-ready`，再由 [build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md) 选择载体、维护 Authoring Inventory、实现、局部 Patch、验证和交付证据。本文是工程事实与设计说明，不是每次创作必须全文读取的第二套工作流。
 >
 > 目标：依据已经批准的体验合同，一次产出可由本编辑器打开、轻改、预览和导出的完整 `.h5lesson`，不因编辑器面板能力而牺牲成品效果。
 
-> 文档同步基线：2026-08-13。当前源码包版本为 Editor 1.0.0 收敛分支；工程、自由运行时和组件生产路径只接受 Project V8、Runtime API 2 与 Component API 4。V8 实现 Skill 尚未完成。
+> 文档同步基线：2026-08-13。当前源码包版本为 Editor 1.0.0 收敛分支；工程、自由运行时和组件生产路径只接受 Project V8、Runtime API 2、Runtime Authoring 1 与 Component API 4。
 
 > 产品身份：ittoedu / 互动课件编辑器（ittoedu Courseware Editor）。ittoedu 自有正式组件使用 `com.ittoedu.*`；第三方组件必须使用其权利主体自己的反向域名，不得冒用 ittoedu。
 
@@ -35,7 +35,7 @@
 - 对场景、场景状态、文字、图片、图形、视频、组件公开参数、全局控制器和交互映射进行直接修改的宿主；
 - 预览及单 HTML、网页包、PDF、PPTX 的统一导出入口。
 
-实现 Skill 完成后，AI 的最低工程循环必须是“生成 `.h5lesson` → `npm run --silent validate:project -- <file>` → 根据 JSON 中 Schema/Health/四格式定位修正 → 再验证 → 交人工验收”。退出码 0/1/2 分别表示无 error、可读但有 error、无法完成 Schema/归档校验。命令只读且不启动 Electron；确定性 Node 字宽只是筛查，不能替代真实像素验收。当前 V8 实现 Skill 尚未完成，因此这条自检能力不解除本文件开头的实现门禁。
+V8 Builder 的最低工程循环是“入口与 Capability 校验 → 生成或局部 Patch `.h5lesson` → `npm run --silent validate:project -- <file>` → 根据 JSON 中 Schema/Health/四格式定位修正 → 真实 Player/导出取证 → 交人工验收”。退出码 0/1/2 分别表示无 error、可读但有 error、无法完成 Schema/归档校验。命令只读且不启动 Electron；确定性 Node 字宽只是筛查，不能替代真实像素与互动验收。
 
 Project V8 JSON 是唯一业务真相：它描述场景、命名状态、声明式交互、素材绑定、运行时文档、组件实例及公开参数。DOM、Phaser、Canvas、WebGL 和 Three.js 都只是执行这些数据的呈现/交互能力。架构不以 DOM 或 Phaser 为业务核心，也不承诺修改 `renderMode` 后自动转换实现代码。
 
@@ -61,16 +61,16 @@ Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调�
 
 仓库提供小型入口 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，用于先发现当前已实现的 Project V8 节点、互动 discriminator、Runtime API 2、Component API 4、导出面和诊断入口，再按需读取 `schemas/`、`diagnostics.json`、`limits.json` 与组件快照。索引采用规范化 JSON，生成检查要求 UTF-8 不超过 16 KiB；不要把完整 Schema、组件目录或本规范全文复制进启动上下文。
 
-该目录是从权威 Schema、协议常量、诊断码注册表和受哈希校验的外部 catalog 生成的开发契约，不是当前课件生成能力，也不表示编辑器内已经接入模型、工作流或 Project V8 实现 Skill。外部 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可读取，但组件快照必须明确标记为不可用/降级；生成器不得据此编造包、许可证、维护人或稳定等级。使用 `npm run generate:ai-capabilities` 更新，使用 `npm run check:ai-capabilities` 验证确定性、哈希和索引大小。
+该目录是从权威 Schema、协议常量、诊断码注册表和受哈希校验的外部 catalog 生成的开发契约，也是 V8 Builder 发现真实 Headless 入口与按需加载子合同的能力证据；它不表示编辑器内已经接入模型或工作流。外部 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可读取，但组件快照必须明确标记为不可用/降级；生成器不得据此编造包、许可证、维护人或稳定等级。使用 `npm run generate:ai-capabilities` 更新，使用 `npm run check:ai-capabilities` 验证确定性、哈希和索引大小。
 
 ## 3. 实现阶段从一开始直接生成统一工程
 
-取得 `implementation-ready` 交接记录后，不要先制作一份脱离工程规范的网页，再进行第二次接入。正确路径是：
+V2 课例派生出当前有效的 `implementation-ready` 后，不要先制作一份脱离工程规范的网页，再进行第二次接入。正确路径是：
 
 ```text
-已批准教学设计 + 教学内容规格 + 教学呈现脚本 + 视觉方向 + 决策记录
+获批课程合同 + 呈现脚本 + 可选内容/视觉制品 + case.json 决策与 scope 哈希
         ↓
-内部技术映射：承载方式、状态、生命周期、编辑入口和验收路径
+Builder 内部开发计划：载体所有权、状态、生命周期、Authoring Inventory 和验收路径
         ↓
   直接生成 Project V8 .h5lesson
   ├─ 场景原生节点（文字、公式、图片、图形、视频、组件）
@@ -90,7 +90,9 @@ Editor 1.x 不包含 Blueprint、AI 局部 patch 或任何编辑器内模型调�
 
 统一规范不等于一切都必须可视化编辑。稳定画面中的元素、文字、几何、显隐、样式、组件参数和层级应进入状态模型；瞬态程序图形、动画曲线、判定逻辑和一次性互动规则可以保留在代码中。
 
-## 4. 八种承载方式
+## 4. 八种工程承载原语
+
+Builder 先用 `native-owned | runtime-owned | hybrid-owned | component-composed` 四类所有权说明谁对场景结果负责，再把实现映射到下列八种当前工程原语。四类所有权用于开发计划和验收，八种原语用于理解 Project V8 的具体组合；两者不是互斥的两套载体分类。
 
 | 承载方式 | 适合内容 | 是否跨场景保持 | 何时优先选用 |
 | --- | --- | --- | --- |
@@ -682,22 +684,23 @@ PPTX 中：
 - 编辑画布支持 50%–200% 缩放、Ctrl/Command+滚轮、空格或鼠标中键平移与一键复位。视图变换不修改节点坐标，也不进入工程或成品；验收截图必须区分编辑视图与实际 1280×720 Player 结果。
 - 编辑状态与当前位置试运行必须保持同一 1280×720 Stage 边界、Player 粗粒度平面和状态物化语义；透明 Phaser 编辑层只保留 `ProxyNodeAdapter` 命中与几何链，不得重新绘制一套视觉或恢复旧 Text/Formula/Image/Video/Shape/TeacherController/ExternalComponent 编辑器视觉适配器。
 
-## 15. 实现阶段的强制工作流
+## 15. V8 Builder 的执行与审阅边界
 
-1. 先由通用编排层核对 `implementation-ready`：批准的教学设计、教学内容规格、教学呈现脚本、视觉方向、决策记录、权威内容、素材要求、可编辑要求、交付格式和验收证据必须齐全，文件路径、版本和 SHA-256 必须与批准记录一致。缺少必需项、哈希失效或仍有阻断项时返回编排层，不得自行补成最终方案。当前 Project V8 实现 Skill 尚未完成，因此这里仍是生成门禁；归档的 `build-project-v7-courseware` 不能充当当前交接校验器，也不能生成或验证 Project V8。
-2. 在课例档案的 `06-traceability.json` 中，把教学呈现脚本逐项双向映射成场景/状态、操作、反馈、分支、可见文案、公式、结束状态和验收证据；每个学生可见实现对象必须能反查脚本依据或记录非教学排除理由。追踪记录属于外部创作制品，不得为此向 Project V8 伪造字段。
-3. 先确定达到已批准成品效果的最短充分方案，再选择八种承载方式；逐项区分稳定视觉状态、声明式交互与瞬态运行效果，并为每个运行时和组件记录充分理由。仅“代码复杂”“视觉重要”或“以后可能复用”不能证明需要组件化。
-4. 建立“人工可见文字与公式清单”，为每项指定 `TextNode.text`、运行时 `content.values`、组件 `props.content` 或结构化公式绑定，并标出权威文案、Formula ID、专业排版和允许轻改的内容；同时把获批字体/色板收敛为最小 `designTokens`，把需要保护的图片主体登记为 `safeAreas`，但不把叙述性美术方向塞进 Schema。
-5. 为跨场景行为定义稳定场景 ID、事件、`courseState` 键和重播/重开语义。
-6. 为每个场景列出基础、初始、缩略图及所有可达稳定状态；把差异写成元素覆盖，而不是运行时重建画面，并与呈现脚本中的静态审阅帧对应。
-7. 优先把场景节点和全局元素点击、状态/场景跳转、声音和视频控制写成 `scene.interactions` / `globalInteractions`；为全局规则设置准确的 `scene.in`；再为每个确有必要的运行时和组件选择最小 `renderMode`，定义创建、更新、resize、显隐、暂停/恢复、捕获准备和销毁责任。
-8. 常见的单元素入场优先使用简洁模式“出现动画”；更复杂、可枚举的入场/退场写成专业规则动作，明确触发事件、目标元素、顺序/并行关系、局部延迟和完成后的下一步；只有连续路径、关键帧或算法运动进入组件/运行时。
-9. 在 V8 实现 Skill 恢复后直接生成 Project V8、嵌入组件、素材和可复现脚本；确认新工程含 `globalLayer`、`globalInteractions`、`interactions`、`designTokens`、`media.audio`、`playback.presenter`，每个 ImageNode 含 `safeAreas`，且不产出历史结构。
-10. 先完成高风险核心互动或代表性场景并与批准脚本、关键帧/样片对照；实际结果未达到 `art candidate` 或尚未取得要求的人类视觉/互动批准时停止批量扩展。需要改变教学内容规格、呈现脚本、授权、成本、性能或兼容导出预期时返回编排层请求批准。
-11. 在统一画布中逐个切换基础和命名状态，实际修改原生文字、组件显式文字目标、运行时显式 text/asset 目标、动画与几何；确认运行时内容提示“所有状态共享”，保存、重开，再用“当前位置试运行”从当前场景/状态核查局部行为，用“整课预览”从课程起点核查完整流程，并检查网页导出同步。
-12. 为可视组件提供缩略图，并验证组件包使用计数、安全替换/删除、场景缩略图状态、组件缩略图/名称后备、背景、全局元素、固定 DOM/Canvas 平面、持久化和静态导出结果；Three.js/GLB 如有使用，还要验证离线加载、低配设备、显存释放与确定帧捕获。
-13. 完整 `.h5lesson` 首次生成后，先运行 `npm run --silent validate:project -- <file.h5lesson>`，按稳定 JSON 中的 Schema、Project Health 和四个目标格式 Export Preflight 修复错误并重新验证；该命令只读、不启动 Electron，也不替代真实导出。随后执行脚本追踪校验和公式危险写法扫描，把信息释放、视觉密度、图片安全区和 Node 字宽近似等启发式项作为人工复核线索，再真实操作所有核心互动并检查单 HTML、网页包、PDF 与 PPTX。按编排层要求提交 headless JSON、真实导出、截图、录屏和差异说明，分别报告管线状态和成品效果状态。
-14. 首次完整生成后先冻结制品路径与哈希并评分，不得先通过人工事后补题或改脚本再把结果当作工作流首轮成功。未经批准人确认不得标记 `accepted`。
+机器执行顺序、文件布局和停止条件以 [build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md) 为准；本文保留协议事实和供人类审阅的工程清单。Builder 只按任务加载相关章节，不需要把本文全文作为启动上下文。
+
+1. 入口脚本重跑 V2 课例 `implementation-ready` 校验、`check:ai-capabilities` 和生成证据哈希。缺少精确内容、批准失效、仍有 blocking 决策或 Capability 不可信时返回编排层，不从聊天、旧工程或模板补写。
+2. 在课例内部 `03-development-plan.md` 把每个 `SCN-*` / `STATE-*`、内容源、静态帧、共享机制和验收证据映射到 `native-owned | runtime-owned | hybrid-owned | component-composed`。这份内部工程计划不是新增的人类教学门禁。
+3. 为全部人工可见内容、素材和关键参数维护 `implementation/authoring-inventory.json`：每项记录唯一来源、载体、稳定 binding、编辑状态与阻断原因。不得持久化 `registered:*`、`dom:*` 或其他会话 targetId；原生、Runtime 与组件绑定必须能够在保存重开后解析到同一稳定对象。
+4. 原生文案使用 `TextNode.text`，运行时文案使用 `RuntimeDocument.content.values`，组件文案使用 `props.content`，公式使用结构化 AST 与稳定 Formula ID；获批字体/色板收敛为最小 `designTokens`，图片主体登记为 `safeAreas`，不把叙述性美术方向塞进 Schema。
+5. 先完成最高风险纵切并与获批脚本、关键帧或样片对照，再批量扩展。若可见效果、核心互动、授权、联网、性能、编辑性或静态差异需要改变已批准体验，停止并返回编排层；技术失败不能静默删减要求。
+6. 通过 Capability Index 指向的仓库真实 TypeScript API 直接构建 Project V8 `.h5lesson`，不得手写巨型 Project JSON、建立影子 DSL 或产出历史结构。新工程含 `globalLayer`、`globalInteractions`、每场景 `interactions`、`designTokens`、`media.audio` 和 `playback.presenter`，每个 ImageNode 含 `safeAreas`。
+7. 为每个场景明确基础、初始、缩略图和所有有教学/导航/复核意义的稳定状态；把稳定差异写成元素覆盖。简单可枚举行为优先写入声明式交互，连续手势、算法判定和程序运动才进入 Runtime；组件只在真实复用、配置或独立维护有价值时使用。
+8. 为跨场景行为定义稳定场景 ID、事件、`courseState` 键和重播/重开语义；为运行时和组件选择最小 `renderMode`，落实创建、更新、resize、显隐、暂停/恢复、捕获准备和销毁责任。
+9. 首次完整生成后冻结工程路径、SHA-256 和稳定 ID。教师在编辑器中修改后只运行 `implementation/patch.ts` 做局部 Patch，并在实际工程上校验 scene/node/binding ID；不得从初始 Builder 覆盖整课或抹掉人工修改。
+10. 在统一画布中实际修改原生文字、组件显式文字目标、运行时 text/asset 目标、动画与几何，保存、关闭并重开；再用“当前位置试运行”检查局部行为、用“整课预览”检查完整流程。Authoring Inventory 中要求可编辑但仍为 `blocked` 的项目会阻止交付。
+11. 为可视组件提供缩略图，并验证组件包使用计数、安全替换/删除、固定 DOM/Canvas 平面、持久化和静态结果；Three.js/GLB 如有使用，还要验证离线加载、低配设备、显存释放与确定帧捕获。
+12. 运行 `validate:project`、Inventory 和 evidence 校验，按 Schema、Project Health 与四格式 Export Preflight 修复错误；随后真实操作核心互动并实际生成单 HTML、网页包、PDF 和 PPTX，提交截图、录屏、contact sheet 与差异说明。启发式扫描只是人工复核线索，不能替代真实 Player、像素和导出证据。
+13. 分别报告管线状态和成品效果状态。自动化管线最多写 `engineering candidate`；真实视觉与互动证据达到约定但尚未最终接受时可写 `art candidate`；只有带指定审阅人、时间、证据和明确意见的人类记录才能成为 `accepted`。
 
 不得只写“有互动”“有动画”或“支持编辑”。必须给出可执行的验收路径；不得把实现阶段重新变成教学设计阶段，也不得用工程文件存在代替结果验收。
 
@@ -705,7 +708,7 @@ PPTX 中：
 
 以下均视为未完成：
 
-- 交接缺少完整题面、答案、推理、难度或揭示边界时，从旧聊天、压缩摘要、既有实现或模板自行补写；
+- V2 课例缺少完整题面、答案、推理、难度或揭示边界时，从旧聊天、压缩摘要、既有实现或模板自行补写；
 - 因编辑器没有面板而把复杂互动改成静态页、普通翻页或统一选择题；
 - 为了组件化而删除一次性高质量场景效果；
 - 删除状态变化、解锁循环、分支、声音或关键动效；
@@ -733,6 +736,7 @@ PPTX 中：
 - 场景缩略图使用指定状态并显示背景、原生元素和组件；编辑状态与当前位置试运行使用同一 1280×720 Player 视觉与状态物化语义，透明 Phaser 层不造成位置偏差；authoring 冻结互动、媒体、导航和课程状态；当前位置试运行从当前场景/状态启动且失败可见、可重试，Blob 资源会释放；整课预览从课程起点启动；
 - 预览、单 HTML 和网页包使用同一运行语义，事件驱动入场/退场、顺序/并行等待、动画完成触发、声音、视频和结构化控制器可离线播放；控制器默认场景目录列出全部场景且只进入目标初始状态，固定 `scene.go`、1–12 按钮和折叠保持正确；整面鼠标/触控拖动、点击阈值、逻辑画布限位/贴边、Alt+方向键与 Shift 细调均可用，切幕/重播保持会话位置，重开恢复作者位置；
 - 组件包使用统计、安全删除、同 ID 替换/升级与失败隔离通过；已有图片/视频可从“元素”→“媒体”重复添加且继续复用同一 Asset ID；编辑画布缩放/平移不改工程坐标；
+- `.h5lesson` 离开作者目录和组件 catalog 后仍能从归档恢复素材、运行时与嵌入组件并完成重开、修改、重存；单 HTML 可单文件移动，网页包按完整目录移动后仍可通过 `file://` 离线运行且没有外部请求；
 - 专业开发面板可校验并撤销场景/全局 runtime source、对象/规则 JSON 修改；第三方组件不可直接改写，工程内可编辑副本使用新 ID/版本且保留原包；
 - 工程检查可定位问题；只读信息释放与视觉密度不改工程且明确标为近似/启发式；四格式 Export Preflight 使用 error/warning/info，错误阻断、其余可确认继续，定位与 JSON 保存通过；异常诊断报告可导出且不包含素材内容；
 - PDF/PPTX 对运行时、声音、视频和教师控制器都有明确静态化结果；PPTX 的普通文字保持原生对象，公式、着重号文字与左起竖排文字按节点静态化；公式对象元数据保留 Formula ID 与无障碍文本，差异和溢出预检均有验收证据；
@@ -742,15 +746,17 @@ PPTX 中：
 
 ### 结果状态
 
-- 每项获批教学内容和呈现要求都有明确场景、操作、反馈、结束状态和证据；脚本与学生可见实现对象可在外部追踪记录中双向核对；
+- 每项获批教学内容和呈现要求都有明确场景、操作、反馈、结束状态和证据；脚本与学生可见实现对象可通过 `03-development-plan.md` 和 Authoring Inventory 双向核对；
 - 所有可达稳定状态都能在状态条中查看；其中的人工文字、元素几何与组件公开参数有编辑入口；
 - 场景互动、声音/视频映射、跨场景指定状态跳转、全局规则、统一全局层、画布控制器、全局组件、重播和重开语义符合设计；
 - 视觉、动画、声音和互动没有因编辑器能力被降级；
 - 列出真实未实现项、终端差异、静态导出差异和剩余风险。
 
+上述可移植性已有同一 Windows 主机隔离树的自动化证据，见 [W3 Windows / 离线可移植性验证记录](reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)。它验证自包含和路径独立，但不能替代另一台真正干净 Windows 的首次依赖安装、可见启动和人工操作，也不能自动授予 W3 `accepted`。
+
 ## 18. 示例与边界
 
-新课件工作流恢复后可参考《不是磁场，而是变化》及其生成脚本：它先从误概念诊断和教学证据链出发，再选择承载方式；把题面、反馈和完成画面落实为原生节点与命名状态，只把连续拖动、曲线和装置响应交给 V4 组件，并用 `component.event → presentation.set` 保持结果可查看、可修改。运行 `npm run build:induction` 重建课件，再运行 `npm run validate:induction` 核对 Project V8、组件 API 4、可编辑文字、状态可达性和离线导出。
+历史参考《不是磁场，而是变化》及其生成脚本已迁入相邻 `courseware-cases/high-school/physics/induction-not-field-but-change/`：它先从误概念诊断和教学证据链出发，再选择承载方式；把题面、反馈和完成画面落实为原生节点与命名状态，只把连续拖动、曲线和装置响应交给 V4 组件，并用 `component.event → presentation.set` 保持结果可查看、可修改。编辑器核心的 `npm run build:induction` 与 `npm run validate:induction` 只转发到课例仓。迁入的旧归档因缺少当前必填 `contentSha256` 会被明确拒绝；先重建再验证可以核对 Project V8、组件 API 4、可编辑文字、状态可达性和离线导出，但该历史课例不计入新工作流验收。
 
 归档标签中的 Project V7 + Runtime API 1 / Component API 3 示例只用于恢复历史原型，不再存在于当前主干。新课件仍必须按本文要求把题目、反馈、完成等稳定画面放入 `scene.presentation.states`。
 

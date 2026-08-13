@@ -1,121 +1,49 @@
 #!/usr/bin/env python3
-"""Manage artifact hashes and human approval state for a courseware case."""
+"""Manage V2 artifact hashes and exact-scope human review approvals."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-
-DEPENDENTS = {
-    "context": ["teachingDesign", "contentSpec", "presentationScript", "visualDirection", "implementationHandoff", "traceability", "acceptance"],
-    "teachingDesign": ["contentSpec", "presentationScript", "visualDirection", "implementationHandoff", "traceability", "acceptance"],
-    "contentSpec": ["presentationScript", "visualDirection", "implementationHandoff", "traceability", "acceptance"],
-    "presentationScript": ["visualDirection", "implementationHandoff", "traceability", "acceptance"],
-    "visualDirection": ["implementationHandoff", "traceability", "acceptance"],
-    "implementationHandoff": ["traceability", "acceptance"],
-    "traceability": ["acceptance"],
-    "acceptance": [],
-}
-
-REVIEW_STAGE = {
-    "context": "intake",
-    "teachingDesign": "teaching-design-review",
-    "contentSpec": "content-spec-review",
-    "presentationScript": "presentation-script-review",
-    "visualDirection": "visual-review",
-    "implementationHandoff": "visual-review",
-    "traceability": "building-sample",
-    "acceptance": "outcome-review",
-}
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def load_manifest(case_dir: Path) -> tuple[Path, dict]:
-    manifest_path = case_dir / "case.json"
-    if not manifest_path.is_file():
-        raise ValueError(f"missing manifest: {manifest_path}")
-    value = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if value.get("schemaVersion") != 1 or not isinstance(value.get("artifacts"), dict):
-        raise ValueError("case.json is not CoursewareCaseManifestV1")
-    return manifest_path, value
-
-
-def artifact_path(case_dir: Path, artifact: dict) -> Path:
-    path = (case_dir / str(artifact.get("path", ""))).resolve()
-    try:
-        path.relative_to(case_dir)
-    except ValueError as exc:
-        raise ValueError(f"artifact path escapes case directory: {path}") from exc
-    if not path.is_file():
-        raise ValueError(f"artifact file is missing: {path}")
-    return path
-
-
-def clear_approval(artifact: dict) -> None:
-    for key in ("approvedBy", "approvedAt", "approvalEvidence", "rejectedAt", "rejectionEvidence", "notRequiredReason"):
-        artifact.pop(key, None)
-
-
-def invalidate_dependents(manifest: dict, key: str) -> list[str]:
-    changed: list[str] = []
-    artifacts = manifest["artifacts"]
-    for dependent_key in DEPENDENTS.get(key, []):
-        dependent = artifacts.get(dependent_key)
-        if not isinstance(dependent, dict):
-            continue
-        previous = dependent.get("status")
-        if previous == "missing":
-            continue
-        dependent["status"] = "draft"
-        dependent.pop("sha256", None)
-        clear_approval(dependent)
-        changed.append(dependent_key)
-    if changed:
-        manifest["stage"] = REVIEW_STAGE[key]
-    return changed
-
-
-def save(path: Path, manifest: dict) -> None:
-    manifest["updatedAt"] = now_iso()
-    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+from courseware_case_v2 import (
+    artifact_current_hash,
+    archive_review,
+    clear_review_state,
+    invalidate_from_artifact,
+    invalidate_readiness,
+    is_automated_identity,
+    load_manifest,
+    next_stage,
+    now_iso,
+    resolve_inside,
+    review_order,
+    review_scope_sha256,
+    save_manifest,
+)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Manage a courseware case artifact")
+    parser = argparse.ArgumentParser(description="Manage V2 courseware artifacts and review scopes")
     parser.add_argument("case_dir")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ready = subparsers.add_parser("ready")
     ready.add_argument("artifact_key")
-    ready.add_argument("--version")
+
+    review_ready = subparsers.add_parser("review-ready")
+    review_ready.add_argument("review_key")
 
     approve = subparsers.add_parser("approve")
-    approve.add_argument("artifact_key")
-    approve.add_argument("--evidence", required=True)
+    approve.add_argument("review_key")
+    approve.add_argument("--approved-by", required=True, help="Named human reviewer; automation must not invent this")
+    approve.add_argument("--evidence", required=True, help="Explicit approval evidence for this exact scope")
 
     reject = subparsers.add_parser("reject")
-    reject.add_argument("artifact_key")
+    reject.add_argument("review_key")
     reject.add_argument("--evidence", required=True)
-
-    not_required = subparsers.add_parser("not-required")
-    not_required.add_argument("artifact_key")
-    not_required.add_argument("--reason", required=True)
 
     invalidate = subparsers.add_parser("invalidate")
     invalidate.add_argument("artifact_key")
@@ -125,98 +53,172 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def require_artifact(manifest: dict, key: str) -> dict:
+    artifact = manifest["artifacts"].get(key)
+    if not isinstance(artifact, dict):
+        raise ValueError(f"unknown artifact: {key}")
+    return artifact
+
+
+def require_review(manifest: dict, key: str) -> dict:
+    review = manifest["reviews"].get(key)
+    if not isinstance(review, dict):
+        raise ValueError(f"unknown review for pathMode {manifest.get('pathMode')}: {key}")
+    return review
+
+
+def artifact_is_ready(case_dir: Path, artifact: dict) -> bool:
+    current_hash = artifact_current_hash(case_dir, artifact)
+    if current_hash is None:
+        return artifact.get("status") in ("not-present", "not-required") and not artifact.get("required")
+    return artifact.get("status") == "ready-for-review" and artifact.get("sha256") == current_hash
+
+
+def review_dependencies_are_current(case_dir: Path, manifest: dict, review: dict) -> None:
+    for dependency_key in review.get("dependsOn", []):
+        dependency = require_review(manifest, dependency_key)
+        if dependency.get("status") != "approved":
+            raise ValueError(f"upstream review is not approved: {dependency_key}")
+        current_scope = review_scope_sha256(case_dir, manifest, dependency_key)
+        if dependency.get("scopeSha256") != current_scope:
+            raise ValueError(f"upstream review scope is stale: {dependency_key}")
+
+
 def main() -> int:
     args = parse_args()
     case_dir = Path(args.case_dir).resolve()
     try:
         manifest_path, manifest = load_manifest(case_dir)
-        artifacts = manifest["artifacts"]
 
         if args.command == "status":
-            rows = []
-            for key, artifact in artifacts.items():
-                path = artifact_path(case_dir, artifact)
-                current_hash = sha256(path)
-                rows.append({
+            artifact_rows = []
+            for key, artifact in manifest["artifacts"].items():
+                current_hash = artifact_current_hash(case_dir, artifact)
+                artifact_rows.append({
                     "key": key,
-                    "version": artifact.get("version"),
                     "status": artifact.get("status"),
+                    "required": bool(artifact.get("required")),
+                    "currentSha256": current_hash,
                     "hashMatches": artifact.get("sha256") in (None, current_hash),
                 })
-            print(json.dumps({"stage": manifest.get("stage"), "artifacts": rows}, ensure_ascii=False, indent=2))
+            review_rows = []
+            for key in review_order(manifest):
+                review = manifest["reviews"][key]
+                current_scope = review_scope_sha256(case_dir, manifest, key)
+                review_rows.append({
+                    "key": key,
+                    "status": review.get("status"),
+                    "currentScopeSha256": current_scope,
+                    "scopeMatches": review.get("scopeSha256") in (None, current_scope),
+                })
+            print(json.dumps({
+                "stage": manifest.get("stage"),
+                "resultStatus": manifest.get("resultStatus"),
+                "derivedReadiness": manifest.get("derivedReadiness"),
+                "artifacts": artifact_rows,
+                "reviews": review_rows,
+            }, ensure_ascii=False, indent=2))
             return 0
-
-        key = args.artifact_key
-        if key not in artifacts:
-            raise ValueError(f"unknown artifact key: {key}")
-        artifact = artifacts[key]
-        path = artifact_path(case_dir, artifact)
-        current_hash = sha256(path)
 
         if args.command == "ready":
-            previous_hash = artifact.get("sha256")
-            invalidated = invalidate_dependents(manifest, key) if previous_hash not in (None, current_hash) else []
+            key = args.artifact_key
+            artifact = require_artifact(manifest, key)
+            path = resolve_inside(case_dir, str(artifact.get("path", "")))
+            current_hash = artifact_current_hash(case_dir, artifact)
+            if current_hash is None:
+                raise ValueError(f"artifact path does not exist: {path}")
+            old_hash = artifact.get("sha256")
+            invalidated = []
+            if old_hash != current_hash or artifact.get("status") != "ready-for-review":
+                invalidated = invalidate_from_artifact(manifest, key, f"artifact changed or re-opened: {key}")
             artifact["status"] = "ready-for-review"
             artifact["sha256"] = current_hash
-            clear_approval(artifact)
-            if args.version:
-                artifact["version"] = args.version
-            manifest["stage"] = REVIEW_STAGE[key]
-            save(manifest_path, manifest)
-            print(json.dumps({"status": "ready-for-review", "artifact": key, "sha256": current_hash, "invalidated": invalidated}, ensure_ascii=False))
-            return 0
-
-        if args.command == "approve":
-            if artifact.get("status") != "ready-for-review":
-                raise ValueError("artifact must be ready-for-review before approval")
-            if artifact.get("sha256") != current_hash:
-                raise ValueError("artifact changed after it was marked ready; mark it ready again")
-            artifact.update({
-                "status": "approved",
+            artifact["readyAt"] = now_iso()
+            artifact.pop("invalidationReason", None)
+            manifest["stage"] = next_stage(manifest)
+            save_manifest(manifest_path, manifest)
+            print(json.dumps({
+                "status": "ready-for-review",
+                "artifact": key,
                 "sha256": current_hash,
-                "approvedBy": "user",
-                "approvedAt": now_iso(),
-                "approvalEvidence": args.evidence,
-            })
-            save(manifest_path, manifest)
-            print(json.dumps({"status": "approved", "artifact": key, "sha256": current_hash}, ensure_ascii=False))
-            return 0
-
-        if args.command == "reject":
-            artifact.update({"status": "rejected", "sha256": current_hash, "rejectedAt": now_iso(), "rejectionEvidence": args.evidence})
-            clear_approval(artifact)
-            artifact["status"] = "rejected"
-            artifact["sha256"] = current_hash
-            artifact["rejectedAt"] = now_iso()
-            artifact["rejectionEvidence"] = args.evidence
-            invalidate_dependents(manifest, key)
-            manifest["stage"] = REVIEW_STAGE[key]
-            save(manifest_path, manifest)
-            print(json.dumps({"status": "rejected", "artifact": key}, ensure_ascii=False))
-            return 0
-
-        if args.command == "not-required":
-            if key != "visualDirection":
-                raise ValueError("only visualDirection may be marked not-required in Skill V1")
-            invalidate_dependents(manifest, key)
-            artifact["status"] = "not-required"
-            artifact.pop("sha256", None)
-            clear_approval(artifact)
-            artifact["notRequiredReason"] = args.reason
-            manifest["stage"] = "visual-review"
-            save(manifest_path, manifest)
-            print(json.dumps({"status": "not-required", "artifact": key, "reason": args.reason}, ensure_ascii=False))
+                "invalidatedReviews": invalidated,
+            }, ensure_ascii=False))
             return 0
 
         if args.command == "invalidate":
+            key = args.artifact_key
+            artifact = require_artifact(manifest, key)
             artifact["status"] = "draft"
             artifact.pop("sha256", None)
-            clear_approval(artifact)
+            artifact.pop("readyAt", None)
             artifact["invalidationReason"] = args.reason
-            invalidated = invalidate_dependents(manifest, key)
-            manifest["stage"] = REVIEW_STAGE[key]
-            save(manifest_path, manifest)
-            print(json.dumps({"status": "draft", "artifact": key, "invalidated": invalidated}, ensure_ascii=False))
+            invalidated = invalidate_from_artifact(manifest, key, args.reason)
+            manifest["stage"] = next_stage(manifest)
+            save_manifest(manifest_path, manifest)
+            print(json.dumps({"status": "draft", "artifact": key, "invalidatedReviews": invalidated}, ensure_ascii=False))
+            return 0
+
+        review_key = args.review_key
+        review = require_review(manifest, review_key)
+
+        if args.command == "review-ready":
+            for artifact_key in review.get("covers", []):
+                artifact = require_artifact(manifest, artifact_key)
+                if not artifact_is_ready(case_dir, artifact):
+                    raise ValueError(f"covered artifact is not current and ready: {artifact_key}")
+            review_dependencies_are_current(case_dir, manifest, review)
+            current_scope = review_scope_sha256(case_dir, manifest, review_key)
+            if review.get("scopeSha256") not in (None, current_scope) or review.get("status") == "approved":
+                archive_review(manifest, review_key, "review scope reopened")
+            clear_review_state(review, "ready-for-review")
+            review["scopeSha256"] = current_scope
+            review["readyAt"] = now_iso()
+            invalidate_readiness(manifest, f"review awaiting approval: {review_key}")
+            manifest["stage"] = next_stage(manifest)
+            save_manifest(manifest_path, manifest)
+            print(json.dumps({"status": "ready-for-review", "review": review_key, "scopeSha256": current_scope}, ensure_ascii=False))
+            return 0
+
+        if args.command == "approve":
+            if review.get("status") != "ready-for-review":
+                raise ValueError("review must be ready-for-review before approval")
+            for artifact_key in review.get("covers", []):
+                if not artifact_is_ready(case_dir, require_artifact(manifest, artifact_key)):
+                    raise ValueError(f"covered artifact changed or is not ready: {artifact_key}")
+            review_dependencies_are_current(case_dir, manifest, review)
+            current_scope = review_scope_sha256(case_dir, manifest, review_key)
+            if review.get("scopeSha256") != current_scope:
+                raise ValueError("review scope changed after it was presented; run review-ready again")
+            if not args.approved_by.strip() or not args.evidence.strip():
+                raise ValueError("human reviewer and explicit evidence must not be empty")
+            if is_automated_identity(args.approved_by):
+                raise ValueError("approved-by must identify a human; automated identities cannot approve")
+            review.update({
+                "status": "approved",
+                "scopeSha256": current_scope,
+                "approvedBy": args.approved_by.strip(),
+                "approvedAt": now_iso(),
+                "approvalEvidence": args.evidence.strip(),
+            })
+            invalidate_readiness(manifest, f"readiness must be re-derived after approval: {review_key}")
+            manifest["stage"] = next_stage(manifest)
+            save_manifest(manifest_path, manifest)
+            print(json.dumps({"status": "approved", "review": review_key, "scopeSha256": current_scope}, ensure_ascii=False))
+            return 0
+
+        if args.command == "reject":
+            current_scope = review_scope_sha256(case_dir, manifest, review_key)
+            archive_review(manifest, review_key, "human rejection")
+            clear_review_state(review, "rejected")
+            review.update({
+                "scopeSha256": current_scope,
+                "rejectedAt": now_iso(),
+                "rejectionEvidence": args.evidence,
+            })
+            invalidate_readiness(manifest, f"review rejected: {review_key}")
+            manifest["stage"] = next_stage(manifest)
+            save_manifest(manifest_path, manifest)
+            print(json.dumps({"status": "rejected", "review": review_key}, ensure_ascii=False))
             return 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -1,0 +1,939 @@
+import { _electron as electron, chromium } from '@playwright/test'
+import { execFile, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync, promises as fs } from 'node:fs'
+import net from 'node:net'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { promisify } from 'node:util'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import type { Browser, ElectronApplication, Page } from 'playwright'
+import packageJson from '../package.json'
+import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
+import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
+import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
+import {
+  buildWebPackageFilesFromProject,
+  buildWebPackageFromProjectAsync,
+} from '../src/renderer/export/buildWebPackage'
+import {
+  createExternalComponentNode,
+  createProject,
+  createTextNode,
+} from '../src/renderer/project/createProject'
+import {
+  createProjectArchive,
+  openProjectArchive,
+} from '../src/renderer/project/projectArchive'
+import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'
+import {
+  APP_EXECUTABLE_NAME,
+  APP_PRODUCT_NAME,
+  APP_VERSION,
+} from '../src/shared/constants'
+import { collectFileArtifactEvidence } from './releaseArtifactEvidence'
+import {
+  assertEquivalentDirectoryEvidence,
+  assertNoForbiddenPathReferences,
+  collectDirectoryEvidence,
+  summarizeDirectoryEvidence,
+} from './windowsPortabilityEvidence'
+
+interface VerificationCheck {
+  name: string
+  detail: string
+  passed: true
+}
+
+interface OfflineResult {
+  label: string
+  screenshotPath: string
+  screenshotSha256: string
+  externalRequests: string[]
+}
+
+interface MovedApplicationIdentity {
+  appPath: string
+  execPath: string
+  cwd: string
+  userData: string
+  configuredComponentDirectory: string
+}
+
+const execFileAsync = promisify(execFile)
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
+const projectRoot = path.resolve(scriptDirectory, '..')
+const releaseDirectory = path.join(projectRoot, 'release')
+const sourceUnpackedDirectory = path.join(releaseDirectory, 'win-unpacked')
+const sourceUnpackedExecutable = path.join(
+  sourceUnpackedDirectory,
+  `${APP_EXECUTABLE_NAME}.exe`,
+)
+const sourcePortableExecutable = path.join(
+  releaseDirectory,
+  `${APP_EXECUTABLE_NAME}-portable-${packageJson.version}.exe`,
+)
+const sampleComponentPath = path.join(
+  projectRoot,
+  'examples',
+  'sample-counter.h5component',
+)
+const playerBundlePath = path.join(projectRoot, 'dist-player', 'player.iife.js')
+const evidenceDirectory = path.join(
+  releaseDirectory,
+  'verification',
+  'w3-portability',
+)
+const reportPath = path.join(evidenceDirectory, 'report.json')
+const reproducibleTimestamp = new Date('2026-08-13T00:00:00.000Z')
+const checks: VerificationCheck[] = []
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message)
+}
+
+function pass(name: string, detail: string): void {
+  checks.push({ name, detail, passed: true })
+  console.log(`✓ ${name}：${detail}`)
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate))
+  return relative === '' || (
+    relative !== '..' &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  )
+}
+
+function sha256Bytes(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex').toUpperCase()
+}
+
+async function removeDirectoryWithRetries(
+  directory: string,
+  attempts = 20,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await fs.rm(directory, { recursive: true, force: true })
+      return true
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : ''
+      if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+  }
+  return false
+}
+
+async function writeWebPackageDirectory(
+  directory: string,
+  files: Readonly<Record<string, Uint8Array>>,
+): Promise<void> {
+  for (const [relativePath, bytes] of Object.entries(files)) {
+    const destination = path.resolve(directory, ...relativePath.split('/'))
+    assert(
+      isWithin(directory, destination),
+      `网页包试图写出隔离目录：${relativePath}`,
+    )
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    await fs.writeFile(destination, bytes)
+  }
+}
+
+function systemEdgePath(): string {
+  const candidates = [
+    process.env['PROGRAMFILES(X86)'],
+    process.env.PROGRAMFILES,
+    process.env.LOCALAPPDATA,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((base) =>
+      path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    )
+  const match = candidates.find(existsSync)
+  if (!match) throw new Error('未找到 Microsoft Edge，无法验证 file:// 离线交付物')
+  return match
+}
+
+async function verifyOfflinePage(
+  browser: Browser,
+  filePath: string,
+  label: string,
+  screenshotPath: string,
+): Promise<OfflineResult> {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
+  const pageErrors: string[] = []
+  const consoleErrors: string[] = []
+  const externalRequests: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+  page.on('request', (request) => {
+    if (/^(?:https?|wss?):/i.test(request.url())) externalRequests.push(request.url())
+  })
+
+  try {
+    await page.goto(pathToFileURL(filePath).href, {
+      waitUntil: 'load',
+      timeout: 45_000,
+    })
+    await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__), undefined, {
+      timeout: 45_000,
+    })
+    const canvas = page.locator('.lesson-canvas-host canvas')
+    await canvas.waitFor({ timeout: 45_000 })
+    const bounds = await canvas.boundingBox()
+    assert(bounds, `${label} 未渲染 Player 画布`)
+
+    const before = await canvas.screenshot()
+    await page.mouse.click(
+      bounds.x + (760 / 1280) * bounds.width,
+      bounds.y + (458 / 720) * bounds.height,
+    )
+    await page.waitForTimeout(300)
+    const after = await canvas.screenshot()
+    assert(
+      Buffer.compare(before, after) !== 0,
+      `${label} 中嵌入组件未响应点击`,
+    )
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    assert(pageErrors.length === 0, `${label} page errors：${pageErrors.join('；')}`)
+    assert(
+      consoleErrors.length === 0,
+      `${label} console errors：${consoleErrors.join('；')}`,
+    )
+    assert(
+      externalRequests.length === 0,
+      `${label} 产生外部网络请求：${externalRequests.join('；')}`,
+    )
+    const resources = await page.evaluate(() =>
+      performance.getEntriesByType('resource').map((entry) => entry.name),
+    )
+    assert(
+      resources.every((resource) => !/^(?:https?|wss?):/i.test(resource)),
+      `${label} 性能记录中包含外部资源：${resources.join('；')}`,
+    )
+    const screenshot = await collectFileArtifactEvidence(screenshotPath)
+    return {
+      label,
+      screenshotPath,
+      screenshotSha256: screenshot.sha256,
+      externalRequests,
+    }
+  } finally {
+    await page.close().catch(() => undefined)
+  }
+}
+
+async function closeElectronApplication(
+  application: ElectronApplication,
+): Promise<void> {
+  await application
+    .evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows().forEach((window) => window.destroy())
+    })
+    .catch(() => undefined)
+  await application.close().catch(() => undefined)
+}
+
+async function verifyMovedUnpackedApplication(
+  isolatedRoot: string,
+  movedProjectPath: string,
+): Promise<{
+  identity: MovedApplicationIdentity
+  directory: ReturnType<typeof summarizeDirectoryEvidence>
+  screenshotPath: string
+  screenshotSha256: string
+}> {
+  const movedApplicationDirectory = path.join(isolatedRoot, 'moved-editor')
+  const movedExecutable = path.join(
+    movedApplicationDirectory,
+    `${APP_EXECUTABLE_NAME}.exe`,
+  )
+  const profileDirectory = path.join(isolatedRoot, 'moved-editor-profile')
+  const missingComponentDirectory = path.join(
+    isolatedRoot,
+    'deliberately-missing-component-library',
+  )
+
+  const sourceEvidence = await collectDirectoryEvidence(sourceUnpackedDirectory)
+  await fs.cp(sourceUnpackedDirectory, movedApplicationDirectory, {
+    recursive: true,
+    force: false,
+    errorOnExist: true,
+  })
+  const movedEvidence = await collectDirectoryEvidence(movedApplicationDirectory)
+  assertEquivalentDirectoryEvidence(sourceEvidence, movedEvidence)
+  const directory = summarizeDirectoryEvidence(movedEvidence)
+  pass(
+    '目录版逐字节复制',
+    `${directory.fileCount} 个文件、${directory.totalBytes} 字节，目录清单 SHA-256 ${directory.manifestSha256}`,
+  )
+
+  await fs.mkdir(profileDirectory, { recursive: true })
+  const application = await electron.launch({
+    executablePath: movedExecutable,
+    cwd: isolatedRoot,
+    args: [`--user-data-dir=${profileDirectory}`],
+    env: {
+      ...process.env,
+      VITE_DEV_SERVER_URL: '',
+      COURSEWARE_COMPONENTS_DIR: missingComponentDirectory,
+      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+      [BACKGROUND_E2E_ENV]: '1',
+    },
+    timeout: 60_000,
+  })
+  try {
+    const page = await application.firstWindow({ timeout: 45_000 })
+    const pageErrors: string[] = []
+    const consoleErrors: string[] = []
+    const externalRequests: string[] = []
+    page.on('pageerror', (error) => pageErrors.push(error.message))
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text())
+    })
+    page.on('request', (request) => {
+      if (/^(?:https?|wss?):/i.test(request.url())) externalRequests.push(request.url())
+    })
+    await page.locator('[data-testid="canvas-stage"] canvas').waitFor({
+      timeout: 45_000,
+    })
+
+    const identity = await application.evaluate(({ app }) => ({
+      appPath: app.getAppPath(),
+      execPath: process.execPath,
+      cwd: process.cwd(),
+      userData: app.getPath('userData'),
+      configuredComponentDirectory:
+        process.env.COURSEWARE_COMPONENTS_DIR ?? '',
+    }))
+    assert(
+      isWithin(movedApplicationDirectory, identity.appPath),
+      `目录版仍从原仓库加载 appPath：${identity.appPath}`,
+    )
+    assert(
+      path.resolve(identity.execPath) === path.resolve(movedExecutable),
+      `目录版实际 execPath 不是复制后的 exe：${identity.execPath}`,
+    )
+    assert(
+      path.resolve(identity.cwd) === path.resolve(isolatedRoot),
+      `目录版继承了非隔离 cwd：${identity.cwd}`,
+    )
+    assert(
+      isWithin(isolatedRoot, identity.userData),
+      `目录版复用了当前用户数据目录：${identity.userData}`,
+    )
+    assert(
+      path.resolve(identity.configuredComponentDirectory) ===
+        path.resolve(missingComponentDirectory) &&
+        !existsSync(missingComponentDirectory),
+      '目录版未被指向明确不存在的组件目录',
+    )
+
+    await application.evaluate(
+      ({ dialog }, projectPath) => {
+        dialog.showOpenDialog = async () => ({
+          canceled: false,
+          filePaths: [projectPath],
+        })
+      },
+      movedProjectPath,
+    )
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    await page
+      .getByRole('button', { name: '重命名课件' })
+      .filter({ hasText: 'W3 可移植性隔离课件（移动后重存）' })
+      .waitFor({ timeout: 30_000 })
+    assert(
+      await page.locator('.scene-item').count() === 1,
+      '移动工程在复制后的目录版中场景数量错误',
+    )
+    await page.getByRole('button', { name: '专业' }).click()
+    await page.getByRole('tab', { name: '组件', exact: true }).click()
+    await page
+      .getByTestId('component-com.example.sample-counter')
+      .waitFor({ timeout: 20_000 })
+
+    assert(pageErrors.length === 0, pageErrors.join('；'))
+    assert(consoleErrors.length === 0, consoleErrors.join('；'))
+    assert(
+      externalRequests.length === 0,
+      `复制后的目录版产生外部网络请求：${externalRequests.join('；')}`,
+    )
+    const screenshotPath = path.join(
+      evidenceDirectory,
+      'moved-unpacked-opened-project.png',
+    )
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    const screenshot = await collectFileArtifactEvidence(screenshotPath)
+    pass(
+      '隔离目录版启动并打开移动工程',
+      `execPath/appPath/cwd/userData 均位于隔离树；外部组件目录不存在；工程内嵌组件可见；网络请求 0`,
+    )
+    return {
+      identity,
+      directory,
+      screenshotPath,
+      screenshotSha256: screenshot.sha256,
+    }
+  } finally {
+    await closeElectronApplication(application)
+  }
+}
+
+async function availableLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (!address || typeof address === 'string') {
+        server.close()
+        reject(new Error('无法分配 Portable 验证端口'))
+        return
+      }
+      server.close((error) => {
+        if (error) reject(error)
+        else resolve(address.port)
+      })
+    })
+  })
+}
+
+async function connectPortableBrowser(
+  port: number,
+  childExited: () => boolean,
+  stderr: () => string,
+): Promise<Browser> {
+  const deadline = Date.now() + 60_000
+  let lastError: unknown
+  while (Date.now() < deadline) {
+    if (childExited()) {
+      throw new Error(`复制后的 Portable 在连接前退出：${stderr()}`)
+    }
+    try {
+      return await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {
+        timeout: 1_000,
+      })
+    } catch (error) {
+      lastError = error
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+  }
+  throw new Error(`复制后的 Portable CDP 连接超时：${String(lastError)}`)
+}
+
+async function findEditorPage(browser: Browser): Promise<Page> {
+  const deadline = Date.now() + 45_000
+  while (Date.now() < deadline) {
+    for (const context of browser.contexts()) {
+      for (const page of context.pages()) {
+        if (await page.locator('[data-testid="canvas-stage"] canvas').count()) {
+          return page
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('复制后的 Portable 已启动，但编辑器画布未加载')
+}
+
+async function verifyMovedPortableApplication(
+  isolatedRoot: string,
+): Promise<{
+  sourceSha256: string
+  movedSha256: string
+  movedPath: string
+}> {
+  const portableDirectory = path.join(isolatedRoot, 'moved-portable')
+  const movedPortableExecutable = path.join(
+    portableDirectory,
+    path.basename(sourcePortableExecutable),
+  )
+  const profileDirectory = path.join(isolatedRoot, 'moved-portable-profile')
+  await fs.mkdir(portableDirectory, { recursive: true })
+  await fs.mkdir(profileDirectory, { recursive: true })
+  await fs.copyFile(sourcePortableExecutable, movedPortableExecutable)
+  const [sourceArtifact, movedArtifact] = await Promise.all([
+    collectFileArtifactEvidence(sourcePortableExecutable),
+    collectFileArtifactEvidence(movedPortableExecutable),
+  ])
+  assert(
+    sourceArtifact.sizeBytes === movedArtifact.sizeBytes &&
+      sourceArtifact.sha256 === movedArtifact.sha256,
+    'Portable.exe 复制后字节或 SHA-256 改变',
+  )
+
+  const port = await availableLoopbackPort()
+  let stderr = ''
+  const child = spawn(
+    movedPortableExecutable,
+    [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profileDirectory}`,
+    ],
+    {
+      cwd: portableDirectory,
+      env: {
+        ...process.env,
+        VITE_DEV_SERVER_URL: '',
+        COURSEWARE_COMPONENTS_DIR: path.join(isolatedRoot, 'missing-portable-components'),
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+        [BACKGROUND_E2E_ENV]: '1',
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+    },
+  )
+  child.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8')
+  })
+  let browser: Browser | undefined
+  try {
+    browser = await connectPortableBrowser(
+      port,
+      () => child.exitCode !== null,
+      () => stderr.trim(),
+    )
+    const page = await findEditorPage(browser)
+    const security = await page.evaluate(() => {
+      const globals = window as unknown as Record<string, unknown>
+      return {
+        url: window.location.href,
+        desktopApiFrozen:
+          typeof globals.desktopAPI === 'object' &&
+          Object.isFrozen(globals.desktopAPI),
+        hasRequire: typeof globals.require !== 'undefined',
+        hasProcess: typeof globals.process !== 'undefined',
+        externalResources: performance
+          .getEntriesByType('resource')
+          .map((entry) => entry.name)
+          .filter((url) => /^(?:https?|wss?):/i.test(url)),
+      }
+    })
+    assert(
+      security.url === 'courseware-editor://app/index.html',
+      `Portable 主页 URL 错误：${security.url}`,
+    )
+    assert(security.desktopApiFrozen, 'Portable preload API 未冻结')
+    assert(!security.hasRequire && !security.hasProcess, 'Portable 渲染器暴露 Node 全局')
+    assert(
+      security.externalResources.length === 0,
+      `Portable 启动加载外部资源：${security.externalResources.join('；')}`,
+    )
+    pass(
+      '复制后的 Portable.exe 启动',
+      `${(movedArtifact.sizeBytes / 1024 / 1024).toFixed(1)} MB，SHA-256 ${movedArtifact.sha256}，隔离 cwd/profile，外部资源 0`,
+    )
+    return {
+      sourceSha256: sourceArtifact.sha256,
+      movedSha256: movedArtifact.sha256,
+      movedPath: movedPortableExecutable,
+    }
+  } finally {
+    await browser?.close().catch(() => undefined)
+    if (child.pid) {
+      await execFileAsync('taskkill', [
+        '/PID',
+        String(child.pid),
+        '/T',
+        '/F',
+      ]).catch(() => undefined)
+    }
+  }
+}
+
+async function verifyDocumentationContract(): Promise<void> {
+  const [readme, guide, launcher, lockfile] = await Promise.all([
+    fs.readFile(path.join(projectRoot, 'README.md'), 'utf8'),
+    fs.readFile(path.join(projectRoot, 'docs', 'USER_GUIDE.md'), 'utf8'),
+    fs.readFile(path.join(projectRoot, '启动课件编辑器.cmd'), 'utf8'),
+    fs.readFile(path.join(projectRoot, 'package-lock.json'), 'utf8'),
+  ])
+  assert(
+    guide.includes('Windows 10/11 x64') &&
+      guide.includes('Node.js LTS') &&
+      guide.includes('启动课件编辑器.cmd') &&
+      guide.includes('npm ci') &&
+      guide.includes('npm start'),
+    '用户指南未完整声明 Windows 源码启动前提与命令',
+  )
+  assert(
+    readme.includes('启动课件编辑器.cmd') &&
+      readme.includes('npm start') &&
+      readme.includes('npm run build:desktop'),
+    'README 的源码启动入口与命令不完整',
+  )
+  assert(
+    /call npm\.cmd ci/i.test(launcher) &&
+      /call npm\.cmd run build:desktop/i.test(launcher) &&
+      /node_modules\\electron\\dist\\electron\.exe/i.test(launcher),
+    '双击入口未按文档执行锁定依赖、生产构建和 Electron 启动',
+  )
+  assert(
+    packageJson.scripts.start === 'npm run build:desktop && electron .' &&
+      packageJson.scripts['build:desktop'] ===
+        'npm run build:player && npm run build:renderer && npm run build:electron',
+    'package.json 的 npm start/build:desktop 与文档不一致',
+  )
+  const parsedLockfile = JSON.parse(lockfile) as { lockfileVersion?: number }
+  assert(
+    typeof parsedLockfile.lockfileVersion === 'number',
+    'package-lock.json 缺少 lockfileVersion',
+  )
+  pass(
+    '文档与启动入口静态一致性',
+    'README/用户指南、CMD、package scripts 与 package-lock 的 Windows 源码启动合同一致',
+  )
+}
+
+async function buildAndVerifyMovedLesson(
+  isolatedRoot: string,
+): Promise<{
+  movedProjectPath: string
+  projectArtifact: Awaited<ReturnType<typeof collectFileArtifactEvidence>>
+  htmlArtifact: Awaited<ReturnType<typeof collectFileArtifactEvidence>>
+  webPackageArtifact: Awaited<ReturnType<typeof collectFileArtifactEvidence>>
+  offline: OfflineResult[]
+}> {
+  const externalSourceDirectory = path.join(
+    isolatedRoot,
+    'external-component-library-to-disconnect',
+  )
+  const authoringDirectory = path.join(isolatedRoot, 'authoring-origin')
+  const deliveryDirectory = path.join(isolatedRoot, 'moved-delivery')
+  const movedWebDirectory = path.join(deliveryDirectory, 'web-package')
+  await Promise.all([
+    fs.mkdir(externalSourceDirectory, { recursive: true }),
+    fs.mkdir(authoringDirectory, { recursive: true }),
+    fs.mkdir(deliveryDirectory, { recursive: true }),
+  ])
+
+  const externalComponentPath = path.join(
+    externalSourceDirectory,
+    'only-source-w3-counter.h5component',
+  )
+  await fs.copyFile(sampleComponentPath, externalComponentPath)
+  const componentBytes = Uint8Array.from(await fs.readFile(externalComponentPath))
+  const packageSha256 = sha256Bytes(componentBytes).toLocaleLowerCase('en-US')
+  const imported = importComponentPackage(componentBytes, {
+    provenance: {
+      sha256: packageSha256,
+      importedAt: reproducibleTimestamp.toISOString(),
+      sourceLabel: 'W3 临时外部组件源（删除后验证）',
+    },
+  })
+
+  const project = createProject({
+    id: 'project_w3_windows_portability',
+    title: 'W3 可移植性隔离课件',
+    now: reproducibleTimestamp,
+    includeDefaultController: false,
+    idFactory: (() => {
+      let sequence = 0
+      return () => `w3_${String(++sequence).padStart(3, '0')}`
+    })(),
+  })
+  const scene = project.scenes[0]!
+  scene.id = 'scene_w3_component'
+  scene.name = '断开源目录后的组件'
+  scene.nodes = [
+    createTextNode({
+      id: 'text_w3_title',
+      name: '验证标题',
+      x: 240,
+      y: 80,
+      width: 800,
+      height: 72,
+      text: '工程移动后仍由内嵌组件运行',
+      style: { fontSize: 40, color: '#0f172a', align: 'center' },
+    }),
+    createExternalComponentNode({
+      id: 'component_w3_counter',
+      name: imported.manifest.name,
+      x: 400,
+      y: 220,
+      width: imported.manifest.defaultSize.width,
+      height: imported.manifest.defaultSize.height,
+      component: {
+        packageId: imported.manifest.id,
+        version: imported.manifest.version,
+      },
+      props: structuredClone(imported.manifest.defaultProps),
+    }),
+  ]
+  project.componentPackages[imported.key] = imported.metadata
+
+  const sourceProjectPath = path.join(authoringDirectory, 'source-project.h5lesson')
+  const initialArchive = createProjectArchive(
+    {
+      project,
+      assetFiles: {},
+      componentFiles: { [imported.key]: imported.files },
+    },
+    { mtime: reproducibleTimestamp },
+  )
+  await fs.writeFile(sourceProjectPath, initialArchive)
+
+  const movedProjectPath = path.join(deliveryDirectory, 'moved-project.h5lesson')
+  await fs.rename(sourceProjectPath, movedProjectPath)
+  await fs.rm(externalSourceDirectory, { recursive: true, force: true })
+  assert(!existsSync(externalSourceDirectory), '临时外部组件源目录未真正删除')
+  assert(!existsSync(sourceProjectPath), '工程仍留在原作者目录，未完成移动')
+
+  const movedArchive = Uint8Array.from(await fs.readFile(movedProjectPath))
+  const reopened = openProjectArchive(movedArchive)
+  const reopenedComponents = componentPackagesFromArchive(
+    reopened.project,
+    reopened.componentFiles,
+  )
+  const embedded = reopenedComponents[imported.manifest.id]
+  assert(embedded, '删除外部组件源后，工程未恢复内嵌组件')
+  assert(
+    embedded.contentSha256 === imported.contentSha256 &&
+      embedded.runtimeSource === imported.runtimeSource,
+    '移动工程中的内嵌组件内容或锁定哈希改变',
+  )
+  assert(
+    Object.keys(reopened.componentFiles[imported.key] ?? {}).length >= 2,
+    '移动工程未包含完整组件 manifest/runtime 文件',
+  )
+
+  reopened.project.title = 'W3 可移植性隔离课件（移动后重存）'
+  reopened.project.updatedAt = '2026-08-13T00:01:00.000Z'
+  const resavedArchive = createProjectArchive(reopened, {
+    mtime: reproducibleTimestamp,
+  })
+  await fs.writeFile(movedProjectPath, resavedArchive)
+  const finalArchive = openProjectArchive(
+    Uint8Array.from(await fs.readFile(movedProjectPath)),
+  )
+  const finalComponents = componentPackagesFromArchive(
+    finalArchive.project,
+    finalArchive.componentFiles,
+  )
+  assert(
+    finalArchive.project.title === 'W3 可移植性隔离课件（移动后重存）',
+    '移动工程重存后未保留修改',
+  )
+  assert(finalComponents[imported.manifest.id], '移动工程重存后丢失内嵌组件')
+  assertNoForbiddenPathReferences(
+    '移动后 Project V8',
+    JSON.stringify(finalArchive.project),
+    [projectRoot, externalSourceDirectory, authoringDirectory],
+  )
+  for (const component of Object.values(finalComponents)) {
+    assertNoForbiddenPathReferences(
+      `移动后组件 ${component.manifest.id}`,
+      `${JSON.stringify(component.manifest)}\n${component.runtimeSource}`,
+      [projectRoot, externalSourceDirectory, authoringDirectory],
+    )
+  }
+  pass(
+    '组件断源、工程移动与重存',
+    `唯一临时组件源已删除；${imported.key} 由工程归档恢复且 contentSha256 ${imported.contentSha256}`,
+  )
+
+  const playerBundle = await fs.readFile(playerBundlePath, 'utf8')
+  const payload = buildExportPayload({
+    project: finalArchive.project,
+    assetFiles: finalArchive.assetFiles,
+    components: finalComponents,
+  })
+  const html = buildStandaloneHtml(payload, playerBundle)
+  const htmlPath = path.join(deliveryDirectory, 'moved-offline.html')
+  await fs.writeFile(htmlPath, html, 'utf8')
+  const webFiles = buildWebPackageFilesFromProject(
+    {
+      project: finalArchive.project,
+      assetFiles: finalArchive.assetFiles,
+      components: finalComponents,
+    },
+    playerBundle,
+  )
+  await writeWebPackageDirectory(movedWebDirectory, webFiles)
+  const webArchive = await buildWebPackageFromProjectAsync(
+    {
+      project: finalArchive.project,
+      assetFiles: finalArchive.assetFiles,
+      components: finalComponents,
+    },
+    playerBundle,
+  )
+  const webArchivePath = path.join(deliveryDirectory, 'moved-web-package.zip')
+  await fs.writeFile(webArchivePath, webArchive)
+
+  assert(!/https?:\/\//i.test(html), '移动后的单 HTML 含远程 URL')
+  assertNoForbiddenPathReferences(
+    '移动后的单 HTML',
+    html,
+    [projectRoot, externalSourceDirectory, authoringDirectory],
+  )
+  for (const [relativePath, bytes] of Object.entries(webFiles)) {
+    if (!/\.(?:html|css|js|json|svg|txt)$/i.test(relativePath)) continue
+    assertNoForbiddenPathReferences(
+      `移动后的网页包 ${relativePath}`,
+      new TextDecoder().decode(bytes),
+      [projectRoot, externalSourceDirectory, authoringDirectory],
+    )
+  }
+
+  await fs.mkdir(evidenceDirectory, { recursive: true })
+  const persistentProjectPath = path.join(
+    evidenceDirectory,
+    'moved-self-contained.h5lesson',
+  )
+  const persistentHtmlPath = path.join(evidenceDirectory, 'moved-offline.html')
+  const persistentWebPath = path.join(evidenceDirectory, 'moved-web-package.zip')
+  await Promise.all([
+    fs.copyFile(movedProjectPath, persistentProjectPath),
+    fs.copyFile(htmlPath, persistentHtmlPath),
+    fs.copyFile(webArchivePath, persistentWebPath),
+  ])
+
+  const browser = await chromium.launch({
+    executablePath: systemEdgePath(),
+    headless: true,
+  })
+  let offline: OfflineResult[]
+  try {
+    offline = [
+      await verifyOfflinePage(
+        browser,
+        htmlPath,
+        '移动后的单 HTML',
+        path.join(evidenceDirectory, 'moved-single-html.png'),
+      ),
+      await verifyOfflinePage(
+        browser,
+        path.join(movedWebDirectory, 'index.html'),
+        '移动后的网页包',
+        path.join(evidenceDirectory, 'moved-web-package.png'),
+      ),
+    ]
+  } finally {
+    await browser.close()
+  }
+  pass(
+    '移动交付物 file:// 离线互动',
+    '单 HTML 与网页包均在 Edge file:// 打开，内嵌计数器响应点击，页错误/控制台错误/外部请求均为 0',
+  )
+
+  const [projectArtifact, htmlArtifact, webPackageArtifact] = await Promise.all([
+    collectFileArtifactEvidence(persistentProjectPath),
+    collectFileArtifactEvidence(persistentHtmlPath),
+    collectFileArtifactEvidence(persistentWebPath),
+  ])
+  return {
+    movedProjectPath,
+    projectArtifact,
+    htmlArtifact,
+    webPackageArtifact,
+    offline,
+  }
+}
+
+async function main(): Promise<void> {
+  let isolatedRoot = ''
+  let failure: string | undefined
+  let result: Record<string, unknown> = {}
+  try {
+    assert(process.platform === 'win32', 'W3 Windows 可移植性验证只能在 Windows 上运行')
+    assert(process.arch === 'x64', `W3 目标为 Windows x64，当前为 ${process.arch}`)
+    assert(APP_VERSION === packageJson.version, '源码应用版本与 package.json 不一致')
+    assert(APP_PRODUCT_NAME === 'ittoedu Courseware Editor', '产品名称不是 ittoedu')
+    for (const requiredPath of [
+      sourceUnpackedExecutable,
+      sourcePortableExecutable,
+      sampleComponentPath,
+      playerBundlePath,
+    ]) {
+      assert(existsSync(requiredPath), `W3 验证缺少前置产物：${requiredPath}`)
+    }
+
+    await fs.rm(evidenceDirectory, { recursive: true, force: true })
+    await fs.mkdir(evidenceDirectory, { recursive: true })
+    isolatedRoot = await fs.mkdtemp(path.join(tmpdir(), 'ittoedu-w3-portability-'))
+    assert(!isWithin(projectRoot, isolatedRoot), '隔离工作区意外位于源码仓库内')
+    console.log(`W3 隔离工作区：${isolatedRoot}`)
+
+    await verifyDocumentationContract()
+    const lesson = await buildAndVerifyMovedLesson(isolatedRoot)
+    const movedApplication = await verifyMovedUnpackedApplication(
+      isolatedRoot,
+      lesson.movedProjectPath,
+    )
+    const movedPortable = await verifyMovedPortableApplication(isolatedRoot)
+
+    result = {
+      host: {
+        platform: `${process.platform}-${process.arch}`,
+        node: process.version,
+        windowsRelease: (await import('node:os')).release(),
+        windowsVersion: (await import('node:os')).version(),
+      },
+      application: {
+        productName: APP_PRODUCT_NAME,
+        version: APP_VERSION,
+      },
+      isolation: {
+        workspaceWasOutsideProjectRoot: true,
+        externalComponentSourceDeletedBeforeReopen: true,
+        authoringOriginAbsentAfterMove: true,
+        keptAfterRun: process.env.W3_KEEP_ISOLATED_WORKSPACE === '1',
+      },
+      lesson,
+      movedApplication,
+      movedPortable,
+      limitations: [
+        '本验证在当前 Windows x64 主机的系统临时目录运行；它不能证明另一台全新 Windows 的环境、驱动、权限或安全软件行为。',
+        'README/CMD/package scripts 的启动合同已静态核对，但没有在另一台无 node_modules 的机器上执行首次 npm ci。',
+        '自动化结果最多为 engineering candidate；可见界面质量、真实课堂操作和内部产品 accepted 仍需明确人类验收。',
+      ],
+    }
+    pass(
+      'W3 自动化结论边界',
+      '同机隔离复制/断源/移动/离线工程证据通过；不冒充另一台干净 Windows 或人工 accepted',
+    )
+  } catch (error) {
+    failure = error instanceof Error ? error.stack ?? error.message : String(error)
+    throw error
+  } finally {
+    const report = {
+      reportVersion: 1,
+      verifiedAt: new Date().toISOString(),
+      status: failure ? 'failed' : 'engineering-candidate',
+      checks,
+      ...result,
+      ...(failure ? { failure } : {}),
+    }
+    await fs.mkdir(evidenceDirectory, { recursive: true }).catch(() => undefined)
+    await fs
+      .writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8')
+      .catch(() => undefined)
+
+    if (isolatedRoot && process.env.W3_KEEP_ISOLATED_WORKSPACE !== '1') {
+      const removed = await removeDirectoryWithRetries(isolatedRoot)
+      if (!removed) console.warn(`警告：未能清理隔离工作区 ${isolatedRoot}`)
+    }
+  }
+
+  console.log(`W3 Windows 可移植性验证通过，共 ${checks.length} 项。`)
+  console.log(`验证报告：${reportPath}`)
+}
+
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : ''
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  main().catch((error: unknown) => {
+    console.error('W3 Windows 可移植性验证失败：', error)
+    process.exitCode = 1
+  })
+}

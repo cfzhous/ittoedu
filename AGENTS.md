@@ -1,7 +1,7 @@
-# 互动课件创作入口
+# 互动课件创作路由
 
-涉及互动课件的策划解读、制作、生成或验收时，必须使用仓库权威 Skill [orchestrate-courseware](.agents/skills/orchestrate-courseware/SKILL.md)，并完整阅读 [通用创作编排规范](docs/AI_COURSEWARE_ORCHESTRATION.md)，先把上下文、人类决策、教学设计、教学内容规格、教学呈现脚本和必要的视觉方向落入独立课例档案并取得逐阶段批准。聊天记录或压缩摘要不得充当唯一交接真相。
+- 教学需求、课例设计、内容闭合、呈现脚本、必要的视觉方向和哈希审批，使用仓库机器执行权威 [orchestrate-courseware](.agents/skills/orchestrate-courseware/SKILL.md)。它按 `fast | standard | high-risk` 选择最薄充分路径；`request_user_input` 可用时直接调用。学科专有要求优先由用户材料、学科 Skill 或本次提示词补充，不堆入通用流程。
+- 只有课例经 V2 校验器派生出当前有效的 `implementation-ready` 后，才使用仓库机器执行权威 [build-project-v8-courseware](.agents/skills/build-project-v8-courseware/SKILL.md) 选择载体、维护 Authoring Inventory、构建或局部 Patch、验证 Project V8 并交付证据。内容、批准或 Capability 失效时返回编排，不从聊天摘要、旧工程或模板补写。
+- [通用创作编排规范](docs/AI_COURSEWARE_ORCHESTRATION.md) 与 [当前创作与接入规范](docs/AI_COURSEWARE_AUTHORING.md) 是供人类审阅和工程维护的背景/设计说明；AI 按 Skill 路由并只加载任务所需章节，不以完整阅读两份长文作为每次创作的前置门禁。
 
-取得哈希有效的 `implementation-ready` 交接记录后，当前主干仍必须暂停在实现门禁：Project V8 / Runtime API 2 / Component API 4 的软件断代已经完成，但新的权威 Project V8 实现 Skill 尚未提供；`build-project-v7-courseware` 只适用于归档标签 `internal-prototype-1.7.0`，不能生成当前主干工程。涉及编辑器的场景状态、运行时/组件关系、缩略图、编辑/运行画布、Project Schema、组件设计或导出语义时，仍必须完整阅读 [当前创作与接入规范](docs/AI_COURSEWARE_AUTHORING.md)。交接无效、内容缺失、脚本无法追溯或实现 Skill 版本不匹配时不得从聊天或既有实现自行补写，应返回相应编排阶段或保持暂停。
-
-通用编排规范负责跨学科的设计收敛、人类门禁、结果验收和复用治理；当前创作规范负责 PPT 兼容模式的工程承载、可编辑边界、运行时/组件、生命周期和导出。不得把尚未开发的创作模式或尚未完成的 V8 实现 Skill 写成当前生成能力。修改实现后，应同步核对 README、用户指南、运行时/组件指南、开发验收基线和示例说明，避免文档继续描述已经淘汰的数据模型或工作流。
+当前生成协议仅为固定 1280×720 的 PPT 兼容模式：Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4。不得伪造尚未发布的长文、无限画布、混合表面或其他 Project 字段；自动化管线最多给出 `engineering candidate`，`art candidate` 还需真实视觉/互动证据，`accepted` 必须来自明确的人类验收。

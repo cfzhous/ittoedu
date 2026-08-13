@@ -80,6 +80,16 @@ describe('AI capability manifest generation', () => {
         exitCodes: Record<string, number>
         execution: string
       }
+      components: {
+        packageAdmission: Record<string, unknown>
+      }
+      headlessBuild: {
+        language: string
+        runner: string
+        entrypoints: Record<string, string>
+        output: string
+        constraints: string[]
+      }
     }>(first.files, 'index.json')
     expect(first.indexBytes).toBeLessThanOrEqual(AI_CAPABILITY_INDEX_MAX_BYTES)
     expect(first.indexBytes).toBe(canonicalJsonByteLength(index))
@@ -99,6 +109,30 @@ describe('AI capability manifest generation', () => {
         unreadableOrUsageError: 2,
       },
       execution: 'node-only-no-electron-no-export-no-write',
+    })
+    expect(index.components.packageAdmission).toEqual({
+      requiredAvailability: 'available',
+      allowedQualitiesForRelease: ['stable'],
+      experimentalRequiresExplicitCaseApproval: true,
+      releaseBlockersMustBeEmpty: true,
+      licenseStatusMustBe: 'verified',
+      maintainerMustBeAssigned: true,
+    })
+    expect(index.headlessBuild).toEqual({
+      language: 'typescript',
+      runner: 'npx tsx --tsconfig <editor-root>/tsconfig.json <case-dir>/implementation/build.ts',
+      entrypoints: {
+        createProject: 'src/renderer/project/createProject.ts',
+        projectArchive: 'src/renderer/project/projectArchive.ts',
+        importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
+        projectSchema: 'src/shared/projectSchema.ts',
+      },
+      output: 'Project V8 .h5lesson',
+      constraints: [
+        'use-real-repository-apis',
+        'no-shadow-project-dsl',
+        'preserve-stable-ids-after-human-edits',
+      ],
     })
 
     const catalog = parseFile<{
@@ -565,6 +599,7 @@ describe('AI capability manifest generation', () => {
       'src/renderer/export/exportSize.ts',
       'scripts/validate-project.ts',
       'src/renderer/components/componentPackageStore.ts',
+      'src/renderer/project/createProject.ts',
       'src/renderer/project/projectArchive.ts',
       'src/renderer/project/validateProjectArchive.ts',
       'src/renderer/export/exportPreflight.ts',

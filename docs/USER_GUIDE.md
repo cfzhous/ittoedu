@@ -2,7 +2,7 @@
 
 本指南适用于 **互动课件编辑器 V1.0.0 内部收敛分支（Windows x64）**，当前工程格式为 Project V8（`schemaVersion: 8`）。产品由 **ittoedu** 开发，英文名为 **ittoedu Courseware Editor**。Project V8 JSON 是工程的业务真相；当前原生 2D 画布使用 Phaser，DOM/Canvas/WebGL 由运行时或组件按需增强。编辑器是 AI-native 课件的轻量编辑与交付容器：手动模式解决文字、素材、布局、稳定状态、常用映射和事件驱动的入场/退场编排；一次性复杂互动使用场景/全局运行时，高复用且需教师反复配置的能力使用组件。
 
-文档同步基线：**2026-08-12**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Project V8、Runtime API 2 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。协议断代完成不代表内部正式版 1.0 的全部验收门禁已经通过。其他规范和证据入口见 [文档导航](README.md)。
+文档同步基线：**2026-08-13（W1 + W3 可移植性增量）**。1.7.0 原型位于归档标签 `internal-prototype-1.7.0`；当前主干的生产路径只接受 Project V8、Runtime API 2、Runtime Authoring 1 与 Component API 4。当前版只使用 `%APPDATA%\ittoedu-courseware-editor`，不会读取或迁移旧品牌目录。协议断代、W1 工程验证和同机隔离可移植性通过，都不代表 W2 人工课例验收或 W3 内部正式版 1.0 已通过。其他规范和证据入口见 [文档导航](README.md)。
 
 ## 1. 启动编辑器
 
@@ -14,7 +14,7 @@
 
 入口会先把仓库 `.agents/skills/` 中的两个权威课件 Skill 幂等同步到当前用户的 `%USERPROFILE%\.agents\skills`，首次缺少依赖时再自动执行 `npm ci`，随后构建 Player、Renderer、Electron 并直接打开应用。之后每次双击都会同步 Skill 并按当前源码重新构建，不会调用 `electron-builder`，也不会生成 `release/`、Portable EXE 或安装程序。需要在终端启动时可使用 `npm start`，它同样会自动执行 Skill 安装；也可只运行 `npm run install:courseware-skills`。
 
-Skill 安装器只管理 `orchestrate-courseware` 与 `build-project-v7-courseware`。目标内容未变化时不会重复复制；若用户目录已有非本项目管理的同名不同内容 Skill，安装器会拒绝覆盖并显示警告，编辑器仍可继续启动。安装过程不会删除旧的 `%USERPROFILE%\.codex\skills` 副本。Codex 未立即显示新版本时应重启 Codex。它们属于外部 AI 创作工作流，不代表 Editor 1.x 内置了 AI 生成功能。
+Skill 安装器只管理 `orchestrate-courseware` 与 `build-project-v8-courseware`。目标内容未变化时不会重复复制；只有仍与安装记录树签名匹配的副本才会自动更新。用户修改过或非本项目管理的同名 Skill 会保留并显示人工处理提示，编辑器仍可继续启动。旧 `build-project-v7-courseware` 只在既往由本项目管理且字节与已知官方版一致时安全退役；修改过或未管理的 V7 副本会保留。安装过程不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 未立即显示新版本时应重启 Codex。它们属于外部 AI 创作工作流，不代表 Editor 1.x 内置了 AI 生成功能。
 
 仓库中历史 1.6.0 便携版/目录版记录不包含当前 Project V8 能力，不应作为当前版本启动入口或分发物。
 
@@ -75,7 +75,7 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-project-v7-coursewa
 
 #### 3.2.1 体验旗舰课例
 
-在源码环境运行 `npm run build:induction`，然后打开 `output/induction-courseware/不是磁场，而是变化.h5lesson`。建议先在“编辑状态”逐幕查看命名状态和可编辑文案，再用“当前位置试运行”操作预测、磁体运动、共享时间线、方向判断与迁移题，最后用“整课预览”走完整路径，并与同目录离线 HTML 对照交付效果。
+历史物理旗舰已迁入相邻 `courseware-cases` 仓库。仍可在编辑器源码根目录运行转发命令 `npm run build:induction`，然后打开 `../courseware-cases/high-school/physics/induction-not-field-but-change/output/induction-courseware/不是磁场，而是变化.h5lesson`。建议先在“编辑状态”逐幕查看命名状态和可编辑文案，再用“当前位置试运行”操作预测、磁体运动、共享时间线、方向判断与迁移题，最后用“整课预览”走完整路径，并与同目录离线 HTML 对照交付效果。迁入时的旧归档因缺少当前必填 `contentSha256` 会被明确拒绝，须先运行上述构建命令生成当前归档；这不会把该历史课例计入冷启动验收。
 
 ### 3.3 最近工程
 
@@ -90,6 +90,8 @@ Skill 安装器只管理 `orchestrate-courseware` 与 `build-project-v7-coursewa
 - 保存成功且保存期间没有发生新修改时，窗口标题中的 `*` 消失；若压缩或写盘期间继续编辑，已写入的是启动保存时的快照，新修改仍保留且 `*` 不会错误消失。
 
 工程文件包含课件数据、素材、自由运行时和工程组件。移动到另一台电脑时，只需复制 `.h5lesson` 文件。运行时和组件都属于可执行代码，只打开可信来源工程。
+
+当前自动化已验证：把唯一外部组件源删除后，移动的 `.h5lesson` 仍可重开、修改、重存并从归档恢复组件；移动后的单 HTML 与完整网页包也可通过 `file://` 离线运行。该结果来自同一 Windows 主机的隔离目录，只证明自包含与路径独立，不等于已经在另一台干净电脑上完成人工验收。详见 [W3 Windows / 离线可移植性验证记录](reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)。
 
 ### 3.5 自动恢复
 
@@ -637,12 +639,12 @@ macOS 风格的 `Command` 组合在代码中有兼容处理，但 Editor 1.0.0 �
 
 Editor 1.0.0 不提供通用关键帧/路径时间轴、节点连线式状态机、内置题库/成绩系统、多人协作、云存储、模板市场、组件热重载、移动端编辑、任意网页导入、DOM/Phaser/Three 自动代码转换或视频文件导出。当前一等公式覆盖行、标记、运算符、分数、根式、上下标和围栏，并提供受限线性输入、结构模板和实时预览；尚不支持任意 LaTeX、矩阵、向量、分段函数、多行对齐、空间光标或虚拟数学键盘。编辑器提供事件驱动的元素入场/退场、顺序/并行步骤、表单式场景/全局交互、声音库和可编辑视频节点；可信运行时和组件负责复杂连续动画与业务互动，Three.js 如需使用只随具体内容打包。
 
-Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 以后。1.x 的统一画布只提供版本化、可校验的 authoring patch 与显式目标边界，不会调用模型、自动理解画面或替用户修改工程；AI 仍可在编辑器外通过规范和可复现脚本生成完整 `.h5lesson`。
+Blueprint、AI 局部 patch 和其他编辑器内 AI 接入统一延后到 2.0 以后。1.x 的统一画布只提供版本化、可校验的 authoring patch 与显式目标边界，不会调用模型、自动理解画面或替用户修改工程。[Unified Authoring Blueprint RFC](reviews/UNIFIED_AUTHORING_BLUEPRINT_RFC_20260813.md) 仍是等待人类评审的研究提案，不是当前产品能力；AI 可在编辑器外通过当前 Skill 和可复现脚本生成完整 `.h5lesson`。
 
-仓库中的 `orchestrate-courseware` 仍可用于编辑器外部策划编排；`build-project-v7-courseware` 只对应已归档的 Project V7 原型，不能在当前主干生成可打开工程。Project V8、Runtime API 2、Component API 4 与软件仓库边界已经收敛，但新的 V8 实现 Skill 尚未进入获批 W1；在此之前不要从策划交接进入新课例工程生成。
+编辑器外部 AI 路径以两个仓库 Skill 为机器执行真相：`orchestrate-courseware` 根据输入完整度选择 `fast | standard | high-risk`，落盘精确内容和呈现脚本，并由 V2 校验器根据当前人类批准哈希派生 `implementation-ready`；只在该状态有效时，`build-project-v8-courseware` 才选择原生节点、Runtime、混合或组件载体，维护 Authoring Inventory，使用仓库真实 TypeScript API 构建/局部 Patch，并验证 Project V8 及真实导出。归档的 `build-project-v7-courseware` 不能生成当前工程。自动管线最多标记 `engineering candidate`，不能自行授予 `art candidate` 或 `accepted`。
 
 PDF 和 PPTX 都不保留场景导航、声明式交互、声音、视频播放、自由运行时和组件行为；需要互动时请导出单 HTML 或网页包。统一全局层可直接编辑母版式原生元素、教师控制器和全局组件，但不会把任意运行时代码反向拆成可视化节点；稳定画面应主动创作为场景状态，瞬态效果仍在当前位置试运行中检查。
 
 开发者可使用 [Project V8 五路径渲染宿主基准](../examples/render-host-benchmark/README.md)核对原生节点、Runtime API 2 Phaser、Runtime API 2 DOM + Three.js，以及 Component API 4 的 DOM 表格与 Phaser 仪表。自动化压力段执行 25 轮，合计 100 次定制场景切换和 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。
 
-**2026-08-13** 的当前增量基线为：`typecheck`、**127 个 Vitest 文件 / 799 项测试**、`build:desktop`、四组件 catalog 与 AI 能力清单校验通过；当前四组件隐藏 E2E 矩阵 **2/2** 通过。自动化使用 `COURSEWARE_E2E_BACKGROUND=1`，窗口不显示、不进入任务栏且不抢焦点。上一次整体隐藏 E2E **27/27** 与制品冒烟 **16/16** 仍是 2026-08-12 身份断代基线；当前组件收敛证据见 [2026-08-13 组件库收敛验证](reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md)。当前结果仍是 `engineering candidate`；尚未完成三仓物理拆分、真实教师任务、中文输入法、读屏、100 卡片 UI 性能及其他人工验收，不能据此宣称 `accepted` 或发布就绪。
+最近一次全量 W1 自动化基线（2026-08-13）为：`typecheck`、**129 个 Vitest 文件 / 801 项测试**、`build:desktop`、四组件 catalog、AI 能力清单与课件 Skill 校验通过；隐藏 Electron E2E **27/27** 已按三个测试文件拆分重跑，其中当前四组件矩阵为 **2/2**。其后的 W3 可移植性专项另通过 **1 个定向测试文件 / 2 项测试**与 **7/7** 项真实隔离检查；专项没有重跑全量 Vitest/E2E，不能把数字相加称为新的全量基线。自动化使用 `COURSEWARE_E2E_BACKGROUND=1`，窗口不显示、不进入任务栏且不抢焦点。制品冒烟 **16/16** 仍是 2026-08-12 身份断代基线；完整证据见 [W1 工作流记录](reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md)、[W3 可移植性记录](reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)与[组件库收敛记录](reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md)。编辑器、组件与课例三个本地仓库已完成物理拆分；当前结果仍是 `engineering candidate`。W2 两个全新课例的真实制品与指定人类验收、另一台真正干净 Windows 的首次启动与可见冒烟尚未完成，W3 内部正式版 1.0 因而不能宣称 `accepted` 或发布就绪。

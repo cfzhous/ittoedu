@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "caseId": "runtime-hybrid-risk-forward",
+  "projectPath": "project/runtime-hybrid-risk-forward.h5lesson",
+  "generatedFrom": {
+    "presentationScriptSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "capabilityIndexSha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "globalEntities": [],
+  "scenes": [
+    {
+      "sceneId": "scene_hybrid_energy",
+      "ownership": "hybrid-owned",
+      "entities": [
+        {
+          "id": "hybrid-title",
+          "label": "实验标题",
+          "kind": "text",
+          "sourceRef": "CNT-001#title",
+          "binding": "native:scene:scene_hybrid_energy:node_hybrid_title:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "hybrid-status",
+          "label": "稳定复核状态",
+          "kind": "text",
+          "sourceRef": "CNT-001#status",
+          "binding": "native:scene:scene_hybrid_energy:node_hybrid_status:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "runtime-prompt",
+          "label": "实验提示",
+          "kind": "text",
+          "sourceRef": "CNT-001#runtime-prompt",
+          "binding": "runtime:scene:scene_hybrid_energy:text:prompt",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "runtime-hidden-message",
+          "label": "隐藏态说明",
+          "kind": "text",
+          "sourceRef": "CNT-001#hidden-feedback",
+          "binding": "runtime:scene:scene_hybrid_energy:text:hiddenMessage",
+          "editability": "property-only",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "runtime-success-message",
+          "label": "成功态说明",
+          "kind": "text",
+          "sourceRef": "CNT-001#success-feedback",
+          "binding": "runtime:scene:scene_hybrid_energy:text:successMessage",
+          "editability": "property-only",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "runtime-error-message",
+          "label": "错误态说明",
+          "kind": "text",
+          "sourceRef": "CNT-001#error-feedback",
+          "binding": "runtime:scene:scene_hybrid_energy:text:errorMessage",
+          "editability": "property-only",
+          "requiredForAcceptance": true
+        }
+      ]
+    }
+  ]
+}

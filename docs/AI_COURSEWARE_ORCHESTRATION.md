@@ -4,15 +4,17 @@
 >
 > 适用版本：策划与验收阶段跨工程版本复用；当前主干目标为 Editor 1.0.0 / Project V8
 >
-> 状态：策划、批准和验收协议继续有效；Project V8 实现 Skill 就绪前，`implementation-ready` 之后必须暂停
+> 文档角色：面向人类的设计背景、审阅解释与长期治理说明；机器执行以仓库 Skill、校验器和当前协议代码为准
 >
-> 同步基线：2026-08-12
+> 同步基线：2026-08-13
 
-本文规定从教学需求进入到成品接受之间的设计编排、人类决策、阶段产物和质量门禁。仓库中的 [orchestrate-courseware Skill](../.agents/skills/orchestrate-courseware/SKILL.md) 负责执行并持久化本文流程；本文继续作为权威规范与审阅依据。它不替代 [当前创作与接入规范](AI_COURSEWARE_AUTHORING.md)：本文负责先把“为什么教、准确教什么、学生看到什么和做什么”确认清楚，后者负责约束编辑器当前工程边界。Project V7 的旧实现映射只保留在归档标签和历史 Skill 设计中，不能作为当前主干生成指令。
+本文解释从教学需求进入到成品接受之间的设计意图、人类判断、质量关注点和复用治理。仓库 [orchestrate-courseware Skill](../.agents/skills/orchestrate-courseware/SKILL.md) 是课例编排的机器执行权威；它把本文中仍需执行的规则收敛为 V2 课例、适应性路径、哈希审批和派生 readiness。[build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md) 是当前工程实现的机器执行权威。[当前创作与接入规范](AI_COURSEWARE_AUTHORING.md) 保留 Project V8 的工程事实与设计理由。AI 不需要在每次创作前把两份长文全文载入上下文，应按 Skill 路由并只读取当前任务所需章节。
 
-Editor 1.x 没有内置模型调用、自动弹框或 AI patch。本流程由编辑器外部的 AI 创作会话执行；需要人类决策时必须先生成宿主无关的 `DecisionPrompt`，再由宿主以结构化选择控件呈现。宿主不具备该能力或当前会话模式不允许结构化选择时，流程进入 `decision-blocked`，不得静默降级为普通文本提问，也不得把本文描述成人工智能已经集成进 Editor 1.x。
+职责边界如下：编排 Skill 冻结目标、证据、精确内容、呈现脚本和必要的高风险视觉方向；学科 Skill、用户材料或本次提示词提供数学、语文、实验安全等专有知识；Builder Skill 选择原生/运行时/混合/组件载体并负责 Authoring Inventory、实现、局部 Patch、验证、导出和证据；只有指定人类可以批准 review scope 或把结果标为 `accepted`。通用工作流保持薄，不为学科差异扩张一套常驻通用状态机。
 
-当前主干只接受固定 1280×720、可兼容导出 PPTX 的 Project V8 Slide 工程；Project V1–V7 均不受支持。Project V8 / Runtime API 2 / Component API 4 的软件断代已经完成，但新的 V8 实现 Skill 尚未提供；当前可以继续完成课例策划与逐阶段批准，仍不得从交接记录生成新的主干课例工程。其他尚未实现的创作表面也不属于本文生成协议，不得由 AI 伪造 Project 字段或成品能力。
+Editor 1.x 没有内置模型调用或 AI patch。本流程由编辑器外部的 AI 创作会话执行；需要人类决策时先把宿主无关的 `DecisionPrompt` 写入课例。宿主暴露 `request_user_input` 时直接调用，不要求或检查 Plan mode；工具缺失时只在确有安全默认值时记录 `safe-default`，否则保留同一 blocking 决策并提出一个简短等价文本问题，收到回答后记录为 `user-text`。这不表示人工智能已经集成进 Editor 1.x。
+
+当前主干只接受固定 1280×720、可兼容导出 PPTX 的 Project V8 Slide 工程；Project V1–V7 均不受支持。当前实现链为 Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4，哈希有效的 V2 `implementation-ready` 课例可交给 V8 Builder。其他尚未实现的创作表面不属于本文生成协议，不得由 AI 伪造 Project 字段或成品能力。
 
 ## 1. 编排层的职责
 
@@ -25,9 +27,10 @@ Editor 1.x 没有内置模型调用、自动弹框或 AI patch。本流程由编
 5. 把教学设计展开为完整、可核验的教学内容规格，冻结题面、材料、答案、推理、难度、容量和揭示边界；
 6. 把已批准教学设计和教学内容规格转换为可逐项验收的教学呈现脚本；
 7. 在必要时提供视觉方向、关键帧或核心互动样片供人类确认；
-8. 在内部完成与当前受支持协议一致的技术路径设计，不把实现细节推给普通用户；
-9. 组织实现、真实播放、兼容导出和结果验收；
-10. 只有在人类接受成品后，才登记参考案例和复用候选。
+8. 按课例风险选择一次聚合、两段或增加视觉审阅的最薄充分路径；
+9. 绑定制品、决策和依赖 review scope 的 SHA-256，由校验器派生 `implementation-ready`；
+10. 把获批体验合同交给 V8 Builder，并在 Builder 发现新的用户可见取舍时接回相应范围；
+11. 只有在人类接受成品后，才登记参考案例和复用候选。
 
 编排层不负责：
 
@@ -36,6 +39,7 @@ Editor 1.x 没有内置模型调用、自动弹框或 AI patch。本流程由编
 - 让既有模板、组件或素材反向决定教学目标；
 - 在设计未批准时直接批量生成最终工程；
 - 把管线通过写成视觉、教学或成品已接受；
+- 选择 Project 节点、Runtime、组件或其他工程载体并直接实现；
 - 为尚未实现的编辑器能力编造数据结构或交付承诺。
 
 ## 2. 不可颠倒的四个层次
@@ -58,27 +62,17 @@ Editor 1.x 没有内置模型调用、自动弹框或 AI patch。本流程由编
 
 不得在教学设计尚不明确时先选择题型、页面模板或组件；不得让呈现脚本或实现阶段临时编写本应在教学内容规格中冻结的题目、答案和难度；不得把 Project Schema 字段清单当作教学呈现脚本；不得因已有组件方便而修改已经批准的学习目标和证据链。
 
-## 3. 阶段状态与人类门禁
+## 3. 薄工作流与适应性人类门禁
 
-创作会话至少使用以下逻辑状态。状态由外部 AI 会话和课例档案记录，不写入 Project V8。
+目标、证据与精确内容必须先于呈现，呈现必须先于工程载体；这个语义顺序不能颠倒，但不要求每个概念都成为独立文件、状态或人类往返。V2 课例只保留 `case.json`、`01-courseware-contract.md` 和 `02-presentation-script.md` 三个必需文件；大体量或需逐字追溯的内容才增加 `content/`，高风险路径才增加 `visual-direction.md`。
 
-| 状态 | 含义 | 人类可见产物 | 允许进入下一阶段的条件 |
-| --- | --- | --- | --- |
-| `intake` | 正在接收材料 | 输入摘要 | 输入来源和任务目标已登记 |
-| `context-ready` | 上下文已汇集 | 权威来源、缺失项和冲突摘要 | 来源优先级明确 |
-| `awaiting-decisions` | 存在高影响不确定项 | 结构化选项 | 阻断项已回答或用户批准推荐默认值 |
-| `decision-blocked` | 当前宿主无法可靠呈现结构化选择 | 能力缺口和恢复方式 | 切换到支持结构化选择的会话模式后重新呈现同一 `DecisionPrompt` |
-| `teaching-design-review` | 教学设计待确认 | 教学设计稿 | 目标、证据链、内容边界和节奏获批准 |
-| `content-spec-review` | 教学内容规格待确认 | 完整内容、答案、难度与容量清单 | 权威内容、推理、错误边界、揭示规则和时长获批准 |
-| `presentation-script-review` | 教学呈现待确认 | 逐节拍呈现脚本 | 所有核心操作、反馈、分支和结束状态获批准 |
-| `visual-review` | 视觉方向待确认 | 视觉说明、关键帧或样片 | 高风险视觉与核心互动方向获批准 |
-| `implementation-ready` | 可以设计实现 | 确认摘要，不展示普通技术细节 | 必需批准记录完整 |
-| `building` | 正在实现 | 简短进度与已发现的重大取舍 | 未出现需要重新批准的产品变化 |
-| `outcome-review` | 成品待验收 | HTML、截图、录屏、导出与差异说明 | 用户完成结果审阅 |
-| `accepted` | 成品已接受 | 接受记录与剩余风险 | 用户明确接受或任务定义的批准人确认 |
-| `reuse-review` | 评估复用价值 | 案例卡与候选模式 | 通过复用治理，不自动晋升模板/组件 |
+| 路径 | 适用条件 | 人类 review scope |
+| --- | --- | --- |
+| `fast` | 用户材料已闭合目标、证据、逐字内容和呈现意图，无高影响未决项 | `experience` 一次聚合批准合同、可选内容与呈现脚本 |
+| `standard` | 需要先稳定课程合同，再展开呈现；默认路径 | 先 `contract`，再批准依赖该 scope 的 `presentationScript` |
+| `high-risk` | 标准路径之外，视觉、核心互动、素材或静态差异返工风险高 | 标准 reviews 后增加依赖脚本的 `visualDirection` |
 
-禁止从 `intake` 直接跳到 `building`，除非任务只是对已接受课件做不改变教学设计和呈现语义的小修。任何实现中出现的教学、视觉或交互重大变化都必须退回对应审阅状态。
+路径只减少无决策价值的往返，不降低语义闭合和人类批准。`implementation-ready` 不是独立交接文档或人工状态，而是校验器对当前输入、决策、制品哈希和 review scope 的派生结果；实现与结果验收分别由 Builder 证据和明确人类接受记录承担。已接受课件的小修只有在不改变目标、内容、呈现、关键视觉与交付语义时才可直接进入局部 Patch。
 
 ## 4. 上下文汇集与权威顺序
 
@@ -219,8 +213,8 @@ interface DecisionPrompt {
   id: string
   stage:
     | 'intake'
-    | 'teaching-design-review'
-    | 'content-spec-review'
+    | 'experience-review'
+    | 'contract-review'
     | 'presentation-script-review'
     | 'visual-review'
     | 'outcome-review'
@@ -229,6 +223,7 @@ interface DecisionPrompt {
   blocking: boolean
   minSelections: 1
   maxSelections: 1 | 2 | 3
+  safeDefaultOptionId?: string
   options: Array<{
     id: string
     label: string
@@ -237,13 +232,14 @@ interface DecisionPrompt {
   }>
   response?: {
     selectedOptionIds: string[]
-    answeredBy: 'user' | 'approved-default'
+    text?: string
+    answeredBy: 'user-structured' | 'user-text' | 'safe-default'
     answeredAt: string
   }
 }
 ```
 
-调用结构化选择前必须做宿主能力预检。对 Codex 会话，需确认当前处于允许选择控件的计划模式且 `request_user_input` 可用；满足时将 `question`、`options[].label` 与 `options[].description` 原样映射为选项框。不满足时保存完整 `DecisionPrompt` 并进入 `decision-blocked`，只说明需要切换到可用模式，不能把选项复制成普通消息后假装完成同一门禁。恢复后继续使用相同决策 ID，避免两套答案。
+先把 `DecisionPrompt` 持久化，再使用宿主当前实际暴露的能力。对 Codex 会话，只要 `request_user_input` 可用就直接把 `question`、`options[].label` 与 `options[].description` 映射为选项框，不检查 Plan mode。工具不可用时，有真正安全的预设项才记录 `safe-default`；否则保持 blocking 并提出一个简短等价文本问题，收到回答后记录 `user-text`。工具缺失不是永久状态，恢复或收到文本回答后继续使用相同决策 ID，避免两套答案。
 
 `DecisionPrompt` 是外部 AI 编排协议，不是 Project V8 字段，也不是 Editor 1.x 已实现的 UI 或 AI 能力。
 
@@ -303,9 +299,9 @@ interface TeachingDesign {
 - 用户上传的已批准设计以保真实现为主，除非存在明确冲突；
 - AI 生成设计时应给出实质不同的方向，而不是只改标题和视觉风格。
 
-### 7.3 教学设计批准门禁
+### 7.3 教学设计审阅关注点
 
-进入下一阶段前，人类至少确认：
+在 `standard` / `high-risk` 的 `contract` review，或 `fast` 的聚合 `experience` review 中，人类至少确认：
 
 - 学习目标和范围正确；
 - 学习证据足以证明目标达成；
@@ -314,11 +310,11 @@ interface TeachingDesign {
 - 所有必须保留的内容已经登记；
 - 决策记录没有未解决的阻断项。
 
-教学设计获批后赋予版本号并进入教学内容规格阶段。后续内容规格或呈现脚本若改变学习目标、内容边界或证据链，必须生成新版本并重新批准。
+教学设计与精确内容共同落入课程合同；不要求再建立一份平行的独立“教学设计批准文档”。后续内容或呈现脚本若改变学习目标、内容边界或证据链，当前 scope 和依赖它的下游 scope 必须按哈希失效并重新审阅。
 
 ## 8. 教学内容规格
 
-教学内容规格回答“本课到底准确教什么”，是教学设计与教学呈现脚本之间的强制交付边界。它不得只保存主题、活动名称或结果摘要；一个没有旧聊天、没有当前实现的新执行者必须能据此准确取得完整内容。
+教学内容规格回答“本课到底准确教什么”，是教学设计与教学呈现脚本之间的强制语义边界，不是强制独立文件或额外批准阶段。它可以只定义一次并落在 `01-courseware-contract.md`、`02-presentation-script.md` 或按需创建的 `content/*.md`；不得只保存主题、活动名称或结果摘要，一个没有旧聊天、没有当前实现的新执行者必须能据此准确取得完整内容。
 
 ### 8.1 每个内容项的最小字段
 
@@ -364,9 +360,9 @@ interface ContentItem {
 - 给出整课容量表，包含独立思考、操作/讨论、反馈修复和教师检查点时间；页面数、点击数和动画时长不能代替教学容量；
 - 权威事实必须关联来源；原创内容必须记录复核范围和剩余风险。
 
-### 8.3 内容规格批准门禁
+### 8.3 精确内容审阅关注点
 
-进入呈现脚本前，人类至少确认：
+在覆盖课程合同与可选 `content/` 的 review scope 中，人类至少确认：
 
 - 完整内容、答案与解释正确；
 - 难度和内容量符合受众与时长；
@@ -375,7 +371,7 @@ interface ContentItem {
 - 公式、图示、单位和学科表述要求完整；
 - 没有需要后续呈现或实现阶段临时编写的核心内容。
 
-教学内容规格获批后赋予版本号。后续脚本或实现若需改变题目、材料、答案、推理、难度、容量或揭示边界，必须返回本阶段生成新版本并重新批准。
+精确内容可以只在合同、脚本或 `content/*.md` 中定义一次，不要求单独的内容规格文件。后续脚本或实现若需改变题目、材料、答案、推理、难度、容量或揭示边界，必须修订唯一内容源并重新批准受影响 scope。
 
 ## 9. 教学呈现脚本
 
@@ -426,7 +422,7 @@ interface PresentationBeat {
 - 不把底层节点类型或代码选择写进人类脚本；
 - 当前模式允许有意使用幻灯片节奏，但不能无理由为每幕复制同一标题栏、卡片和导航壳。
 
-### 9.3 呈现脚本审阅
+### 9.3 呈现脚本审阅关注点
 
 人类审阅重点：
 
@@ -439,7 +435,7 @@ interface PresentationBeat {
 - 最终总结是否来自此前证据，而不是突然出现结论；
 - 静态 PPTX/PDF 审阅画面是否仍有意义。
 
-脚本批准后赋予版本号并进入 `presentation-script-review → visual-review` 或 `implementation-ready`。实现阶段若需改变学生看见的内容、操作、反馈或结束状态，必须退回脚本审阅。
+`fast` 路径的脚本与合同在同一 `experience` scope 批准；`standard` / `high-risk` 的脚本 scope 依赖已批准合同 scope；只有 `high-risk` 再进入视觉方向 review。实现阶段若需改变学生看见的内容、操作、反馈或结束状态，必须修订脚本并让受影响批准按哈希失效。
 
 ## 10. 视觉方向、关键帧与核心样片
 
@@ -467,7 +463,7 @@ interface PresentationBeat {
 
 视觉方向不等于整页模板。相同设计系统可以在不同教学节拍采用不同构图；PPTX 兼容要求稳定画面，不要求成品视觉模拟传统 PPT 模板。
 
-### 10.3 人类门禁
+### 10.3 高风险人类审阅
 
 人类确认：
 
@@ -477,11 +473,11 @@ interface PresentationBeat {
 - 核心互动值得继续实现；
 - HTML 与静态兼容结果的预期差异可接受。
 
-普通、低风险且已有接受方向的课件可以只提供视觉摘要并取得一次确认；不得用“低风险”跳过尚不明确的关键构图或素材决策。
+这些确认由 `high-risk` 的 `visualDirection` scope 承担。普通、低风险且呈现脚本已经闭合视觉意图的课件不单独创建视觉制品或额外 review；不得用“低风险”掩盖尚不明确、会造成高返工的关键构图、互动因果或素材决策。
 
-## 11. 技术路径设计：默认内部完成
+## 11. Builder 技术路径背景：默认内部完成
 
-教学设计、教学内容规格、呈现脚本和必要视觉方向批准后，AI 才进入技术设计。
+只有 V2 校验器派生当前有效的 `implementation-ready` 后，Builder 才进入技术设计。以下内容帮助人类理解交接后的工程关注点；具体载体选择、Inventory、脚本、任务和验证由 V8 Builder Skill 规定，不由编排 Skill 执行。
 
 ### 11.1 内部技术计划必须覆盖
 
@@ -519,38 +515,22 @@ interface PresentationBeat {
 
 ### 11.3 实现入口
 
-技术计划完成后，生成 `implementation-ready` 交接记录，并完整核对 [当前创作与接入规范](AI_COURSEWARE_AUTHORING.md) 的文字可编辑性、状态、运行时、组件、生命周期、离线和导出要求。当前主干到此必须暂停：归档的 `build-project-v7-courseware` 与 Project V8 不兼容，只有新的 V8 实现 Skill 就绪且交接版本匹配后才能进入工程生成。
+编排层不先做技术计划。所需 reviews 完成后运行 V2 校验器，让它从当前输入、决策、制品与批准 scope 派生 `implementation-ready`；随后交给 [build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md)。Builder 会重跑入口校验，再按需读取 Capability 子合同和 [当前创作与接入规范](AI_COURSEWARE_AUTHORING.md) 的相关工程章节，选择载体并创建内部开发计划与 Authoring Inventory。Builder 若发现新的用户可见取舍，返回编排层修订相应制品，而不是自行猜写。
 
-## 12. `implementation-ready` 交接记录
+## 12. V2 课例真相与派生 `implementation-ready`
 
-实现阶段至少取得以下输入：
+课例最小目录只有：
 
-```ts
-interface ImplementationHandoff {
-  status: 'implementation-ready'
-  projectTitle: string
-  approvedTeachingDesignVersion: string
-  approvedContentSpecVersion: string
-  approvedPresentationScriptVersion: string
-  approvedVisualDirectionVersion?: string
-  approvedArtifacts: Array<{
-    kind: 'teaching-design' | 'content-spec' | 'presentation-script' | 'visual-direction'
-    path: string
-    version: string
-    sha256: string
-  }>
-  decisionLogIds: string[]
-  authoritativeContent: string[]
-  requiredAssets: string[]
-  approvedAssumptions: string[]
-  visibleEditabilityRequirements: string[]
-  deliveryRequirements: Array<'h5lesson' | 'standalone-html' | 'web-package' | 'pdf' | 'pptx'>
-  expectedStaticDifferences: string[]
-  acceptanceEvidence: string[]
-}
+```text
+<case>/
+├── case.json
+├── 01-courseware-contract.md
+└── 02-presentation-script.md
 ```
 
-字段可以用人类易读方式表达，不要求真的保存为 TypeScript。批准必须绑定文件路径、版本和 SHA-256；内容变化后原批准和下游 readiness 自动失效。缺少获批教学设计、教学内容规格或呈现脚本时，不得伪造版本号后继续。
+`content/` 只在内容较大、独立来源或需要逐字追溯时增加；`visual-direction.md` 只属于 `high-risk`。不要另建 `decisions.json`、独立内容规格、implementation handoff、追踪 JSON 或 acceptance Markdown 形成平行真相。
+
+`case.json` 记录输入、来源、约束、假设、嵌入式决策、制品路径/状态/哈希、path-specific reviews、失效历史、blocking 决策和结果状态。`derivedReadiness` 由校验器拥有，至少绑定当前制品哈希、批准 scope 哈希、精确内容位置和 blocker。它不是文件、人工批准或成品状态；Builder 必须重跑校验，不能信任复制来的字段。任何输入、决策、覆盖制品或上游 scope 改变，直接 review 与所有依赖 review 都失效，并保留审计历史。
 
 ## 13. 实现、变更控制与返工
 
@@ -583,6 +563,7 @@ interface ImplementationHandoff {
 - 保存、关闭、重开和恢复；
 - 场景、状态、声明式交互、运行时和组件生命周期；
 - 单 HTML 与网页包离线运行；
+- 交付约束包含跨目录或跨设备移动时，在原始组件/素材源不可用后实际重开工程和运行成品；不能只断言归档中存在文件；
 - PDF/PPTX 静态化和差异报告；
 - 类型检查、测试和构建。
 
@@ -747,33 +728,25 @@ accepted 成品
 
 未来上下文系统应能够在构建报告中记录本次实际使用的知识、学科说明、素材、模板和组件版本。记录用于复现和审计，不要求把完整知识库塞进 `.h5lesson` 或发布 HTML。
 
-## 17. 快速路径与引导路径
+## 17. 路径选择与扩展方式
 
-### 17.1 引导路径
+### 17.1 `fast`
 
-适用于只有主题、部分教案、高风险内容、新视觉方向或复杂互动的任务。完整执行上下文诊断、结构化选择、教学设计、教学内容规格、呈现脚本、视觉审阅、技术实现和结果验收。
+仅适用于用户材料已经闭合目标、证据、精确内容、呈现意图和关键取舍的任务。编排者仍完成冷启动可恢复的合同与脚本，但将二者放在一个 `experience` scope 中集中审阅，不再人为拆成多轮确认。是否简单、页面少或时间紧都不是单独使用 `fast` 的理由。
 
-### 17.2 快速路径
+### 17.2 `standard`
 
-适用于：
+默认路径。先在课程合同中收敛目标、证据、精确内容、来源和约束并批准 `contract` scope，再编写并批准依赖它的 `presentationScript` scope。它适合只有主题、部分教案、内容需整理或呈现结构尚需设计的多数任务。
 
-- 已提供并批准的完整教学设计；
-- 呈现结构简单且无高影响不确定项；
-- 使用已经接受、适用范围明确的方向；
-- 不涉及付费、授权、重大终端差异或架构改造。
+### 17.3 `high-risk`
 
-快速路径仍必须：
+在 `standard` 之上，仅当视觉主体、核心互动因果、定制素材、3D/复杂动画、旗舰审美或 HTML 与静态终端差异存在高返工风险时，增加 `visual-direction.md` 和 `visualDirection` scope。风险解除后仍由同一 Builder 路径实现，不再复制一套“高级工作流”。
 
-1. 给出输入摘要与假设；
-2. 补齐并确认可供冷启动实现的教学内容规格；
-3. 生成并确认教学呈现脚本；
-4. 完成内部技术计划；
-5. 提供真实结果证据；
-6. 取得接受状态。
+### 17.4 学科扩展与提示词
 
-快速不等于跳过设计，而是减少没有决策价值的往返。
+通用流程只负责目标—证据—内容—呈现的跨学科闭合。公式书写、文学证据、诵读节奏、实验安全、区域课标和其他学科专有要求由用户材料、学科 Skill 或本次提示词注入，并在合同/脚本中留下来源与可审阅结果；不要为每门学科扩张通用 case schema 或常驻阶段。
 
-### 17.3 已接受课件的小修路径
+### 17.5 已接受课件的小修路径
 
 如果修改不改变学习目标、呈现脚本、关键视觉或交付语义，可以直接进入技术变更和受影响范围回归。以下修改不能按小修处理：
 
@@ -823,13 +796,13 @@ AI 在不同阶段只展示用户需要判断的内容：
 
 通用创作编排层遵守以下原则：
 
-1. 先确认教学设计，再冻结教学内容规格，再确认教学呈现，最后决定技术实现；
+1. 先闭合目标与证据，再冻结精确内容，再确认教学呈现，最后由 Builder 决定技术实现；语义顺序固定，文件和 review 往返按风险保持最薄；
 2. 人类决定教学目标、关键体验和可感知取舍，AI 承担普通技术细节；
 3. 只询问会实质改变结果的问题，其他事项使用可追踪默认值；
 4. 视觉方向属于设计，不属于可以完全隐藏的技术实现；
 5. 只有被人类接受的成品才能进入复用沉淀；
 6. 学科知识、学科创作说明、素材、模板和组件各自独立治理；
 7. 已有模板和组件服务教学设计，不能反向统治教学设计；
-8. 当前实现映射只描述真实存在的 PPT 兼容 Project V8 能力；在 V8 实现 Skill 就绪前不得据此直接生成工程；
+8. 当前实现映射只描述真实存在的 PPT 兼容 Project V8 能力；实现必须从当前 V8 Builder Skill 和 Capability 入口进入；
 9. 管线通过不是成品接受；
 10. 编排层最终交付的是一份获批、可实现、可验收的体验合同。

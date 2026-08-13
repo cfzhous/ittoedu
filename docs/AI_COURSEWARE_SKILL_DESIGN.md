@@ -1,549 +1,202 @@
-# AI 互动课件创作 Skill 设计草案
+# AI 互动课件 Skill 设计与迁移说明（V2 / Project V8）
 
-> 历史归档说明：本文记录 Editor 1.7.0 / Project V7 的 Skill V1 设计，不是当前主干的实现入口。当前主干可继续使用编排阶段，但必须在 `implementation-ready` 后暂停，等待 Project V8 / Runtime API 2 / Component API 4 对应的新实现 Skill。
-
-> 状态：设计已批准，Skill V1 基线已实现；完整课例冷启动验收尚未执行
+> 状态：W1 机器工作流已实现并通过工程验证；W3 的同机 Windows/离线可移植性专项已达到 `engineering candidate`；W2 两个全新课例尚待有效人类决策、成品制作和结果验收，W3 内部正式版 1.0 尚未接受。
 >
-> 适用范围：当前已实现的 PPT 兼容固定画布课件
+> 机器执行权威：仓库 [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) 与 [`build-project-v8-courseware`](../.agents/skills/build-project-v8-courseware/SKILL.md)。本文只解释设计理由、边界和迁移关系，不复制第二套可执行流程。
 >
-> 目标版本：Skill V1 / Project V7
->
-> 设计基线：2026-08-07
-
-本文设计两个相互隔离的 Skill，把“从教学主题到获批体验合同”和“从获批体验合同到 Project V7 成品”变成可重复执行、可中断恢复、可验证的工作流。
-
-本文不表示 Editor 1.x 已经内置 AI、Skill、自动弹框或模型调用，也不增加 Project Schema。Skill 运行在编辑器外部的 AI 创作环境中；课例档案和交接清单属于外部创作制品。
+> 当前协议：固定 1280×720 的 PPT 兼容 Slide；Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4。Editor 1.7.0 / Project V7 的原始 Skill V1 设计由 Git 标签 `internal-prototype-1.7.0` 保存，不是当前入口。
 
 ## 1. 第一性目标
 
-### 1.1 最终结果
+一个从干净上下文启动的 AI，只依赖用户材料、当前两个 Skill、课例档案和仓库机器合同，也应能够：
 
-一个从空白上下文启动的 AI，只获得：
+- 在不依赖旧聊天或失败实现的情况下恢复任务；
+- 让人类只判断会实质改变教学和成品的高影响取舍；
+- 冻结精确教学内容、场景/状态呈现和必要视觉方向；
+- 在批准仍与当前内容哈希一致时派生实现就绪；
+- 通过真实 Project V8 API 构建或局部修补可编辑工程；
+- 分别报告工程管线与用户可感知结果，不让自动化冒充人类接受。
 
-- 用户本次提供的主题和材料；
-- 两个 Skill；
-- 当前项目规范；
-- 已批准并落盘的课例制品；
+设计同时优化 AI 创作友好度：通用工作流保持薄、可恢复、按需加载；学科规则和单次额外要求由用户材料、学科 Skill 或本次提示词补充，而不是持续堆进通用 Skill。
 
-就能在不依赖旧聊天、不依赖压缩上下文、不参考失败实现的前提下，生成忠实于教学设计和教学呈现脚本的 Project V7 课件，并为每个关键结果提供可追溯证据。
-
-### 1.2 不可妥协的成功条件
-
-1. 聊天记录只用于交流，不作为教学内容或实现要求的唯一真相。
-2. 每个阶段先落盘、校验、取得人类批准，再进入下一阶段。
-3. AI 只能写入 `draft` 或 `ready-for-review`，不能自行写入 `approved`。
-4. 任何获批制品发生内容变化后，原批准立即失效。
-5. 实现阶段必须从落盘制品冷启动，不得凭旧对话补全缺失内容。
-6. 每个学生可见场景、操作、反馈、分支和文案都能追溯到呈现脚本。
-7. 工程测试通过与教学、视觉、体验接受严格分开。
-8. 第一次生成结果必须先验收再修补；修补后的成品不能反向证明首轮工作流有效。
-
-### 1.3 当前约束
-
-- 当前产品能力只有固定 1280×720、Project V7、HTML/PDF/PPTX 等既有导出能力。
-- Skill 不能自动切换 Codex 的协作模式，也不能伪造结构化选项框。
-- 高层教学质量不能完全由静态脚本判断，必须保留人类门禁。
-- 结构、引用、哈希、覆盖率和危险公式写法等适合确定性校验。
-- 首版不建设知识库检索系统，不把单一数学案例抽象成通用模板。
-
-## 2. 为什么采用两个 Skill
-
-采用两个 Skill，而不是一个从主题直接生成工程的巨型 Skill：
+## 2. 为什么保留两个 Skill
 
 ```text
 orchestrate-courseware
-  主题/材料
-    → 决策
-    → 教学设计
-    → 教学内容规格
-    → 教学呈现脚本
-    → 视觉方向
-    → implementation-ready
+  输入与来源
+    → 高影响决策
+    → 课程设计合同与精确内容
+    → 场景/状态呈现脚本
+    → 可选高风险视觉方向
+    → 哈希批准与派生 implementation-ready
 
-build-project-v7-courseware
-  implementation-ready
-    → 技术映射
-    → 核心样片
-    → Project V7 整课
-    → 导出与证据
-    → outcome-review
+build-project-v8-courseware
+  当前有效的 implementation-ready
+    → Capability 预检
+    → 载体所有权与 Authoring Inventory
+    → 风险纵切
+    → Project V8 构建或 stable-ID Patch
+    → Player、导出与真实性证据
+    → 人类结果验收
 ```
 
-分离后的硬规则：
+分离的目的不是增加阶段，而是隔离两类责任：
 
-- 第一个 Skill 不生成 Project、运行时或组件代码。
-- 第二个 Skill 不补写教学目标、题目、标准答案或呈现脚本。
-- 第二个 Skill 发现交接内容缺失、冲突或不可实现时，必须返回相应审阅阶段。
-- 两个 Skill 只通过有版本、有哈希的课例制品交接，不通过聊天摘要交接。
+- 编排 Skill 决定教什么、学生看见和执行什么、反馈是什么；不选择组件、Runtime 或 Project 节点。
+- Builder 决定如何用当前软件能力承载已批准体验；不补写题目、答案、解释、教学目标或用户可见取舍。
+- Builder 发现内容或可感知设计缺口时返回编排，不能在实现层静默猜写。
+- 两者通过可校验的课例文件交接，聊天记录或压缩摘要不能成为唯一真相。
 
-## 3. 共享课例档案
+## 3. 编排 V2：最薄充分课例
 
-每个非简单课例建立独立目录。建议结构如下：
+### 3.1 最小制品
+
+新课例最少只需要：
 
 ```text
-docs/courseware-cases/<case-id>/
+<case-dir>/
 ├── case.json
-├── decisions.json
-├── 00-context.md
-├── 01-teaching-design.md
-├── 02-content-spec.md
-├── 03-presentation-script.md
-├── 04-visual-direction.md
-├── 05-implementation-handoff.md
-├── 06-traceability.json
-└── 07-acceptance.md
+├── 01-courseware-contract.md
+└── 02-presentation-script.md
 ```
 
-其中 Markdown 保存需要人类阅读、审阅和批准的内容；JSON 只保存状态、结构化决策、引用、哈希与机器可验证映射，不重复保存完整教学正文。
+只有精确内容较大、来源独立或需要逐字追溯时才增加 `content/*.md`；只有高风险路径才增加 `visual-direction.md`。决策直接嵌入 `case.json`，不另建 `decisions.json`。`implementation-ready` 是校验器派生状态，不是手写交接文件。追踪和验收也不得另建平行真相取代 Builder Inventory 与证据清单。
 
-### 3.1 `case.json`
+### 3.2 三条自适应路径
 
-`case.json` 是外部创作流程清单，不是 Project V7 字段。首版建议结构：
-
-```ts
-interface CoursewareCaseManifestV1 {
-  schemaVersion: 1
-  caseId: string
-  title: string
-  authoringMode: 'ppt-compatible'
-  stage:
-    | 'intake'
-    | 'context-ready'
-    | 'awaiting-decisions'
-    | 'decision-blocked'
-    | 'teaching-design-review'
-    | 'content-spec-review'
-    | 'presentation-script-review'
-    | 'visual-review'
-    | 'implementation-ready'
-    | 'building-sample'
-    | 'sample-review'
-    | 'building-full'
-    | 'outcome-review'
-    | 'accepted'
-    | 'rejected'
-  artifacts: Record<string, {
-    path: string
-    version: string
-    status: 'missing' | 'draft' | 'ready-for-review' | 'approved' | 'rejected' | 'not-required'
-    sha256?: string
-    approvedBy?: 'user'
-    approvedAt?: string
-    notRequiredReason?: string
-  }>
-  decisionLogPath: string
-  blockingDecisionIds: string[]
-  sourceCaseId?: string
-}
-```
-
-约束：
-
-- `approved` 必须绑定当时文件的 SHA-256、用户批准记录和时间。
-- 文件内容改变后重新计算哈希；与批准哈希不一致时自动退回 `draft`。
-- `implementation-ready` 必须由校验器根据已批准制品派生，不能仅修改字符串取得。
-- `accepted` 必须引用真实结果证据和人类结果审阅记录。
-
-### 3.2 恢复与上下文压缩规则
-
-Skill 每次启动、恢复或怀疑上下文被压缩时，必须：
-
-1. 读取 `case.json`；
-2. 校验当前文件哈希和批准状态；
-3. 只读取当前阶段需要的已批准上游制品和当前草稿；
-4. 输出一段简短恢复摘要；
-5. 从清单阶段继续，不从聊天记忆推断阶段。
-
-聊天内容与获批文件冲突时，以哈希有效的获批文件为准；若用户明确要求改变内容，先使受影响批准失效并返回对应审阅阶段。
-
-## 4. Skill A：`orchestrate-courseware`
-
-### 4.1 触发描述草案
-
-```yaml
----
-name: orchestrate-courseware
-description: Design and approve interactive courseware before implementation. Use when Codex receives a teaching topic, lesson plan,教材或素材，需要诊断上下文、向人类提出结构化高影响决策、生成并落盘教学设计、教学内容规格、教学呈现脚本、视觉方向和 implementation-ready 交接记录，或需要恢复、审阅、修订这些创作阶段。不得用于直接生成 Project V7 工程。
----
-```
-
-正式实现时统一 frontmatter 语言，避免中英文混杂；此处只展示触发覆盖范围。
-
-### 4.2 输入
-
-- 教学主题或用户材料；
-- 年级、学科、时长、使用场景等已知约束；
-- 用户指定的权威来源；
-- 可选的学科知识包、学科创作说明和素材登记；
-- 可选的既有课例档案。
-
-### 4.3 输出
-
-- 完整课例档案中的 `case.json`、`decisions.json`；
-- `00-context.md` 至 `05-implementation-handoff.md`；
-- 所有审阅状态、批准哈希和未解决阻断项；
-- 成功时生成可被第二个 Skill 验证的 `implementation-ready` 状态。
-
-### 4.4 强制执行顺序
-
-#### 阶段 A0：初始化
-
-- 在展开设计前先创建课例目录和 `case.json`。
-- 登记用户原始输入，禁止只在聊天中保留题目、约束或附件说明。
-- 判断属于完整设计、部分设计、仅主题还是旧课改编。
-
-#### 阶段 A1：上下文与决策
-
-- 建立来源清单、权威顺序、缺失项、冲突和假设。
-- 只为高影响不确定项建立 `DecisionPrompt`。
-- 调用选择控件前预检宿主能力。
-- 宿主不支持结构化选择时，保存同一个 `DecisionPrompt`，进入 `decision-blocked`，不得改成普通文本选项并继续。
-- Skill 不能自行切换 Plan/Default 等宿主模式。
-
-#### 阶段 A2：教学设计
-
-- 明确受众、先修、目标、证据、困难、策略、教学序列和总时长。
-- 建立“目标 → 学习证据 → 教学阶段”覆盖关系。
-- 不得选择 Project 节点、组件或运行时。
-- 结构校验通过后才能提交人类审阅。
-
-#### 阶段 A3：教学内容规格
-
-这一层是 Skill V1 相对现有规范的关键增强。它冻结“到底教什么”，防止呈现脚本和实现阶段临时编题。
-
-每个 `ContentItem` 至少包含：
-
-- 稳定内容 ID、教学目的和关联目标；
-- 完整学习者可见题面、全部已知条件和必要图示说明；
-- 标准答案、完整推理链和允许的替代路径；
-- 典型错误、错误成因、反馈原则和提示升级；
-- 年级难度依据、认知要求和先修关系；
-- 出现时机、答案揭示策略和预计用时；
-- 权威来源或“本课例原创且已复核”记录；
-- 公式、符号、单位、图表和媒体的语义要求。
-
-内容规格必须给出整课容量表，说明各环节预计用时、学生实际思考时间和总时长。页面数、点击数和动画时长不能代替教学容量。
-
-#### 阶段 A4：教学呈现脚本
-
-每个 `PresentationBeat` 除现有规范字段外，首版增加：
-
-- `contentItemIds`：引用哪些已批准内容；
-- `timeBudget`：教师讲解、学生操作和反馈分别耗时；
-- `requiredVisibleBeforeAction`：学生操作前必须已经看见的信息；
-- `revealPolicy`：哪些结论不能提前出现；
-- `teacherCheckpoint`：何时由教师控制推进；
-- `objectiveAndEvidenceRefs`：该节拍服务的目标与证据。
-
-硬规则：
-
-- 学生第一次操作前必须具备完成操作所需的全部信息。
-- 不允许没有教学贡献的孤立分类、排序、拖拽或选择。
-- 最终总结只能归纳前面已经形成的证据。
-- 每个错误分支必须给出诊断、反馈和恢复路径。
-- 每个节拍必须有有意义的 HTML 稳定态和 PDF/PPTX 静态审阅帧。
-
-#### 阶段 A5：视觉方向
-
-- 根据风险判断必须审阅、简化审阅或 `not-required`。
-- 固定主体、层级、构图差异、学科视觉语言、互动因果和避免事项。
-- 关键帧只作为目标参考，不能作为完成证据。
-- 不把统一页眉、卡片、页码和底栏当作默认质量方案。
-
-#### 阶段 A6：交接
-
-- 生成技术无关的体验合同摘要。
-- 引用所有获批文件的版本、路径和 SHA-256。
-- 列出权威内容、可编辑要求、交付格式、静态差异和验收证据。
-- 运行全部编排校验器；失败时不得写入 `implementation-ready`。
-
-### 4.5 Skill A 失败状态
-
-| 状态 | 触发条件 | 允许动作 |
+| 路径 | 适用输入 | 人类 review scope |
 | --- | --- | --- |
-| `decision-blocked` | 宿主不能呈现结构化选择 | 保存 Prompt，等待切换宿主模式 |
-| `source-conflict` | 权威来源或用户材料冲突 | 呈现影响，请人类裁决 |
-| `content-incomplete` | 题面、答案、难度或时长不完整 | 留在内容规格阶段修订 |
-| `review-rejected` | 人类拒绝当前制品 | 根据意见修订并生成新版本 |
-| `stale-approval` | 文件哈希与批准哈希不一致 | 自动撤销下游 readiness |
-| `implementation-impact` | 后续技术限制要求改变体验 | 返回相应设计/脚本/视觉阶段 |
+| `fast` | 目标、证据、逐字内容、呈现意图和关键取舍已经闭合 | `experience` 集中批准 |
+| `standard` | 多数新课例；内容或呈现仍需收敛 | 先 `contract`，再 `presentationScript` |
+| `high-risk` | 核心互动、视觉主体、定制素材或静态差异具有高返工风险 | 标准路径外增加 `visualDirection` |
 
-这些是编排诊断，不写入 Project V7。
+路径只减少无决策价值的往返，不降低精确内容、可恢复性或哈希批准要求。文件数量和批准次数不是质量指标。
 
-## 5. Skill B：`build-project-v7-courseware`
+### 3.3 决策与 `request_user_input`
 
-### 5.1 触发描述草案
+每次只保留最重要的 1–3 个高影响问题，并先以稳定 Decision ID 写入 `case.json`：
 
-```yaml
----
-name: build-project-v7-courseware
-description: Implement, validate, and export an approved interactive courseware experience as a Project V7 lesson. Use only when a courseware case has a hash-valid implementation-ready handoff and Codex needs to map approved presentation beats to scenes, states, native nodes, interactions, runtimes, components, exports, traceability, and outcome evidence. Refuse to invent or repair missing teaching content during implementation.
----
-```
+- 宿主暴露 `request_user_input` 时直接调用，不检查 Plan mode；
+- 工具不可用但存在真正安全的默认值时记录 `safe-default`；
+- 工具不可用且无安全默认值时保留 blocking 决策，用一个简短等价文本问题暂停，回答后记录 `user-text`；
+- 工具短暂缺失不生成永久 `decision-blocked` 流程，也不更换同一决策 ID。
 
-### 5.2 启动前硬门禁
+结构化选项框是宿主交互能力，不表示 Editor 1.x 内置模型调用或 AI 面板。
 
-Skill B 首先运行交接校验，不直接读取旧聊天：
+### 3.4 哈希批准与派生就绪
 
-- `case.json` 存在且 Schema 有效；
-- 教学设计、内容规格、呈现脚本均为 `approved`；
-- 获批哈希与当前文件一致；
-- 没有未解决阻断决策；
-- 视觉方向已批准或有有效的 `not-required` 理由；
-- 交接记录引用的版本、素材和交付格式存在；
-- Project V7 规范版本与当前仓库一致。
+人类批准绑定当前 review scope 的 SHA-256。输入、决策、覆盖制品或上游 scope 变化时，直接批准及其下游批准失效并保留审计历史。只有 V2 校验器确认以下条件后才能派生 `implementation-ready`：
 
-任何一项失败都必须停止实现并报告应返回的阶段。
+- 路径要求的制品语义闭合且哈希当前有效；
+- 精确内容位置明确，无需从聊天或旧实现补写；
+- 没有 unresolved blocking decision；
+- 当前路径要求的人类 reviews 均绑定有效 scope。
 
-### 5.3 技术映射
+AI、Codex、agent、builder、bot 或自动化身份不得作为人类批准人。
 
-每个呈现节拍建立双向映射：
+## 4. Project V8 Builder
 
-| 脚本项 | Project V7 实现 |
+### 4.1 入口门禁
+
+Builder 首先重跑 V2 `implementation-ready` 校验和 `check:ai-capabilities`，确认 Capability Index 的真实 TypeScript Headless 入口。脚本、批准、内容或 Capability 哈希失效时立即返回编排；不得调用归档 V7 Skill、手写巨型 Project JSON 或建立影子 DSL。
+
+### 4.2 结果优先的载体选择
+
+每个场景按成品质量和编辑责任选择：
+
+- `native-owned`：稳定文字、公式、图片、图形、视频、命名状态和常规映射；
+- `runtime-owned`：一次性复杂连续互动或定制可视化；
+- `hybrid-owned`：原生稳定内容与 Runtime 瞬态机制共同承担；
+- `component-composed`：确有跨课复用责任、版本和公开参数的能力。
+
+“代码复杂”“视觉重要”或“未来可能复用”都不足以强制组件化。先完成最高风险纵切，再批量扩展全课。
+
+### 4.3 Authoring Inventory 与局部 Patch
+
+Builder 为所有必须可编辑的人工文字、素材和关键参数维护 `implementation/authoring-inventory.json`，记录稳定 scene/global 绑定、编辑状态、来源和当前哈希。`registered:*`、`dom:*`、会话 `targetId` 等临时标识不得作为持久绑定。
+
+首次完整生成后冻结工程路径、稳定 ID 和 SHA-256。人类在编辑器中修改后，后续变更通过 `implementation/patch.ts` 保留既有 scene/node/binding ID；不得从初始 Builder 整课覆盖人类修改。
+
+### 4.4 真实验证与证据
+
+至少覆盖：
+
+- Project V8 Schema、工程健康、公式和 Inventory 校验；
+- 打开、编辑、保存、关闭、重开与稳定 ID Patch；
+- 真实 Player 和离线单 HTML、网页包；
+- PDF、PPTX 静态差异与对象/快照检查；
+- 每个互动幕的交互前、关键反馈、稳定结果三帧；
+- 每个静态幕的稳定帧、整课 contact sheet 和核心互动录屏。
+
+真实性校验应拒绝伪格式、重复路径、相同帧字节、场景证据缺失和自动化验收身份。Headless 绿色不能替代像素、互动或人工产品判断。
+
+## 5. 质量状态边界
+
+| 状态 | 含义 | 谁可签发 |
+| --- | --- | --- |
+| `unusable` | 无法完成核心使用 | 自动化或人类 |
+| `placeholder` | 机制或内容仍是占位 | 自动化或人类 |
+| `engineering candidate` | 结构、构建和机器门禁成立 | 自动化最高等级 |
+| `art candidate` | 已有真实视觉/互动证据，等待最终接受 | 基于证据的审阅流程 |
+| `accepted` | 指定人类对精确证据范围给出明确接受意见 | 仅人类 |
+
+管线状态与结果状态必须分别报告。测试通过、文件存在或导出成功最多证明 `engineering candidate`，不能自动升级为 `accepted`。
+
+## 6. 权威源、发现与安装
+
+仓库 `.agents/skills/` 是两个 Skill 的权威源码和项目级发现入口。安装器将受管理副本事务性同步到当前用户 `.agents/skills/`，并用树签名区分幂等更新、用户修改和来源不明目录。
+
+当前安装器只管理：
+
+- `orchestrate-courseware`
+- `build-project-v8-courseware`
+
+旧 `build-project-v7-courseware` 只有在受本项目管理且字节仍等于已知官方树时才可安全退役。修改过、来源不明或清单外副本必须保留并报告；安装器不会静默删除 `%USERPROFILE%\.codex\skills` 中的历史副本。
+
+## 7. V1 到 V2/V8 的迁移关系
+
+| 历史 V1 做法 | 当前做法 |
 | --- | --- |
-| `beatId` | Scene ID、State ID |
-| 可见内容 | TextNode、Runtime content key 或 Component props key |
-| 学生动作 | Node/Component/Runtime 触发 |
-| 即时反馈 | Interaction、State 或瞬态效果 |
-| 错误分支 | 可达状态和恢复路径 |
-| 稳定结束态 | 命名状态 |
-| 静态审阅帧 | thumbnail/PDF/PPTX 捕获策略 |
-| 学习证据 | 事件和结果证据路径 |
+| 固定七份 Markdown/JSON 制品 | 最小三文件；内容与视觉按需要增加 |
+| 固定教学设计→内容规格→呈现→视觉批准流 | `fast | standard | high-risk` 自适应 review scopes |
+| 独立 `decisions.json` 和永久 `decision-blocked` | `case.json` 嵌入稳定决策；工具恢复后沿用同一 ID |
+| 依赖 Plan mode 才能展示选项框 | `request_user_input` 可用即直接调用 |
+| 手写 `implementation-ready` handoff | V2 校验器根据内容、决策、制品和批准哈希派生 |
+| 独立追踪与 acceptance Markdown | Builder development plan、Authoring Inventory、证据清单和人类记录 |
+| Project V7 Builder | 只面向 Project V8 的真实 TypeScript Builder |
+| 实现后整课重生成 | 人工编辑后按稳定 ID 局部 Patch |
+| 静态检查可近似代表成品 | 强制真实 Player、四格式、逐幕帧、contact sheet 和录屏 |
 
-`06-traceability.json` 必须同时支持：
+V1 课例只能作为未批准输入。迁移时先审计，把原始字节完整保存在新 V2 目录的 `legacy-v1/`，且不继承旧批准、决策响应、readiness 或 acceptance。
 
-- 从脚本找到实现；
-- 从任一学生可见实现反查脚本依据；
-- 识别缺失脚本项；
-- 识别没有脚本依据的新增互动或文案。
+## 8. 学科与知识扩展
 
-### 5.4 承载方式选择门禁
+通用 Skill 只承担跨学科的不变量：目标—证据—内容—呈现闭合、高影响决策、哈希失效、实现边界、结果证据和人类门禁。数学公式、文学证据、诵读、实验安全、区域课标和其他专有要求来自：
 
-按以下顺序选择最短充分承载方式：
+1. 用户本次材料与明确要求；
+2. 任务相关的学科 Skill；
+3. 本次提示词中可追溯的补充规则。
 
-1. 稳定且需直接编辑的画面：原生节点与命名状态。
-2. 可枚举的触发—条件—动作：声明式交互。
-3. 当前课例专属的连续行为、算法判定或瞬态视觉：场景/全局运行时。
-4. 会复用、需参数化或有独立生命周期价值的能力：组件。
+扩展必须在课例合同或脚本中留下来源与用户可审阅结果，但不扩张通用 case schema、常驻阶段或组件体系。只有多个已接受课例证明稳定复用责任后，才讨论模板或组件晋升。
 
-每个组件必须记录组件化理由。仅“代码较多”“互动复杂”或“以后可能复用”不构成充分理由。一次性数学实验、课程专属联动或单幕复杂交互默认优先使用运行时；稳定题面、说明、反馈和总结默认使用原生节点。
+## 9. 当前验证状态与后续门禁
 
-### 5.5 公式与学科排版合同
+W1 的实现与自动化证据见 [课件工作流 W1 验证记录](reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md)，W3 的同机隔离可移植性增量见 [W3 Windows / 离线可移植性验证记录](reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)，完整路线见 [内部正式版与多表面开发计划](../MULTI_SURFACE_DEVELOPMENT_PLAN.md)。当前边界是：
 
-- 内容规格中的每个公式必须有稳定 Formula ID 和显示语义。
-- 展示分数不得使用 `½`、`⅓` 等斜线 Unicode 分数字符冒充竖式分数。
-- 需要竖式分数时使用结构化分子、分数线和分母；不得只用普通文本 `/` 替代。
-- 上标、下标、根式、向量、分段函数和单位按内容规格实现。
-- 可编辑文字与结构化公式的边界必须登记；静态后备不得形成另一套数学文本。
-- HTML、PDF 和 PPTX 分别进行实际截图验收；源代码扫描只能发现部分错误，不能代替视觉检查。
+- 编排 V2、V8 Builder、前向夹具、真实性证据和受管安装迁移已达到 `engineering candidate`；
+- 前向夹具只证明机制，不计入产品验收；
+- W2 的数学、语文新课例仍须取得有效用户决策、完成真实制品，并由指定人类分别达到 `accepted`；
+- W3 已自动证明目录版/Portable 同机隔离启动、工程断源移动重开和单 HTML/网页包离线移动；仍须另一台真正干净 Windows 的首次启动与可见冒烟，且只有在 W2 和其余全链路/文档门禁成立后才能接受；
+- Flow、Project V9、混合表面和 Spatial 2D 属于后续里程碑，不得写成当前生成能力。
 
-### 5.6 实现节奏
+## 10. 维护规则
 
-1. 冷启动读取获批制品并生成技术映射。
-2. 先实现最高风险的核心样片。
-3. 对照呈现脚本、视觉目标和公式排版进行样片门禁。
-4. 样片未达到 `art candidate` 或未获人工视觉批准时停止扩展。
-5. 批量实现剩余节拍，并持续更新追踪矩阵。
-6. 运行 Project、互动、生命周期、离线和导出验证。
-7. 生成结果证据和差异报告，进入 `outcome-review`。
-8. 只有人类接受后才能写入 `accepted`。
+修改工作流时按以下顺序维护：
 
-### 5.7 Skill B 失败状态
+1. 先更新仓库权威 Skill、reference、模板、脚本和确定性测试；
+2. 同步 Capability Index、Schema 或源码事实，但不在 Skill 中复制完整长合同；
+3. 更新本文、编排规范、创作接入规范、README 与用户指南中的人类解释；
+4. 运行 Skill 测试、能力检查、相关软件测试、链接检查和 `git diff --check`；
+5. 分别记录管线等级、结果等级、未解除的人类门禁和历史副本处置。
 
-| 状态 | 触发条件 | 返回位置 |
-| --- | --- | --- |
-| `handoff-invalid` | 缺失、未批准、哈希失效或引用错误 | Skill A 对应阶段 |
-| `traceability-gap` | 脚本与实现无法双向覆盖 | 技术映射/实现阶段 |
-| `sample-rejected` | 核心样片未获视觉或互动批准 | 样片阶段，禁止扩展 |
-| `script-change-required` | 技术限制要求改变学生体验 | 呈现脚本审阅 |
-| `content-change-required` | 发现题目、答案或难度问题 | 内容规格审阅 |
-| `pipeline-failed` | Schema、构建、互动或导出失败 | 实现阶段 |
-| `outcome-rejected` | 实际教学、视觉或体验未获接受 | 按反馈退回相应阶段 |
-
-## 6. 确定性校验器
-
-Skill V1 不依赖模型记忆完成以下硬检查。建议先实现一个统一入口，再按模块拆分：
-
-```text
-validate-courseware-case
-├── manifest
-├── decisions
-├── teaching-design
-├── content-spec
-├── presentation-script
-├── handoff
-├── traceability
-└── formula-markup
-```
-
-### 6.1 可确定性阻断的内容
-
-- 必需文件、标题、字段、ID 和引用缺失；
-- 目标没有学习证据，内容没有关联目标；
-- 节拍没有引用内容项或没有稳定结束态；
-- 学生动作前的必要信息清单为空；
-- 分支没有恢复或下一步；
-- 各阶段时长缺失或总时长明显不一致；
-- 阻断决策未解决；
-- 批准哈希失效；
-- 脚本节拍未映射或实现对象没有脚本来源；
-- 学生可见文字没有登记入口；
-- 展示公式出现禁用的斜线分数字符；
-- `accepted` 缺少人类、时间和真实证据。
-
-### 6.2 不能伪装成确定性通过的内容
-
-以下只能生成审阅报告，不能自动批准：
-
-- 教学目标是否真正有价值；
-- 题目难度是否恰当；
-- 45 分钟课堂是否真实成立；
-- 互动是否促进理解而非增加操作；
-- 视觉是否专业、清晰、有学科表现力；
-- 学生是否能从实际画面理解任务；
-- HTML 与 PPTX/PDF 差异是否可接受。
-
-校验报告必须分别输出 `pipeline status` 和 `outcome status`。
-
-## 7. Skill 资源规划
-
-两个 Skill 的 `SKILL.md` 只保存核心执行顺序、硬停止条件和资源路由，控制在较短篇幅。详细内容按需加载。
-
-仓库权威源结构：
-
-```text
-.agents/skills/
-├── orchestrate-courseware/
-│   ├── SKILL.md
-│   ├── agents/openai.yaml
-│   ├── references/
-│   │   ├── artifact-contracts.md
-│   │   ├── decision-gates.md
-│   │   └── review-rubrics.md
-│   ├── scripts/
-│   │   ├── init-case.*
-│   │   └── validate-case.*
-│   └── assets/
-│       └── case-templates/
-└── build-project-v7-courseware/
-    ├── SKILL.md
-    ├── agents/openai.yaml
-    ├── references/
-    │   ├── carrier-selection.md
-    │   ├── traceability-contract.md
-    │   └── formula-typography.md
-    ├── scripts/
-    │   ├── validate-handoff.*
-    │   ├── validate-traceability.*
-    │   └── validate-formula-markup.*
-    └── assets/
-        └── implementation-templates/
-```
-
-现有规范继续作为项目权威参考，不把全文复制进 Skill：
-
-- `docs/AI_COURSEWARE_ORCHESTRATION.md`
-- `docs/AI_COURSEWARE_AUTHORING.md`
-- 运行时、组件与发布规范
-
-Skill 的权威源位于本仓库 `.agents/skills/` 并纳入版本控制；该路径同时是 Codex 的仓库级发现入口。根目录启动脚本按目录哈希把权威副本幂等同步到当前用户的 `.agents/skills/`，用于跨工作区调用。个人目录不是唯一真相，后续修改必须先更新并验证仓库权威源，再同步安装。
-
-## 8. 学科能力的挂载方式
-
-首版两个 Skill 保持跨学科，不内置“动点题应该怎么教”。未来按需挂载：
-
-```text
-通用 Skill
-  + subject-knowledge/<subject>/<level>
-  + subject-authoring-guide/<subject>/<level>
-  + approved-assets
-  + accepted-case-index
-```
-
-学科包负责事实、课程标准、难度标尺、典型错误、表征方式和学科排版；通用 Skill 负责流程、制品、门禁和追踪。学科包不能跳过本次教学设计批准，也不能直接决定页面模板。
-
-高中数学包未来至少应覆盖：
-
-- 年级与复习阶段难度标尺；
-- 典型题型、关键思想和先修关系；
-- 完整解题与证明质量要求；
-- 图、式、数、形联动的呈现原则；
-- 公式、坐标系、函数图象和几何标注规范；
-- 常见伪高中难度、机械分类和无效互动警示。
-
-它不属于两个通用 Skill 的首版实现范围。
-
-## 9. 冷启动验收设计
-
-### 9.1 失败案例 0
-
-当前《高中数学动点问题专题课》保留为流程失败案例，不继续打磨后作为成功证据。记录的问题至少包括：
-
-- 脚本没有冻结完整题面和初始信息；
-- 内容量和难度没有通过专门门禁；
-- 实现只对齐状态骨架，没有对齐呈现语义；
-- 大量内容被不必要地组件化；
-- 分数使用斜线 Unicode 字符；
-- 工程测试没有验证脚本忠实度。
-
-### 9.2 Skill V1 前向测试
-
-Skill 实现后执行一次不泄漏答案的冷启动测试：
-
-1. 使用新任务或等价空白上下文。
-2. 只提供原始主题、两个 Skill、项目规范和本轮产生的课例档案。
-3. 不提供当前失败实现、诊断结论或期望页面答案。
-4. 每个阶段按 Skill 取得人类批准。
-5. 首次完整生成后冻结结果并评分，不先人工修补。
-6. 对照验收量表报告首轮通过项和失败项。
-7. 修订 Skill 后重新从干净档案启动，不沿用失败实现。
-
-首个数学案例通过只能说明首个案例闭环。至少再用一个不同学科、不同互动机制的案例通过，才评估通用工作流有效性；至少两个独立接受案例出现稳定重复后，才讨论模板或组件晋升。
-
-## 10. Skill V1 范围
-
-### 必须实现
-
-- 两个 Skill 的触发和硬边界；
-- 课例初始化、阶段恢复和批准失效；
-- 教学内容规格阶段；
-- DecisionPrompt 持久化与 `decision-blocked`；
-- Markdown 制品模板；
-- `case.json`、批准哈希和交接校验；
-- 呈现脚本结构校验；
-- 脚本—实现追踪矩阵；
-- 公式排版静态扫描；
-- 冷启动首轮验收流程。
-
-### 暂不实现
-
-- 编辑器内置 AI 或自动弹框；
-- 自动切换 Codex 协作模式；
-- 在线知识库、向量检索或素材市场；
-- 长文本、无限画布或混合模式；
-- 自动判断成品视觉已接受；
-- 自动把案例晋升为模板或组件；
-- 对旧失败课件做自动迁移或美化。
-
-## 11. 实施与验证顺序
-
-1. 已确认本文的双 Skill 边界与课例档案结构。
-2. 已确认 `.agents/skills/` 仓库权威源与用户级自动安装副本策略。
-3. 已使用 `skill-creator` 初始化两个 Skill。
-4. 已实现 `orchestrate-courseware`、Markdown 模板、批准哈希、失效传播和课例结构校验。
-5. 已实现 `build-project-v7-courseware`、交接、追踪和公式危险写法校验。
-6. 已完成临时课例的正向/反向结构测试，并证明公式扫描能拒绝当前数学失败案例中的斜线分数字符。
-7. 待使用一个仅主题输入走到真实 `implementation-ready`，不进入工程实现。
-8. 待在干净上下文中重跑高中数学案例并冻结首轮结果。
-9. 根据失败证据修订 Skill，而不是只修课件。
-10. 完成第二个独立学科案例后再评估通用性。
-
-## 12. 已批准的设计决定
-
-1. 采用两个 Skill，而不是单一端到端 Skill。
-2. 把 `02-content-spec.md` 设为教学设计与呈现脚本之间的强制门禁。
-3. 每次批准绑定文件哈希，文件变化自动失效。
-4. 把当前数学课例固定为失败案例 0，不继续修补后充当 Skill 成功证据。
-5. Skill 的权威源放在本仓库，并安装/同步到用户 Skill 目录。
-
-批准时间：2026-08-07。本次 Skill 建设没有修改现有数学课件生成脚本；后续完整课例必须通过冷启动流程重新产生，不能从失败实现继续修补。
+不得把尚未实现的表面、未获批准的 RFC、自动化推荐项或历史 V1 能力写成当前事实。

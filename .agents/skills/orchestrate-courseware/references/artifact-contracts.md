@@ -1,136 +1,132 @@
-# Courseware case artifact contracts
+# Courseware case V2 contracts
 
 ## Contents
 
-1. Directory contract
-2. Manifest and approval contract
-3. ID conventions
-4. Artifact requirements
-5. Stage and invalidation rules
+1. Minimal directory
+2. `case.json` shape
+3. Adaptive review profiles
+4. Exact-content closure
+5. Hash, invalidation, and recovery
+6. V1 audit and migration
 
-## 1. Directory contract
+## 1. Minimal directory
 
-Use one directory per case:
+Every case starts with exactly three required files:
 
 ```text
-docs/courseware-cases/<case-id>/
+<case>/
 ├── case.json
-├── decisions.json
-├── 00-context.md
-├── 01-teaching-design.md
-├── 02-content-spec.md
-├── 03-presentation-script.md
-├── 04-visual-direction.md
-├── 05-implementation-handoff.md
-├── 06-traceability.json
-└── 07-acceptance.md
+├── 01-courseware-contract.md
+└── 02-presentation-script.md
 ```
 
-Markdown is the human-reviewable content truth. JSON stores state, structured decisions, hashes, and implementation mapping; do not duplicate full teaching content into JSON.
+Create `content/` only when content is large, separately sourced, or needs word-level traceability. Create `visual-direction.md` only for `high-risk`. Do not create `decisions.json`, a separate content-specification file, an implementation handoff, traceability JSON, or acceptance Markdown as parallel truth.
 
-## 2. Manifest and approval contract
+## 2. `case.json` shape
 
-`case.json` uses `schemaVersion: 1` and `authoringMode: "ppt-compatible"`. Each artifact entry contains:
+Use `schemaVersion: 2`, `targetProjectSchemaVersion: 8`, `authoringMode: "ppt-compatible"`, and one `pathMode`: `fast | standard | high-risk`.
 
-- `path`: path relative to the case directory;
-- `version`: artifact version such as `0.1` or `1.0`;
-- `status`: `missing | draft | ready-for-review | approved | rejected | not-required`;
-- `sha256`: hash of the exact reviewed bytes;
-- `approvedBy`, `approvedAt`, and `approvalEvidence` for approved artifacts;
-- `notRequiredReason` only when a stage is genuinely optional.
+Top-level responsibilities:
 
-Only a human can authorize `approved`. The helper script may persist that authorization but cannot supply it. If an approved file hash changes, invalidate that approval and all dependent readiness.
+- `inputs`: original request or faithful summary, sources, constraints, assumptions;
+- `artifacts`: paths, file/directory kind, required flag, authoring status, and current ready hash;
+- `reviews`: path-specific human review scopes and approvals;
+- `reviewHistory`: invalidated prior scope claims for audit;
+- `decisions`: embedded `DecisionPrompt` records and responses;
+- `blockingDecisionIds`: exact unresolved blocking decision IDs;
+- `derivedReadiness`: validator-owned readiness, hashes, exact-content locations, and blockers;
+- `resultStatus`: outcome vocabulary only; orchestration tools leave it `pending` and never create `accepted`.
 
-Use these artifact keys:
+The artifact keys and paths are fixed:
+
+| Key | Kind | Path | Required |
+| --- | --- | --- | --- |
+| `coursewareContract` | file | `01-courseware-contract.md` | always |
+| `presentationScript` | file | `02-presentation-script.md` | always |
+| `contentBundle` | directory | `content/` | optional |
+| `visualDirection` | file | `visual-direction.md` | high-risk only |
+
+`derivedReadiness` is machine-derived:
+
+```json
+{
+  "status": "not-ready | implementation-ready",
+  "evaluatedAt": "ISO-8601",
+  "validator": "courseware-case-v2",
+  "artifactHashes": {},
+  "approvedReviewHashes": {},
+  "exactContentLocations": {},
+  "blockingReasons": []
+}
+```
+
+It is not an artifact, a human approval, or an outcome status. A Builder must rerun validation rather than trust a copied field.
+
+## 3. Adaptive review profiles
+
+Reviews approve exact scopes, not abstract file names. Each review records `covers`, `dependsOn`, `status`, and an exact `scopeSha256`; an approved review also records a named human, time, and explicit evidence.
+
+| Path | Required human reviews |
+| --- | --- |
+| `fast` | `experience`: contract + optional content + presentation script in one aggregate scope |
+| `standard` | `contract`: contract + optional content; then `presentationScript`, bound to the approved contract scope |
+| `high-risk` | standard reviews; then `visualDirection`, bound to the approved presentation scope |
+
+Do not use `fast` merely to reduce review work. Use it only when supplied content, objectives, evidence, presentation intent, and material decisions are already complete enough for one coherent review. `approvedBy` must name a human; the tools and validator reject common Codex, AI, agent, builder, bot, and automation identities.
+
+Approval operations:
 
 ```text
-context
-teachingDesign
-contentSpec
-presentationScript
-visualDirection
-implementationHandoff
-traceability
-acceptance
+python <skill-dir>/scripts/case_artifact.py <case> ready coursewareContract
+python <skill-dir>/scripts/case_artifact.py <case> ready presentationScript
+python <skill-dir>/scripts/case_artifact.py <case> review-ready <review-key>
+python <skill-dir>/scripts/case_artifact.py <case> approve <review-key> --approved-by <human> --evidence <explicit-approval>
 ```
 
-## 3. ID conventions
+For standard/high-risk paths, approve upstream reviews before preparing downstream review scopes.
 
-Use stable, unique, case-local IDs:
+## 4. Exact-content closure
 
-- `SRC-001`: source;
-- `DEC-001`: decision;
-- `OBJ-001`: learning objective;
-- `EVD-001`: evidence of learning;
-- `STG-001`: teaching stage;
-- `CNT-001`: authoritative content item;
-- `ERR-001`: misconception or error path;
-- `FORM-001`: formula or notation item;
-- `BEAT-001`: presentation beat;
-- `VIS-001`: visual reference or frame;
-- `ACC-001`: acceptance evidence.
+Exact content may live in the contract, presentation script, or `content/*.md`, but every `CNT-*` definition must exist once and include:
 
-Never use array positions as identity. Preserve IDs across revisions unless the concept itself is removed.
-
-## 4. Artifact requirements
-
-### `00-context.md`
-
-Require original request, current mode, audience facts, source register with authority, constraints, missing information, conflicts, and assumptions. Record unavailable future capabilities as out of scope.
-
-### `01-teaching-design.md`
-
-Require audience and prerequisites, duration, objectives, evidence, core content, difficulties, strategy, sequence, assessment, constraints, source references, and an objective/evidence/stage coverage table.
-
-### `02-content-spec.md`
-
-For each `CNT-*`, require:
-
-- complete learner-visible prompt and givens;
-- expected response and complete reasoning;
+- complete learner-visible wording, givens, definitions, choices, teacher prompts, or source text;
+- expected response and complete explanation/reasoning;
 - accepted alternatives and rejected boundaries;
-- misconceptions and feedback principles;
-- difficulty/cognitive-demand justification;
-- prerequisite and source references;
-- reveal policy and estimated minutes;
-- formula, notation, unit, diagram, table, and media requirements.
+- typical errors, causes, first feedback, escalation, and repaired evidence;
+- difficulty, prerequisite, source, and review status;
+- reveal order, instructional time, notation, unit, diagram, media, and accessibility needs.
 
-Require a capacity table whose planned minutes reconcile with the lesson duration. Interaction count and page count are not instructional capacity.
+Use stable IDs: `SRC-*`, `DEC-*`, `OBJ-*`, `EVD-*`, `STG-*`, `CNT-*`, `ERR-*`, `FORM-*`, `SCN-*`, `STATE-*`, `VIS-*`. The script must reference every content item it presents and must not reference unknown objectives, evidence, or content.
 
-### `03-presentation-script.md`
+A cold-start Builder must not need chat, an old implementation, or subject-matter guessing to recover visible text, correct answers, feedback, or reveal behavior. File layout may vary; semantic closure may not.
 
-For each `BEAT-*`, require the fields in the template. `requiredVisibleBeforeAction` must be concrete enough for a cold-start implementer to construct the initial view. Branches must name condition, response, and recovery/next state.
+## 5. Hash, invalidation, and recovery
 
-### `04-visual-direction.md`
+A review scope hash covers:
 
-Require goals, avoidances, subject representation, hierarchy, typography, palette, composition plan, interaction causality, motion, key frames, assets/licenses, accessibility, and static export expectations.
+1. the canonical `inputs` hash;
+2. the canonical embedded `decisions` hash;
+3. current hashes and presence/status of every covered file or directory;
+4. current upstream review scope hashes.
 
-### `05-implementation-handoff.md`
+Directory hashes include sorted relative file names and every file hash. Changing inputs, a decision response, contract bytes, script bytes, any `content/` file, or visual bytes invalidates the direct review and every dependent review. Retain invalidated claims in `reviewHistory`; never keep them active.
 
-Require approved artifact paths, versions, hashes, decisions, authoritative content, assets, assumptions, editability, delivery formats, expected static differences, evidence, and change-control return points.
+Recover from files:
 
-## 5. Stage and invalidation rules
+1. Run `case_artifact.py <case> status` and `validate_case.py <case> --target draft --json`.
+2. Resolve blocking decisions from `case.json`.
+3. Reconcile changed artifacts, run `ready`, and re-review only invalidated scopes and their dependents.
+4. Run `validate_case.py <case> --target implementation-ready --promote`.
 
-Use this order:
+`--promote` persists either a fresh `implementation-ready` result or a fresh `not-ready` result. It never approves reviews and never changes `resultStatus` to `accepted`.
+
+## 6. V1 audit and migration
+
+Treat V1 as untrusted historical input, even when it claims `approved` or `implementation-ready`.
 
 ```text
-intake
-→ context-ready
-→ awaiting-decisions | decision-blocked
-→ teaching-design-review
-→ content-spec-review
-→ presentation-script-review
-→ visual-review
-→ implementation-ready
+python <skill-dir>/scripts/migrate_case_v1.py <v1-case> audit
+python <skill-dir>/scripts/migrate_case_v1.py <v1-case> migrate --destination <new-v2-case> --path-mode <mode>
 ```
 
-Changing an artifact invalidates all dependent artifacts:
-
-- context → every later artifact;
-- teaching design → content spec and later;
-- content spec → presentation script and later;
-- presentation script → visual direction, handoff, traceability, acceptance;
-- visual direction → handoff, traceability, acceptance;
-- handoff → traceability and acceptance.
-
-Do not delete downstream work automatically. Retain it as a draft needing reconciliation, and remove its approval.
+Migration is copy-on-create: it refuses an existing destination, fingerprints and preserves the source, creates V2 draft files, copies every V1 source byte unchanged under `legacy-v1/` with a file/tree SHA-256 inventory, records legacy status/hash claims for audit, and sets all V2 reviews to pending. The `legacy-v1/` tree is evidence, never current V2 truth. Migration does not inherit approvals, decision responses, readiness, or acceptance. Reconcile migrated material into V2 sections, re-ask material decisions, remove placeholders/duplicates, and obtain fresh path reviews.

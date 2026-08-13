@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "caseId": "native-formula-forward",
+  "projectPath": "project/native-formula-forward.h5lesson",
+  "generatedFrom": {
+    "presentationScriptSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "capabilityIndexSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "globalEntities": [],
+  "scenes": [
+    {
+      "sceneId": "scene_native_discriminant",
+      "ownership": "native-owned",
+      "entities": [
+        {
+          "id": "native-title",
+          "label": "题目标题",
+          "kind": "text",
+          "sourceRef": "CNT-001#title",
+          "binding": "native:scene:scene_native_discriminant:node_native_title:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "native-formula",
+          "label": "判别式公式",
+          "kind": "formula",
+          "sourceRef": "CNT-001#formula",
+          "binding": "native:scene:scene_native_discriminant:node_native_formula:ast",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "native-hint",
+          "label": "计算提示",
+          "kind": "text",
+          "sourceRef": "CNT-001#hint",
+          "binding": "native:scene:scene_native_discriminant:node_native_hint:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "native-feedback",
+          "label": "稳定反馈",
+          "kind": "text",
+          "sourceRef": "CNT-001#feedback",
+          "binding": "native:scene:scene_native_discriminant:node_native_feedback:text",
+          "editability": "visible",
+          "requiredForAcceptance": true
+        }
+      ]
+    }
+  ]
+}

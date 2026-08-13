@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project V8 课件实现"
+  short_description: "依据获批呈现脚本构建、验证并交付当前 Project V8 互动课件"
+  default_prompt: "Use $build-project-v8-courseware to implement this approved courseware case as a validated Project V8 lesson."

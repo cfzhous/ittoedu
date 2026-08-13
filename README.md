@@ -4,11 +4,11 @@ ittoedu 开发的 Windows 桌面课件创作工具，英文产品名为 **ittoed
 
 当前源码版本：**1.0.0（内部正式版收敛中）**
 
-文档同步基线：**2026-08-13**。1.7.0 原型已冻结在 `internal-prototype-1.7.0`；主干正在按 [内部正式版与多表面计划](MULTI_SURFACE_DEVELOPMENT_PLAN.md) 收敛 Editor 1.0.0。工程、自由运行时和组件生产路径已断代到 Project V8、Runtime API 2、Component API 4；这项协议收敛不等于内部正式版全部门禁已经完成。阅读入口见 [文档导航](docs/README.md)；身份断代与 Headless 自检见 [2026-08-12 验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)，当前四组件目录见 [2026-08-13 组件库收敛验证](docs/reviews/COMPONENT_LIBRARY_CONSOLIDATION_VERIFICATION_20260813.md)。
+文档同步基线：**2026-08-13（W1 + W3 可移植性增量）**。1.7.0 原型已冻结在 `internal-prototype-1.7.0`；主干正在按 [内部正式版与多表面计划](MULTI_SURFACE_DEVELOPMENT_PLAN.md) 收敛 Editor 1.0.0。工程、自由运行时、运行时作者协议和组件生产路径已断代到 Project V8、Runtime API 2、Runtime Authoring 1、Component API 4；这项协议收敛、W1 工程验证和同机隔离可移植性通过，都不等于 W2 人工课例验收或 W3 内部正式版 1.0 已完成。阅读入口见 [文档导航](docs/README.md)；身份断代与 Headless 自检见 [2026-08-12 验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)，W1 工作流证据见 [W1 验证记录](docs/reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md)，W3 的 Windows/离线移动专项见 [可移植性验证记录](docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)。
 
-当前主干基线：Editor 1.0.0、Project V8、RuntimeDocument API 2、Component API 4、PublishedLesson V1。Project V8 JSON 是业务真相，DOM、Phaser 和按内容打包的 Three.js 都是可替换的呈现/交互能力，而不是工程模型本身。ittoedu 第一方组件使用 `com.ittoedu.*`；第三方必须使用自身权利主体的反向域名。Project V1–V7、Runtime API 1 与 Component API 1–3 会在当前产品入口明确拒绝，不再自动迁移或由宿主兼容执行。详细处置合同见 [里程碑 0 冻结记录](docs/INTERNAL_1_0_MILESTONE_0.md)。
+当前主干基线：Editor 1.0.0、Project V8、RuntimeDocument API 2、Runtime Authoring 1、Component API 4、PublishedLesson V1。Project V8 JSON 是业务真相，DOM、Phaser 和按内容打包的 Three.js 都是可替换的呈现/交互能力，而不是工程模型本身。ittoedu 第一方组件使用 `com.ittoedu.*`；第三方必须使用自身权利主体的反向域名。Project V1–V7、Runtime API 1 与 Component API 1–3 会在当前产品入口明确拒绝，不再自动迁移或由宿主兼容执行。详细处置合同见 [里程碑 0 冻结记录](docs/INTERNAL_1_0_MILESTONE_0.md)。
 
-当前自动化基线（2026-08-13）：`typecheck`、**127 个 Vitest 文件 / 799 项测试**、`build:desktop`、四组件 catalog 与 AI 能力清单校验均通过；隐藏 Electron E2E 中的当前组件矩阵 **2/2** 通过。上一次整体隐藏 E2E **27/27** 和制品冒烟 **16/16** 仍是 2026-08-12 基线，不伪装为本增量已重跑的证据。所有 Electron 自动化使用 `COURSEWARE_E2E_BACKGROUND=1`。当前结果仍只达到 `engineering candidate`；真实教师任务、中文输入法、读屏、100 卡片 UI 性能及其他人工结果门禁未完成，不代表 `accepted` 或发布就绪。
+最近一次全量 W1 自动化基线（2026-08-13）为：`typecheck`、**129 个 Vitest 文件 / 801 项测试**、`build:desktop`、四组件 catalog、AI 能力清单与课件 Skill 校验均通过；隐藏 Electron E2E **27/27** 已按三个测试文件拆分重跑，其中包含当前四组件矩阵 **2/2**。其后的 W3 可移植性专项另通过 **1 个定向测试文件 / 2 项测试**和 **7/7** 项真实隔离检查，但没有重跑全量 Vitest/E2E，不能把两组数字相加冒充新的全量基线。制品冒烟 **16/16** 仍是 2026-08-12 身份断代基线。所有 Electron 自动化使用 `COURSEWARE_E2E_BACKGROUND=1`。这些结果只证明当前软件与工作流达到 `engineering candidate`；W2 两个全新课例的真实制品和人工验收、另一台真正干净 Windows 的首次启动与可见冒烟仍未完成，因此 W3 内部正式版 1.0 尚未达到 `accepted` 或发布就绪。
 
 ## 快速开始
 
@@ -38,7 +38,7 @@ npm start
 npm run install:courseware-skills
 ```
 
-安装器只管理 `orchestrate-courseware` 与 `build-project-v7-courseware`，内容未变时直接跳过；如果用户目录已有同名但并非本项目管理、且内容不同的 Skill，它会拒绝覆盖并要求人工处理。安装器不会删除或修改旧的 `%USERPROFILE%\.codex\skills` 副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 是外部 AI 创作工作流，不会把 AI 能力嵌入 Editor 1.x。
+安装器只管理 `orchestrate-courseware` 与 `build-project-v8-courseware`。它记录已安装树签名：内容未变时直接跳过，只更新仍与管理记录匹配的副本；用户修改过或非本项目管理的同名副本会保留并提示人工处理。旧 `build-project-v7-courseware` 只有在既往由本项目管理且字节签名与已知官方版一致时才安全退役；修改过或未管理的 V7 副本仍保留。安装器不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 是外部 AI 创作工作流，不会把 AI 能力嵌入 Editor 1.x。
 
 开始修改前建议先建立基线：
 
@@ -81,11 +81,11 @@ npm test
 - 场景缩略图按 `thumbnailStateId` 绘制背景、原生元素和组件缩略图，并按层合成已启用场景/全局运行时登记的静态后备；组件未提供图片时显示带名称的后备框，已启用运行时未提供后备时显示“运行时”提示角标；
 - 大型课件缩略图延迟渲染、图片按场景加载和增量撤销历史。
 
-详细操作见 [用户指南](docs/USER_GUIDE.md)，正式版收敛进度见 [内部正式版与多表面计划](MULTI_SURFACE_DEVELOPMENT_PLAN.md)。AI 制作课件必须先使用 [`orchestrate-courseware`](.agents/skills/orchestrate-courseware/SKILL.md)，按 [通用创作编排规范](docs/AI_COURSEWARE_ORCHESTRATION.md) 把教学设计、教学内容规格、呈现脚本和批准哈希落入课例档案；取得有效 `implementation-ready` 后仍须等待新的 Project V8 实现 Skill，不能在当前主干使用归档的 `build-project-v7-courseware`。聊天记录不充当唯一交接真相。自由运行时和组件分别见 [自由运行时指南](docs/RUNTIME_AUTHORING.md) 与 [组件开发指南](docs/COMPONENT_AUTHORING.md)。
+详细操作见 [用户指南](docs/USER_GUIDE.md)，正式版收敛进度见 [内部正式版与多表面计划](MULTI_SURFACE_DEVELOPMENT_PLAN.md)。AI 制作课件先使用机器执行入口 [`orchestrate-courseware`](.agents/skills/orchestrate-courseware/SKILL.md)，按 `fast | standard | high-risk` 选择最薄充分路径，把课例真相、精确内容、呈现脚本和当前批准哈希落盘；`request_user_input` 可用时直接调用，不要求 Plan mode。只有 V2 校验器派生出当前有效的 `implementation-ready` 后，才交给 [`build-project-v8-courseware`](.agents/skills/build-project-v8-courseware/SKILL.md) 选择载体、维护 Authoring Inventory、构建或局部 Patch，并交付真实验证证据。归档的 `build-project-v7-courseware` 不得用于当前工程；聊天记录不充当唯一真相，自动管线最多给出 `engineering candidate`，`accepted` 必须来自明确的人类验收。[通用编排规范](docs/AI_COURSEWARE_ORCHESTRATION.md) 与 [创作接入规范](docs/AI_COURSEWARE_AUTHORING.md) 是人类审阅和工程维护背景，不是每次创作必须全文加载的硬门禁。自由运行时和组件分别见 [自由运行时指南](docs/RUNTIME_AUTHORING.md) 与 [组件开发指南](docs/COMPONENT_AUTHORING.md)。
 
 ## 历史课例边界
 
-仓库暂存物理旗舰课例和数学“流程失败案例 0”，仅用于复现、诊断和后续 W1 原子迁移，不是当前模板或冷启动验收结果。数学案例继续保持 `pipeline: passed / outcome: rejected`；物理旗舰也不计入 W2。详细失败证据见 [《让运动变成函数》编排记录](docs/courseware-pilots/math-motion/ORCHESTRATION_RECORD.md)，组件级构建说明分别留在对应 example 目录。新课例必须等待 Project V8 实现 Skill，并从全新主题和干净课例档案启动。
+物理旗舰课例和数学“流程失败案例 0”已在 W1-0 原子迁入相邻本地 Git 仓库 [`courseware-cases`](../courseware-cases/README.md)，核心仓只保留转发命令。数学案例继续保持 `pipeline: passed / outcome: rejected`；物理旗舰保持 `pipeline: passed / outcome: pending`，二者都不计入 W2。178 个源文件 / 64,818,336 字节由逐文件 SHA-256 清单锁定；旧 `.h5lesson` 缺少当前必填 `contentSha256` 而被当前解析器明确拒绝，原脚本重建后的当前归档已在可丢弃克隆中复验。新课例必须从全新主题和干净课例档案启动。
 
 ## 技术栈
 
@@ -311,10 +311,11 @@ PPTX 映射规则：
 | `npm run build:render-benchmark` | 生成原生 / Phaser / DOM / Three.js / V4 Phaser 组件五路径离线基准 |
 | `npm run build:icons` | 从源图标重新生成应用图标 |
 | `npm run verify` | 依次执行能力检查、三配置类型检查、Vitest、隐藏 E2E 和桌面构建，不重复调用 `build` |
+| `npm run verify:w3-portability` | 构建 Player，并在 Windows 系统临时隔离树中验证目录版/Portable 复制启动、工程断源重开重存及单 HTML/网页包离线移动；不替代另一台干净 Windows 的人工验收 |
 
-机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它只提供当前 Project V8、Runtime API 2、Component API 4、互动、诊断和导出面的低成本索引；需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。它不是编辑器内 AI、自动课件生成器、工作流或 Project V8 实现 Skill。外部组件 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可生成，但组件能力必须明确标记为 `unavailable`/降级；当前快照中的四个包仍全部是 `experimental`，许可和维护人阻断没有被能力索引解除。
+机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它提供当前 Project V8、Runtime API 2、Component API 4、Headless Builder、互动、诊断和导出面的低成本索引；`build-project-v8-courseware` 先核对该索引及生成证据，需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。索引本身不是编辑器内 AI、自动课件生成器或工作流。外部组件 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可生成，但组件能力必须明确标记为 `unavailable`/降级；当前快照中的四个包仍全部是 `experimental`，许可和维护人阻断没有被能力索引解除。
 
-AI/脚本的最低闭环是“生成工程 → `validate:project` → 按结构化路径修正 → 再验证 → 人工验收”。该命令不启动 Electron、不执行真实导出、不改写工程；Node 下文字/公式布局使用公开标注的确定性近似测量，近似溢出只给 warning，最终像素裁切仍必须以真实编辑器或导出为准。它不是编辑器内 AI、课件生成工作流或尚未完成的 Project V8 实现 Skill。
+Project V8 外部 Builder 的最低闭环是“校验获批课例与 Capability → 使用仓库真实 TypeScript API 生成工程 → `validate:project` → 按稳定绑定局部修正 → 重开、Player、四格式与视觉证据 → 人工验收”。`validate:project` 命令本身不启动 Electron、不执行真实导出、不改写工程；Node 下文字/公式布局使用公开标注的确定性近似测量，近似溢出只给 warning，最终像素裁切仍必须以真实编辑器或导出为准。自动闭环最多给出 `engineering candidate`，不得用 Headless 通过代替像素、互动或人类验收。
 
 E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口和课件预览窗口保持 `BrowserWindow.isVisible() === false`，不会调用 `show()`、出现在任务栏或抢占焦点；透明、离屏坐标与关闭后台渲染节流只是额外防护和稳定性设置，不再依赖“显示一个透明窗口”实现后台测试。生产构建/制品验证中的自动启动也显式使用同一环境变量。正常 `npm start`、开发启动和双击入口不读取该测试默认值，仍会照常显示窗口。常规验证不得使用可视 E2E；只有开发者明确需要观察单个故障时才手工运行 `npm run test:e2e:visible`。
 
@@ -326,9 +327,9 @@ E2E 默认向 Electron 传入 `COURSEWARE_E2E_BACKGROUND=1`：主窗口和课件
 
 根目录 `启动课件编辑器.cmd` 仍是面向当前源码工作区的标准双击入口；它生成被 `.gitignore` 排除的 `dist-player/`、`dist-renderer/` 与 `dist-electron/`，然后直接使用项目锁定的 Electron 运行。拉取新提交后再次双击即可同步和重建，不需要复用旧 `release/`。
 
-本轮已在本地构建并验证 1.0.0 Portable 与目录版候选制品，但它们不随源码提交、未经商业代码签名，也不等于已对外签发。历史 1.6.0/1.7.0 二进制、哈希和构建说明只由 Git 历史与标签 `internal-prototype-1.7.0` 保存，不能作为当前版本启动入口或验证证据。
+当前 1.0.0 Portable 与目录版候选已在同一 Windows 主机的系统临时隔离树中完成逐文件复制校验和真实启动；一个嵌入 V4 组件的 Project V8 也在删除唯一外部组件源后完成移动、重开、修改、重存和再次重开，移动后的单 HTML 与网页包通过 `file://` 实际点击且无外部请求。证据见 [W3 Windows / 离线可移植性验证记录](docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)。这仍只是同机 `engineering candidate`：候选制品不随源码提交、未经商业代码签名，也没有替代另一台真正干净 Windows 的首次依赖安装与可见人工操作。历史 1.6.0/1.7.0 二进制、哈希和构建说明只由 Git 历史与标签 `internal-prototype-1.7.0` 保存，不能作为当前版本启动入口或验证证据。
 
-`release/`、源码 ZIP、校验截图和其他可重建制品不随源码提交；正式分发时必须基于明确的当前工作树快照生成，并通过独立制品渠道交付。当前软件本体、身份断代、Headless 校验和制品自动化结果见 [2026-08-12 最终验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)。尚未完成根目录入口可见人工冒烟、真实翻页硬件、真实教师任务和发布组件权属审查。
+`release/`、源码 ZIP、校验截图和其他可重建制品不随源码提交；正式分发时必须基于明确的当前工作树快照生成，并通过独立制品渠道交付。软件本体、身份断代、Headless 校验和 2026-08-12 制品自动化见 [身份断代验证记录](docs/reviews/PRODUCT_IDENTITY_RENAME_VERIFICATION_20260812.md)，后续可移植性增量见 [W3 专项记录](docs/reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)。尚未完成另一台干净 Windows 的首次启动与可见人工冒烟、真实翻页硬件、真实教师任务和发布组件权属审查。
 
 ## 测试与提交要求
 
