@@ -7,15 +7,15 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W11 [V05]`
+> `ACTIVE_WAVE: W11 [V05 blocked / GATE-V = NO-GO]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
-> `INTEGRATION_CURSOR: single / serial`
+> `INTEGRATION_CURSOR: stopped at V04 accepted / no ready set`
 > `PRIMARY_COORDINATOR: 当前根代理；复杂架构任务优先使用 GPT-5.6 Sol / max`
 > `ATOMIC_EXECUTOR: GPT-5.6 Terra / max`
 > `ULTRA_WORKFLOW: 仅由主协调者按需用于只读审计、独立验证或已通过隔离预检的执行波`
-> `PLAN_STATUS: audited-final / implementation-active`
+> `PLAN_STATUS: GATE-V NO-GO / implementation-stopped`
 > `CURRENT_PRODUCT_STATUS: unusable`
 
 本文件是仓库根目录唯一长期开发计划。它不是把当前失败的 V9 前端改得“像 V8”，而是从真正包含成熟 V8 前端的 `3e41ec0` 出发，在原文件、原 DOM、原画布和原交互链中逐步换入 V9 数据与运行内核。
@@ -882,10 +882,11 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - Slide 最小写命令：稳定 `SlideEditorSelection` 与 scene Native text move 已在 base/命名状态中分别写入 frame/override；一次有效移动恰好 +1 revision/+1 history，零位移无历史，Undo/Redo 后 ID 稳定；全量 145 个 Vitest 文件 / 913 个测试和 8 个 Agent Kit 测试全绿。
 - Workspace 注入边界：原 Workspace 已以严格二选一的 `slideAuthoring` 输入承接 document/packages/selection 与 selection/move；缺省仍逐项调用原 V8 Store，App 尚未启用注入；全量 146 个 Vitest 文件 / 915 个测试和 8 个 Agent Kit 测试全绿，三尺寸 mask 外像素差异均为 0。
 - 测试 V9 单后端：只有精确 query 才让原 App/Workspace 读取直接 V9 fixture；一个 Native text 以稳定 `layerItemId` 投影、选择并一次性移动，V8 Store project 不变；全量 147 个 Vitest 文件 / 920 个测试和 8 个 Agent Kit 测试全绿，默认三尺寸 mask 外像素差异均为 0。
+- `V05 not accepted / GATE-V = NO-GO`：真实 Electron 可以通过 Phaser 几何代理移动 V9 frame，Undo/Redo 与 schemaVersion 9 archive 也已走通到首轮保存，但 V9 Native text 没有进入隔离 Player 的视觉树；当前 accepted cursor 仍为 V04 `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`。
 
 ### W11｜V9 最小纵切真实闭环波
 
-- Status: `ready`
+- Status: `blocked / GATE-V = NO-GO`
 - Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - Write cards: `V05`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
@@ -893,10 +894,20 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - Integration order: `V05`
 - Stop condition: 若真实 Electron 指针不能通过原 Phaser bridge 只写 V9，Undo/Redo 不能恢复同一稳定 ID，archive 不是 schemaVersion 9，完全销毁进程后无法从文件恢复相同 text/frame/ID，或必须修改 Store/Workspace/Phaser/Schema/IPC/TopToolbar 才能闭环，则 `GATE-V = NO-GO` 并停止后续开发；全部通过后由主协调者立即执行 GATE-V 二元裁决
 
+### GATE-V 二元裁决｜NO-GO
+
+- Decision date: `2026-08-15`
+- Accepted cursor: `V04 @ 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`；V05 未 accepted，后续 DAG 没有 ready set。
+- Failed contract: 第 6.4 节第 2 项“通过纯只读 View 显示一个 V9 Native text”。1366×768 真实 Electron 截图中，V9 text 的预期屏幕区域为纯白；`245 × 62 = 15190` 个像素中低于 RGB 248 的像素为 `0`，而原 V8 Player 教师控制器仍可见。
+- Root cause: `ProxyNodeAdapter` 按冻结设计只维护几何命中和变换手柄，隔离 Player 才是视觉真相；V03 的 `slideAuthoring` 只替换 Phaser 的 `document/componentPackages/selection/move` 输入。Workspace 的 Player 启动 payload 仍固定读取 V8 `project/assetFiles/componentPackages`，现有完整 authoring snapshot 也固定读取 `useEditorStore`，且未由握手路径调用。因此 V9 节点可被无形命中并写回 V9，却不能被 Player 显示。
+- Prohibited escape hatches: 在 App 内同步写一份 V8 scene、伪造同 ID V8 节点、覆盖 Canvas/Player DOM 或增加 test-only visual 都违反“单 backend、只读 View、无双 Store”；让现有 Player 正确显示 V9 则必须修改 Workspace/Player 接缝，直接命中本波停止条件与 V05 白名单禁令。
+- Consequence: `GATE-V = NO-GO`，V05 blocked，K01 及全部后续节点 blocked；不得把仅有命中、history/archive 通过的结果称为 Gate 通过。
+- Resume condition: 只有在冻结计划获准修订后，才可物化一个 Gate 前的只读 Player 视觉投影节点（由主协调者裁决接口与白名单），随后重新执行 V05 与完整 GATE-V；不得把 A07/S02 偷跑进当前卡。
+
 ### ACTIVE_CARD｜V05 闭合 V9 Slide 真实鼠标、历史与 archive 重开
 
 - Owner: `strong-coordinator`
-- Status: `ready`
+- Status: `blocked / not accepted`
 - Wave: `W11`
 - Accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - Dependencies: `V04 accepted @ 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
