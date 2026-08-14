@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W06 [K00]`
+> `ACTIVE_WAVE: W07 [V01]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -866,72 +866,75 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - `G03 accepted`：`14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
 - `G04 accepted`：`95fbb13934a17594a7a556f7b2627372d0732d89`
 - `G05 accepted`：`dc190edb6a0d1b7b696e7308effd401d343134a2`
+- `K00 accepted`：`eb00ed257dd6a12adf92914e89252063a6bad654`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 - 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
 - 行为基线：12 个原高价值测试文件、151 个源码定义、7 个参数化定义、172 个实际用例全部映射为 `keep` 并全绿。
 - 守卫基线：静态门、三项必失败内存负例、三档 live geometry/masked golden 全绿；画布区外逐像素差异为 0；全量 143 个 Vitest 文件 / 903 个测试和 8 个 Agent Kit 测试全绿。
 - 唯一入口：`ProductApp` 的产品 import graph 只到原 `App`；CourseStudio 源码保留但不可达；默认 `test:e2e` 已绑定 `v8-only` 真实 Electron preservation visual，三档壳层 mask 外像素差异为 0。
+- V9 新工程：`createCourseProject` 已直接生成含初始 Slide/state/location 与全局教师控制器的 schema-valid V9 文档，不再调用 V8 factory/migration；全量 143 个 Vitest 文件 / 904 个测试和 8 个 Agent Kit 测试全绿。
 
-### W06｜直接 V9 新工程基础波
+### W07｜只读 Slide 编辑投影波
 
 - Status: `ready`
-- Common accepted parent SHA: `dc190edb6a0d1b7b696e7308effd401d343134a2`
-- Write cards: `K00`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `eb00ed257dd6a12adf92914e89252063a6bad654`
+- Write cards: `V01`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: K00 位于第 7.11 节规定的 `G04→G05→K00→V01→V05` 高耦合串行链，且改动公共课程模型 factory；不满足双写入条件，不创建 worktree
-- Integration order: `K00`
-- Stop condition: 直接 factory 若不能在不改 Schema/类型、不新增依赖且不调用 V8 factory/migration 的条件下生成可通过当前 V9 Schema 的单 Slide 工程、初始状态和全局教师控制器，K00 blocked；通过后自动物化串行 `W07 [V01]`
+- Parallel preflight: V01 是第 7.11 节规定的最小纵切串行节点，V02 依赖其稳定投影合同；本波只有一个新纯模块和一个新定向测试，不满足双写入必要性，不创建 worktree
+- Integration order: `V01`
+- Stop condition: 若投影必须生成可写 `SceneDocument` 镜像、替代 ID、压缩 Runtime/Component、导入 Store/Workspace/Player，或无法在不修改 Schema 的前提下同时表达 scope visibility、统一顺序与 state 有效值，V01 blocked；通过后自动物化串行 `W08 [V02]`
 
-### ACTIVE_CARD｜K00 直接创建 Course Project V9 初始工程
+### ACTIVE_CARD｜V01 建立只读 SlideEditorView 纯投影
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W06`
-- Accepted parent SHA: `dc190edb6a0d1b7b696e7308effd401d343134a2`
-- Dependencies: `G05 accepted @ dc190edb6a0d1b7b696e7308effd401d343134a2`
+- Wave: `W07`
+- Accepted parent SHA: `eb00ed257dd6a12adf92914e89252063a6bad654`
+- Dependencies: `K00 accepted @ eb00ed257dd6a12adf92914e89252063a6bad654`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: `createCourseProject` 不创建 Project V8、不调用 V8→V9 migration，直接返回通过 `courseProjectDocumentSchema` 的 revision 0 Course Project V9；工程含一个 1280×720 Slide、一个带 `state_initial` 的初始场景、对应 start location，以及一个 course-global、全 location 可见的默认教师控制器。
-- Before: `createCourseProject` 先调用 `createProject(... includeDefaultController: true)` 生成 Project V8，再调用 `migrateProjectV8ToCourseProjectV9`；V9 新工程的第一事实依赖已禁止的旧顶层协议。
-- After: `createCourseProject` 直接组装当前 Course Project V9 类型并由当前 Schema parse；默认标题、设计 token、声音、播放设置、初始状态、场景/location 关系和教师控制器语义保持当前输出；同文件其他 Native 插入路径仍留给 K01/K02，不在本卡扩大。
+- 唯一可见/模型结果: 一个无副作用 `buildSlideEditorView` 把指定 V9 Slide location/state 投影为只读 `SlideEditorView`：global/surface/scene 三类条目按统一 order 排列，scope visibility 独立保留，scene state 的 layer/background overrides 被物化为有效值，稳定 `layerItemId` 原样成为 `selectionId`。
+- Before: V9 的有效图层/状态物化只存在于 Player Host 或失败的 CourseStudio 前端私有逻辑中；原 UI 尚无不依赖 Store/Player、不可写且不伪装成 V8 `SceneDocument` 的读取形状。
+- After: 新纯模块只依赖 Course Project types、scope visibility 与稳定排序；输入文档不被修改，输出 LayerItem 为深只读克隆且无 setter/command/history/archive 能力；非 Slide location、未知 state 明确失败；不挂载到产品或 Store。
 
 读取来源：
 
-- BASE3E: `src/renderer/project/createProject.ts` 中默认 project/controller 值；`src/shared/courseProjectSchema.ts` 当前严格 Schema
-- DONORF77: `src/renderer/course/courseStudioModel.ts` 中 `initialSlidePresentation`、`createCourseProject`、`createDefaultTeacherController` 的函数级实现；只摘取 K00 所需字段，不覆盖整文件
-- CURRENT: `src/renderer/course/courseStudioModel.ts` 的 `stableId`、`createCourseProject`；`src/shared/courseProjectTypes.ts` 的 `CourseProjectDocument/LayerItem/SlideSceneDocument`；`tests/unit/courseStudioModel.test.ts`
+- BASE3E: `src/renderer/store/editorStore.ts` 中只读 scene/state materialization 语义（只读参考，不导入）；`src/renderer/ui/Workspace.tsx` 所需 transform/selection 字段（只读参考）
+- DONORF77: 无；第 4.1 节规定 UI 纵切前 donor 只摘 K00 factory，不从失败前端复制 View
+- CURRENT: `src/shared/courseProjectTypes.ts` 的 LayerItem/Slide/state/scope；`src/shared/courseProjectModel.ts` 的 `isCourseLayerVisibleAtLocation`；`src/shared/stableOrder.ts`；`src/player/surfaces/slide/SlideSurfaceHost.ts` 中 state override/order 语义（只读参考，不导入 Player）
 
 产品修改白名单：
 
-- `src/renderer/course/courseStudioModel.ts`（只改 factory 所需 import、常量/私有 helper 与 `createCourseProject`）
+- `src/renderer/course/slideEditorView.ts`（新建纯类型与纯投影函数）
 
 测试修改白名单：
 
-- `tests/unit/courseStudioModel.test.ts`
+- `tests/unit/slideEditorView.test.ts`（新模块无既有覆盖，新增唯一精确合同）
 
 明确禁止：
 
-- 修改 `courseProjectTypes.ts`、`courseProjectSchema.ts`、V8 `createProject.ts`、migration/archive、Store、App/UI/Workspace/CSS、guard、golden、behavior map、package/lockfile、Schema 或 IPC；
-- 删除或改写 `migrateProjectV8ToCourseProjectV9`，或把同文件其余 Native 插入 helper 提前迁移；K00 只切断“新建 V9 工程”这一条 V8 依赖；
-- 新建通用 factory 层、Store、Adapter、App/Shell/Workspace、兼容 View、运行时 flag 或测试后门；
-- 改变默认教师控制器的 frame、按钮动作/可见性、样式、播放设置或静态导出语义；
+- 修改 Course Project/V8 types 或 Schema、`courseStudioModel.ts`、Player Host、Store、App/UI/Workspace/CSS、guard、golden、behavior map、package/lockfile、archive/export 或 IPC；
+- 导入 `projectTypes.ts` 的 `SceneDocument/SceneNode`、`editorStore`、React、Phaser、Player/Host；不得把 Flow/Spatial 转成 Slide View；
+- 返回输入 LayerItem 引用、生成替代 ID、隐藏 scope 不匹配的作者条目、把多个 Runtime/Component 合并为旧单例，或提供任何写操作/setter/command/history/cache；
+- 在 `stateId: null` 时偷偷套用 initial state；base 与显式命名状态必须可区分；
 - 新建 worktree、运行 `npm install`/`npm ci`；
 - push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- `output/k00/`（若需要；默认不产生）
+- `output/v01/`（若需要；默认不产生）
 
 实现步骤：
 
-1. 增加仅服务本卡的初始 Slide presentation 与默认教师控制器 V9 literal helper；所有稳定 ID 由现有 `stableId` 生成，controller 为 `globalLayerItems` 中 order 1、`visibility.mode='all'` 的 Native layer。
-2. 把 `createCourseProject` 改为直接构造 `schemaVersion: 9` 的单 Slide 工程；scene/location/startLocation 使用同一个稳定 scene ID，初始 presentation 明确包含 `state_initial`，最后仍由 `courseProjectDocumentSchema.parse` 封口。
-3. 在既有 model 单测中新增直接 factory 合同：验证 revision/时间、Schema、surface-scene-location 对齐、初始状态、默认 playback 和教师控制器完整语义，并机械断言该函数体不调用 `createProject` 或 `migrateProjectV8ToCourseProjectV9`。
-4. 跑定向 model/archive/validator 测试、typecheck、renderer build、静态 preservation guard 与全量单测；核对只改白名单两文件。
+1. 定义 `DeepReadonly`、`SlideEditorLayerView`、`SlideEditorPresentationView` 与 `SlideEditorView`；Layer view 仅含 scope、scope 当前可见性、`selectionId` 和深只读 LayerItem 克隆，选择 ID 必须等于 `layerItemId`。
+2. 实现纯 state materialization：只对 scene items 应用 label/frame/order/visible/locked/rotation/opacity/hit/nativeData/componentProps；深合并结构化字段，并按 `layerItemOrder` 重排到原稀疏 order slots；base state 不套 override。
+3. 由 Slide location 严格解析 surface/scene/state，克隆 global/surface/scene 条目，计算 scope visibility，按 `order + layerItemId` 稳定合并；投影 state/background 元数据，不修改或泄漏输入引用。
+4. 新测试覆盖三作用域交错顺序、include/exclude visibility、稳定选择 ID、Native 深层 override、scene order slots、背景/state 元数据、base 与命名状态差异、输入隔离，以及非 Slide/未知 state 失败。
+5. 跑定向 View/model/Slide Host 测试、typecheck、renderer build、静态 preservation guard 与全量单测；核对只新增白名单两文件。
 
 验证命令：
 
@@ -940,20 +943,23 @@ git status --short
 git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
 npm run verify:editor-preservation
-npx vitest run tests/unit/courseStudioModel.test.ts tests/unit/courseProjectPatchCli.test.ts tests/unit/validateProject.test.ts
+npx vitest run tests/unit/slideEditorView.test.ts tests/unit/courseStudioModel.test.ts tests/unit/slideSurfaceHost.test.ts
 npm run typecheck
 npm run build:renderer
 npm test
+$forbidden = rg -n "projectTypes|editorStore|Workspace|React|Phaser|SlideSurfaceHost|Player" src/renderer/course/slideEditorView.ts 2>$null
+if ($LASTEXITCODE -eq 0) { $forbidden; throw 'V01 forbidden dependency found' }
+if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only dc190edb6a0d1b7b696e7308effd401d343134a2
+git diff --name-only eb00ed257dd6a12adf92914e89252063a6bad654
 ```
 
 鼠标/截图证据：不适用；纯模型卡不改变当前可见入口。Outcome status 仍为 `unusable`，自动化最多证明 `engineering candidate`。
 
-Commit: `refactor(course): create new projects directly as V9`
+Commit: `feat(course): add read-only Slide editor projection`
 Rollback: `git revert <task-sha>`
 
 ---
