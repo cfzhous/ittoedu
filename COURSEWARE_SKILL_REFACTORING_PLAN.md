@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W02 [G02]`
+> `ACTIVE_WAVE: W03 [G03]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -862,77 +862,75 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 
 - `G00 accepted`：`8c7a530492e553f8bd1b560a3de598f4da24497c`
 - `G01 accepted`：`05bdee521de2fe3de9de166333aa22b012058b7b`
+- `G02 accepted`：`378c195f74e562f3ad5e47c494b94e709ccb57dd`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
+- 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
 
-### W02｜V8 原壳视觉与鼠标证据波
+### W03｜V8 高价值行为测试映射波
 
 - Status: `ready`
-- Common accepted parent SHA: `05bdee521de2fe3de9de166333aa22b012058b7b`
-- Write cards: `G02`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `378c195f74e562f3ad5e47c494b94e709ccb57dd`
+- Write cards: `G03`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: `G02 ‖ G03` 的文件可隔离、磁盘余量 28.95 GB，但二者均为第 7.1 节协调者专属，不能把 Owner 改写为 Terra Max；本波退回默认单写入，不创建 worktree
-- Integration order: `G02`
-- Stop condition: 原 App 无法在未改产品代码的条件下启动、真实鼠标链失败或任一尺寸发生壳层遮挡/页面级溢出时，G02 blocked 并由协调者先判定基线事实；通过后自动物化串行 `W03 [G03]`
+- Parallel preflight: `G04` 依赖 `G03` 的行为映射且 guard/map 都是协调者专属高冲突区；ready set 只有 `G03`，不满足第 5.8 节双写入条件，不创建 worktree
+- Integration order: `G03`
+- Stop condition: 第 6.2 节任一高价值测试文件缺失、普通或 `it.each` 测试定义无法完整映射、Vitest 展开计数不一致、定向测试失败，或出现无 replacement 的 `adapt/retire` 时，G03 blocked 并由协调者先解决基线事实；通过后自动物化串行 `W04 [G04]`
 
-### ACTIVE_CARD｜G02 冻结 V8 原壳三尺寸与真实鼠标证据
+### ACTIVE_CARD｜G03 冻结 V8 高价值行为测试映射
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W02`
-- Accepted parent SHA: `05bdee521de2fe3de9de166333aa22b012058b7b`
+- Wave: `W03`
+- Accepted parent SHA: `378c195f74e562f3ad5e47c494b94e709ccb57dd`
 - Dependencies: `G01 accepted @ 05bdee521de2fe3de9de166333aa22b012058b7b`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: 原 `App/Workspace` 在 1280×720、1366×768、1920×1080 的三张黄金基线、DOM 几何和一次真实鼠标选择/拖动/Undo 证据被固定，且由协调者逐图视觉复核。
-- Before: 原 V8 App 仅可通过当前 `ProductApp` 的“旧版 V8 编辑器”入口到达；仓库没有本轮三尺寸壳层 golden、几何闭包或真实鼠标基线。
-- After: 三张 PNG 像素尺寸精确；`.app-shell`、顶部、左栏、中央、画布视口、状态条、右栏、底部状态栏均可见且在 viewport 内；真实鼠标将新建文字移动并由 Undo 恢复；无页面错误、console error 或外网请求。
+- 唯一可见/模型结果: 第 6.2 节 12 个高价值测试文件中的 151 个静态测试定义（含 7 个 `it.each`，由 Vitest 展开为 172 个执行用例）全部进入单一机器可读映射，每个定义都有 `keep/adapt/retire` 结论；当前基线不弱化任何断言，全部为 `keep`。
+- Before: 仓库保留了高价值 V8 单元/UI 测试，但没有可供后续 verifier 判断删除、弱化、适配或退休的行为清单。
+- After: `v8-behavior-map.json` 固定 baseline commit、受保护文件、文件 SHA-256、Vitest 收集到的完整测试名与源码位置、合同类别、处置和计数；总数与 Vitest collector 和实际运行结果一致；任何未来 `adapt/retire` 都必须提供非空原因与已存在的 V9 replacement test。
 
 读取来源：
 
-- BASE3E: `src/renderer/ProductApp.tsx`、`src/renderer/App.tsx`、`src/renderer/ui/TopToolbar.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/SceneStateStrip.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/styles/globals.css`
+- BASE3E: `tests/unit/editorStore.test.ts`、`globalEditorStore.test.ts`、`globalLayerUi.test.tsx`、`sceneStateUi.test.tsx`、`stageViewportTransform.test.ts`、`editorFormattingUi.test.tsx`、`simpleEditorMode.test.tsx`、`developerMode.test.tsx`、`mediaTab.test.tsx`、`componentPropertiesEditor.test.tsx`、`presenterSettingsUi.test.tsx`、`interactionEditor.test.tsx`
 - DONORF77: 无
-- CURRENT: `src/main/windowVisibility.ts`、`tests/e2e/course-studio.spec.ts`；历史鼠标语义只读参考 `3e41ec0^:tests/e2e/editor.spec.ts`
+- CURRENT: 第 6.2 节测试合同、`tests/contracts/v8-shell-baseline/geometry.json`
+- HISTORY: `3e41ec0^:tests/e2e/editor.spec.ts` 只作为真实鼠标语义来源登记，不把已经不在 `3e` 基线中的文件伪装成当前受保护测试。
 
 产品修改白名单：无。
 
-文档修改白名单：
-
-- `docs/verification/V8_EDITOR_VISUAL_BASELINE_20260814.md`
+文档修改白名单：无。
 
 合同证据白名单：
 
-- `tests/contracts/v8-shell-baseline/1280x720.png`
-- `tests/contracts/v8-shell-baseline/1366x768.png`
-- `tests/contracts/v8-shell-baseline/1920x1080.png`
-- `tests/contracts/v8-shell-baseline/geometry.json`
+- `tests/contracts/v8-behavior-map.json`
 
 测试修改白名单：无。
 
 明确禁止：
 
-- 修改产品、现有测试、配置、依赖、lockfile、Schema、IPC 或 CSS；
-- 用 DOM 样式改写、`dispatchEvent` 或 Store 直调冒充鼠标移动；
-- 裁切截图隐藏边栏、状态条、溢出或错误；
-- 在截图间改变项目内容、编辑模式、选中对象或缩放；
-- 把 CourseStudio 壳截图当成原 App 基线；
+- 修改产品、现有测试、golden、配置、依赖、lockfile、Schema、IPC 或 CSS；
+- 删除、改名、跳过、弱化或重写任何原 `describe/it/test`；
+- 用文件级 `keep` 掩盖漏掉的普通测试标题、`it.each` 模板或参数行；
+- 把当前不存在的 future replacement、CourseStudio 测试或历史 E2E 冒充已通过的替代合同；
+- 在 G03 建 verifier 或其负例；
 - 新建 worktree、运行 `npm install`/`npm ci`；
-- 在 G02 建 verifier 或改 behavior map；
 - push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- `output/playwright/g02/capture-v8-baseline.mjs`
-- `output/playwright/g02/*.png`
-- `output/playwright/g02/geometry.json`
+- `output/g03/generate-v8-behavior-map.mjs`
+- `output/g03/verify-v8-behavior-map.mjs`
+- `output/g03/vitest-list*.json`
 
 实现步骤：
 
-1. 从干净执行父提交重新构建 Player/Renderer/Electron，用独立 Electron profile 启动默认产品，再通过可见按钮进入原 V8 App；只用 Playwright 真实鼠标新增、选中、拖动文字并 Undo，记录逻辑坐标前后值。
-2. 固定同一 UI 状态，依次把 Electron content viewport 设为三种精确尺寸；采集完整页面 PNG 与核心 DOM 矩形，机械检查边界、相邻栏不交叠和页面无溢出；协调者逐张查看后才把候选复制为合同证据并写结论文档。
+1. 使用仓库现有 Vitest collector 的 `list --json --includeTaskLocation` 收集 12 个白名单文件的完整执行用例；按 `file + line + column` 聚合普通定义和 `it.each` 展开行，重复路径、缺失位置或计数不一致立即失败，不用正则近似代替最终清单，也不引入新解析依赖。
+2. 为每个文件写入第 6.2 节合同类别、BASE3E SHA-256、`keep` 处置、逐定义源码位置、全部展开测试名和计数；登记 G02 发现的空状态预览缺口与历史 E2E 来源，但二者不计入 151 个当前定义或 172 个执行用例。
+3. 独立 verifier 临时脚本重新调用 Vitest collector 并与 JSON 双向比对，然后运行 12 个原文件；不得为通过映射而改测试。
 
 验证命令：
 
@@ -940,24 +938,20 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 git status --short
 git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
-npm run build:player
-npm run build:renderer
-npm run build:electron
-node output/playwright/g02/capture-v8-baseline.mjs
-Get-FileHash -Algorithm SHA256 tests/contracts/v8-shell-baseline/1280x720.png,tests/contracts/v8-shell-baseline/1366x768.png,tests/contracts/v8-shell-baseline/1920x1080.png
+npx vitest list tests/unit/editorStore.test.ts tests/unit/globalEditorStore.test.ts tests/unit/globalLayerUi.test.tsx tests/unit/sceneStateUi.test.tsx tests/unit/stageViewportTransform.test.ts tests/unit/editorFormattingUi.test.tsx tests/unit/simpleEditorMode.test.tsx tests/unit/developerMode.test.tsx tests/unit/mediaTab.test.tsx tests/unit/componentPropertiesEditor.test.tsx tests/unit/presenterSettingsUi.test.tsx tests/unit/interactionEditor.test.tsx --json=output/g03/vitest-list-verify.json --includeTaskLocation
+node output/g03/verify-v8-behavior-map.mjs
+npx vitest run tests/unit/editorStore.test.ts tests/unit/globalEditorStore.test.ts tests/unit/globalLayerUi.test.tsx tests/unit/sceneStateUi.test.tsx tests/unit/stageViewportTransform.test.ts tests/unit/editorFormattingUi.test.tsx tests/unit/simpleEditorMode.test.tsx tests/unit/developerMode.test.tsx tests/unit/mediaTab.test.tsx tests/unit/componentPropertiesEditor.test.tsx tests/unit/presenterSettingsUi.test.tsx tests/unit/interactionEditor.test.tsx
+npm run typecheck
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only 05bdee521de2fe3de9de166333aa22b012058b7b
+git diff --name-only 378c195f74e562f3ad5e47c494b94e709ccb57dd
 ```
 
-鼠标/截图证据：
+鼠标/截图证据：不适用；本卡是测试合同冻结，不产生 UI 结论。
 
-- Playwright `page.mouse` 在真实 Phaser canvas 上执行 pointer down/move/up；属性栏 X/Y 必须变化，Undo 后恢复。
-- 协调者使用本地图片查看器逐张复核三张完整截图；自动几何通过不能替代视觉复核。
-
-Commit: `test(contracts): freeze V8 editor visual baseline`
+Commit: `test(contracts): map protected V8 editor behavior`
 Rollback: `git revert <task-sha>`
 
 ---
