@@ -38,6 +38,15 @@ import {
 import { loadPlayerBundle } from './export/loadPlayerBundle'
 import { renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
 import {
+  buildV9SlideWorkspaceSnapshot,
+  createV9SlideVerticalSliceState,
+  moveV9SlideVerticalSlice,
+  resolveEditorStartupBackend,
+  selectV9SlideVerticalSlice,
+  V9_SLIDE_TEST_BACKEND,
+  type V9SlideVerticalSliceState,
+} from './course/v9SlideVerticalSlice'
+import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
 } from './components/componentPackageStore'
@@ -78,6 +87,7 @@ import { ScenePanel } from './ui/ScenePanel'
 import { SceneStateStrip } from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
+import type { WorkspaceSlideAuthoringInput } from './ui/workspaceSlideAuthoring'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
 import { planCatalogBatchJoin } from './components/componentLibraryModel'
@@ -241,6 +251,12 @@ function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
 }
 
 export default function App() {
+  const [v9SlideVerticalSlice, setV9SlideVerticalSlice] =
+    useState<V9SlideVerticalSliceState | null>(() => (
+      resolveEditorStartupBackend(window.location.search) === V9_SLIDE_TEST_BACKEND
+        ? createV9SlideVerticalSliceState()
+        : null
+    ))
   const [busy, setBusy] = useState(false)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
     | {
@@ -304,6 +320,23 @@ export default function App() {
     () => summarizeProjectHealth(projectHealthDiagnostics),
     [projectHealthDiagnostics],
   )
+  const v9SlideAuthoring = useMemo<WorkspaceSlideAuthoringInput | undefined>(() => {
+    if (v9SlideVerticalSlice === null) return undefined
+    const snapshot = buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice)
+    return {
+      ...snapshot,
+      onSelectionChange: (event) => {
+        setV9SlideVerticalSlice((current) => current === null
+          ? null
+          : selectV9SlideVerticalSlice(current, event))
+      },
+      onMoveEnd: (event) => {
+        setV9SlideVerticalSlice((current) => current === null
+          ? null
+          : moveV9SlideVerticalSlice(current, event))
+      },
+    }
+  }, [v9SlideVerticalSlice])
 
   const setError = useEditorStore((state) => state.setError)
   const setStatus = useEditorStore((state) => state.setStatus)
@@ -1154,6 +1187,7 @@ export default function App() {
         <ScenePanel />
         <div className="editor-center">
           <Workspace
+            slideAuthoring={v9SlideAuthoring}
             onAddImage={(x, y) =>
               void selectAndImportImage('add', { x, y })
             }
