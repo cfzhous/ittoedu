@@ -17,8 +17,8 @@ beforeAll(() => {
 })
 
 describe('editor preservation guard', () => {
-  it('accepts the current transition repository without mutating the worktree', async () => {
-    await expect(verifyRepositorySnapshot(repositorySnapshot, { entryMode: 'transition' }))
+  it('accepts the current V8-only repository without mutating the worktree', async () => {
+    await expect(verifyRepositorySnapshot(repositorySnapshot, { entryMode: 'v8-only' }))
       .resolves.toBeUndefined()
   })
 
@@ -26,7 +26,7 @@ describe('editor preservation guard', () => {
     const mutated = cloneRepositorySnapshot(repositorySnapshot)
     deleteSnapshotPath(mutated, 'src/renderer/ui/Workspace.tsx')
 
-    await expect(verifyRepositorySnapshot(mutated, { entryMode: 'transition' }))
+    await expect(verifyRepositorySnapshot(mutated, { entryMode: 'v8-only' }))
       .rejects.toMatchObject({ code: 'CORE_FILE_MISSING' })
   })
 
@@ -38,22 +38,15 @@ describe('editor preservation guard', () => {
       'export default function ConvergedEditorApp() { return null }\n',
     )
 
-    await expect(verifyRepositorySnapshot(mutated, { entryMode: 'transition' }))
+    await expect(verifyRepositorySnapshot(mutated, { entryMode: 'v8-only' }))
       .rejects.toMatchObject({ code: 'FORBIDDEN_FRONTEND_PATH' })
   })
 
-  it('passes a V8-only entry and fails if ProductApp reimports CourseStudioApp', async () => {
-    const v8Only = cloneRepositorySnapshot(repositorySnapshot)
-    setSnapshotText(v8Only, 'src/renderer/ProductApp.tsx', `
-import LegacyApp from './App'
-export default function ProductApp() {
-  return <LegacyApp />
-}
-`)
-    await expect(verifyRepositorySnapshot(v8Only, { entryMode: 'v8-only' }))
+  it('fails if the current ProductApp reimports CourseStudioApp', async () => {
+    await expect(verifyRepositorySnapshot(repositorySnapshot, { entryMode: 'v8-only' }))
       .resolves.toBeUndefined()
 
-    const reintroduced = cloneRepositorySnapshot(v8Only)
+    const reintroduced = cloneRepositorySnapshot(repositorySnapshot)
     setSnapshotText(reintroduced, 'src/renderer/ProductApp.tsx', `
 import LegacyApp from './App'
 import CourseStudioApp from './course/CourseStudioApp'

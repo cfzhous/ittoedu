@@ -19,8 +19,8 @@
     "test:compat": "vitest run tests/unit/projectV8Schema.test.ts tests/unit/publishedLesson.test.ts tests/unit/runtimeHostV2.test.ts tests/unit/componentProtocolV4.test.ts",
     "prepare:e2e": "npm run build:course-cases && npm run build:renderer && npm run build:electron",
     "pretest:e2e": "npm run prepare:e2e",
-    "test:e2e": "playwright test tests/e2e/course-studio.spec.ts",
-    "test:e2e:run": "playwright test tests/e2e/course-studio.spec.ts",
+    "test:e2e": "npm run verify:editor-preservation:visual",
+    "test:e2e:run": "npm run verify:editor-preservation:visual",
     "test:e2e:visible": "cross-env COURSEWARE_E2E_BACKGROUND=0 npm run test:e2e",
     "build:player": "vite build --config vite.player.config.ts",
     "build:course-cases": "npm run build:player && tsx scripts/build-course-cases.ts",
@@ -41,8 +41,8 @@
     "verify": "npm run build",
     "verify:full": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run prepare:e2e && npm run test:e2e:run",
     "verify:clean-windows": "tsx scripts/verify-clean-windows.ts",
-    "verify:editor-preservation": "tsx scripts/verify-editor-preservation.ts --entry-mode=transition",
-    "verify:editor-preservation:visual": "tsx scripts/verify-editor-preservation.ts --entry-mode=transition --visual",
+    "verify:editor-preservation": "tsx scripts/verify-editor-preservation.ts --entry-mode=v8-only",
+    "verify:editor-preservation:visual": "tsx scripts/verify-editor-preservation.ts --entry-mode=v8-only --visual",
     "build:icons": "tsx scripts/build-icons.ts"
   },
   "dependencies": {

@@ -993,7 +993,7 @@ async function runVisualVerification(
         const actual = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
         resizeTrace.push(actual)
         if (actual.width === viewport.width && actual.height === viewport.height) break
-        await app.evaluate(({ BrowserWindow }, correction) => {
+        const expectedContentSize = await app.evaluate(({ BrowserWindow }, correction) => {
           const window = BrowserWindow.getAllWindows()[0]
           if (!window) throw new Error('Editor BrowserWindow is missing')
           const [width, height] = window.getSize()
@@ -1002,11 +1002,19 @@ async function runVisualVerification(
             Math.max(1, height + correction.height),
             false,
           )
+          const [contentWidth, contentHeight] = window.getContentSize()
+          return { width: contentWidth, height: contentHeight }
         }, {
           width: viewport.width - actual.width,
           height: viewport.height - actual.height,
         })
-        await page.waitForTimeout(250)
+        await waitFor(
+          () => page.evaluate(
+            ({ width, height }) => innerWidth === width && innerHeight === height,
+            expectedContentSize,
+          ),
+          `${viewport.width}x${viewport.height} native content resize synchronization`,
+        )
       }
       await waitFor(
         () => page.evaluate(
@@ -1015,10 +1023,16 @@ async function runVisualVerification(
         ),
         `${viewport.width}x${viewport.height} viewport`,
       )
+      const golden = contract.captures[index]!
+      await waitFor(async () => {
+        const liveGeometry = await readLiveGeometry(page, viewport)
+        assertGeometryCapture(liveGeometry)
+        assertLiveGeometryMatchesGolden(liveGeometry, golden.geometry)
+        return true
+      }, `${viewport.width}x${viewport.height} geometry stabilization`)
       await page.waitForTimeout(350)
       const geometry = await readLiveGeometry(page, viewport)
       assertGeometryCapture(geometry)
-      const golden = contract.captures[index]!
       assertLiveGeometryMatchesGolden(geometry, golden.geometry)
       const currentPath = resolve(outputDirectory, `current-${viewport.width}x${viewport.height}.png`)
       const diffPath = resolve(outputDirectory, `diff-${viewport.width}x${viewport.height}.png`)
