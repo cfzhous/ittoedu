@@ -1,0 +1,457 @@
+{
+  "capturedAt": "2026-08-14T15:40:22.475Z",
+  "sourceCommit": "3e41ec058627d38c4b9f5439b454cc72331e1485",
+  "executionParent": "48dd493377a27dfbfd28850a28bf925e274cd82e",
+  "routeEvidence": {
+    "visibleButton": true,
+    "appShellReached": true,
+    "initialLegacyQueryReload": true,
+    "screenshotNormalization": "Only the fixed ProductApp route-return button was hidden; App descendants were untouched."
+  },
+  "previewRecovery": {
+    "initialDiagnostics": [],
+    "usedVisibleRetry": false,
+    "recovered": true
+  },
+  "mouseEvidence": {
+    "capturedAt": "2026-08-14T23:32:10.6304812+08:00",
+    "input": "Windows SendInput through Computer Use on the real Phaser canvas",
+    "window": {
+      "title": "* 互动课件编辑器",
+      "contentObservation": "1427x899 Windows capture; Electron content viewport reported 1427x865 by Playwright"
+    },
+    "sequence": [
+      "Activate the visible Electron window",
+      "Click the Layers tab through accessibility index 155",
+      "Drag the selected text from window coordinate (670,335) to (730,375)",
+      "Observe Properties X/Y after the system drag",
+      "Click toolbar Undo through accessibility index 87",
+      "Observe restored Properties X/Y and the 已撤销 status"
+    ],
+    "initial": {
+      "x": 440,
+      "y": 320
+    },
+    "moved": {
+      "x": 540.9,
+      "y": 387.3
+    },
+    "restored": {
+      "x": 440,
+      "y": 320
+    },
+    "screenStart": {
+      "x": 670,
+      "y": 335
+    },
+    "screenEnd": {
+      "x": 730,
+      "y": 375
+    },
+    "undoEvidence": {
+      "toolbarControl": "撤销（Ctrl+Z）",
+      "status": "已撤销"
+    },
+    "playwrightProbe": {
+      "selectionClickPassed": true,
+      "dragInjectionPassed": false,
+      "canvasCursor": "move",
+      "disposition": "Tooling limitation only; system-level pointer drag and toolbar Undo passed."
+    }
+  },
+  "captures": [
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "bytes": 96962,
+      "sha256": "b3fc23c4e973076e1c573ea402957dd5dcf5f61ac3aa3d7d5388eb3f5171cc38",
+      "resizeTrace": [
+        {
+          "width": 1427,
+          "height": 865
+        },
+        {
+          "width": 1293,
+          "height": 755
+        },
+        {
+          "width": 1280,
+          "height": 720
+        }
+      ],
+      "geometry": {
+        "expectedViewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "actualViewport": {
+          "width": 1280,
+          "height": 720,
+          "devicePixelRatio": 2
+        },
+        "document": {
+          "clientWidth": 1280,
+          "clientHeight": 720,
+          "scrollWidth": 1280,
+          "scrollHeight": 720,
+          "bodyScrollWidth": 1280,
+          "bodyScrollHeight": 720
+        },
+        "rectangles": {
+          "appShell": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 720,
+            "right": 1280,
+            "bottom": 720
+          },
+          "toolbar": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 52,
+            "right": 1280,
+            "bottom": 52
+          },
+          "appMain": {
+            "x": 0,
+            "y": 52,
+            "width": 1280,
+            "height": 642,
+            "right": 1280,
+            "bottom": 694
+          },
+          "scenePanel": {
+            "x": 0,
+            "y": 53,
+            "width": 205,
+            "height": 640,
+            "right": 205,
+            "bottom": 693
+          },
+          "editorCenter": {
+            "x": 205,
+            "y": 53,
+            "width": 783,
+            "height": 640,
+            "right": 988,
+            "bottom": 693
+          },
+          "workspace": {
+            "x": 205,
+            "y": 53,
+            "width": 783,
+            "height": 492,
+            "right": 988,
+            "bottom": 545
+          },
+          "canvasViewport": {
+            "x": 227,
+            "y": 95,
+            "width": 739,
+            "height": 428,
+            "right": 966,
+            "bottom": 523
+          },
+          "canvasStage": {
+            "x": 227,
+            "y": 101.156,
+            "width": 739,
+            "height": 415.688,
+            "right": 966,
+            "bottom": 516.844
+          },
+          "stateStrip": {
+            "x": 205,
+            "y": 545,
+            "width": 783,
+            "height": 148,
+            "right": 988,
+            "bottom": 693
+          },
+          "rightSidebar": {
+            "x": 988,
+            "y": 53,
+            "width": 292,
+            "height": 640,
+            "right": 1280,
+            "bottom": 693
+          },
+          "statusBar": {
+            "x": 0,
+            "y": 694,
+            "width": 1280,
+            "height": 26,
+            "right": 1280,
+            "bottom": 720
+          }
+        }
+      },
+      "screenshotFile": "1280x720.png"
+    },
+    {
+      "viewport": {
+        "width": 1366,
+        "height": 768
+      },
+      "bytes": 104909,
+      "sha256": "2d5c8dcc8c9f9ed211ca3804bc845e0edf96dabe86c651e5c487d37f1abd0f69",
+      "resizeTrace": [
+        {
+          "width": 1280,
+          "height": 720
+        },
+        {
+          "width": 1366,
+          "height": 768
+        }
+      ],
+      "geometry": {
+        "expectedViewport": {
+          "width": 1366,
+          "height": 768
+        },
+        "actualViewport": {
+          "width": 1366,
+          "height": 768,
+          "devicePixelRatio": 2
+        },
+        "document": {
+          "clientWidth": 1366,
+          "clientHeight": 768,
+          "scrollWidth": 1366,
+          "scrollHeight": 768,
+          "bodyScrollWidth": 1366,
+          "bodyScrollHeight": 768
+        },
+        "rectangles": {
+          "appShell": {
+            "x": 0,
+            "y": 0,
+            "width": 1366,
+            "height": 720,
+            "right": 1366,
+            "bottom": 720
+          },
+          "toolbar": {
+            "x": 0,
+            "y": 0,
+            "width": 1366,
+            "height": 52,
+            "right": 1366,
+            "bottom": 52
+          },
+          "appMain": {
+            "x": 0,
+            "y": 52,
+            "width": 1366,
+            "height": 642,
+            "right": 1366,
+            "bottom": 694
+          },
+          "scenePanel": {
+            "x": 0,
+            "y": 53,
+            "width": 224,
+            "height": 640,
+            "right": 224,
+            "bottom": 693
+          },
+          "editorCenter": {
+            "x": 224,
+            "y": 53,
+            "width": 830,
+            "height": 640,
+            "right": 1054,
+            "bottom": 693
+          },
+          "workspace": {
+            "x": 224,
+            "y": 53,
+            "width": 830,
+            "height": 492,
+            "right": 1054,
+            "bottom": 545
+          },
+          "canvasViewport": {
+            "x": 246,
+            "y": 95,
+            "width": 786,
+            "height": 428,
+            "right": 1032,
+            "bottom": 523
+          },
+          "canvasStage": {
+            "x": 258.555,
+            "y": 95,
+            "width": 760.889,
+            "height": 428,
+            "right": 1019.444,
+            "bottom": 523
+          },
+          "stateStrip": {
+            "x": 224,
+            "y": 545,
+            "width": 830,
+            "height": 148,
+            "right": 1054,
+            "bottom": 693
+          },
+          "rightSidebar": {
+            "x": 1054,
+            "y": 53,
+            "width": 312,
+            "height": 640,
+            "right": 1366,
+            "bottom": 693
+          },
+          "statusBar": {
+            "x": 0,
+            "y": 694,
+            "width": 1366,
+            "height": 26,
+            "right": 1366,
+            "bottom": 720
+          }
+        }
+      },
+      "screenshotFile": "1366x768.png"
+    },
+    {
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "bytes": 112562,
+      "sha256": "184246d593ddadb867c47ec0f5bc01192be57b57aef20a57b17662e9c4d3a60e",
+      "resizeTrace": [
+        {
+          "width": 1366,
+          "height": 768
+        },
+        {
+          "width": 1920,
+          "height": 1080
+        }
+      ],
+      "geometry": {
+        "expectedViewport": {
+          "width": 1920,
+          "height": 1080
+        },
+        "actualViewport": {
+          "width": 1920,
+          "height": 1080,
+          "devicePixelRatio": 2
+        },
+        "document": {
+          "clientWidth": 1920,
+          "clientHeight": 1080,
+          "scrollWidth": 1920,
+          "scrollHeight": 1080,
+          "bodyScrollWidth": 1920,
+          "bodyScrollHeight": 1080
+        },
+        "rectangles": {
+          "appShell": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 720,
+            "right": 1920,
+            "bottom": 720
+          },
+          "toolbar": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 52,
+            "right": 1920,
+            "bottom": 52
+          },
+          "appMain": {
+            "x": 0,
+            "y": 52,
+            "width": 1920,
+            "height": 642,
+            "right": 1920,
+            "bottom": 694
+          },
+          "scenePanel": {
+            "x": 0,
+            "y": 53,
+            "width": 224,
+            "height": 640,
+            "right": 224,
+            "bottom": 693
+          },
+          "editorCenter": {
+            "x": 224,
+            "y": 53,
+            "width": 1384,
+            "height": 640,
+            "right": 1608,
+            "bottom": 693
+          },
+          "workspace": {
+            "x": 224,
+            "y": 53,
+            "width": 1384,
+            "height": 492,
+            "right": 1608,
+            "bottom": 545
+          },
+          "canvasViewport": {
+            "x": 246,
+            "y": 95,
+            "width": 1340,
+            "height": 428,
+            "right": 1586,
+            "bottom": 523
+          },
+          "canvasStage": {
+            "x": 535.555,
+            "y": 95,
+            "width": 760.889,
+            "height": 428,
+            "right": 1296.444,
+            "bottom": 523
+          },
+          "stateStrip": {
+            "x": 224,
+            "y": 545,
+            "width": 1384,
+            "height": 148,
+            "right": 1608,
+            "bottom": 693
+          },
+          "rightSidebar": {
+            "x": 1608,
+            "y": 53,
+            "width": 312,
+            "height": 640,
+            "right": 1920,
+            "bottom": 693
+          },
+          "statusBar": {
+            "x": 0,
+            "y": 694,
+            "width": 1920,
+            "height": 26,
+            "right": 1920,
+            "bottom": 720
+          }
+        }
+      },
+      "screenshotFile": "1920x1080.png"
+    }
+  ],
+  "diagnostics": {
+    "pageErrors": [],
+    "consoleErrors": [],
+    "externalRequests": []
+  }
+}
