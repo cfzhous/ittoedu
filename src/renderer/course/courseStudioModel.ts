@@ -4,16 +4,17 @@ import {
   deriveCourseProjectAuthoringInventorySnapshot,
   migrateProjectV8ToCourseProjectV9,
 } from '../../shared/courseProjectModel'
-import type {
-  CourseProjectDocument,
-  CourseSurfaceDocument,
-  FlowBlock,
-  LayerItem,
-  MixedPrintEntry,
-  ScopedLayerItem,
-  SlideSceneDocument,
-  SlidePresentationState,
-  SpatialSurfaceDocument,
+import {
+  COURSE_PROJECT_SCHEMA_VERSION,
+  type CourseProjectDocument,
+  type CourseSurfaceDocument,
+  type FlowBlock,
+  type LayerItem,
+  type MixedPrintEntry,
+  type ScopedLayerItem,
+  type SlideSceneDocument,
+  type SlidePresentationState,
+  type SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type { SceneNode } from '../../shared/projectTypes'
 import {
@@ -48,20 +49,138 @@ function stableId(prefix: string, preferred?: string): string {
   return preferred ?? `${prefix}-${nanoid(10)}`
 }
 
+function initialSlidePresentation(): NonNullable<SlideSceneDocument['presentation']> {
+  return {
+    initialStateId: 'state_initial',
+    thumbnailStateId: 'state_initial',
+    states: [{ id: 'state_initial', name: '初始', layerItemOverrides: {} }],
+  }
+}
+
+function createDefaultTeacherControllerLayer(): LayerItem {
+  return {
+    layerItemId: stableId('teacher-controller'),
+    label: '教师控制器',
+    frame: { mode: 'absolute', x: 190, y: 638, width: 900, height: 64 },
+    order: 1,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'teacher-controller',
+      data: {
+        title: '教师控制台',
+        showSceneProgress: true,
+        compact: false,
+        collapsible: true,
+        defaultCollapsed: false,
+        buttons: [
+          { id: stableId('teacher-button'), action: { type: 'scene.previous' }, label: '上一场景', visible: true },
+          { id: stableId('teacher-button'), action: { type: 'scene.next' }, label: '下一场景', visible: true },
+          { id: stableId('teacher-button'), action: { type: 'scene.open-picker' }, label: '场景目录', visible: true },
+          { id: stableId('teacher-button'), action: { type: 'scene.replay' }, label: '重播', visible: true },
+          { id: stableId('teacher-button'), action: { type: 'course.restart' }, label: '重新开始', visible: false },
+          { id: stableId('teacher-button'), action: { type: 'audio.toggle-mute' }, label: '声音', visible: true },
+          { id: stableId('teacher-button'), action: { type: 'player.fullscreen.toggle' }, label: '全屏', visible: true },
+        ],
+        style: {
+          backgroundColor: '#172033',
+          backgroundOpacity: 0.94,
+          accentColor: '#e7b85c',
+          textColor: '#f8fafc',
+          cornerRadius: 16,
+        },
+        includeInStaticExports: false,
+      },
+    },
+  }
+}
+
 export function createCourseProject(input: {
   id?: string
   title?: string
   now?: string
 } = {}): CourseProjectDocument {
   const now = input.now ?? new Date().toISOString()
-  const legacy = createProject({
-    id: input.id ?? stableId('course'),
-    title: input.title ?? '未命名课程',
-    now,
-    includeDefaultController: true,
-  })
-  const project = migrateProjectV8ToCourseProjectV9(legacy)
-  project.updatedAt = now
+  const projectId = input.id ?? stableId('course')
+  const title = input.title ?? '未命名课程'
+  const sceneId = stableId('scene')
+  const surfaceId = `slide:${projectId}`
+  const project: CourseProjectDocument = {
+    schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+    id: projectId,
+    revision: 0,
+    title,
+    createdAt: now,
+    updatedAt: now,
+    assets: {},
+    componentPackages: {},
+    designTokens: {
+      fonts: [{
+        id: 'body',
+        label: '正文',
+        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+      }],
+      colors: [
+        { id: 'background', label: '背景', color: '#ffffff' },
+        { id: 'text', label: '正文', color: '#1f2937' },
+        { id: 'accent', label: '强调', color: '#2563eb' },
+      ],
+    },
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+      },
+    },
+    playback: {
+      controls: 'canvas',
+      keyboardNavigation: true,
+      presenter: {
+        enabled: true,
+        strategy: 'scene-navigation',
+        additionalBindings: [],
+      },
+    },
+    courseState: [],
+    navigationGuards: [],
+    locations: [{
+      id: sceneId,
+      label: '场景 1',
+      kind: 'slide-scene',
+      surfaceId,
+      sceneId,
+    }],
+    startLocationId: sceneId,
+    globalLayerItems: [{
+      item: createDefaultTeacherControllerLayer(),
+      visibility: { mode: 'all', locationIds: [] },
+    }],
+    globalInteractions: [],
+    surfaces: [{
+      id: surfaceId,
+      title,
+      type: 'slide',
+      canvas: { width: 1280, height: 720 },
+      surfaceLayerItems: [],
+      scenes: [{
+        id: sceneId,
+        name: '场景 1',
+        backgroundColor: '#ffffff',
+        backgroundAssetId: null,
+        layerItems: [],
+        presentation: initialSlidePresentation(),
+        interactions: [],
+      }],
+    }],
+  }
   return courseProjectDocumentSchema.parse(project)
 }
 

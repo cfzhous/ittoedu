@@ -23,6 +23,109 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 const NOW = '2026-08-14T00:00:00.000Z'
 
 describe('Course Studio product model', () => {
+  it('creates a schema-valid V9 project directly with its initial state and global controller', () => {
+    const factorySource = createCourseProject.toString()
+    expect(factorySource).not.toMatch(/\bcreateProject\s*\(/u)
+    expect(factorySource).not.toContain('migrateProjectV8ToCourseProjectV9')
+
+    const project = createCourseProject({ id: 'course-direct-v9', title: '直接 V9', now: NOW })
+    expect(courseProjectDocumentSchema.parse(project)).toEqual(project)
+    expect(project).toMatchObject({
+      schemaVersion: 9,
+      id: 'course-direct-v9',
+      revision: 0,
+      title: '直接 V9',
+      createdAt: NOW,
+      updatedAt: NOW,
+      startLocationId: expect.stringMatching(/^scene-/u),
+      playback: {
+        controls: 'canvas',
+        keyboardNavigation: true,
+        presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+      },
+    })
+
+    expect(project.surfaces).toHaveLength(1)
+    const surface = project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('expected initial Slide surface')
+    expect(surface).toMatchObject({
+      id: 'slide:course-direct-v9',
+      title: '直接 V9',
+      canvas: { width: 1280, height: 720 },
+      surfaceLayerItems: [],
+    })
+    expect(surface.scenes).toHaveLength(1)
+    const scene = surface.scenes[0]!
+    expect(scene).toMatchObject({
+      id: project.startLocationId,
+      name: '场景 1',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      layerItems: [],
+      presentation: {
+        initialStateId: 'state_initial',
+        thumbnailStateId: 'state_initial',
+        states: [{ id: 'state_initial', name: '初始', layerItemOverrides: {} }],
+      },
+      interactions: [],
+    })
+    expect(project.locations).toEqual([{
+      id: scene.id,
+      label: '场景 1',
+      kind: 'slide-scene',
+      surfaceId: surface.id,
+      sceneId: scene.id,
+    }])
+
+    expect(project.globalLayerItems).toHaveLength(1)
+    const controllerEntry = project.globalLayerItems[0]!
+    expect(controllerEntry.visibility).toEqual({ mode: 'all', locationIds: [] })
+    expect(controllerEntry.item).toMatchObject({
+      layerItemId: expect.stringMatching(/^teacher-controller-/u),
+      label: '教师控制器',
+      frame: { mode: 'absolute', x: 190, y: 638, width: 900, height: 64 },
+      order: 1,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      kind: 'native',
+      content: { nativeType: 'teacher-controller' },
+    })
+    if (controllerEntry.item.kind !== 'native' ||
+      controllerEntry.item.content.nativeType !== 'teacher-controller') {
+      throw new Error('expected global teacher controller')
+    }
+    const controller = controllerEntry.item.content.data
+    expect(controller).toMatchObject({
+      title: '教师控制台',
+      showSceneProgress: true,
+      compact: false,
+      collapsible: true,
+      defaultCollapsed: false,
+      style: {
+        backgroundColor: '#172033',
+        backgroundOpacity: 0.94,
+        accentColor: '#e7b85c',
+        textColor: '#f8fafc',
+        cornerRadius: 16,
+      },
+      includeInStaticExports: false,
+    })
+    expect(controller.buttons.map(({ action, label, visible }) => ({ action, label, visible }))).toEqual([
+      { action: { type: 'scene.previous' }, label: '上一场景', visible: true },
+      { action: { type: 'scene.next' }, label: '下一场景', visible: true },
+      { action: { type: 'scene.open-picker' }, label: '场景目录', visible: true },
+      { action: { type: 'scene.replay' }, label: '重播', visible: true },
+      { action: { type: 'course.restart' }, label: '重新开始', visible: false },
+      { action: { type: 'audio.toggle-mute' }, label: '声音', visible: true },
+      { action: { type: 'player.fullscreen.toggle' }, label: '全屏', visible: true },
+    ])
+    expect(new Set(controller.buttons.map((button) => button.id)).size).toBe(controller.buttons.length)
+  })
+
   it('creates and incrementally edits Slide, Flow and Spatial surfaces', () => {
     let project = createCourseProject({ id: 'course-ui', title: '多表面课程', now: NOW })
     const slide = project.surfaces[0]
