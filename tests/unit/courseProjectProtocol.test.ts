@@ -9,8 +9,6 @@ import {
   deriveCourseProjectAuthoringInventorySnapshot,
   getEffectiveLayerOrder,
   isCanonicalLayerOrder,
-  migrateProjectV8ToCourseProjectV9,
-  ProjectV8MigrationCompatibilityError,
   reindexLayerItems,
 } from '@/shared/courseProjectModel'
 import type {
@@ -21,15 +19,14 @@ import type {
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
-import type { ProjectDocument } from '@/shared/projectTypes'
 import {
-  createProject,
-  createTextNode,
-} from '@/renderer/project/createProject'
+  addSlideTextLayer,
+  createCourseProject,
+} from '@/renderer/course/courseStudioModel'
 
 const HASH = 'a'.repeat(64)
 
-function addPortableImage(project: ProjectDocument, id: string): void {
+function addPortableImage(project: CourseProjectDocument, id: string): void {
   project.assets[id] = {
     id,
     filename: `${id}.png`,
@@ -42,44 +39,68 @@ function addPortableImage(project: ProjectDocument, id: string): void {
   }
 }
 
-function makeV8ProjectWithStableIds(): ProjectDocument {
-  const project = createProject({
+function makeSlideProject(): CourseProjectDocument {
+  let project = createCourseProject({
     id: 'course-stable',
     title: '多表面协议',
     now: '2026-08-14T00:00:00.000Z',
-    includeDefaultController: false,
-    controls: 'none',
   })
-  const scene = project.scenes[0]!
+  project.globalLayerItems = []
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  const scene = surface.scenes[0]!
   scene.id = 'scene-stable'
   scene.name = '稳定场景'
-  scene.nodes.push(createTextNode({
-    id: 'text-stable',
-    name: '稳定文字',
-    text: '二次函数',
-    x: 100,
-    y: 120,
-  }))
-  addPortableImage(project, 'runtime-fallback')
-  scene.runtime = {
-    runtimeApiVersion: 2,
-    enabled: true,
-    renderMode: 'hybrid',
-    source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
-    content: { values: { title: '运行时标题' } },
-    assets: {},
-    nodeBindings: { title: 'text-stable' },
-    staticFallback: {
-      assetId: 'runtime-fallback',
-      coverage: 'runtime-layer',
-      layer: 'overlay',
-    },
+  project.locations[0] = {
+    id: 'scene-stable',
+    label: '稳定场景',
+    kind: 'slide-scene',
+    surfaceId: surface.id,
+    sceneId: 'scene-stable',
   }
-  return project
-}
-
-function makeSlideProject(): CourseProjectDocument {
-  return migrateProjectV8ToCourseProjectV9(makeV8ProjectWithStableIds())
+  project.startLocationId = 'scene-stable'
+  project = addSlideTextLayer(project, surface.id, scene.id, '二次函数', {
+    id: 'text-stable',
+    now: '2026-08-14T00:00:00.000Z',
+  })
+  const currentSurface = project.surfaces[0]
+  if (!currentSurface || currentSurface.type !== 'slide') throw new Error('expected slide surface')
+  const currentScene = currentSurface.scenes[0]!
+  const text = currentScene.layerItems[0]!
+  text.label = '稳定文字'
+  text.frame.x = 100
+  text.frame.y = 120
+  currentScene.presentation!.states[0]!.layerItemOverrides['text-stable'] = { locked: true }
+  addPortableImage(project, 'runtime-fallback')
+  currentScene.layerItems.push({
+    layerItemId: 'runtime-stable',
+    label: '表面运行时',
+    kind: 'runtime',
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    order: 1,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    runtime: {
+      protocol: 'surface-v1',
+      runtimeApiVersion: 3,
+      enabled: true,
+      renderMode: 'dom',
+      source: 'CoursewareSurfaceRuntime.define({runtimeApiVersion:3,create(){return{destroy(){}}}})',
+      content: { values: { title: '运行时标题' } },
+      assets: {},
+      nodeBindings: { title: 'text-stable' },
+      staticFallback: {
+        assetId: 'runtime-fallback',
+        coverage: 'surface',
+      },
+    },
+  })
+  project.revision = 0
+  return courseProjectDocumentSchema.parse(project)
 }
 
 function makeComponentPackage(project: CourseProjectDocument): void {
@@ -101,7 +122,7 @@ function flowBlocks(): FlowBlock[] {
       id: 'list',
       type: 'list',
       ordered: true,
-      items: [{ id: 'list-item-1', text: '第一项' }],
+      items: [{ id: 'list-item-1', text: '第一项', level: 0 }],
     },
     { id: 'quote', type: 'quote', text: '引用', citation: '出处' },
     { id: 'divider', type: 'divider' },
@@ -182,6 +203,7 @@ function makeSpatialSurface(item: LayerItem): CourseSurfaceDocument {
       home: { x: 0, y: 0, zoom: 1 },
       frames: [{ id: 'camera-overview', name: '总览', x: 0, y: 0, zoom: 0.5 }],
     },
+    relations: [],
     semanticZoom: [{
       id: 'zoom-detail',
       layerItemIds: [worldItem.layerItemId],
@@ -193,22 +215,10 @@ function makeSpatialSurface(item: LayerItem): CourseSurfaceDocument {
 }
 
 describe('Course Project V9 multi-surface protocol', () => {
-  it('migrates V8 purely into one slide surface while retaining existing ids', () => {
-    const source = makeV8ProjectWithStableIds()
-    source.scenes[0]!.presentation = {
-      initialStateId: 'state-locked',
-      states: [{
-        id: 'state-locked',
-        name: '锁定复核态',
-        nodeOverrides: { 'text-stable': { locked: true } },
-      }],
-    }
-    const before = structuredClone(source)
-    const migrated = migrateProjectV8ToCourseProjectV9(source)
-
-    expect(source).toEqual(before)
-    expect(courseProjectDocumentSchema.parse(migrated)).toEqual(migrated)
-    expect(migrated).toMatchObject({
+  it('constructs and validates a native V9 project without a migration step', () => {
+    const project = makeSlideProject()
+    expect(courseProjectDocumentSchema.parse(project)).toEqual(project)
+    expect(project).toMatchObject({
       schemaVersion: 9,
       id: 'course-stable',
       revision: 0,
@@ -219,15 +229,16 @@ describe('Course Project V9 multi-surface protocol', () => {
       }],
     })
 
-    const slide = migrated.surfaces[0]
+    const slide = project.surfaces[0]
     expect(slide?.type).toBe('slide')
     if (slide?.type !== 'slide') throw new Error('expected slide surface')
     expect(slide.scenes[0]?.layerItems).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'runtime',
-        frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+        frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
         runtime: expect.objectContaining({
-          protocol: 'legacy-runtime-v2',
+          protocol: 'surface-v1',
+          runtimeApiVersion: 3,
           staticFallback: { assetId: 'runtime-fallback', coverage: 'surface' },
         }),
       }),
@@ -245,49 +256,57 @@ describe('Course Project V9 multi-surface protocol', () => {
       .toMatchObject({ locked: true })
   })
 
-  it('preserves a single legacy Runtime plane and rejects ambiguous dual-plane migration', () => {
-    const underlay = makeV8ProjectWithStableIds()
-    underlay.scenes[0]!.runtime!.source = `CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){
-      ctx.dom.underlay.appendChild(ctx.dom.underlay.ownerDocument.createElement('div'));
-      return {destroy(){}};
-    }})`
-    // Source usage is authoritative; a stale fallback label must not move the
-    // executable underlay above authored native content.
-    underlay.scenes[0]!.runtime!.staticFallback!.layer = 'overlay'
-    const migrated = migrateProjectV8ToCourseProjectV9(underlay)
-    const surface = migrated.surfaces[0]
-    if (surface?.type !== 'slide') throw new Error('expected slide')
-    expect(surface.scenes[0]!.layerItems.map((item) => item.kind)).toEqual([
-      'runtime',
-      'native',
-    ])
+  it('rejects ambiguous Slide scene ids across different surfaces', () => {
+    const project = createCourseProject({
+      id: 'course-global-scene-ids',
+      title: '全课程场景标识',
+      now: '2026-08-14T00:00:00.000Z',
+    })
+    const first = project.surfaces[0]
+    if (!first || first.type !== 'slide') throw new Error('expected slide surface')
+    const duplicate = structuredClone(first)
+    duplicate.id = 'slide-second'
+    duplicate.title = '第二组幻灯片'
+    project.surfaces.push(duplicate)
+    project.locations.push({
+      id: 'location-second-slide',
+      label: '第二组幻灯片',
+      kind: 'slide-scene',
+      surfaceId: duplicate.id,
+      sceneId: duplicate.scenes[0]!.id,
+    })
 
-    for (const rootExpression of ['ctx.domRoot', 'ctx.dom.root', 'ctx.phaser.root']) {
-      const rootAlias = makeV8ProjectWithStableIds()
-      rootAlias.scenes[0]!.runtime!.source = `CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){
-        ${rootExpression}; return {destroy(){}};
-      }})`
-      rootAlias.scenes[0]!.runtime!.staticFallback!.layer = 'underlay'
-      const aliasSurface = migrateProjectV8ToCourseProjectV9(rootAlias).surfaces[0]
-      if (aliasSurface?.type !== 'slide') throw new Error('expected alias slide')
-      expect(aliasSurface.scenes[0]!.layerItems.map((item) => item.kind)).toEqual([
-        'native',
-        'runtime',
-      ])
+    const result = courseProjectDocumentSchema.safeParse(project)
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => (
+        issue.message === 'Slide scene ids must be unique across the course'
+      ))).toBe(true)
     }
+  })
 
-    const ambiguous = makeV8ProjectWithStableIds()
-    ambiguous.scenes[0]!.runtime!.source = `CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){
-      ctx.phaser.underlay.add(ctx.phaser.scene.add.rectangle(0,0,10,10));
-      ctx.dom.overlay.appendChild(ctx.dom.overlay.ownerDocument.createElement('div'));
-      return {destroy(){}};
-    }})`
-    expect(() => migrateProjectV8ToCourseProjectV9(ambiguous)).toThrow(
-      ProjectV8MigrationCompatibilityError,
-    )
-    expect(() => migrateProjectV8ToCourseProjectV9(ambiguous)).toThrow(
-      /无法在不改变旧语义/,
-    )
+  it('rejects V8, legacy whole-canvas frames and Runtime API 2 as unsupported input', () => {
+    const project = makeSlideProject()
+    expect(courseProjectDocumentSchema.safeParse({ ...project, schemaVersion: 8 }).success).toBe(false)
+
+    const legacyFrame = structuredClone(project) as unknown as {
+      surfaces: Array<{ scenes: Array<{ layerItems: Array<{ frame: { mode: string } }> }> }>
+    }
+    legacyFrame.surfaces[0]!.scenes[0]!.layerItems[0]!.frame.mode = 'legacy-whole-canvas'
+    expect(courseProjectDocumentSchema.safeParse(legacyFrame).success).toBe(false)
+
+    const api2 = structuredClone(project) as unknown as {
+      surfaces: Array<{ scenes: Array<{ layerItems: Array<{
+        kind: string
+        runtime?: { protocol: string; runtimeApiVersion: number }
+      }> }> }>
+    }
+    const runtime = api2.surfaces[0]!.scenes[0]!.layerItems.find(
+      (item) => item.kind === 'runtime',
+    )!.runtime!
+    runtime.protocol = 'legacy-runtime-v2'
+    runtime.runtimeApiVersion = 2
+    expect(courseProjectDocumentSchema.safeParse(api2).success).toBe(false)
   })
 
   it('uses strict surface, layer and block discriminators and rejects dirty fields', () => {
@@ -383,7 +402,7 @@ describe('Course Project V9 multi-surface protocol', () => {
 
   it('accepts the finite Flow block union and traverses its asset/component references', () => {
     const project = makeSlideProject()
-    addPortableImage(project as unknown as ProjectDocument, 'shared-image')
+    addPortableImage(project, 'shared-image')
     makeComponentPackage(project)
     project.surfaces = [makeFlowSurface()]
     project.locations = [{
@@ -401,6 +420,58 @@ describe('Course Project V9 multi-surface protocol', () => {
       expect.objectContaining({ kind: 'asset', id: 'shared-image' }),
       expect.objectContaining({ kind: 'component', id: 'component.quiz', version: '4.0.0' }),
     ]))
+    expect(Object.values(deriveCourseProjectAuthoringInventory(project))).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: '列表层级：list-item-1',
+        jsonPointer: expect.stringMatching(/\/items\/0\/level$/u),
+        valueKind: 'number',
+      }),
+    ]))
+  })
+
+  it('rejects mismatched asset MIME, Flow media kinds and invalid list hierarchy', () => {
+    const project = makeSlideProject()
+    addPortableImage(project, 'shared-image')
+    makeComponentPackage(project)
+    project.surfaces = [makeFlowSurface()]
+    project.locations = [{
+      id: 'location-flow',
+      label: '讲义开头',
+      kind: 'flow-block',
+      surfaceId: 'surface-flow',
+      blockId: 'heading',
+    }]
+    project.startLocationId = 'location-flow'
+
+    const badMime = structuredClone(project)
+    badMime.assets['shared-image']!.mimeType = 'audio/mpeg'
+    expect(courseProjectDocumentSchema.safeParse(badMime).success).toBe(false)
+
+    const wrongMediaKind = structuredClone(project)
+    const wrongMediaSurface = wrongMediaKind.surfaces[0]
+    if (wrongMediaSurface?.type !== 'flow') throw new Error('expected flow surface')
+    const media = wrongMediaSurface.blocks.find((block) => block.type === 'media')
+    if (!media || media.type !== 'media') throw new Error('expected media block')
+    media.mediaKind = 'audio'
+    expect(courseProjectDocumentSchema.safeParse(wrongMediaKind).success).toBe(false)
+
+    const skippedLevel = structuredClone(makeFlowSurface())
+    if (skippedLevel.type !== 'flow') throw new Error('expected flow surface')
+    skippedLevel.blocks = [{
+      id: 'bad-list',
+      type: 'list',
+      ordered: false,
+      items: [
+        { id: 'root', text: '根项目', level: 0 },
+        { id: 'skipped', text: '跨级项目', level: 2 },
+      ],
+    }]
+    expect(courseSurfaceSchema.safeParse(skippedLevel).success).toBe(false)
+
+    const missingRoot = structuredClone(skippedLevel)
+    if (missingRoot.type !== 'flow' || missingRoot.blocks[0]?.type !== 'list') throw new Error('expected list')
+    missingRoot.blocks[0].items = [{ id: 'child-only', text: '没有根项目', level: 1 }]
+    expect(courseSurfaceSchema.safeParse(missingRoot).success).toBe(false)
   })
 
   it('accepts Spatial world coordinates, camera frames and semantic zoom', () => {
@@ -428,7 +499,7 @@ describe('Course Project V9 multi-surface protocol', () => {
 
   it('requires an explicit, type-safe print plan for a mixed course', () => {
     const project = makeSlideProject()
-    addPortableImage(project as unknown as ProjectDocument, 'shared-image')
+    addPortableImage(project, 'shared-image')
     makeComponentPackage(project)
     const slide = project.surfaces[0]
     if (slide.type !== 'slide') throw new Error('expected slide surface')
@@ -525,7 +596,7 @@ describe('Course Project V9 multi-surface protocol', () => {
           backgroundAssetId: scene.backgroundAssetId,
           interactions: scene.interactions,
           layerItems: scene.layerItems.map((item) => {
-            const { label: _label, locked: _locked, ...publishedItem } = item
+            const { locked: _locked, ...publishedItem } = item
             if (publishedItem.kind !== 'runtime') return publishedItem
             const { source: _source, ...runtime } = publishedItem.runtime
             return {
@@ -555,5 +626,18 @@ describe('Course Project V9 multi-surface protocol', () => {
 
     expect(publishedCourseV2Schema.safeParse(published).success).toBe(true)
     expect(publishedCourseV2Schema.safeParse({ ...published, createdAt: 'author-only' }).success).toBe(false)
+
+    const legacyPublished = structuredClone(published) as unknown as {
+      surfaces: Array<{ scenes: Array<{ layerItems: Array<{
+        kind: string
+        runtime?: { protocol: string; runtimeApiVersion: number }
+      }> }> }>
+    }
+    const legacyRuntime = legacyPublished.surfaces[0]!.scenes[0]!.layerItems.find(
+      (item) => item.kind === 'runtime',
+    )!.runtime!
+    legacyRuntime.protocol = 'legacy-runtime-v2'
+    legacyRuntime.runtimeApiVersion = 2
+    expect(publishedCourseV2Schema.safeParse(legacyPublished).success).toBe(false)
   })
 })

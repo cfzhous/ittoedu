@@ -26,6 +26,7 @@ import {
 } from '../pptxTextAndShape'
 import {
   buildCourseExportDifferenceReport,
+  resolveSlideExportLocationId,
   type CourseExportDifference,
 } from './printArtifacts'
 
@@ -92,8 +93,7 @@ function sceneItems(
   scene: SlideSceneDocument,
 ): LayerItem[] {
   const state = scene.presentation?.states.find((candidate) => candidate.id === scene.presentation?.initialStateId)
-  const location = project.locations.find((candidate) => candidate.kind === 'slide-scene' && candidate.surfaceId === surface.id && candidate.sceneId === scene.id)
-  const locationId = location?.id ?? scene.id
+  const locationId = resolveSlideExportLocationId(project, surface, scene)
   const entries = [
     ...project.globalLayerItems.filter((entry) => isScopedVisible(entry, locationId)).map((entry) => structuredClone(entry.item)),
     ...surface.surfaceLayerItems.filter((entry) => isScopedVisible(entry, locationId)).map((entry) => structuredClone(entry.item)),
@@ -178,6 +178,14 @@ function addPlaceholder(slide: PptxSlide, item: LayerItem, scale: CanvasScale, m
   })
 }
 
+function dynamicItemTeacherLabel(item: Extract<LayerItem, { kind: 'component' | 'runtime' }>): string {
+  return item.kind === 'component' ? '互动组件' : '互动内容'
+}
+
+function nonSlideSurfaceTeacherLabel(surface: Exclude<CourseProjectDocument['surfaces'][number], SlideSurfaceDocument>): string {
+  return surface.type === 'flow' ? '流式讲义' : '空间画布'
+}
+
 async function addNative(
   slide: PptxSlide,
   item: Extract<LayerItem, { kind: 'native' }>,
@@ -195,8 +203,8 @@ async function addNative(
     const data = assetData(project, assetFiles, node.assetId)
     if (data) addImage(slide, item, data, scale, '可编辑图片')
     else {
-      addPlaceholder(slide, item, scale, `图片素材缺失\n${node.assetId}`)
-      warnings.push(`图片“${item.label}”的素材 ${node.assetId} 缺失。`)
+      addPlaceholder(slide, item, scale, `图片素材缺失\n${item.label}`)
+      warnings.push(`图片“${item.label}”的素材缺失。`)
     }
   } else if (node.type === 'video') {
     const poster = node.poster.assetId ? assetData(project, assetFiles, node.poster.assetId) : undefined
@@ -204,7 +212,10 @@ async function addNative(
     else addPlaceholder(slide, item, scale, `▶ 视频\n${project.assets[node.assetId]?.filename ?? item.label}`)
     warnings.push(`视频“${item.label}”在 PPTX 中使用可选择封面/占位，不保留播放交互。`)
   } else if (node.type === 'teacher-controller') {
-    if (!node.includeInStaticExports) return
+    if (!node.includeInStaticExports) {
+      warnings.push(`教师控制器“${item.label}”已按静态导出设置省略。`)
+      return
+    }
     slide.addText(node.title, {
       ...pptxNodePosition(node, scale),
       rotate: pptxRotation(node.rotation),
@@ -246,7 +257,7 @@ export async function buildCoursePptx(
   pptx.author = APP_NAME
   pptx.company = APP_COMPANY
   pptx.title = project.title
-  pptx.subject = 'Course Project V9 Slide 可编辑兼容导出'
+  pptx.subject = '互动课件幻灯片导出'
   pptx.theme = { headFontFace: 'Microsoft YaHei', bodyFontFace: 'Microsoft YaHei' }
   const scale: CanvasScale = { x: WIDE_SLIDE_WIDTH / 1280, y: WIDE_SLIDE_HEIGHT / 720 }
   const warnings: string[] = []
@@ -274,8 +285,8 @@ export async function buildCoursePptx(
         let captured: string | undefined
         try {
           captured = await options.captureDynamicItem?.({ project, surface, scene, item })
-        } catch (cause) {
-          sceneWarnings.push(`${item.kind} “${item.label}”实例快照失败：${cause instanceof Error ? cause.message : String(cause)}`)
+        } catch {
+          sceneWarnings.push(`${dynamicItemTeacherLabel(item)}“${item.label}”的当前画面生成失败，已尝试使用静态预览。`)
         }
         if (captured?.startsWith('data:image/')) {
           addImage(slide, item, captured, scale, '实际运行快照')
@@ -284,10 +295,10 @@ export async function buildCoursePptx(
           const fallback = fallbackId ? assetData(project, assetFiles, fallbackId) : undefined
           if (fallback) {
             addImage(slide, item, fallback, scale, '作者静态后备')
-            sceneWarnings.push(`${item.kind} “${item.label}”在 PPTX 中使用作者静态后备。`)
+            sceneWarnings.push(`${dynamicItemTeacherLabel(item)}“${item.label}”在 PPTX 中使用教师设置的静态预览。`)
           } else {
-            addPlaceholder(slide, item, scale, `${item.kind === 'component' ? '互动组件' : '互动运行时'}\n${item.label}`)
-            sceneWarnings.push(`${item.kind} “${item.label}”无快照或静态后备，已使用可选择占位，未静默省略。`)
+            addPlaceholder(slide, item, scale, `${dynamicItemTeacherLabel(item)}\n${item.label}`)
+            sceneWarnings.push(`${dynamicItemTeacherLabel(item)}“${item.label}”没有可用的当前画面或静态预览，已用可选中的说明占位代替。`)
           }
         }
       }
@@ -296,10 +307,10 @@ export async function buildCoursePptx(
       addWarningNote(slide, sceneWarnings)
     }
   }
-  if (slideCount === 0) throw new Error('当前课程没有 Slide 表面，无法生成 PPTX。')
+  if (slideCount === 0) throw new Error('当前课程没有幻灯片，无法生成 PPTX。')
   const nonSlideDifferences = project.surfaces
     .filter((surface) => surface.type !== 'slide')
-    .map((surface) => `${surface.type} 表面“${surface.title}”没有 PPTX 映射，已明确忽略。`)
+    .map((surface) => `${nonSlideSurfaceTeacherLabel(surface)}“${surface.title}”不转换为 PPTX 页面。`)
   warnings.push(...nonSlideDifferences)
   nonSlideDifferences.forEach((message) => options.onWarning?.(message))
   const output = await pptx.write({ outputType: 'arraybuffer', compression: true })

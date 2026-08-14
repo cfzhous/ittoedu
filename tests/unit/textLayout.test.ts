@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTextNode } from '@/renderer/project/createProject'
+import { textNode } from '../helpers/nativeNodeFixtures'
 import { renderTextNodeCanvas } from '@/shared/textLayout'
 
 type FillTextCall = [text: string, x: number, y: number]
@@ -38,7 +38,7 @@ describe('direction-aware text layout', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       canvasContext(calls),
     )
-    const node = createTextNode({
+    const node = textNode({
       width: 200,
       height: 80,
       text: '甲乙丙丁戊己庚',
@@ -66,7 +66,7 @@ describe('direction-aware text layout', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       canvasContext(rightToLeftCalls),
     )
-    const node = createTextNode({
+    const node = textNode({
       height: 80,
       text: '甲乙丙丁',
       style: {
@@ -102,7 +102,7 @@ describe('direction-aware text layout', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       canvasContext(plainCalls),
     )
-    const plain = createTextNode({
+    const plain = textNode({
       width: 200,
       text: '重点 文本',
       style: {
@@ -142,7 +142,7 @@ describe('direction-aware text layout', () => {
       vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
         canvasContext(fillTextCalls, arcCalls),
       )
-      const node = createTextNode({
+      const node = textNode({
         height: 80,
         text: '甲乙',
         runs: [{ start: 1, end: 2, style: { emphasis: false } }],

@@ -6,6 +6,10 @@ import type {
   SurfaceResetScope,
 } from '../SurfaceHost'
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
+import {
+  flowListItemsToTree,
+  type FlowListTreeNode,
+} from '../../../shared/flowListStructure'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import type {
   LayerItem,
@@ -34,6 +38,7 @@ export interface FlowRenderOptions {
   renderComponent?: (
     block: Extract<FlowBlock, { type: 'component' }>,
   ) => Node | FlowRenderedComponent | undefined
+  resolveComponentName?: (packageId: string, version: string) => string | undefined
   expandSections?: boolean
 }
 
@@ -68,6 +73,7 @@ export interface FlowScopedLayerHostOptions {
     action: TeacherControllerAction,
     item: NativeLayerItem,
   ): boolean | Promise<boolean>
+  teacherControllerProgressText?(): string
   onTeacherControllerAction?(action: TeacherControllerAction, item: NativeLayerItem): void
   onLayerHit?(hit: FlowLayerHit): void
 }
@@ -124,6 +130,7 @@ export class FlowScopedLayerHost {
       globalLayerItems: structuredClone(options.globalLayerItems ?? []),
       resolveLocationId: () => this.#locationId,
       beforeTeacherControllerAction: options.beforeTeacherControllerAction,
+      teacherControllerProgressText: options.teacherControllerProgressText,
       onTeacherControllerAction: options.onTeacherControllerAction,
       onLayerHit: (hit) => {
         if (hit.source === 'scene') return
@@ -180,6 +187,10 @@ export class FlowScopedLayerHost {
     return this.#host.setInspectionMode(mode)
   }
 
+  refreshTeacherControllers(): void {
+    this.#host.refreshTeacherControllers()
+  }
+
   activate(): Promise<void> { return this.#host.activate() }
   suspend(): Promise<void> { return this.#host.suspend() }
   resume(): Promise<void> { return this.#host.resume() }
@@ -202,6 +213,24 @@ function appendTextElement(
   element.textContent = text
   parent.appendChild(element)
   return element
+}
+
+function appendListTreeDom(
+  dom: Document,
+  parent: HTMLElement,
+  nodes: readonly FlowListTreeNode[],
+  ordered: boolean,
+): void {
+  for (const node of nodes) {
+    const listItem = appendTextElement(dom, parent, 'li', node.item.text)
+    listItem.dataset.flowListItemId = node.item.id
+    listItem.dataset.flowListLevel = String(node.item.level)
+    if (node.children.length > 0) {
+      const nested = dom.createElement(ordered ? 'ol' : 'ul')
+      appendListTreeDom(dom, nested, node.children, ordered)
+      listItem.appendChild(nested)
+    }
+  }
 }
 
 function renderBlockDom(
@@ -227,10 +256,7 @@ function renderBlockDom(
     }
     case 'list': {
       element = dom.createElement(block.ordered ? 'ol' : 'ul')
-      for (const item of block.items) {
-        const listItem = appendTextElement(dom, element, 'li', item.text)
-        listItem.dataset.flowListItemId = item.id
-      }
+      appendListTreeDom(dom, element, flowListItemsToTree(block.items), block.ordered)
       parent.appendChild(element)
       break
     }
@@ -324,18 +350,22 @@ function renderBlockDom(
         element.appendChild(flowComponentNode(rendered))
         parent.appendChild(element)
       } else {
+        const componentName = options.resolveComponentName?.(
+          block.component.packageId,
+          block.component.version,
+        ) ?? '互动组件'
         element = dom.createElement('aside')
         element.className = 'flow-component-fallback'
         const source = options.resolveAsset?.(block.staticFallbackAssetId)
         if (source) {
           const image = dom.createElement('img')
           image.src = source
-          image.alt = `互动组件 ${block.component.packageId} 的静态后备`
+          image.alt = `${componentName}的静态预览`
           image.dataset.assetId = block.staticFallbackAssetId
           element.appendChild(image)
         }
-        appendTextElement(dom, element, 'strong', `互动组件：${block.component.packageId}`)
-        appendTextElement(dom, element, 'p', `版本 ${block.component.version}`)
+        appendTextElement(dom, element, 'strong', componentName)
+        appendTextElement(dom, element, 'p', '当前显示静态预览')
         parent.appendChild(element)
       }
       element.dataset.componentId = block.component.packageId
@@ -439,7 +469,7 @@ export function buildFlowStaticLayerFallback(
     let disposition = 'preserved'
     if (item.kind === 'native') {
       if (item.content.nativeType === 'teacher-controller' && !item.content.data.includeInStaticExports) {
-        warnings.push(`${item.layerItemId}: teacher controller is omitted because includeInStaticExports is false`)
+        warnings.push(`教师控制器“${item.label}”已按静态导出设置省略。`)
         content = '<div class="flow-static-descriptive-fallback">教师控制器已按静态导出设置省略</div>'
         disposition = 'omitted'
       } else {
@@ -452,11 +482,11 @@ export function buildFlowStaticLayerFallback(
       const sourceUrl = assetId ? resolveAsset(assetId) : undefined
       disposition = 'fallback'
       if (sourceUrl && assetId) {
-        content = `<img src="${escapeHtml(sourceUrl)}" data-asset-id="${escapeHtml(assetId)}" alt="${escapeHtml(item.label)}的静态后备" style="width:100%;height:100%;object-fit:contain">`
-        warnings.push(`${item.layerItemId}: ${item.kind} uses its authored static fallback`)
+        content = `<img src="${escapeHtml(sourceUrl)}" data-asset-id="${escapeHtml(assetId)}" alt="${escapeHtml(item.label)}的静态预览" style="width:100%;height:100%;object-fit:contain">`
+        warnings.push(`“${item.label}”已使用作者设置的静态预览；导出文件中不保留互动。`)
       } else {
-        content = `<div class="flow-static-descriptive-fallback">${item.kind === 'component' ? '互动组件' : '互动运行时'}：${escapeHtml(item.label)}（无可用静态后备）</div>`
-        warnings.push(`${item.layerItemId}: ${item.kind} has no usable static fallback`)
+        content = `<div class="flow-static-descriptive-fallback">${item.kind === 'component' ? '互动组件' : '互动内容'}：${escapeHtml(item.label)}（无可用静态预览）</div>`
+        warnings.push(`“${item.label}”没有可用的静态预览，已用说明文字代替。`)
       }
     }
     return `<div class="slide-layer-item flow-static-layer-item" data-layer-item-id="${escapeHtml(item.layerItemId)}" data-layer-kind="${item.kind}" data-layer-source="${source}" data-layer-order="${item.order}" data-static-disposition="${disposition}"${item.visible && disposition !== 'omitted' ? '' : ' hidden'} style="${layerFrameStyle(item)}"><div class="slide-layer-content" style="width:100%;height:100%">${content}</div></div>`
@@ -467,14 +497,31 @@ export function buildFlowStaticLayerFallback(
   }
 }
 
-function serializeBlock(block: FlowBlock, resolveAsset: (assetId: string) => string | undefined): string {
+function serializeListTree(
+  nodes: readonly FlowListTreeNode[],
+  ordered: boolean,
+): string {
+  const tag = ordered ? 'ol' : 'ul'
+  return `<${tag}>${nodes.map((node) => (
+    `<li data-flow-list-item-id="${escapeHtml(node.item.id)}" data-flow-list-level="${node.item.level}">${escapeHtml(node.item.text)}${node.children.length > 0 ? serializeListTree(node.children, ordered) : ''}</li>`
+  )).join('')}</${tag}>`
+}
+
+function serializeBlock(
+  block: FlowBlock,
+  resolveAsset: (assetId: string) => string | undefined,
+  resolveComponentName: NonNullable<FlowRenderOptions['resolveComponentName']>,
+): string {
   const id = escapeHtml(block.id)
   const wrap = (content: string, tag = 'div') => `<${tag} class="flow-block flow-block-${block.type}" data-flow-block-id="${id}">${content}</${tag}>`
   switch (block.type) {
     case 'heading': return wrap(escapeHtml(block.text), `h${block.level}`)
     case 'paragraph': return wrap(escapeHtml(block.text), 'p')
     case 'quote': return wrap(`<p>${escapeHtml(block.text)}</p>${block.citation ? `<cite>${escapeHtml(block.citation)}</cite>` : ''}`, 'blockquote')
-    case 'list': return wrap(block.items.map((item) => `<li data-flow-list-item-id="${escapeHtml(item.id)}">${escapeHtml(item.text)}</li>`).join(''), block.ordered ? 'ol' : 'ul')
+    case 'list': {
+      const tree = serializeListTree(flowListItemsToTree(block.items), block.ordered)
+      return `<div class="flow-block flow-block-list" data-flow-block-id="${id}">${tree}</div>`
+    }
     case 'divider': return `<hr class="flow-block flow-block-divider" data-flow-block-id="${id}">`
     case 'media': {
       const src = escapeHtml(resolveAsset(block.assetId) ?? '')
@@ -487,23 +534,25 @@ function serializeBlock(block: FlowBlock, resolveAsset: (assetId: string) => str
     case 'formula': return wrap(`<span role="math" aria-label="${escapeHtml(block.accessibleText)}" data-formula-id="${escapeHtml(block.formulaId)}">${escapeHtml(serializeFormulaAst(block.ast))}</span>`)
     case 'code': return wrap(`<code${block.language ? ` data-language="${escapeHtml(block.language)}"` : ''}>${escapeHtml(block.code)}</code>`, 'pre')
     case 'callout': return wrap(`${block.title ? `<strong>${escapeHtml(block.title)}</strong>` : ''}<p>${escapeHtml(block.body)}</p>`, 'aside')
-    case 'section': return `<details class="flow-block flow-block-section" data-flow-block-id="${id}"${block.collapsedByDefault ? '' : ' open'}><summary>${escapeHtml(block.title)}</summary>${block.blocks.map((child) => serializeBlock(child, resolveAsset)).join('')}</details>`
+    case 'section': return `<details class="flow-block flow-block-section" data-flow-block-id="${id}"${block.collapsedByDefault ? '' : ' open'}><summary>${escapeHtml(block.title)}</summary>${block.blocks.map((child) => serializeBlock(child, resolveAsset, resolveComponentName)).join('')}</details>`
     case 'component': {
       const fallback = resolveAsset(block.staticFallbackAssetId)
-      return wrap(`${fallback ? `<img src="${escapeHtml(fallback)}" alt="互动组件 ${escapeHtml(block.component.packageId)} 的静态后备" data-asset-id="${escapeHtml(block.staticFallbackAssetId)}">` : ''}<strong>互动组件：${escapeHtml(block.component.packageId)}</strong><p>版本 ${escapeHtml(block.component.version)}</p>`, 'aside')
+      const componentName = resolveComponentName(block.component.packageId, block.component.version) ?? '互动组件'
+      return wrap(`${fallback ? `<img src="${escapeHtml(fallback)}" alt="${escapeHtml(componentName)}的静态预览" data-asset-id="${escapeHtml(block.staticFallbackAssetId)}">` : ''}<strong>${escapeHtml(componentName)}</strong><p>当前显示静态预览</p>`, 'aside')
     }
   }
 }
 
 export function buildFlowStandaloneHtml(
   flow: FlowSurfaceDocument,
-  options: Pick<FlowRenderOptions, 'resolveAsset' | 'expandSections'> & {
+  options: Pick<FlowRenderOptions, 'resolveAsset' | 'resolveComponentName' | 'expandSections'> & {
     /** Already ordered/captured surface+global layer composition. */
     layerHtml?: string
   } = {},
 ): string {
   const resolveAsset = options.resolveAsset ?? (() => undefined)
-  const blocks = flow.blocks.map((block) => serializeBlock(block, resolveAsset)).join('\n')
+  const resolveComponentName = options.resolveComponentName ?? (() => undefined)
+  const blocks = flow.blocks.map((block) => serializeBlock(block, resolveAsset, resolveComponentName)).join('\n')
   const layerHtml = options.layerHtml?.trim() ?? ''
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(flow.title)}</title><style>html{color-scheme:light}body{margin:0;font-family:"Microsoft YaHei","PingFang SC",sans-serif;color:#172033;background:#fff}.flow-static-stack{position:relative;min-height:100%;isolation:isolate}.flow-surface{box-sizing:border-box;max-width:${flow.layout.readingWidth}px;margin:0 auto;padding:48px 32px;line-height:1.75}.flow-static-layer-mount{position:absolute;inset:0 auto auto 0;width:1280px;height:720px;pointer-events:none}.flow-static-layer-mount>.slide-surface{margin:0!important;background:transparent!important;pointer-events:none}.flow-static-descriptive-fallback{box-sizing:border-box;width:100%;height:100%;display:grid;place-items:center;padding:8px;border:1px dashed #64748b;background:#f8fafc;color:#334155}.flow-block{overflow-wrap:anywhere}img,video{max-width:100%;height:auto}audio{max-width:100%}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cbd5e1;padding:.5rem;text-align:left}aside{border-left:4px solid #3b82f6;padding:.75rem 1rem;background:#eff6ff}summary{cursor:pointer;font-weight:700}</style></head><body><main class="flow-static-stack"><article class="flow-surface" data-surface-id="${escapeHtml(flow.id)}">${options.expandSections ? blocks.replace(/<details(?![^>]* open)/g, '<details open') : blocks}</article>${layerHtml ? `<div class="flow-static-layer-mount" data-flow-layer-composition="ordered">${layerHtml}</div>` : ''}</main></body></html>`
 }
@@ -520,18 +569,20 @@ export class FlowSurfaceHost implements SurfaceHost {
   #scopedLayers: FlowScopedLayerHost
   #active = false
   #renderComponent?: FlowRenderOptions['renderComponent']
+  #resolveComponentName?: FlowRenderOptions['resolveComponentName']
   #renderedComponents: FlowRenderedComponent[] = []
   #mode: SlideInspectionMode = 'playback'
   #domPlayback = new DomPlaybackFreeze()
 
   constructor(
     flow: FlowSurfaceDocument,
-    options: Pick<FlowRenderOptions, 'renderComponent'> & FlowScopedLayerHostOptions = {},
+    options: Pick<FlowRenderOptions, 'renderComponent' | 'resolveComponentName'> & FlowScopedLayerHostOptions = {},
   ) {
     this.id = flow.id
     this.#initial = cloneFlowDocument(flow)
     this.#current = cloneFlowDocument(flow)
     this.#renderComponent = options.renderComponent
+    this.#resolveComponentName = options.resolveComponentName
     this.#mode = options.inspectionMode ?? 'playback'
     this.#scopedLayers = new FlowScopedLayerHost(flow, options)
   }
@@ -612,6 +663,10 @@ export class FlowSurfaceHost implements SurfaceHost {
     return this.#scopedLayers.setLocationId(locationId)
   }
 
+  refreshTeacherControllers(): void {
+    this.#scopedLayers.refreshTeacherControllers()
+  }
+
   async setInspectionMode(mode: SlideInspectionMode): Promise<void> {
     this.#mode = mode
     await Promise.all(this.#renderedComponents.map((component) => component.setInspectionMode?.(mode)))
@@ -626,6 +681,7 @@ export class FlowSurfaceHost implements SurfaceHost {
       content: buildFlowStandaloneHtml(this.#current, {
         expandSections: true,
         resolveAsset: (assetId) => this.#context?.services.resolveAsset(assetId),
+        resolveComponentName: this.#resolveComponentName,
         layerHtml: layers.content,
       }),
       width: layers.width,
@@ -655,6 +711,7 @@ export class FlowSurfaceHost implements SurfaceHost {
     const next = renderFlowDocument(this.#current, {
       domDocument: this.#context.container.ownerDocument,
       resolveAsset: (assetId) => this.#context?.services.resolveAsset(assetId),
+      resolveComponentName: this.#resolveComponentName,
       renderComponent: (block) => {
         const rendered = this.#renderComponent?.(block)
         if (rendered && 'node' in rendered) this.#renderedComponents.push(rendered)

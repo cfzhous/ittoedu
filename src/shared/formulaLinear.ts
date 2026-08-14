@@ -481,7 +481,7 @@ class FormulaLinearParser {
   }
 }
 
-/** Parse the deliberately limited, offline linear authoring syntax into V8 AST. */
+/** Parse the deliberately limited, offline teacher syntax into the canonical formula AST. */
 export function parseFormulaLinear(source: string): FormulaAstNode {
   return new FormulaLinearParser(source).parse()
 }
@@ -540,7 +540,7 @@ function serializeNode(ast: FormulaAstNode, topLevel = false): string {
 }
 
 /**
- * Serialize every legal V8 formula node without inventing a second persisted
+ * Serialize every legal formula node without inventing a second persisted
  * source. Explicit escape commands preserve uncommon token/operator/fence data.
  */
 export function serializeFormulaAst(ast: FormulaAstNode): string {

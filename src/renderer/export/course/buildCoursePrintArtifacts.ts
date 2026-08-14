@@ -5,11 +5,17 @@ import type {
   MixedPrintEntry,
   SlideSceneDocument,
   SlideSurfaceDocument,
+  SpatialSurfaceDocument,
 } from '../../../shared/courseProjectTypes'
-import { getEffectiveCourseLayerOrder } from '../../../shared/courseProjectModel'
+import {
+  getEffectiveCourseLayerOrder,
+  isCourseLayerVisibleAtLocation,
+} from '../../../shared/courseProjectModel'
+import { compareStableStrings } from '../../../shared/stableOrder'
 import type { SurfaceCapture } from '../../../player/surfaces/SurfaceHost'
 import type { FlowStaticLayerEntry } from '../../../player/surfaces/flow/FlowSurfaceHost'
 import {
+  SPATIAL_CANONICAL_VIEWPORT,
   spatialCameraFromPose,
 } from '../../../player/surfaces/spatial/spatialModel'
 import { renderSpatialSvgMarkup } from '../../../player/surfaces/spatial/SpatialSurfaceHost'
@@ -17,6 +23,7 @@ import {
   buildCourseExportDifferenceReport,
   buildFlowPrintHtml,
   buildMixedPrintPlan,
+  resolveSlideExportLocationId,
   type CourseExportDifference,
   type MixedPrintPage,
   type MixedPrintPlan,
@@ -27,6 +34,8 @@ export interface SlidePrintCaptureContext {
   project: CourseProjectDocument
   surface: SlideSurfaceDocument
   scene: SlideSceneDocument
+  /** Stable course location used to resolve shared-layer visibility. */
+  locationId: string
 }
 
 export interface FlowPrintCaptureContext {
@@ -94,9 +103,9 @@ function flowPrintFragment(documentHtml: string): FlowPrintFragment {
     }).trim())
     .filter(Boolean)
     .join('\n')
-  if (!fragmentStyles) throw new Error('Flow print document did not provide carryable head styles')
+  if (!fragmentStyles) throw new Error('流式讲义缺少可用的打印样式。')
   if (/@page\b/iu.test(fragmentStyles)) {
-    throw new Error('Flow print fragment retained an unsafe @page rule')
+    throw new Error('流式讲义的打印样式与当前页面设置冲突。')
   }
   const style = pagePadding
     ? ` style="box-sizing:border-box;min-height:100%;padding:${pagePadding}"`
@@ -155,12 +164,111 @@ function defaultEntries(project: CourseProjectDocument): MixedPrintEntry[] {
   })
 }
 
-function flowPrintLocationId(project: CourseProjectDocument, surfaceId: string): string {
+export interface FlowStaticExportLayerPlan {
+  primaryLocationId: string
+  locationIds: string[]
+  effectiveLayerItems: FlowStaticLayerEntry[]
+  /** True when one static document consolidates layers that vary between blocks. */
+  consolidatesLocationScopedLayers: boolean
+  warnings: string[]
+}
+
+/**
+ * A Flow document can span several course locations. Static exports therefore
+ * use the union of layers visible at any Flow location instead of silently
+ * applying only the start/first block's visibility.
+ */
+export function buildFlowStaticExportLayerPlan(
+  project: CourseProjectDocument,
+  surface: FlowSurfaceDocument,
+): FlowStaticExportLayerPlan {
+  const matching = project.locations.filter((location) => (
+    location.kind === 'flow-block' && location.surfaceId === surface.id
+  ))
+  const start = matching.find((location) => location.id === project.startLocationId)
+  const orderedLocations = start
+    ? [start, ...matching.filter((location) => location.id !== start.id)]
+    : matching
+  if (orderedLocations.length === 0) {
+    throw new Error('当前流式讲义缺少可导出的课程位置。')
+  }
+  const locationIds = orderedLocations.map((location) => location.id)
+  const byLayerId = new Map<string, FlowStaticLayerEntry>()
+  for (const locationId of locationIds) {
+    for (const entry of getEffectiveCourseLayerOrder({
+      project,
+      surfaceId: surface.id,
+      locationId,
+    })) {
+      if (entry.source !== 'global' && entry.source !== 'surface') continue
+      byLayerId.set(entry.item.layerItemId, { item: entry.item, source: entry.source })
+    }
+  }
+  const scopedEntries = [...project.globalLayerItems, ...surface.surfaceLayerItems]
+  const consolidatesLocationScopedLayers = locationIds.length > 1 && scopedEntries.some((entry) => (
+    new Set(locationIds.map((locationId) => (
+      isCourseLayerVisibleAtLocation(entry, locationId)
+    ))).size > 1
+  ))
+  return {
+    primaryLocationId: locationIds[0]!,
+    locationIds,
+    effectiveLayerItems: [...byLayerId.values()].sort((left, right) => (
+      left.item.order - right.item.order ||
+      compareStableStrings(left.item.layerItemId, right.item.layerItemId)
+    )),
+    consolidatesLocationScopedLayers,
+    warnings: consolidatesLocationScopedLayers
+      ? ['讲义中有随课程位置变化的共享内容；已将各位置可见的内容合并到本次静态导出中，未静默省略。']
+      : [],
+  }
+}
+
+function spatialPrintLocationId(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  cameraFrameId?: string,
+): string {
+  if (cameraFrameId) {
+    const exact = project.locations.find((location) => (
+      location.kind === 'spatial-camera' &&
+      location.surfaceId === surfaceId &&
+      location.cameraFrameId === cameraFrameId
+    ))
+    if (exact) return exact.id
+    throw new Error('有一个空间镜头缺少可导出的课程位置。')
+  }
   const start = project.locations.find((location) => location.id === project.startLocationId)
-  if (start?.surfaceId === surfaceId) return start.id
-  const location = project.locations.find((candidate) => candidate.surfaceId === surfaceId)
-  if (!location) throw new Error(`Flow surface ${surfaceId} has no printable course location`)
-  return location.id
+  if (start?.kind === 'spatial-camera' && start.surfaceId === surfaceId) return start.id
+  const first = project.locations.find((location) => (
+    location.kind === 'spatial-camera' && location.surfaceId === surfaceId
+  ))
+  if (!first) throw new Error('当前空间画布缺少可导出的课程位置。')
+  return first.id
+}
+
+function spatialPrintSurfaceAtLocation(
+  project: CourseProjectDocument,
+  surface: SpatialSurfaceDocument,
+  locationId: string,
+): { surface: SpatialSurfaceDocument; warnings: string[] } {
+  const printable = structuredClone(surface)
+  printable.surfaceLayerItems = []
+  const allItems = getEffectiveCourseLayerOrder({
+    project,
+    surfaceId: surface.id,
+    locationId,
+  }).map(({ item }) => structuredClone(item))
+  const omittedControllers = allItems.filter((item) => (
+    item.kind === 'native' &&
+    item.content.nativeType === 'teacher-controller' &&
+    !item.content.data.includeInStaticExports
+  ))
+  printable.world.layerItems = allItems.filter((item) => !omittedControllers.includes(item))
+  return {
+    surface: printable,
+    warnings: omittedControllers.map((item) => `教师控制器“${item.label}”已按静态导出设置省略。`),
+  }
 }
 
 /**
@@ -193,10 +301,11 @@ export async function buildCoursePrintArtifacts(
         if (!scene) continue
         try {
           if (!options.captureSlide) {
-            throw new Error('Slide print capture callback is required')
+            throw new Error('幻灯片打印画面未就绪。')
           }
-          const bodyHtml = await options.captureSlide({ project, surface, scene })
-          if (!bodyHtml.trim()) throw new Error('Slide capture returned empty HTML')
+          const locationId = resolveSlideExportLocationId(project, surface, scene)
+          const bodyHtml = await options.captureSlide({ project, surface, scene, locationId })
+          if (!bodyHtml.trim()) throw new Error('幻灯片打印画面为空。')
           pages.push({
             id: `${entry.id}:${scene.id}`,
             surfaceId: surface.id,
@@ -213,20 +322,16 @@ export async function buildCoursePrintArtifacts(
       continue
     }
     if (entry.kind === 'flow-document' && surface.type === 'flow') {
-      const locationId = flowPrintLocationId(project, surface.id)
-      const effectiveLayerItems = getEffectiveCourseLayerOrder({
-        project,
-        surfaceId: surface.id,
-        locationId,
-      }).filter((candidate): candidate is FlowStaticLayerEntry => (
-        candidate.source === 'global' || candidate.source === 'surface'
-      ))
+      const layerPlan = buildFlowStaticExportLayerPlan(project, surface)
+      const locationId = layerPlan.primaryLocationId
+      const effectiveLayerItems = layerPlan.effectiveLayerItems
+      warnings.push(...layerPlan.warnings)
       let capturedDocument: SurfaceCapture | undefined
-      if (effectiveLayerItems.length > 0 && options.captureFlow) {
+      if (options.captureFlow && !layerPlan.consolidatesLocationScopedLayers) {
         try {
           capturedDocument = await options.captureFlow({ project, surface, locationId })
           if (capturedDocument.format !== 'html') {
-            throw new Error(`Flow capture returned ${capturedDocument.format}; HTML is required`)
+            throw new Error('流式讲义的打印画面格式不正确。')
           }
         } catch (cause) {
           failures.push({ surfaceId: surface.id, sourceId: entry.id, target: 'pdf', error: error(cause) })
@@ -238,6 +343,10 @@ export async function buildCoursePrintArtifacts(
           resolveAsset,
           locationId,
           effectiveLayerItems,
+          resolveComponentName: (packageId, version) => {
+            const component = project.componentPackages[packageId]
+            return component?.version === version ? component.name : undefined
+          },
           ...(capturedDocument ? { capturedDocument } : {}),
         })
         const fragment = flowPrintFragment(artifact.html)
@@ -257,25 +366,40 @@ export async function buildCoursePrintArtifacts(
       continue
     }
     if (entry.kind === 'spatial-frames' && surface.type === 'spatial-2d') {
-      const frames = entry.cameraFrameIds.length > 0
-        ? entry.cameraFrameIds.map((frameId) => surface.camera.frames.find((frame) => frame.id === frameId))
-        : [undefined]
-      for (const frame of frames) {
-        const sourceId = frame?.id ?? `${surface.id}:home`
+      const pagesToRender = [
+        { kind: 'home' as const },
+        ...entry.cameraFrameIds.map((frameId) => ({
+          kind: 'frame' as const,
+          frameId,
+          frame: surface.camera.frames.find((frame) => frame.id === frameId),
+        })),
+      ]
+      for (const page of pagesToRender) {
+        const frame = page.kind === 'frame' ? page.frame : undefined
+        const sourceId = page.kind === 'frame' ? page.frameId : `${surface.id}:home`
         try {
-          if (entry.cameraFrameIds.length > 0 && !frame) {
-            throw new Error(`Unknown Spatial camera frame ${sourceId}`)
+          if (page.kind === 'frame' && !frame) {
+            throw new Error('空间画布中有一个镜头已不存在，无法导出该页。')
           }
-          const pose = frame ?? surface.camera.home
-          const camera = spatialCameraFromPose(pose, { width: 1120, height: 760 })
+          const pose = page.kind === 'home' ? surface.camera.home : frame!
+          const camera = spatialCameraFromPose(pose, SPATIAL_CANONICAL_VIEWPORT)
+          const locationId = spatialPrintLocationId(
+            project,
+            surface.id,
+            page.kind === 'frame' ? page.frameId : undefined,
+          )
+          const printable = spatialPrintSurfaceAtLocation(project, surface, locationId)
+          for (const warning of printable.warnings) {
+            if (!warnings.includes(warning)) warnings.push(warning)
+          }
           pages.push({
             id: `${entry.id}:${sourceId}`,
             surfaceId: surface.id,
             surfaceKind: 'spatial-2d',
-            title: frame?.name ?? surface.title,
-            bodyHtml: `<div class="spatial-print-frame">${renderSpatialSvgMarkup(surface, camera, resolveAsset)}</div>`,
+            title: page.kind === 'home' ? `${surface.title} — 首页` : frame!.name,
+            bodyHtml: `<div class="spatial-print-frame">${renderSpatialSvgMarkup(printable.surface, camera, resolveAsset)}</div>`,
             pageSize: size,
-            sourceFrameId: frame?.id,
+            sourceFrameId: page.kind === 'frame' ? page.frameId : undefined,
           })
         } catch (cause) {
           failures.push({ surfaceId: surface.id, sourceId, target: 'pdf', error: error(cause) })

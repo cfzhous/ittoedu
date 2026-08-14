@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
-import { createProject } from '@/renderer/project/createProject'
+import { createCourseProject } from '@/renderer/course/courseStudioModel'
 import {
-  createProjectArchive,
-  openProjectArchive,
-} from '@/renderer/project/projectArchive'
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 
 function packageFiles(runtimeSuffix = ''): Record<string, Uint8Array> {
@@ -76,11 +76,15 @@ describe('component canonical content integrity', () => {
       .not.toBe(componentContentSha256({ a: strToU8(''), bc: new Uint8Array() }))
   })
 
-  it('rejects an archive whose embedded executable bytes no longer match Project V8', () => {
+  it('rejects a V9 archive whose embedded executable bytes no longer match metadata', () => {
     const parsed = parseComponentPackageFiles(packageFiles())
-    const project = createProject({ includeDefaultController: false, controls: 'none' })
-    project.componentPackages[parsed.key] = parsed.metadata
-    const archive = createProjectArchive({
+    const project = createCourseProject({
+      id: 'component-integrity',
+      title: '组件完整性',
+      now: '2026-08-14T00:00:00.000Z',
+    })
+    project.componentPackages[parsed.metadata.packageId] = parsed.metadata
+    const archive = createCourseProjectArchive({
       project,
       assetFiles: {},
       componentFiles: { [parsed.key]: parsed.files },
@@ -89,8 +93,6 @@ describe('component canonical content integrity', () => {
     const runtimePath = `${parsed.metadata.runtimePath}`
     files[runtimePath] = strToU8(`${parsed.runtimeSource}\n/*tampered*/`)
 
-    expect(() => openProjectArchive(zipSync(files))).toThrow(
-      '内容 SHA-256 与工程锁定值不一致',
-    )
+    expect(() => openCourseProjectArchive(zipSync(files))).toThrow('内容校验')
   })
 })

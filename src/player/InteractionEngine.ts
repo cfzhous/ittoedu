@@ -1,7 +1,7 @@
 import type {
   CourseEventBus,
-  RuntimeHostActions,
-  RuntimePresentationApi,
+  RuntimePresentationStateInfo,
+  RuntimePresentationTransition,
 } from '../shared/runtimeTypes'
 import {
   isAudioInteractionAction,
@@ -54,6 +54,29 @@ export interface InteractionNodeMotionContext {
   readonly sceneId: string | null
 }
 
+/**
+ * Neutral interaction controllers used by both the legacy Phaser renderer and
+ * the native V9 surface hosts. V9 navigation/reconciliation is asynchronous,
+ * while the earlier renderer can continue returning booleans synchronously.
+ */
+export interface InteractionHostActions {
+  goToScene(sceneId: string, targetStateId?: string): boolean | PromiseLike<boolean>
+  nextScene(): boolean | PromiseLike<boolean>
+  previousScene(): boolean | PromiseLike<boolean>
+  replayScene(): boolean | void | PromiseLike<boolean | void>
+  restartCourse(): boolean | void | PromiseLike<boolean | void>
+}
+
+export interface InteractionPresentationController {
+  current(): string | null
+  states(): ReadonlyArray<Readonly<RuntimePresentationStateInfo>>
+  setState(stateId: string): boolean | PromiseLike<boolean>
+  transitionTo(
+    stateId: string,
+    transition?: RuntimePresentationTransition,
+  ): boolean | PromiseLike<boolean>
+}
+
 export interface InteractionEngineOptions {
   scope?: 'scene' | 'global'
   sceneId: string
@@ -61,8 +84,8 @@ export interface InteractionEngineOptions {
   currentSceneId?(): string | null
   rules: readonly InteractionRule[]
   events: CourseEventBus
-  presentation: RuntimePresentationApi
-  hostActions: Readonly<RuntimeHostActions>
+  presentation: InteractionPresentationController
+  hostActions: Readonly<InteractionHostActions>
   executeAudioAction?(action: AudioInteractionAction): unknown
   executeVideoAction?(action: VideoInteractionAction): unknown
   executeNodeMotion?(
@@ -171,8 +194,8 @@ export class InteractionEngine {
   private readonly currentSceneId: () => string | null
   private readonly rules: readonly InteractionRule[]
   private readonly events: CourseEventBus
-  private readonly presentation: RuntimePresentationApi
-  private readonly hostActions: Readonly<RuntimeHostActions>
+  private readonly presentation: InteractionPresentationController
+  private readonly hostActions: Readonly<InteractionHostActions>
   private readonly executeAudioAction?: (action: AudioInteractionAction) => unknown
   private readonly executeVideoAction?: (action: VideoInteractionAction) => unknown
   private readonly executeNodeMotion?: (

@@ -18,7 +18,6 @@ import type {
   ProjectMediaSettings,
   ProjectPlaybackSettings,
 } from './projectTypes'
-import type { RuntimeRenderMode } from './runtimeTypes'
 
 export const PUBLISHED_COURSE_FORMAT = 'h5course-published' as const
 export const PUBLISHED_COURSE_VERSION = 2 as const
@@ -48,6 +47,7 @@ export interface PublishedCourseComponent {
 
 export interface PublishedLayerItemBase {
   layerItemId: string
+  label: string
   frame: LayerFrame
   order: number
   visible: boolean
@@ -72,10 +72,10 @@ export interface PublishedComponentLayerItem extends PublishedLayerItemBase {
 export interface PublishedRuntimeLayerItem extends PublishedLayerItemBase {
   kind: 'runtime'
   runtime: {
-    protocol: 'surface-v1' | 'legacy-runtime-v2'
-    runtimeApiVersion: 2 | 3
+    protocol: 'surface-v1'
+    runtimeApiVersion: 3
     enabled: boolean
-    renderMode: RuntimeRenderMode
+    renderMode: 'dom'
     code: PublishedCourseExecutableCode
     content: {
       values: Record<string, string>

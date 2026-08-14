@@ -183,7 +183,7 @@ export function addPptxTextNode(
 }
 
 /**
- * PPTX has no dependable editable mapping for the recursive V8 formula AST.
+ * PPTX has no dependable editable mapping for the recursive formula AST.
  * Export one transparent PNG so its authored geometry remains deterministic;
  * Formula ID and accessible text remain available as object metadata.
  */

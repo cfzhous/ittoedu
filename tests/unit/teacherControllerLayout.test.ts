@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TeacherControllerNode } from '../../src/shared/projectTypes'
-import { createTeacherControllerNode } from '../../src/renderer/project/createProject'
+import { teacherControllerNode } from '../helpers/nativeNodeFixtures'
 import {
   createTeacherControllerLayout,
   formatTeacherControllerProgress,
@@ -48,7 +48,7 @@ function controller(
 
 describe('createTeacherControllerLayout', () => {
   it('includes a visible state-free scene directory in the default controller', () => {
-    const node = createTeacherControllerNode()
+    const node = teacherControllerNode()
     const pickerButtons = node.buttons.filter(
       (button) => button.action.type === 'scene.open-picker',
     )

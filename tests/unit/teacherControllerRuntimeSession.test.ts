@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { teacherControllerNode } from '../helpers/nativeNodeFixtures'
 import {
   constrainTeacherControllerOffset,
   logicalDragDelta,
@@ -24,7 +24,7 @@ describe('teacher controller runtime session geometry', () => {
   })
 
   it('keeps the expanded controller inside the canvas and snaps near edges', () => {
-    const node = createTeacherControllerNode({ x: 200, y: 100 })
+    const node = teacherControllerNode({ x: 200, y: 100 })
     const constrained = constrainTeacherControllerOffset(
       node,
       { dx: -195, dy: -94 },
@@ -36,7 +36,7 @@ describe('teacher controller runtime session geometry', () => {
   })
 
   it('lets the collapsed pill reach an edge without reserving the hidden panel', () => {
-    const node = createTeacherControllerNode({ x: 200, y: 100 })
+    const node = teacherControllerNode({ x: 200, y: 100 })
     const collapse = createTeacherControllerLayout(node, node.width, node.height).collapse
     if (!collapse) throw new Error('fixture controller must be collapsible')
 
@@ -51,7 +51,7 @@ describe('teacher controller runtime session geometry', () => {
   })
 
   it('constrains the rotated visible bounds instead of only the author frame', () => {
-    const node = createTeacherControllerNode({ x: 0, y: 0 })
+    const node = teacherControllerNode({ x: 0, y: 0 })
     node.rotation = 45
     const constrained = constrainTeacherControllerOffset(
       node,

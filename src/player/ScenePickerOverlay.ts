@@ -110,7 +110,7 @@ export class ScenePickerOverlay {
     const headingGroup = document.createElement('div')
     const title = document.createElement('h2')
     title.id = titleId
-    title.textContent = '场景目录'
+    title.textContent = '课程目录'
     applyStyles(title, {
       margin: '0',
       color: '#fff7df',
@@ -119,7 +119,7 @@ export class ScenePickerOverlay {
     })
     const description = document.createElement('p')
     description.id = descriptionId
-    description.textContent = `选择要跳转的场景，共 ${options.scenes.length} 个`
+    description.textContent = `选择要前往的课程位置，共 ${options.scenes.length} 个`
     applyStyles(description, {
       margin: '6px 0 0',
       color: '#b9c5d8',
@@ -131,7 +131,7 @@ export class ScenePickerOverlay {
     const closeButton = document.createElement('button')
     closeButton.type = 'button'
     closeButton.className = 'lesson-scene-picker__close'
-    closeButton.setAttribute('aria-label', '关闭场景目录')
+    closeButton.setAttribute('aria-label', '关闭课程目录')
     closeButton.textContent = '×'
     applyStyles(closeButton, {
       width: '38px',
@@ -149,7 +149,7 @@ export class ScenePickerOverlay {
     const list = document.createElement('div')
     list.className = 'lesson-scene-picker__list'
     list.setAttribute('role', 'group')
-    list.setAttribute('aria-label', '全部场景')
+    list.setAttribute('aria-label', '全部课程位置')
     applyStyles(list, {
       display: 'grid',
       minHeight: '0',

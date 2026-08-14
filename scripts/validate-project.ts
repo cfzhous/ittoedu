@@ -1,13 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import {
-  projectValidationExitCode,
-  serializeProjectValidationReport,
-  unreadableProjectValidationReport,
-  validateProjectArchiveBytes,
-  type ProjectValidationFatalError,
-} from '../src/renderer/project/validateProjectArchive'
 import { openCourseProjectArchive } from '../src/renderer/project/courseProjectArchive'
 
 export interface CourseProjectV9ValidationReport {
@@ -28,6 +21,43 @@ export interface CourseProjectV9ValidationReport {
   }
   summary: { error: 0; warning: 0; total: 0 }
   fatal: null
+}
+
+export interface CourseProjectV9ValidationFatalError {
+  code: 'usage-error' | 'input-unreadable' | 'archive-invalid' | 'validation-failed'
+  title: string
+  message: string
+}
+
+export interface CourseProjectV9UnreadableReport {
+  reportVersion: 2
+  status: 'unreadable'
+  input: { filename: string }
+  schema: { valid: false; schemaVersion: null; issues: [] }
+  project: null
+  summary: { error: 1; warning: 0; total: 1 }
+  fatal: CourseProjectV9ValidationFatalError
+}
+
+function unreadableCourseProjectReport(
+  filename: string,
+  error: CourseProjectV9ValidationFatalError,
+): CourseProjectV9UnreadableReport {
+  return {
+    reportVersion: 2,
+    status: 'unreadable',
+    input: { filename },
+    schema: { valid: false, schemaVersion: null, issues: [] },
+    project: null,
+    summary: { error: 1, warning: 0, total: 1 },
+    fatal: error,
+  }
+}
+
+function serializeCourseProjectValidationReport(
+  report: CourseProjectV9ValidationReport | CourseProjectV9UnreadableReport,
+): string {
+  return `${JSON.stringify(report, null, 2)}\n`
 }
 
 export function validateCourseProjectV9ArchiveBytes(
@@ -76,11 +106,11 @@ const defaultIo: ValidationCliIo = {
 
 function fatal(
   filename: string,
-  error: ProjectValidationFatalError,
+  error: CourseProjectV9ValidationFatalError,
   io: ValidationCliIo,
 ): 2 {
-  const report = unreadableProjectValidationReport(filename, error)
-  io.stdout(serializeProjectValidationReport(report))
+  const report = unreadableCourseProjectReport(filename, error)
+  io.stdout(serializeCourseProjectValidationReport(report))
   io.stderr(`${error.title}：${error.message}\n`)
   return 2
 }
@@ -120,18 +150,15 @@ export async function runValidateProjectCli(
 
   const v9Report = validateCourseProjectV9ArchiveBytes(bytes, filename)
   if (v9Report) {
-    io.stdout(`${JSON.stringify(v9Report, null, 2)}\n`)
+    io.stdout(serializeCourseProjectValidationReport(v9Report))
     return 0
   }
 
-  // V8 remains an explicit compatibility/import boundary. Keeping its richer
-  // compatibility report here does not make it the default authoring format.
-  const report = validateProjectArchiveBytes(bytes, filename)
-  io.stdout(serializeProjectValidationReport(report))
-  if (report.fatal) {
-    io.stderr(`${report.fatal.title}：${report.fatal.message}\n`)
-  }
-  return projectValidationExitCode(report)
+  return fatal(filename, {
+    code: 'archive-invalid',
+    title: '课程工程不受支持或已损坏',
+    message: '无界面工程校验只接受当前 Course Project V9 归档。',
+  }, io)
 }
 
 const invokedPath = process.argv[1]
@@ -143,12 +170,12 @@ if (
     .then((exitCode) => { process.exitCode = exitCode })
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : '发生未知错误。'
-      const report = unreadableProjectValidationReport('', {
+      const report = unreadableCourseProjectReport('', {
         code: 'validation-failed',
         title: '工程校验失败',
         message,
       })
-      process.stdout.write(serializeProjectValidationReport(report))
+      process.stdout.write(serializeCourseProjectValidationReport(report))
       process.stderr.write(`工程校验失败：${message}\n`)
       process.exitCode = 2
     })

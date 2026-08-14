@@ -6,4 +6,4 @@
 - 所有 Native、Runtime、Component 与教师控制器都进入统一图层。画布文字必须可命中，普通可替换图片应可命中；临时 `hitId` 不得代替跨保存稳定的 `authoringAddress`。
 - 教师工作流不使用 Hash、签名、审批状态机、候选等级或 Evidence 清单。工程仍必须通过当前 Schema、类型、保存重开、真实 Player、导出和体验复核。
 
-当前产品协议是 Course Project V9、Published Course V2、Runtime API 2/3 兼容与 Component API 4。V8 只作为显式导入迁移和必要兼容测试存在，不得作为新课件默认生成路线。长期开发方向只看根目录 [唯一计划](COURSEWARE_SKILL_REFACTORING_PLAN.md)，当前产品事实以源码、Schema 与能力卡为准。自动化最多证明 `engineering candidate`；具体课例只有经过真实视觉/互动复核才可称 `art candidate`，`accepted` 必须来自教师明确验收。
+当前产品协议是 Course Project V9、Published Course V2、Surface Runtime API 3 与 Component API 4。当前没有需要继承的成品旧工程：产品不提供 V8 导入、迁移、旧编辑器或 Runtime API 2 兼容；V8 代码只可在迁移成熟交互期间作为只读参考，完成替代后删除。长期开发方向只看根目录 [唯一计划](COURSEWARE_SKILL_REFACTORING_PLAN.md)，当前产品事实以源码、Schema 与能力卡为准。自动化最多证明 `engineering candidate`；具体课例只有经过真实视觉/互动复核才可称 `art candidate`，`accepted` 必须来自教师明确验收。

@@ -55,7 +55,7 @@ export function isStrokeOnlyShapeType(shapeType: ShapeType): boolean {
   return strokeOnlyShapeTypes.has(shapeType)
 }
 
-/** Runtime-visible Project V8 node discriminators used by generated contracts. */
+/** Native node discriminators shared by V9 Native elements and player primitives. */
 export const SCENE_NODE_TYPES = [
   'text',
   'formula',

@@ -1,9 +1,11 @@
-import type {
-  ComponentLayerItem,
-  LayerItem,
-  NativeLayerItem,
-  RuntimeLayerItem,
-  ScopedLayerItem,
+import {
+  SPATIAL_MAX_ZOOM,
+  SPATIAL_MIN_ZOOM,
+  type ComponentLayerItem,
+  type LayerItem,
+  type NativeLayerItem,
+  type RuntimeLayerItem,
+  type ScopedLayerItem,
 } from '../../../shared/courseProjectTypes'
 import { renderFormulaNodeSvg } from '../../../shared/formulaRenderer'
 import type { FormulaNode } from '../../../shared/projectTypes'
@@ -16,12 +18,14 @@ import type {
   SurfaceMountContext,
   SurfaceResetScope,
 } from '../SurfaceHost'
-import type {
-  ComponentSlideItemHostFactory,
-  RuntimeSlideItemHostFactory,
-  SlideInspectionMode,
-  SlideItemHost,
-  SlideItemMountContext,
+import {
+  renderTeacherController,
+  type TeacherControllerDomRenderOptions,
+  type ComponentSlideItemHostFactory,
+  type RuntimeSlideItemHostFactory,
+  type SlideInspectionMode,
+  type SlideItemHost,
+  type SlideItemMountContext,
 } from '../slide/SlideSurfaceHost'
 import { DomPlaybackFreeze } from '../domPlaybackFreeze'
 import {
@@ -60,6 +64,8 @@ export interface SpatialSurfaceHostOptions {
   globalLayerItems?: readonly ScopedLayerItem[]
   /** Drives include/exclude visibility for course- and surface-scoped items. */
   initialLocationId?: string
+  /** Course-wide progress text shown by an authored teacher controller. */
+  teacherControllerProgressText?(): string
   onLayerHit?(hit: SpatialLayerHit): void
   onTeacherControllerAction?(action: TeacherControllerAction, item: NativeLayerItem): void | Promise<void>
 }
@@ -151,8 +157,8 @@ function formulaNodeForItem(item: NativeLayerItem): FormulaNode {
 
 function itemDescription(item: LayerItem): string {
   if (item.kind === 'native') return nativeDescription(item)
-  if (item.kind === 'component') return `互动组件：${item.component.packageId}`
-  return `互动运行时：${item.label}`
+  if (item.kind === 'component') return `互动组件：${item.label}`
+  return `互动内容：${item.label}`
 }
 
 function imageAssetId(item: LayerItem): string | undefined {
@@ -670,7 +676,7 @@ class SpatialStaticFallbackHost<T extends DynamicSpatialItem> implements SlideIt
       ? `${this.#item.label}加载失败，已使用安全后备`
       : this.#item.kind === 'component'
         ? `互动组件：${this.#item.label}`
-        : `互动运行时：${this.#item.label}`
+        : `互动内容：${this.#item.label}`
     root.appendChild(label)
     this.#container.replaceChildren(root)
   }
@@ -685,6 +691,9 @@ function createSpatialRecord(
     action: TeacherControllerAction,
     item: NativeLayerItem,
   ) => void | Promise<void>,
+  teacherControllerView: (
+    item: NativeLayerItem,
+  ) => Omit<TeacherControllerDomRenderOptions, 'onAction'>,
 ): SpatialItemRecord {
   const wrapper = dom.createElementNS(SVG_NS, 'g')
   wrapper.dataset.spatialLayerRecord = 'true'
@@ -720,36 +729,13 @@ function createSpatialRecord(
       Object.assign(video.style, { width: '100%', height: '100%', objectFit: data.fit })
       html.appendChild(video)
     } else if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
-      const { data } = item.content
-      const nav = dom.createElement('nav')
-      nav.className = 'spatial-native-teacher-controller'
-      nav.setAttribute('aria-label', data.title || item.label)
-      Object.assign(nav.style, {
-        boxSizing: 'border-box', width: '100%', height: '100%', display: 'flex',
-        alignItems: 'center', gap: data.compact ? '4px' : '8px',
-        padding: data.compact ? '4px 6px' : '8px 12px',
-        backgroundColor: colorWithOpacity(data.style.backgroundColor, data.style.backgroundOpacity),
-        color: data.style.textColor,
-        borderRadius: `${data.style.cornerRadius}px`,
+      const nav = renderTeacherController(item, dom, {
+        ...teacherControllerView(item),
+        onAction: (action, controller) => {
+          void onTeacherControllerAction(action, controller)
+        },
       })
-      const title = dom.createElement('strong')
-      title.textContent = data.title
-      nav.appendChild(title)
-      for (const button of data.buttons) {
-        if (!button.visible) continue
-        const element = dom.createElement('button')
-        element.type = 'button'
-        element.dataset.controllerButtonId = button.id
-        element.textContent = button.label
-        Object.assign(element.style, {
-          color: data.style.textColor, borderColor: data.style.accentColor, background: 'transparent',
-        })
-        element.addEventListener('click', (event) => {
-          event.stopPropagation()
-          void onTeacherControllerAction(button.action, item)
-        })
-        nav.appendChild(element)
-      }
+      nav.classList.add('spatial-native-teacher-controller')
       html.appendChild(nav)
     }
   } else {
@@ -814,6 +800,8 @@ export class SpatialSurfaceHost implements SurfaceHost {
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
   #records = new Map<string, SpatialItemRecord>()
+  #teacherControllerCollapsed = new Map<string, boolean>()
+  #teacherControllerDefaults = new Map<string, string>()
   #visibleRecords: SpatialItemRecord[] = []
   #active = false
   #destroyed = false
@@ -836,13 +824,17 @@ export class SpatialSurfaceHost implements SurfaceHost {
     this.#locationId = options.initialLocationId
     this.#options = {
       ...options,
-      minZoom: options.minZoom ?? 0.05,
-      maxZoom: options.maxZoom ?? 32,
+      minZoom: options.minZoom ?? SPATIAL_MIN_ZOOM,
+      maxZoom: options.maxZoom ?? SPATIAL_MAX_ZOOM,
       showControls: options.showControls ?? true,
       showMinimap: options.showMinimap ?? true,
       interactiveCamera: options.interactiveCamera ?? true,
     }
-    if (this.#options.minZoom <= 0 || this.#options.maxZoom < this.#options.minZoom) {
+    if (
+      this.#options.minZoom < SPATIAL_MIN_ZOOM ||
+      this.#options.maxZoom > SPATIAL_MAX_ZOOM ||
+      this.#options.maxZoom < this.#options.minZoom
+    ) {
       throw new Error('Invalid Spatial zoom limits')
     }
   }
@@ -850,6 +842,23 @@ export class SpatialSurfaceHost implements SurfaceHost {
   get camera(): SpatialCamera { return { ...this.#camera } }
   get inspectionMode(): SlideInspectionMode { return this.#mode }
   get rootElement(): HTMLElement | null { return this.#root }
+
+  refreshTeacherControllers(): void {
+    for (const record of this.#records.values()) {
+      if (record.item.kind !== 'native' || record.item.content.nativeType !== 'teacher-controller') continue
+      const html = record.content
+      if (!(html instanceof this.#root!.ownerDocument.defaultView!.HTMLElement)) continue
+      const nav = renderTeacherController(record.item, html.ownerDocument, {
+        ...this.#teacherControllerView(record.item),
+        onAction: (action, controller) => {
+          if (this.#mode === 'inspect') return
+          void this.#options.onTeacherControllerAction?.(action, controller)
+        },
+      })
+      nav.classList.add('spatial-native-teacher-controller')
+      html.replaceChildren(nav)
+    }
+  }
 
   setCamera(camera: SpatialCamera): Promise<void> {
     this.#camera = validateSpatialCamera({
@@ -1029,7 +1038,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
       width: camera.viewportWidth,
       height: camera.viewportHeight,
       warnings: [...this.#records.values()].filter((record) => record.failed)
-        .map((record) => `${record.item.label} uses its static Spatial fallback`),
+        .map((record) => `“${record.item.label}”未能生成当前互动画面，已使用静态预览。`),
     }
   }
 
@@ -1120,7 +1129,11 @@ export class SpatialSurfaceHost implements SurfaceHost {
           structuredClone(item),
           entry.source,
           resolveAsset,
-          (action, controller) => this.#options.onTeacherControllerAction?.(action, controller),
+          (action, controller) => {
+            if (this.#mode === 'inspect') return
+            return this.#options.onTeacherControllerAction?.(action, controller)
+          },
+          (controller) => this.#teacherControllerView(controller),
         )
         const surfaceSignal = this.#surfaceAbortController?.signal
         if (surfaceSignal?.aborted) record.abortController.abort(surfaceSignal.reason)
@@ -1133,7 +1146,11 @@ export class SpatialSurfaceHost implements SurfaceHost {
           structuredClone(item),
           entry.source,
           resolveAsset,
-          (action, controller) => this.#options.onTeacherControllerAction?.(action, controller),
+          (action, controller) => {
+            if (this.#mode === 'inspect') return
+            return this.#options.onTeacherControllerAction?.(action, controller)
+          },
+          (controller) => this.#teacherControllerView(controller),
         )
         record.abortController.abort('spatial-native-item-updated')
         if (wasVisible) record.wrapper.replaceWith(replacement.wrapper)
@@ -1296,6 +1313,8 @@ export class SpatialSurfaceHost implements SurfaceHost {
     }
     record.wrapper.remove()
     this.#records.delete(record.item.layerItemId)
+    this.#teacherControllerCollapsed.delete(record.item.layerItemId)
+    this.#teacherControllerDefaults.delete(record.item.layerItemId)
   }
 
   #report(phase: SurfaceLifecyclePhase, cause: unknown, layerItemId: string): void {
@@ -1461,6 +1480,32 @@ export class SpatialSurfaceHost implements SurfaceHost {
       { min: this.#options.minZoom, max: this.#options.maxZoom },
     ))
     event.preventDefault()
+  }
+
+  #teacherControllerView(
+    item: NativeLayerItem,
+  ): Omit<TeacherControllerDomRenderOptions, 'onAction'> {
+    if (item.content.nativeType !== 'teacher-controller') {
+      throw new TypeError('Expected teacher controller item')
+    }
+    const data = item.content.data
+    const defaultSignature = `${data.collapsible}:${data.defaultCollapsed}`
+    if (this.#teacherControllerDefaults.get(item.layerItemId) !== defaultSignature) {
+      this.#teacherControllerDefaults.set(item.layerItemId, defaultSignature)
+      this.#teacherControllerCollapsed.set(
+        item.layerItemId,
+        data.collapsible && data.defaultCollapsed,
+      )
+    }
+    const supplied = this.#options.teacherControllerProgressText?.().trim()
+    return {
+      progressText: supplied || this.#document.title,
+      collapsed: this.#teacherControllerCollapsed.get(item.layerItemId) ?? false,
+      canInteract: () => this.#mode === 'playback',
+      onCollapsedChange: (collapsed) => {
+        this.#teacherControllerCollapsed.set(item.layerItemId, collapsed)
+      },
+    }
   }
 
   #handleKeyDown = (event: KeyboardEvent): void => {

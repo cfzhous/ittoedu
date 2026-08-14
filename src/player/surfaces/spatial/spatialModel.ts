@@ -1,10 +1,15 @@
-import type {
-  LayerItem,
-  SpatialCameraFrame,
-  SpatialCameraPose,
-  SpatialSemanticZoomRule,
-  SpatialSurfaceDocument,
+import {
+  SPATIAL_MAX_ZOOM,
+  SPATIAL_MIN_ZOOM,
+  SPATIAL_CANONICAL_VIEWPORT,
+  type LayerItem,
+  type SpatialCameraFrame,
+  type SpatialCameraPose,
+  type SpatialSemanticZoomRule,
+  type SpatialSurfaceDocument,
 } from '../../../shared/courseProjectTypes'
+
+export { SPATIAL_CANONICAL_VIEWPORT }
 
 export type {
   SpatialCameraFrame,
@@ -53,6 +58,9 @@ export function validateSpatialCamera(camera: SpatialCamera): SpatialCamera {
   finite(camera.x, 'camera.x')
   finite(camera.y, 'camera.y')
   positive(camera.zoom, 'camera.zoom')
+  if (camera.zoom < SPATIAL_MIN_ZOOM || camera.zoom > SPATIAL_MAX_ZOOM) {
+    throw new Error(`camera.zoom must be between ${SPATIAL_MIN_ZOOM} and ${SPATIAL_MAX_ZOOM}`)
+  }
   positive(camera.viewportWidth, 'camera.viewportWidth')
   positive(camera.viewportHeight, 'camera.viewportHeight')
   return { ...camera }
@@ -64,6 +72,7 @@ export function spatialCameraFromPose(
 ): SpatialCamera {
   return validateSpatialCamera({
     ...pose,
+    zoom: Math.min(SPATIAL_MAX_ZOOM, Math.max(SPATIAL_MIN_ZOOM, positive(pose.zoom, 'camera.zoom'))),
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
   })
@@ -106,11 +115,14 @@ export function zoomSpatialCameraAt(
   camera: SpatialCamera,
   nextZoom: number,
   screenAnchor: { x: number; y: number },
-  limits: { min: number; max: number } = { min: 0.05, max: 32 },
+  limits: { min: number; max: number } = { min: SPATIAL_MIN_ZOOM, max: SPATIAL_MAX_ZOOM },
 ): SpatialCamera {
   positive(limits.min, 'minZoom')
   positive(limits.max, 'maxZoom')
   if (limits.min > limits.max) throw new Error('minZoom cannot exceed maxZoom')
+  if (limits.min < SPATIAL_MIN_ZOOM || limits.max > SPATIAL_MAX_ZOOM) {
+    throw new Error(`zoom limits must stay between ${SPATIAL_MIN_ZOOM} and ${SPATIAL_MAX_ZOOM}`)
+  }
   const before = screenToWorld(camera, screenAnchor)
   const zoom = Math.min(limits.max, Math.max(limits.min, positive(nextZoom, 'zoom')))
   const provisional = { ...camera, zoom }
@@ -143,10 +155,48 @@ export function fitSpatialCamera(
   return validateSpatialCamera({
     x: bounds.x + bounds.width / 2,
     y: bounds.y + bounds.height / 2,
-    zoom: Math.min(availableWidth / bounds.width, availableHeight / bounds.height),
+    zoom: Math.min(
+      SPATIAL_MAX_ZOOM,
+      Math.max(
+        SPATIAL_MIN_ZOOM,
+        Math.min(availableWidth / bounds.width, availableHeight / bounds.height),
+      ),
+    ),
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
   })
+}
+
+/** Fit the declared Spatial world and return a persistable camera pose. */
+export function fitSpatialSurfaceCamera(
+  spatial: SpatialSurfaceDocument,
+  paddingPx = 36,
+  effectiveLayerItems: readonly LayerItem[] = spatial.world.layerItems,
+): SpatialCameraPose {
+  const baseBounds = spatialFiniteBounds(spatial)
+  const visibleItems = effectiveLayerItems.filter((item) => item.visible)
+  const itemBounds = visibleItems.length === 0 ? undefined : {
+    x: Math.min(...visibleItems.map((item) => item.frame.x)),
+    y: Math.min(...visibleItems.map((item) => item.frame.y)),
+    width: Math.max(...visibleItems.map((item) => item.frame.x + item.frame.width)) -
+      Math.min(...visibleItems.map((item) => item.frame.x)),
+    height: Math.max(...visibleItems.map((item) => item.frame.y + item.frame.height)) -
+      Math.min(...visibleItems.map((item) => item.frame.y)),
+  }
+  const bounds = itemBounds ? {
+    x: Math.min(baseBounds.x, itemBounds.x),
+    y: Math.min(baseBounds.y, itemBounds.y),
+    width: Math.max(baseBounds.x + baseBounds.width, itemBounds.x + itemBounds.width) -
+      Math.min(baseBounds.x, itemBounds.x),
+    height: Math.max(baseBounds.y + baseBounds.height, itemBounds.y + itemBounds.height) -
+      Math.min(baseBounds.y, itemBounds.y),
+  } : baseBounds
+  const camera = fitSpatialCamera(
+    bounds,
+    SPATIAL_CANONICAL_VIEWPORT,
+    paddingPx,
+  )
+  return { x: camera.x, y: camera.y, zoom: camera.zoom }
 }
 
 function intersects(a: SpatialRect, b: SpatialRect): boolean {

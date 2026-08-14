@@ -597,6 +597,7 @@ describe('SlideSurfaceHost unified compositor', () => {
     class CurrentFrameHost implements SlideItemHost<RuntimeLayerItem> {
       marker: HTMLSpanElement | null = null
       canvas: HTMLCanvasElement | null = null
+      captureCalls = 0
 
       mount(context: SlideItemMountContext<RuntimeLayerItem>): void {
         this.marker = context.container.ownerDocument.createElement('span')
@@ -615,6 +616,7 @@ describe('SlideSurfaceHost unified compositor', () => {
       }
 
       capture(): void {
+        this.captureCalls += 1
         this.marker!.dataset.capturePhase = 'after'
         this.marker!.textContent = 'after prepareCapture'
         this.canvas!.dataset.pixelPhase = 'after'
@@ -639,6 +641,21 @@ describe('SlideSurfaceHost unified compositor', () => {
     expect(current.canvas?.toDataURL).toHaveBeenCalledWith('image/png')
     expect(current.marker).toHaveTextContent('after prepareCapture')
     expect(current.canvas?.dataset.pixelPhase).toBe('after')
+    expect(current.captureCalls).toBe(1)
+
+    current.marker!.dataset.capturePhase = 'interactive'
+    current.marker!.textContent = 'current interactive frame'
+    const currentFrameCapture = await host.capture({
+      purpose: 'export',
+      dynamicPreparation: 'preserve-current',
+    })
+    const currentFrameTemplate = document.createElement('template')
+    currentFrameTemplate.innerHTML = currentFrameCapture.content
+    const currentFrameContent = currentFrameTemplate.content.querySelector<HTMLElement>('.slide-layer-content')!
+    expect(current.captureCalls).toBe(1)
+    expect(currentFrameContent.querySelector('[data-capture-phase="interactive"]')?.textContent).toBe('current interactive frame')
+    expect(currentFrameContent.querySelector('canvas')).toBeNull()
+    expect(currentFrameContent.querySelector<HTMLImageElement>('img[data-capture-canvas="true"]')?.src).toBe(currentPixelPng)
 
     await host.destroy()
   })
@@ -755,6 +772,63 @@ describe('SlideSurfaceHost unified compositor', () => {
     expect(actions).toEqual([{ type: 'audio.toggle-mute' }])
   })
 
+  it('renders course progress and applies collapsible/default-collapsed settings without executing in inspection', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.collapsible = true
+    controller.content.data.defaultCollapsed = true
+    const action = vi.fn()
+    const host = new SlideSurfaceHost(slide([controller]), {
+      teacherControllerProgressText: () => '2 / 5 · 二次函数探究',
+      onTeacherControllerAction: action,
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+
+    const nav = host.rootElement!.querySelector<HTMLElement>('.slide-native-teacher-controller')!
+    const progress = nav.querySelector<HTMLOutputElement>('[data-teacher-controller-progress]')!
+    const collapse = nav.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!
+    const mute = nav.querySelector<HTMLButtonElement>('[data-controller-button-id="mute"]')!
+    expect(progress).toHaveTextContent('2 / 5 · 二次函数探究')
+    expect(nav).toHaveAttribute('data-collapsed', 'true')
+    expect(progress).not.toBeVisible()
+    expect(collapse).toHaveAccessibleName('展开教师控制器')
+
+    collapse.click()
+    expect(nav).toHaveAttribute('data-collapsed', 'false')
+    expect(progress.hidden).toBe(false)
+    await host.setInspectionMode('inspect')
+    collapse.click()
+    mute.click()
+    expect(nav).toHaveAttribute('data-collapsed', 'false')
+    expect(action).not.toHaveBeenCalled()
+  })
+
+  it('uses the course teacher-navigation authority instead of stopping at the Slide boundary', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.buttons = [{
+      id: 'next', action: { type: 'scene.next' }, label: '下一页', visible: true,
+    }]
+    const document = slide([controller])
+    const nextScene = vi.fn(async () => true)
+    const after = vi.fn()
+    const host = new SlideSurfaceHost(document, {
+      teacherControllerActions: { nextScene },
+      onTeacherControllerAction: after,
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    host.rootElement!.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.click()
+
+    await vi.waitFor(() => expect(nextScene).toHaveBeenCalledTimes(1))
+    expect(host.sceneId).toBe('scene-1')
+    expect(after).toHaveBeenCalledWith(
+      { type: 'scene.next' },
+      expect.objectContaining({ layerItemId: 'controller' }),
+    )
+  })
+
   it('allows an asynchronous navigation guard to block teacher-controller side effects', async () => {
     const controller = controllerItem('controller', 1)
     if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
@@ -786,6 +860,40 @@ describe('SlideSurfaceHost unified compositor', () => {
       expect.objectContaining({ layerItemId: 'controller' }),
     ))
     expect(host.sceneId).toBe('scene-1')
+    expect(after).not.toHaveBeenCalled()
+  })
+
+  it('treats teacher-controller buttons as authoring content in inspection mode', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.buttons = [{
+      id: 'next',
+      action: { type: 'scene.next' },
+      label: '下一场景',
+      visible: true,
+    }]
+    const document = slide([textItem('first', 0), controller])
+    document.scenes.push({
+      id: 'scene-2',
+      name: '场景二',
+      backgroundColor: '#ffffff',
+      layerItems: [textItem('second', 0)],
+      interactions: [],
+    })
+    const before = vi.fn(async () => true)
+    const after = vi.fn()
+    const host = new SlideSurfaceHost(document, {
+      beforeTeacherControllerAction: before,
+      onTeacherControllerAction: after,
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.setInspectionMode('inspect')
+    ;(host.rootElement!.querySelector('[data-controller-button-id="next"]') as HTMLButtonElement).click()
+    await Promise.resolve()
+
+    expect(host.sceneId).toBe('scene-1')
+    expect(before).not.toHaveBeenCalled()
     expect(after).not.toHaveBeenCalled()
   })
 })

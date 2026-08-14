@@ -12,6 +12,20 @@ import type {
 } from '../../../shared/courseProjectTypes'
 import type { FormulaNode, TeacherControllerAction } from '../../../shared/projectTypes'
 import type {
+  AudioInteractionAction,
+  NodeMotionAction,
+  VideoInteractionAction,
+} from '../../../shared/interactionTypes'
+import type { CourseEventBus } from '../../../shared/runtimeTypes'
+import {
+  InteractionEngine,
+  type InteractionBindableNodeHandle,
+  type InteractionBindableRoot,
+  type InteractionHostActions,
+  type InteractionNodeMotionContext,
+  type InteractionPresentationController,
+} from '../../InteractionEngine'
+import type {
   SurfaceCapture,
   SurfaceCaptureRequest,
   SurfaceHost,
@@ -28,6 +42,10 @@ export interface SlideItemCapture {
   format: SurfaceCapture['format']
   content: string
   warnings?: readonly string[]
+}
+
+export function slideItemCaptureFailureWarning(label: string): string {
+  return `“${label}”的当前画面生成失败。`
 }
 
 export interface SlideLayerHit {
@@ -89,13 +107,30 @@ export interface SlideSurfaceHostOptions {
   globalLayerItems?: readonly ScopedLayerItem[]
   /** Resolves CourseLocation.id when this surface is hosted by a mixed course. */
   resolveLocationId?(sceneId: string, stateId: string | undefined): string | undefined
+  /** Shared V9 course bus used by Runtime/Component and declarative rules. */
+  interactionEvents?: CourseEventBus
+  /** Course audio authority shared by scene and global interaction engines. */
+  executeAudioAction?(action: AudioInteractionAction): unknown
+  /** Disable when a course-owned media bridge emits events for every surface. */
+  emitInteractionMediaEvents?: boolean
+  /** Course navigation authority; local same-surface behavior is the fallback. */
+  interactionActions?: Partial<InteractionHostActions>
+  /** Teacher-controller navigation authority, kept distinct from Runtime entry points. */
+  teacherControllerActions?: Partial<InteractionHostActions>
+  /** A course coordinator may announce entry after committing navigation state. */
+  deferInteractionEntry?: boolean
   /** Guard hook evaluated before any built-in teacher-controller side effect. */
   beforeTeacherControllerAction?(
     action: TeacherControllerAction,
     item: NativeLayerItem,
   ): boolean | Promise<boolean>
+  /** Course-wide progress text. Falls back to this Slide's scene position. */
+  teacherControllerProgressText?(): string
   onLayerHit?(hit: SlideLayerHit): void
-  onTeacherControllerAction?(action: TeacherControllerAction, item: NativeLayerItem): void
+  onTeacherControllerAction?(
+    action: TeacherControllerAction,
+    item: NativeLayerItem,
+  ): unknown
 }
 
 type EffectiveLayerEntry = {
@@ -466,10 +501,18 @@ function renderShape(item: NativeLayerItem, dom: Document): HTMLElement {
   return root
 }
 
-function renderTeacherController(
+export interface TeacherControllerDomRenderOptions {
+  progressText: string
+  collapsed: boolean
+  canInteract(): boolean
+  onCollapsedChange(collapsed: boolean): void
+  onAction(action: TeacherControllerAction, item: NativeLayerItem): void
+}
+
+export function renderTeacherController(
   item: NativeLayerItem,
   dom: Document,
-  onAction: (action: TeacherControllerAction, item: NativeLayerItem) => void,
+  options: TeacherControllerDomRenderOptions,
 ): HTMLElement {
   if (item.content.nativeType !== 'teacher-controller') {
     throw new TypeError('Expected teacher controller item')
@@ -482,6 +525,7 @@ function renderTeacherController(
   controller.style.height = '100%'
   controller.style.display = 'flex'
   controller.style.alignItems = 'center'
+  controller.style.overflow = 'hidden'
   controller.style.gap = data.compact ? '4px' : '8px'
   controller.style.padding = data.compact ? '4px 6px' : '8px 12px'
   controller.style.backgroundColor = colorWithOpacity(
@@ -492,7 +536,26 @@ function renderTeacherController(
   controller.style.borderRadius = `${data.style.cornerRadius}px`
   const title = createElement(dom, 'strong', 'slide-teacher-controller-title')
   title.textContent = data.title
+  title.style.flex = 'none'
+  title.style.whiteSpace = 'nowrap'
   controller.appendChild(title)
+
+  const progress = dom.createElement('output')
+  progress.className = 'slide-teacher-controller-progress'
+  progress.dataset.teacherControllerProgress = 'true'
+  progress.setAttribute('aria-label', '课程进度')
+  progress.textContent = options.progressText
+  progress.style.flex = 'none'
+  progress.style.whiteSpace = 'nowrap'
+  if (data.showSceneProgress) controller.appendChild(progress)
+
+  const actions = createElement(dom, 'div', 'slide-teacher-controller-actions')
+  actions.style.display = 'flex'
+  actions.style.minWidth = '0'
+  actions.style.flex = '1 1 auto'
+  actions.style.alignItems = 'center'
+  actions.style.gap = data.compact ? '4px' : '8px'
+  actions.style.overflow = 'hidden'
   for (const button of data.buttons) {
     if (!button.visible) continue
     const element = dom.createElement('button')
@@ -504,10 +567,38 @@ function renderTeacherController(
     element.style.background = 'transparent'
     element.addEventListener('click', (event) => {
       event.stopPropagation()
-      onAction(button.action, item)
+      if (options.canInteract()) options.onAction(button.action, item)
     })
-    controller.appendChild(element)
+    actions.appendChild(element)
   }
+  controller.appendChild(actions)
+
+  const collapse = dom.createElement('button')
+  collapse.type = 'button'
+  collapse.dataset.teacherControllerCollapse = 'true'
+  collapse.style.flex = 'none'
+  collapse.style.color = data.style.textColor
+  collapse.style.borderColor = data.style.accentColor
+  collapse.style.background = 'transparent'
+  if (data.collapsible) controller.appendChild(collapse)
+
+  const applyCollapsed = (requested: boolean) => {
+    const collapsed = data.collapsible && requested
+    controller.dataset.collapsed = String(collapsed)
+    actions.hidden = collapsed
+    progress.hidden = collapsed
+    collapse.textContent = collapsed ? '展开' : '收起'
+    collapse.setAttribute('aria-label', collapsed ? '展开教师控制器' : '收起教师控制器')
+    collapse.setAttribute('aria-expanded', String(!collapsed))
+  }
+  applyCollapsed(options.collapsed)
+  collapse.addEventListener('click', (event) => {
+    event.stopPropagation()
+    if (!options.canInteract()) return
+    const collapsed = controller.dataset.collapsed !== 'true'
+    options.onCollapsedChange(collapsed)
+    applyCollapsed(collapsed)
+  })
   return controller
 }
 
@@ -527,13 +618,22 @@ class NativeDomItemHost {
   #container: HTMLElement | null = null
   #services: SurfacePlayerServices | null = null
   #onTeacherControllerAction: (action: TeacherControllerAction, item: NativeLayerItem) => void
+  #teacherControllerProgressText: () => string
+  #teacherControllerCollapsed: boolean | undefined
+  #mode: SlideInspectionMode = 'playback'
 
   constructor(
     item: NativeLayerItem,
     onTeacherControllerAction: (action: TeacherControllerAction, item: NativeLayerItem) => void,
+    teacherControllerProgressText: () => string,
   ) {
     this.#item = item
     this.#onTeacherControllerAction = onTeacherControllerAction
+    this.#teacherControllerProgressText = teacherControllerProgressText
+    if (item.content.nativeType === 'teacher-controller') {
+      this.#teacherControllerCollapsed = item.content.data.collapsible &&
+        item.content.data.defaultCollapsed
+    }
   }
 
   mount(context: { container: HTMLElement; services: SurfacePlayerServices }): void {
@@ -543,6 +643,16 @@ class NativeDomItemHost {
   }
 
   update(item: NativeLayerItem): void {
+    if (
+      item.content.nativeType === 'teacher-controller' &&
+      this.#item.content.nativeType === 'teacher-controller' && (
+        item.content.data.collapsible !== this.#item.content.data.collapsible ||
+        item.content.data.defaultCollapsed !== this.#item.content.data.defaultCollapsed
+      )
+    ) {
+      this.#teacherControllerCollapsed = item.content.data.collapsible &&
+        item.content.data.defaultCollapsed
+    }
     this.#item = item
     this.#render()
   }
@@ -551,8 +661,14 @@ class NativeDomItemHost {
   suspend(): void {}
   resume(): void {}
   reset(_scope: SurfaceResetScope): void {}
-  setInspectionMode(_mode: SlideInspectionMode): void {}
+  setInspectionMode(mode: SlideInspectionMode): void {
+    this.#mode = mode
+  }
   capture(_request: SurfaceCaptureRequest): void {}
+
+  refresh(): void {
+    this.#render()
+  }
 
   destroy(): void {
     this.#container?.replaceChildren()
@@ -574,7 +690,15 @@ class NativeDomItemHost {
         element = renderTeacherController(
           this.#item,
           dom,
-          this.#onTeacherControllerAction,
+          {
+            progressText: this.#teacherControllerProgressText(),
+            collapsed: this.#teacherControllerCollapsed ?? false,
+            canInteract: () => this.#mode === 'playback',
+            onCollapsedChange: (collapsed) => {
+              this.#teacherControllerCollapsed = collapsed
+            },
+            onAction: this.#onTeacherControllerAction,
+          },
         )
         break
     }
@@ -642,7 +766,7 @@ class StaticFallbackItemHost<T extends ComponentLayerItem | RuntimeLayerItem> im
       ? `${this.#item.label}加载失败，已使用安全后备`
       : this.#item.kind === 'component'
         ? `互动组件：${this.#item.label}`
-        : `互动运行时：${this.#item.label}`
+        : `互动内容：${this.#item.label}`
     fallback.appendChild(label)
     fallback.dataset.fallbackKind = this.#item.kind
     if (this.#error) {
@@ -674,8 +798,8 @@ function applyWrapperLayout(
   // Inspection is the frozen playback frame, not an authoring x-ray. Hidden
   // playback items remain hidden; teachers can still select them in the layer
   // panel and explicitly change their authored visibility.
-  const playbackVisible = item.playbackInitialVisibility !== 'hidden'
-  wrapper.hidden = !record.scopedVisible || !item.visible || !playbackVisible || sessionVisibility === false
+  const playbackVisible = sessionVisibility ?? item.playbackInitialVisibility !== 'hidden'
+  wrapper.hidden = !record.scopedVisible || !item.visible || !playbackVisible
 }
 
 function pointInsideItem(item: LayerItem, x: number, y: number): boolean {
@@ -746,6 +870,7 @@ export class SlideSurfaceHost implements SurfaceHost {
   #surfaceAbortController: AbortController | null = null
   #queue: Promise<void> = Promise.resolve()
   #domPlayback = new DomPlaybackFreeze()
+  #sceneInteractionEngine: InteractionEngine | null = null
 
   constructor(surface: SlideSurfaceDocument, options: SlideSurfaceHostOptions = {}) {
     if (surface.scenes.length === 0) throw new TypeError('Slide surface requires at least one scene')
@@ -764,6 +889,14 @@ export class SlideSurfaceHost implements SurfaceHost {
 
   get document(): SlideSurfaceDocument {
     return cloneSurface(this.#document)
+  }
+
+  /** Refreshes progress/status text without remounting unrelated Native media or dynamic items. */
+  refreshTeacherControllers(): void {
+    for (const record of this.#orderedRecords) {
+      if (record.item.kind !== 'native' || record.item.content.nativeType !== 'teacher-controller') continue
+      if (record.host instanceof NativeDomItemHost) record.host.refresh()
+    }
   }
 
   mount(context: SurfaceMountContext): Promise<void> {
@@ -785,6 +918,10 @@ export class SlideSurfaceHost implements SurfaceHost {
       root.hidden = !this.#active
       root.addEventListener('pointerdown', this.#handlePointerDown)
       root.addEventListener('dblclick', this.#handleDoubleClick)
+      root.addEventListener('play', this.#handleNativeVideoEvent, true)
+      root.addEventListener('pause', this.#handleNativeVideoEvent, true)
+      root.addEventListener('ended', this.#handleNativeVideoEvent, true)
+      root.addEventListener('timeupdate', this.#handleNativeVideoEvent, true)
       context.container.appendChild(root)
       this.#root = root
       this.#surfaceAbortController = new AbortController()
@@ -800,6 +937,8 @@ export class SlideSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       if (surface.id !== this.id) throw new TypeError('Slide surface identity cannot change')
       if (surface.scenes.length === 0) throw new TypeError('Slide surface requires at least one scene')
+      const restartInteractions = this.#interactionsShouldRun()
+      if (restartInteractions) this.#stopInteractionEngines()
       this.#document = cloneSurface(surface)
       let scene = this.#findScene(this.#sceneId)
       if (!scene) {
@@ -808,6 +947,7 @@ export class SlideSurfaceHost implements SurfaceHost {
       }
       this.#stateId = this.#validStateId(scene, this.#stateId)
       await this.#reconcile()
+      if (restartInteractions) this.#startInteractionEngines(false)
     })
   }
 
@@ -827,17 +967,35 @@ export class SlideSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       const scene = this.#findScene(sceneId)
       if (!scene) throw new Error(`Unknown Slide scene: ${sceneId}`)
+      this.#sceneInteractionEngine?.destroy()
+      this.#sceneInteractionEngine = null
       this.#sceneId = scene.id
       this.#stateId = this.#validStateId(scene, stateId)
       await this.#reconcile()
+      if (this.#interactionsShouldRun()) {
+        this.#startSceneInteractionEngine()
+        this.#bindInteractionNodes()
+        if (!this.#options.deferInteractionEntry) this.#announceInteractionEntry()
+      }
     })
   }
 
   setPresentationState(stateId?: string): Promise<void> {
     return this.#run(async () => {
       const scene = this.#currentScene()
+      const previousStateId = this.#stateId
       this.#stateId = this.#validStateId(scene, stateId)
       await this.#reconcile()
+      this.#bindInteractionNodes()
+      if (previousStateId !== this.#stateId && this.#interactionsShouldRun()) {
+        this.#emitPresentationChange(previousStateId)
+      }
+    })
+  }
+
+  announceInteractionEntry(): Promise<void> {
+    return this.#run(async () => {
+      if (this.#interactionsShouldRun()) this.#announceInteractionEntry()
     })
   }
 
@@ -848,12 +1006,14 @@ export class SlideSurfaceHost implements SurfaceHost {
         this.#syncDomPlayback()
         return
       }
+      if (mode === 'inspect') this.#stopInteractionEngines()
       this.#mode = mode
       if (this.#root) this.#root.dataset.inspectionMode = mode
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'activate', () => record.host.setInspectionMode?.(mode))
       }
       this.#syncDomPlayback()
+      if (mode === 'playback' && this.#active) this.#startInteractionEngines(true)
     })
   }
 
@@ -872,11 +1032,13 @@ export class SlideSurfaceHost implements SurfaceHost {
         await this.#invoke(record, 'activate', () => record.host.activate?.())
       }
       this.#syncDomPlayback()
+      this.#startInteractionEngines(true)
     })
   }
 
   suspend(): Promise<void> {
     return this.#run(async () => {
+      this.#stopInteractionEngines()
       this.#active = false
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'suspend', () => record.host.suspend?.())
@@ -897,11 +1059,13 @@ export class SlideSurfaceHost implements SurfaceHost {
         })
       }
       this.#syncDomPlayback()
+      this.#startInteractionEngines(true)
     })
   }
 
   reset(scope: SurfaceResetScope): Promise<void> {
     return this.#run(async () => {
+      this.#stopInteractionEngines()
       this.#sessionVisibility.clear()
       if (scope === 'course') this.#sceneId = this.#document.scenes[0]!.id
       const scene = this.#currentScene()
@@ -910,6 +1074,7 @@ export class SlideSurfaceHost implements SurfaceHost {
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'reset', () => record.host.reset?.(scope))
       }
+      if (this.#interactionsShouldRun()) this.#startInteractionEngines(false)
     })
   }
 
@@ -930,7 +1095,7 @@ export class SlideSurfaceHost implements SurfaceHost {
           record.item.content.nativeType === 'teacher-controller' &&
           !record.item.content.data.includeInStaticExports
         ) continue
-        if (!record.host.capture) continue
+        if (!record.host.capture || request.dynamicPreparation === 'preserve-current') continue
         try {
           const captured = await record.host.capture(request)
           if (captured) {
@@ -938,7 +1103,7 @@ export class SlideSurfaceHost implements SurfaceHost {
             warnings.push(...(captured.warnings ?? []))
           }
         } catch (cause) {
-          warnings.push(`${record.item.label} capture failed`)
+          warnings.push(slideItemCaptureFailureWarning(record.item.label))
           this.#report('capture', cause, record.item.layerItemId)
         }
       }
@@ -979,7 +1144,7 @@ export class SlideSurfaceHost implements SurfaceHost {
           }
           materializeCanvasBitmaps(record.content, cloneContent, record.item.label)
         } catch (cause) {
-          const warning = `${record.item.label} capture failed`
+          const warning = slideItemCaptureFailureWarning(record.item.label)
           if (!warnings.includes(warning)) warnings.push(warning)
           this.#report('capture', cause, record.item.layerItemId)
         }
@@ -1014,6 +1179,7 @@ export class SlideSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       if (this.#destroyed) return
       this.#destroyed = true
+      this.#stopInteractionEngines()
       this.#surfaceAbortController?.abort('slide-surface-destroyed')
       for (const record of [...this.#orderedRecords].reverse()) {
         await this.#destroyRecord(record)
@@ -1022,6 +1188,10 @@ export class SlideSurfaceHost implements SurfaceHost {
       this.#orderedRecords = []
       this.#root?.removeEventListener('pointerdown', this.#handlePointerDown)
       this.#root?.removeEventListener('dblclick', this.#handleDoubleClick)
+      this.#root?.removeEventListener('play', this.#handleNativeVideoEvent, true)
+      this.#root?.removeEventListener('pause', this.#handleNativeVideoEvent, true)
+      this.#root?.removeEventListener('ended', this.#handleNativeVideoEvent, true)
+      this.#root?.removeEventListener('timeupdate', this.#handleNativeVideoEvent, true)
       this.#root?.remove()
       this.#root = null
       this.#context = null
@@ -1134,7 +1304,264 @@ export class SlideSurfaceHost implements SurfaceHost {
     this.#root.style.backgroundImage = backgroundUrl ? `url("${backgroundUrl.replace(/"/g, '\\"')}")` : ''
     this.#root.style.backgroundSize = 'cover'
     this.#root.style.backgroundPosition = 'center'
+    this.#bindInteractionNodes()
     this.#syncDomPlayback()
+  }
+
+  #interactionsShouldRun(): boolean {
+    return Boolean(
+      !this.#destroyed &&
+      this.#active &&
+      this.#mode === 'playback' &&
+      this.#options.interactionEvents,
+    )
+  }
+
+  #interactionPresentation(): InteractionPresentationController {
+    return {
+      current: () => this.#stateId ?? null,
+      states: () => this.#currentScene().presentation?.states.map(({ id, name, description }) => ({
+        id,
+        name,
+        ...(description ? { description } : {}),
+      })) ?? [],
+      setState: (stateId) => {
+        const known = this.#currentScene().presentation?.states.some((state) => state.id === stateId)
+        return known ? this.setPresentationState(stateId).then(() => true) : false
+      },
+      transitionTo: (stateId) => {
+        const known = this.#currentScene().presentation?.states.some((state) => state.id === stateId)
+        return known ? this.setPresentationState(stateId).then(() => true) : false
+      },
+    }
+  }
+
+  #interactionHostActions(): InteractionHostActions {
+    const configured = this.#options.interactionActions
+    return {
+      goToScene: (sceneId, targetStateId) => configured?.goToScene
+        ? configured.goToScene(sceneId, targetStateId)
+        : this.#findScene(sceneId)
+          ? this.setScene(sceneId, targetStateId).then(() => true)
+          : false,
+      nextScene: () => {
+        if (configured?.nextScene) return configured.nextScene()
+        const index = this.#document.scenes.findIndex((scene) => scene.id === this.#sceneId)
+        const scene = this.#document.scenes[index + 1]
+        return scene ? this.setScene(scene.id).then(() => true) : false
+      },
+      previousScene: () => {
+        if (configured?.previousScene) return configured.previousScene()
+        const index = this.#document.scenes.findIndex((scene) => scene.id === this.#sceneId)
+        const scene = this.#document.scenes[index - 1]
+        return scene ? this.setScene(scene.id).then(() => true) : false
+      },
+      replayScene: () => configured?.replayScene
+        ? configured.replayScene()
+        : this.reset('surface').then(() => {
+            if (this.#interactionsShouldRun()) this.#announceInteractionEntry()
+            return true
+          }),
+      restartCourse: () => configured?.restartCourse
+        ? configured.restartCourse()
+        : this.reset('course').then(() => {
+            if (this.#interactionsShouldRun()) this.#announceInteractionEntry()
+            return true
+          }),
+    }
+  }
+
+  #startInteractionEngines(announceEntry: boolean): void {
+    if (!this.#interactionsShouldRun()) return
+    this.#startSceneInteractionEngine()
+    this.#bindInteractionNodes()
+    if (announceEntry && !this.#options.deferInteractionEntry) this.#announceInteractionEntry()
+  }
+
+  #startSceneInteractionEngine(): void {
+    if (this.#sceneInteractionEngine || !this.#interactionsShouldRun()) return
+    const rules = this.#currentScene().interactions
+    if (rules.length === 0) return
+    this.#sceneInteractionEngine = new InteractionEngine({
+      scope: 'scene',
+      sceneId: this.#sceneId,
+      currentSceneId: () => this.#sceneId,
+      rules,
+      events: this.#options.interactionEvents!,
+      presentation: this.#interactionPresentation(),
+      hostActions: this.#interactionHostActions(),
+      executeAudioAction: this.#options.executeAudioAction,
+      executeVideoAction: (action) => this.#executeVideoAction(action),
+      executeNodeMotion: (action, context) => this.#executeNodeMotion(action, context),
+      onError: (error, context) => this.#report(
+        'activate',
+        error instanceof Error ? error : new Error(String(error)),
+        'nodeId' in (context.action ?? {}) ? (context.action as { nodeId: string }).nodeId : 'interaction',
+      ),
+    })
+  }
+
+  #stopInteractionEngines(): void {
+    this.#sceneInteractionEngine?.destroy()
+    this.#sceneInteractionEngine = null
+  }
+
+  #bindInteractionNodes(): void {
+    if (!this.#sceneInteractionEngine) return
+    const host = this
+    const handles: InteractionBindableNodeHandle[] = this.#orderedRecords.map((record) => {
+      const input = {
+        get enabled(): boolean { return record.item.hitPolicy !== 'pass-through' },
+        get cursor(): string | undefined { return record.wrapper.style.cursor || undefined },
+        set cursor(value: string | undefined) { record.wrapper.style.cursor = value ?? '' },
+      }
+      const root: InteractionBindableRoot = {
+        get active(): boolean { return host.#active && host.#mode === 'playback' },
+        get visible(): boolean { return !record.wrapper.hidden },
+        input,
+        setInteractive: ({ cursor } = {}) => {
+          if (cursor) record.wrapper.style.cursor = cursor
+          return record.wrapper
+        },
+        on: (eventName, listener) => {
+          record.wrapper.addEventListener(eventName, listener as EventListener)
+          return record.wrapper
+        },
+        off: (eventName, listener) => {
+          record.wrapper.removeEventListener(eventName, listener as EventListener)
+          return record.wrapper
+        },
+      }
+      return { id: record.item.layerItemId, root }
+    })
+    this.#sceneInteractionEngine?.bindNodeHandles(handles)
+  }
+
+  #announceInteractionEntry(): void {
+    const events = this.#options.interactionEvents
+    if (!events || !this.#interactionsShouldRun()) return
+    this.#emitPresentationChange(undefined)
+    events.emit('scene:enter', {
+      surfaceId: this.id,
+      sceneId: this.#sceneId,
+      stateId: this.#stateId ?? null,
+    })
+  }
+
+  #emitPresentationChange(previousStateId: string | undefined): void {
+    if (!this.#stateId) return
+    this.#options.interactionEvents?.emit('presentation:change', {
+      surfaceId: this.id,
+      sceneId: this.#sceneId,
+      stateId: this.#stateId,
+      previousStateId: previousStateId ?? null,
+    })
+  }
+
+  #executeVideoAction(action: VideoInteractionAction): boolean | PromiseLike<boolean> {
+    const record = this.#records.get(action.nodeId)
+    const video = record?.content.querySelector<HTMLVideoElement>('video')
+    if (!video) throw new Error(`找不到互动视频：${action.nodeId}`)
+    const play = (): boolean | PromiseLike<boolean> => {
+      const started = video.play()
+      return started && typeof started.then === 'function'
+        ? started.then(() => true)
+        : true
+    }
+    switch (action.type) {
+      case 'video.play': return play()
+      case 'video.pause':
+        video.pause()
+        return true
+      case 'video.restart':
+        video.currentTime = 0
+        return play()
+      case 'video.stop':
+        video.pause()
+        video.currentTime = 0
+        return true
+      case 'video.toggle':
+        if (video.paused) return play()
+        video.pause()
+        return true
+      case 'video.seek':
+        video.currentTime = action.seconds
+        return true
+    }
+  }
+
+  #executeNodeMotion(
+    action: NodeMotionAction,
+    context: InteractionNodeMotionContext,
+  ): boolean | PromiseLike<boolean> {
+    const record = this.#records.get(action.nodeId)
+    if (!record || !this.#interactionsShouldRun()) return false
+    const entering = action.type === 'node.enter'
+    if (entering) this.setItemSessionVisibility(action.nodeId, true)
+    const content = record.content
+    const translate = action.effect === 'slide'
+      ? action.direction === 'left' ? 'translateX(-10%)'
+        : action.direction === 'right' ? 'translateX(10%)'
+          : action.direction === 'up' ? 'translateY(-10%)' : 'translateY(10%)'
+      : undefined
+    const hiddenFrame: Keyframe = {
+      opacity: 0,
+      ...(action.effect === 'scale' ? { transform: 'scale(.92)' } : {}),
+      ...(translate ? { transform: translate } : {}),
+    }
+    const shownFrame: Keyframe = { opacity: 1, transform: 'none' }
+    if (action.effect === 'none' || action.durationMs <= 0 || typeof content.animate !== 'function') {
+      this.setItemSessionVisibility(action.nodeId, entering)
+      return true
+    }
+    const animation = content.animate(
+      entering ? [hiddenFrame, shownFrame] : [shownFrame, hiddenFrame],
+      {
+        duration: action.durationMs,
+        easing: action.easing,
+        fill: 'none',
+      },
+    )
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (completed: boolean) => {
+        if (settled) return
+        settled = true
+        context.signal.removeEventListener('abort', abort)
+        if (completed && !entering) this.setItemSessionVisibility(action.nodeId, false)
+        resolve(completed)
+      }
+      const abort = () => {
+        animation.cancel()
+        finish(false)
+      }
+      context.signal.addEventListener('abort', abort, { once: true })
+      if (context.signal.aborted) {
+        abort()
+        return
+      }
+      void animation.finished.then(() => finish(true), () => finish(false))
+    })
+  }
+
+  #handleNativeVideoEvent = (event: Event): void => {
+    if (!this.#interactionsShouldRun() || this.#options.emitInteractionMediaEvents === false) return
+    const target = event.target
+    const ViewVideo = this.#root?.ownerDocument.defaultView?.HTMLVideoElement
+    if (!ViewVideo || !(target instanceof ViewVideo)) return
+    const wrapper = target.closest<HTMLElement>('.slide-layer-item')
+    const nodeId = wrapper?.dataset.layerItemId
+    if (!nodeId) return
+    const payload = {
+      surfaceId: this.id,
+      sceneId: this.#sceneId,
+      nodeId,
+      seconds: target.currentTime,
+    }
+    if (event.type === 'play') this.#options.interactionEvents?.emit('video:started', payload)
+    else if (event.type === 'pause') this.#options.interactionEvents?.emit('video:paused', payload)
+    else if (event.type === 'ended') this.#options.interactionEvents?.emit('video:ended', payload)
+    else if (event.type === 'timeupdate') this.#options.interactionEvents?.emit('video:time', payload)
   }
 
   #syncDomPlayback(): void {
@@ -1196,7 +1623,7 @@ export class SlideSurfaceHost implements SurfaceHost {
     if (item.kind === 'native') {
       return new NativeDomItemHost(item, (action, controller) => {
         void this.#handleTeacherControllerAction(action, controller)
-      })
+      }, () => this.#teacherControllerProgressText())
     }
     if (item.kind === 'component') {
       return this.#options.componentHostFactory?.(item) ?? new StaticFallbackItemHost(item)
@@ -1271,7 +1698,7 @@ export class SlideSurfaceHost implements SurfaceHost {
     if (record.item.kind === 'native') {
       const native = new NativeDomItemHost(record.item, (action, controller) => {
         void this.#handleTeacherControllerAction(action, controller)
-      })
+      }, () => this.#teacherControllerProgressText())
       record.host = native
       native.mount({ container: record.content, services: this.#context!.services })
       return
@@ -1351,27 +1778,49 @@ export class SlideSurfaceHost implements SurfaceHost {
     action: TeacherControllerAction,
     item: NativeLayerItem,
   ): Promise<void> {
+    // In inspection the controller is authored like every other unified layer.
+    // Its visible buttons must not navigate, reset, mute or enter fullscreen
+    // merely because the teacher clicked through the selected frame.
+    if (this.#mode === 'inspect') return
     if (
       this.#options.beforeTeacherControllerAction &&
       await this.#options.beforeTeacherControllerAction(action, item) === false
     ) return
     const currentIndex = this.#document.scenes.findIndex((scene) => scene.id === this.#sceneId)
-    if (action.type === 'scene.previous' && currentIndex > 0) {
-      await this.setScene(this.#document.scenes[currentIndex - 1]!.id)
-    } else if (action.type === 'scene.next' && currentIndex < this.#document.scenes.length - 1) {
-      await this.setScene(this.#document.scenes[currentIndex + 1]!.id)
+    const configured = this.#options.teacherControllerActions ?? this.#options.interactionActions
+    if (action.type === 'scene.previous') {
+      if (configured?.previousScene) await configured.previousScene()
+      else if (currentIndex > 0) await this.setScene(this.#document.scenes[currentIndex - 1]!.id)
+    } else if (action.type === 'scene.next') {
+      if (configured?.nextScene) await configured.nextScene()
+      else if (currentIndex < this.#document.scenes.length - 1) {
+        await this.setScene(this.#document.scenes[currentIndex + 1]!.id)
+      }
     } else if (action.type === 'scene.go') {
-      await this.setScene(action.sceneId, action.targetStateId)
+      if (configured?.goToScene) await configured.goToScene(action.sceneId, action.targetStateId)
+      else await this.setScene(action.sceneId, action.targetStateId)
     } else if (action.type === 'scene.replay') {
-      await this.reset('surface')
+      if (configured?.replayScene) await configured.replayScene()
+      else await this.reset('surface')
     } else if (action.type === 'course.restart') {
-      await this.reset('course')
+      if (configured?.restartCourse) await configured.restartCourse()
+      else await this.reset('course')
     }
-    this.#options.onTeacherControllerAction?.(action, item)
+    await this.#options.onTeacherControllerAction?.(action, item)
     const CustomEventConstructor = this.#root?.ownerDocument.defaultView?.CustomEvent
     const event = CustomEventConstructor
       ? new CustomEventConstructor('courseware:teacher-controller-action', { detail: action })
       : null
     if (event) this.#root?.dispatchEvent(event)
+  }
+
+  #teacherControllerProgressText(): string {
+    const supplied = this.#options.teacherControllerProgressText?.().trim()
+    if (supplied) return supplied
+    const index = this.#document.scenes.findIndex((scene) => scene.id === this.#sceneId)
+    const scene = this.#document.scenes[index]
+    return scene
+      ? `${index + 1} / ${this.#document.scenes.length} · ${scene.name}`
+      : `1 / ${this.#document.scenes.length}`
   }
 }

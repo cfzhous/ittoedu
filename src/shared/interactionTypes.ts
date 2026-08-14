@@ -169,7 +169,7 @@ export type NodeMotionAction = (
   | { type: 'node.exit' }
 ) & NodeMotionActionBase & NodeMotionDescriptor
 
-/** Payload family used by both sequential and parallel Project V8 action steps. */
+/** Payload family used by both sequential and parallel authored action steps. */
 export type InteractionActionPayload =
   | {
       type: 'presentation.set'
@@ -190,7 +190,7 @@ export type InteractionActionPayload =
   | VideoInteractionAction
   | NodeMotionAction
 
-/** Action payload carried by a Project V8 interaction step. */
+/** Action payload carried by an authored interaction step. */
 export type InteractionAction = InteractionActionPayload
 
 const actionTypesMatchContract: AssertExactly<

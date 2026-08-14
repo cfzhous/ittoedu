@@ -1,4 +1,7 @@
-import type { SlideSurfaceHost } from '../../player/surfaces/slide/SlideSurfaceHost'
+import {
+  slideItemCaptureFailureWarning,
+  type SlideSurfaceHost,
+} from '../../player/surfaces/slide/SlideSurfaceHost'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -34,25 +37,33 @@ export function currentPptxDynamicCapture(
     ) {
       throw new Error('当前实例未在画布上打开，无法捕获当前帧')
     }
+    const expectedStateId = scene.presentation?.initialStateId
+    if (currentHost.stateId !== expectedStateId) {
+      throw new Error('当前画布不是该幻灯片的初始画面，已改用静态预览以避免混用不同画面状态')
+    }
     return captureItem(currentHost, item)
   }
 }
 
 /**
  * Captures one dynamic item from the already-mounted Course Studio surface.
- * The host capture runs first so prepareCapture/capture.waitUntil can settle
- * the same live instance; no export-only Runtime/Component is constructed.
+ * The live host is cloned without invoking arbitrary prepareCapture hooks.
+ * Current DOM and Canvas pixels are materialized by SlideSurfaceHost itself,
+ * so exporting cannot mutate course state, emit lesson events or navigate.
  */
 export async function captureCurrentSlideDynamicItem(
   host: SlideSurfaceHost,
   item: DynamicLayerItem,
 ): Promise<string> {
-  const prepared = await host.capture({ purpose: 'export' })
-  if (prepared.warnings?.includes(`${item.label} capture failed`)) {
-    throw new Error('当前实例的 capture 契约执行失败')
+  const prepared = await host.capture({
+    purpose: 'export',
+    dynamicPreparation: 'preserve-current',
+  })
+  if (prepared.warnings?.includes(slideItemCaptureFailureWarning(item.label))) {
+    throw new Error('当前实例的画面生成失败')
   }
   if (prepared.format !== 'html') {
-    throw new Error('当前 Slide 实例未返回可捕获的 HTML 帧')
+    throw new Error('当前幻灯片实例未返回可捕获的画面')
   }
 
   // Consume the clone returned by the live host capture contract. DOM

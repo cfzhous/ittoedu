@@ -1,4 +1,3 @@
-import { evaluateAssessment } from '../../shared/assessmentEvaluators'
 import type {
   ComponentCreateContextV4Dom,
   ComponentDefinitionV4,
@@ -15,9 +14,6 @@ import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes
 import type { ExternalComponentNode } from '../../shared/projectTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,
-  RuntimeCreateContextDom,
-  RuntimeDefinition,
-  RuntimeInstanceLifecycle,
   RuntimePresentationApi,
 } from '../../shared/runtimeTypes'
 import type {
@@ -27,11 +23,8 @@ import type {
 } from '../../shared/surfaceRuntimeTypes'
 import { ComponentRegistry } from '../ComponentRegistry'
 import { CourseEventBus } from '../CourseEventBus'
-import { CourseStateStore } from '../CourseStateStore'
 import type { DeclarativeCourseState } from '../DeclarativeCourseState'
 import { decodePublishedCourseCode } from '../publishedCourse'
-import { RuntimeRegistry } from '../RuntimeRegistry'
-import type { RuntimeHost } from '../RuntimeHost'
 import type { RenderedNodeHandle } from '../renderNode'
 import { SurfaceRuntimeAuthoringBridge } from '../SurfaceRuntimeAuthoring'
 import { SurfaceRuntimeRegistry } from '../SurfaceRuntimeRegistry'
@@ -41,18 +34,16 @@ import type {
 } from './slide/SlideSurfaceHost'
 import type { SurfacePlayerServices } from './SurfaceHost'
 import type { FlowRenderedComponent } from './flow/FlowSurfaceHost'
-import type { LegacyMiniPhaserStage } from './legacyMiniPhaserStage'
+import type { ComponentMiniPhaserStage } from './componentMiniPhaserStage'
 
-async function loadLegacyPhaserSupport() {
-  const [runtimeHostModule, renderNodeModule, stageModule] = await Promise.all([
-    import('../RuntimeHost'),
+async function loadComponentPhaserSupport() {
+  const [renderNodeModule, stageModule] = await Promise.all([
     import('../renderNode'),
-    import('./legacyMiniPhaserStage'),
+    import('./componentMiniPhaserStage'),
   ])
   return {
-    RuntimeHost: runtimeHostModule.RuntimeHost,
     renderNode: renderNodeModule.renderNode,
-    LegacyMiniPhaserStage: stageModule.LegacyMiniPhaserStage,
+    ComponentMiniPhaserStage: stageModule.ComponentMiniPhaserStage,
   }
 }
 
@@ -239,7 +230,7 @@ class PublishedDomComponentHost implements SlideItemHost<ComponentLayerItem> {
 }
 
 class PublishedPhaserComponentHost implements SlideItemHost<ComponentLayerItem> {
-  #stage: LegacyMiniPhaserStage | null = null
+  #stage: ComponentMiniPhaserStage | null = null
   #handle: RenderedNodeHandle | null = null
   #item: ComponentLayerItem | null = null
   #context: SlideItemMountContext<ComponentLayerItem> | null = null
@@ -252,7 +243,7 @@ class PublishedPhaserComponentHost implements SlideItemHost<ComponentLayerItem> 
   ) {}
 
   async mount(context: SlideItemMountContext<ComponentLayerItem>): Promise<void> {
-    const { LegacyMiniPhaserStage, renderNode } = await loadLegacyPhaserSupport()
+    const { ComponentMiniPhaserStage, renderNode } = await loadComponentPhaserSupport()
     const component = componentFor(this.environment.payload, context.item)
     if (!component) throw new Error(`Published component ${context.item.component.packageId} is missing`)
     if (component.renderMode === 'dom') throw new Error(`Published component ${component.id} does not require Phaser`)
@@ -277,7 +268,7 @@ class PublishedPhaserComponentHost implements SlideItemHost<ComponentLayerItem> 
         },
       },
     }
-    const stage = new LegacyMiniPhaserStage(
+    const stage = new ComponentMiniPhaserStage(
       context.container,
       context.item.frame.width,
       context.item.frame.height,
@@ -360,224 +351,6 @@ class PublishedPhaserComponentHost implements SlideItemHost<ComponentLayerItem> 
     this.#item = null
     this.#context = null
     this.#active = false
-  }
-}
-
-class PublishedDomRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
-  #instance: RuntimeInstanceLifecycle | null = null
-  #localState = new CourseStateStore()
-
-  constructor(
-    private readonly definition: RuntimeDefinition,
-    private readonly environment: PublishedDynamicHostEnvironment,
-  ) {}
-
-  mount(context: SlideItemMountContext<RuntimeLayerItem>): void {
-    const runtime = context.item.runtime
-    if (runtime.protocol !== 'legacy-runtime-v2' || runtime.runtimeApiVersion !== 2) {
-      throw new Error(`Runtime ${context.item.layerItemId} uses an unsupported published protocol`)
-    }
-    if (runtime.renderMode !== 'dom') {
-      throw new Error(`Runtime ${context.item.layerItemId} requires ${runtime.renderMode}; DOM item host cannot execute it`)
-    }
-    const underlay = context.container.ownerDocument.createElement('div')
-    const overlay = context.container.ownerDocument.createElement('div')
-    underlay.className = 'published-runtime-underlay'
-    overlay.className = 'published-runtime-overlay'
-    for (const root of [underlay, overlay]) {
-      root.style.position = 'absolute'
-      root.style.inset = '0'
-      context.container.appendChild(root)
-    }
-    const createContext: RuntimeCreateContextDom = {
-      runtimeApiVersion: 2,
-      renderMode: 'dom',
-      scope: 'scene',
-      mode: 'preview',
-      sceneId: context.sceneId,
-      width: context.item.frame.width,
-      height: context.item.frame.height,
-      content: {
-        get: (key) => {
-          const value = runtime.content.values[key]
-          if (value === undefined) throw new Error(`Unknown Runtime content key ${key}`)
-          return value
-        },
-        all: () => Object.freeze({ ...runtime.content.values }),
-      },
-      assets: {
-        url: (bindingKey) => {
-          const assetId = runtime.assets[bindingKey]?.assetId
-          return assetId ? this.environment.payload.assets[assetId]?.url ?? '' : ''
-        },
-        projectUrl: (assetId) => this.environment.payload.assets[assetId]?.url ?? '',
-      },
-      presentation: presentationPort(context.surfaceId, this.environment.navigation),
-      actions: actionPort(this.environment.navigation),
-      events: this.environment.events,
-      localState: this.#localState,
-      courseState: courseStatePort(this.environment.courseState),
-      capture: { waitUntil: () => undefined },
-      navigation: { guard: () => () => undefined },
-      assessment: { evaluate: evaluateAssessment },
-      evidence: { recordAction: () => undefined },
-      emit: (eventName, payload) => this.environment.events.emit(eventName, payload),
-      domRoot: overlay,
-      dom: { root: overlay, underlay, overlay },
-    }
-    this.#instance = this.definition.create(createContext)
-    if (!this.#instance || typeof this.#instance.destroy !== 'function') {
-      throw new Error(`Runtime ${context.item.layerItemId} returned an invalid lifecycle`)
-    }
-  }
-
-  update(item: RuntimeLayerItem): void { this.#instance?.resize?.(item.frame.width, item.frame.height) }
-  activate(): void { this.#instance?.setVisible?.(true); this.#instance?.resume?.() }
-  suspend(): void { this.#instance?.suspend?.(); this.#instance?.setVisible?.(false) }
-  resume(): void { this.activate() }
-  reset(): void { this.#localState.clear() }
-  async capture(): Promise<void> { await this.#instance?.prepareCapture?.() }
-  destroy(): void { this.#instance?.destroy(); this.#instance = null; this.#localState.clear() }
-}
-
-class PublishedPhaserRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
-  #stage: LegacyMiniPhaserStage | null = null
-  #host: RuntimeHost | null = null
-  #item: RuntimeLayerItem
-  #context: SlideItemMountContext<RuntimeLayerItem> | null = null
-  #active = false
-  #mode: 'playback' | 'inspect' = 'playback'
-
-  constructor(
-    item: RuntimeLayerItem,
-    private readonly registry: RuntimeRegistry,
-    private readonly environment: PublishedDynamicHostEnvironment,
-  ) { this.#item = structuredClone(item) }
-
-  async mount(context: SlideItemMountContext<RuntimeLayerItem>): Promise<void> {
-    this.#context = context
-    this.#mode = context.mode
-    await this.#mountCurrent(context)
-  }
-
-  async #mountCurrent(context: SlideItemMountContext<RuntimeLayerItem>): Promise<void> {
-    const { LegacyMiniPhaserStage, RuntimeHost } = await loadLegacyPhaserSupport()
-    const runtime = this.#item.runtime
-    if (runtime.protocol !== 'legacy-runtime-v2' || runtime.runtimeApiVersion !== 2) {
-      throw new Error(`Runtime ${this.#item.layerItemId} uses an unsupported published protocol`)
-    }
-    if (runtime.renderMode === 'dom') throw new Error(`Runtime ${this.#item.layerItemId} does not require Phaser`)
-    const stage = new LegacyMiniPhaserStage(
-      context.container,
-      this.#item.frame.width,
-      this.#item.frame.height,
-      context.signal,
-    )
-    this.#stage = stage
-    const roots = await stage.ready
-    if (context.signal.aborted) return
-    this.#host = new RuntimeHost({
-      registry: this.registry,
-      runtime: {
-        runtimeApiVersion: 2,
-        enabled: runtime.enabled,
-        renderMode: runtime.renderMode,
-        source: runtime.source,
-        content: structuredClone(runtime.content),
-        assets: structuredClone(runtime.assets),
-        ...(runtime.nodeBindings ? { nodeBindings: structuredClone(runtime.nodeBindings) } : {}),
-      },
-      label: this.#item.label,
-      scope: 'scene',
-      mode: 'preview',
-      sceneId: context.sceneId,
-      width: this.#item.frame.width,
-      height: this.#item.frame.height,
-      environment: {
-        phaser: { scene: roots.scene, underlay: roots.underlay, overlay: roots.overlay },
-        dom: roots.dom,
-        resolveNode: (nodeId) => stage.resolveSiblingNode(nodeId),
-        presentation: presentationPort(context.surfaceId, this.environment.navigation),
-      },
-      actions: actionPort(this.environment.navigation),
-      events: this.environment.events,
-      courseState: courseStatePort(this.environment.courseState),
-      assetUrl: (assetId) => this.environment.payload.assets[assetId]?.url ?? '',
-      registerNavigationGuard: () => () => undefined,
-    })
-    stage.syncSiblingNodes()
-    stage.setInteractive(this.#mode === 'playback')
-    if (!this.#active || this.#mode === 'inspect') {
-      this.#host.suspend()
-      stage.setPaused(true)
-    }
-  }
-
-  async update(item: RuntimeLayerItem): Promise<void> {
-    const mustRemount = item.runtime.source !== this.#item.runtime.source ||
-      item.runtime.renderMode !== this.#item.runtime.renderMode ||
-      item.runtime.enabled !== this.#item.runtime.enabled ||
-      JSON.stringify(item.runtime.content) !== JSON.stringify(this.#item.runtime.content) ||
-      JSON.stringify(item.runtime.assets) !== JSON.stringify(this.#item.runtime.assets) ||
-      JSON.stringify(item.runtime.nodeBindings) !== JSON.stringify(this.#item.runtime.nodeBindings)
-    this.#item = structuredClone(item)
-    if (this.#context) this.#context = { ...this.#context, item }
-    if (mustRemount && this.#context) {
-      this.#cleanup()
-      this.#context.container.replaceChildren()
-      await this.#mountCurrent(this.#context)
-      return
-    }
-    this.#stage?.resize(item.frame.width, item.frame.height)
-    this.#host?.resize(item.frame.width, item.frame.height)
-  }
-
-  activate(): void {
-    this.#active = true
-    this.#host?.setVisible(true)
-    this.#stage?.setVisible(true)
-    if (this.#mode === 'inspect') {
-      this.#host?.suspend()
-      this.#stage?.setPaused(true)
-    } else {
-      this.#host?.resume()
-      this.#stage?.setPaused(false)
-    }
-  }
-  suspend(): void {
-    this.#active = false
-    this.#host?.suspend()
-    this.#host?.setVisible(false)
-    this.#stage?.setPaused(true)
-    this.#stage?.setVisible(false)
-  }
-  resume(): void { this.activate() }
-  reset(): void {}
-  setInspectionMode(mode: 'playback' | 'inspect'): void {
-    this.#mode = mode
-    this.#stage?.setInteractive(mode === 'playback')
-    if (mode === 'inspect') {
-      this.#host?.suspend()
-      this.#stage?.setPaused(true)
-    } else if (this.#active) {
-      this.#host?.resume()
-      this.#stage?.setPaused(false)
-    }
-  }
-  async capture(): Promise<{ format: 'html'; content: string } | void> {
-    await this.#host?.waitForCaptureReady()
-    if (this.#stage) return { format: 'html', content: this.#stage.captureHtml() }
-  }
-  destroy(): void {
-    this.#cleanup()
-    this.#context = null
-    this.#active = false
-  }
-  #cleanup(): void {
-    this.#host?.destroy()
-    this.#host = null
-    this.#stage?.destroy()
-    this.#stage = null
   }
 }
 
@@ -712,10 +485,8 @@ class PublishedSurfaceRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
 /** Owns executable registries and returns per-item adapters for Slide Host. */
 export class PublishedDynamicHostRegistry {
   readonly #components = new ComponentRegistry()
-  readonly #runtimes = new RuntimeRegistry()
   readonly #surfaceRuntimes = new SurfaceRuntimeRegistry()
   readonly #componentDefinitions = new Map<string, ComponentDefinitionV4>()
-  readonly #runtimeDefinitions = new Map<string, RuntimeDefinition>()
   readonly #surfaceRuntimeDefinitions = new Map<string, SurfaceRuntimeDefinition>()
   readonly #flowHosts = new Set<{
     host: SlideItemHost<ComponentLayerItem>
@@ -753,18 +524,7 @@ export class PublishedDynamicHostRegistry {
       }
       return new PublishedSurfaceRuntimeHost(definition, this.environment)
     }
-    if (item.runtime.runtimeApiVersion !== 2 || item.runtime.protocol !== 'legacy-runtime-v2') {
-      throw new Error(`Runtime ${item.layerItemId} has no installed ${item.runtime.protocol} executor`)
-    }
-    if (item.runtime.renderMode !== 'dom') {
-      return new PublishedPhaserRuntimeHost(item, this.#runtimes, this.environment)
-    }
-    let definition = this.#runtimeDefinitions.get(item.layerItemId)
-    if (!definition) {
-      definition = this.#runtimes.executeRuntime(item.runtime.source, item.layerItemId, 2)
-      this.#runtimeDefinitions.set(item.layerItemId, definition)
-    }
-    return new PublishedDomRuntimeHost(definition, this.environment)
+    throw new Error(`Runtime ${item.layerItemId} has no installed ${item.runtime.protocol} executor`)
   }
 
   /** Mounts a DOM Component used by a semantic Flow block into its own node. */
@@ -869,10 +629,8 @@ export class PublishedDynamicHostRegistry {
     }
     this.#flowHosts.clear()
     this.#components.dispose()
-    this.#runtimes.dispose()
     this.#surfaceRuntimes.dispose()
     this.#componentDefinitions.clear()
-    this.#runtimeDefinitions.clear()
     this.#surfaceRuntimeDefinitions.clear()
   }
 
@@ -887,11 +645,14 @@ export class PublishedDynamicHostRegistry {
     if (fallback) {
       const image = root.ownerDocument.createElement('img')
       image.src = fallback
-      image.alt = `互动组件 ${block.component.packageId} 的静态后备`
+      const componentName = this.environment.payload.components[
+        componentKey(block.component.packageId, block.component.version)
+      ]?.name
+      image.alt = `${componentName || '互动组件'}的静态预览`
       root.appendChild(image)
     }
     const message = root.ownerDocument.createElement('p')
-    message.textContent = `互动组件无法运行：${error.message}`
+    message.textContent = '互动组件暂时无法运行。'
     root.appendChild(message)
   }
 }

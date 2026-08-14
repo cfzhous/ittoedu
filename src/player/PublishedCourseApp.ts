@@ -8,7 +8,11 @@ import type {
 } from '../shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../shared/publishedCourseTypes'
 import type { TeacherControllerAction } from '../shared/projectTypes'
+import type { AudioInteractionAction } from '../shared/interactionTypes'
+import { AudioManager } from './AudioManager'
+import { CourseGlobalInteractionController } from './CourseGlobalInteractionController'
 import { CourseEventBus } from './CourseEventBus'
+import { ScenePickerOverlay } from './ScenePickerOverlay'
 import { DeclarativeCourseState, type CourseNavigationEntryPoint } from './DeclarativeCourseState'
 import {
   publishedCourseToPlayerDocument,
@@ -19,7 +23,10 @@ import {
   PublishedDynamicHostRegistry,
 } from './surfaces/publishedDynamicHosts'
 import { SlideSurfaceHost } from './surfaces/slide/SlideSurfaceHost'
-import { spatialCameraFromPose } from './surfaces/spatial/spatialModel'
+import {
+  SPATIAL_CANONICAL_VIEWPORT,
+  spatialCameraFromPose,
+} from './surfaces/spatial/spatialModel'
 import { SpatialSurfaceHost } from './surfaces/spatial/SpatialSurfaceHost'
 import type { SurfaceDiagnostic, SurfaceHost } from './surfaces/SurfaceHost'
 
@@ -75,6 +82,9 @@ export class PublishedCourseApp {
   readonly #diagnostics: SurfaceDiagnostic[] = []
   readonly #dynamicHosts: PublishedDynamicHostRegistry
   readonly #player: CoursePlayer
+  readonly #audio: AudioManager
+  readonly #globalInteractionController: CourseGlobalInteractionController
+  #locationPicker: ScenePickerOverlay | null = null
   #currentLocationId: string | null = null
   #destroyed = false
 
@@ -97,6 +107,33 @@ export class PublishedCourseApp {
     this.#options = options
     this.#locations = structuredClone(this.project.locations)
     this.#locationMap = new Map(this.#locations.map((entry) => [entry.id, entry]))
+    this.events.on<{
+      surfaceId: string
+      sceneId: string
+      stateId: string
+    }>('presentation:change', ({ surfaceId, sceneId, stateId }) => {
+      const location = this.#locations.find((candidate) => (
+        candidate.kind === 'slide-scene' &&
+        candidate.surfaceId === surfaceId &&
+        candidate.sceneId === sceneId &&
+        candidate.stateId === stateId
+      )) ?? this.#locations.find((candidate) => (
+        candidate.kind === 'slide-scene' &&
+        candidate.surfaceId === surfaceId &&
+        candidate.sceneId === sceneId &&
+        candidate.stateId === undefined
+      ))
+      if (!location) return
+      this.#currentLocationId = location.id
+      replaceUrlLocation(location.id)
+      this.#updateNavigationLabel()
+    })
+    this.#audio = new AudioManager(
+      this.project,
+      (assetId) => this.payload.assets[assetId]?.url ?? '',
+      this.events,
+      { unlockTarget: this.#root, mediaRoot: this.#root },
+    )
     this.#dynamicHosts = new PublishedDynamicHostRegistry({
       payload: this.payload,
       courseState: this.courseState,
@@ -138,6 +175,46 @@ export class PublishedCourseApp {
         cause: failure.error,
       }),
     })
+    this.#globalInteractionController = new CourseGlobalInteractionController({
+      root: this.#root,
+      rules: this.project.globalInteractions,
+      events: this.events,
+      currentSurfaceId: () => this.#currentLocation()?.surfaceId ?? null,
+      currentSceneId: () => {
+        const location = this.#currentLocation()
+        return location?.kind === 'slide-scene' ? location.sceneId : null
+      },
+      presentation: {
+        current: () => this.#activeSlideHost()?.stateId ?? null,
+        states: () => {
+          const host = this.#activeSlideHost()
+          return host ? this.presentationState(host.id).states : []
+        },
+        setState: (stateId) => {
+          const host = this.#activeSlideHost()
+          return host ? this.setPresentationState(host.id, stateId).then(() => true) : false
+        },
+        transitionTo: (stateId) => {
+          const host = this.#activeSlideHost()
+          return host ? this.setPresentationState(host.id, stateId).then(() => true) : false
+        },
+      },
+      hostActions: {
+        goToScene: (sceneId, stateId) => this.goToScene(sceneId, stateId, 'runtime'),
+        nextScene: () => this.next('runtime'),
+        previousScene: () => this.previous('runtime'),
+        replayScene: () => this.replay(),
+        restartCourse: () => this.restart(),
+      },
+      executeAudioAction: (action) => this.#executeAudioAction(action),
+      onError: (error, context) => this.#report({
+        surfaceId: this.#currentLocation()?.surfaceId ?? 'course',
+        phase: 'activate',
+        severity: 'error',
+        message: `全局互动“${context.rule?.name ?? context.rule?.id ?? '未命名'}”执行失败：${error instanceof Error ? error.message : String(error)}`,
+        cause: error instanceof Error ? error : new Error(String(error)),
+      }),
+    })
   }
 
   static async create(
@@ -172,32 +249,55 @@ export class PublishedCourseApp {
       return false
     }
 
+    const previous = this.#currentLocation()
+    // Configure an inactive Slide before activation so scene-enter rules see
+    // the requested scene rather than the host's previous/default scene.
+    if (target.kind === 'slide-scene') {
+      await this.#slideHosts.get(target.surfaceId)?.setScene(target.sceneId, target.stateId)
+    }
     const activation = await this.#player.activateSurface(target.surfaceId)
     if (!activation.ok) {
       this.#showNotice(`表面“${target.surfaceId}”加载失败，其他表面仍可使用。`)
       return false
     }
-    if (target.kind === 'slide-scene') {
-      await this.#slideHosts.get(target.surfaceId)?.setScene(target.sceneId, target.stateId)
-    } else if (target.kind === 'flow-block') {
+    // Controller progress, visibility and all later side effects read the same
+    // committed course location that the guard chain approved.
+    this.#currentLocationId = locationId
+    if (target.kind === 'flow-block') {
       await this.#flowHosts.get(target.surfaceId)?.setLocationId(target.id)
+      this.#flowHosts.get(target.surfaceId)?.refreshTeacherControllers()
       const container = this.#surfaceContainers.get(target.surfaceId)
       container?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(target.blockId)}"]`)
         ?.scrollIntoView?.({ block: 'start' })
-    } else {
+    } else if (target.kind === 'spatial-camera') {
       const surface = this.project.surfaces.find((entry) => entry.id === target.surfaceId)
       const host = this.#spatialHosts.get(target.surfaceId)
       if (surface?.type === 'spatial-2d' && host) {
         const frame = surface.camera.frames.find((entry) => entry.id === target.cameraFrameId)
         if (!frame) throw new Error(`Unknown Spatial camera frame: ${target.cameraFrameId}`)
         await host.setLocationId(target.id)
-        await host.setCamera(spatialCameraFromPose(frame, { width: 1120, height: 760 }))
+        await host.setCamera(spatialCameraFromPose(frame, SPATIAL_CANONICAL_VIEWPORT))
+        host.refreshTeacherControllers()
       }
+    } else {
+      this.#slideHosts.get(target.surfaceId)?.refreshTeacherControllers()
     }
-    this.#currentLocationId = locationId
+    if (
+      previous?.kind === 'slide-scene' &&
+      (target.kind !== 'slide-scene' || target.sceneId !== previous.sceneId)
+    ) {
+      this.events.emit('scene:leave', {
+        surfaceId: previous.surfaceId,
+        sceneId: previous.sceneId,
+      })
+    }
     this.#syncContainers(target.surfaceId)
     replaceUrlLocation(locationId)
     this.#updateNavigationLabel()
+    this.#globalInteractionController.refreshBindings()
+    if (target.kind === 'slide-scene') {
+      await this.#slideHosts.get(target.surfaceId)?.announceInteractionEntry()
+    }
     return true
   }
 
@@ -234,6 +334,8 @@ export class PublishedCourseApp {
 
   async restart(): Promise<void> {
     const decision = this.courseState.restart()
+    this.events.emit('course:restart', {})
+    this.#globalInteractionController.resetCourseState()
     await this.#player.resetCourse()
     this.#currentLocationId = null
     await this.navigate(decision.toLocationId, 'restart')
@@ -242,6 +344,10 @@ export class PublishedCourseApp {
   async destroy(): Promise<void> {
     if (this.#destroyed) return
     this.#destroyed = true
+    this.events.emit('course:destroy', {})
+    this.#globalInteractionController.destroy()
+    this.#locationPicker?.destroy()
+    this.#locationPicker = null
     await this.#player.destroy()
     this.#dynamicHosts.dispose()
     this.events.dispose()
@@ -254,13 +360,34 @@ export class PublishedCourseApp {
     stateId?: string,
     entryPoint: CourseNavigationEntryPoint = 'runtime',
   ): Promise<boolean> {
-    const target = this.#locations.find((location) => (
+    const scene = this.project.surfaces
+      .filter((surface) => surface.type === 'slide')
+      .flatMap((surface) => surface.scenes)
+      .find((candidate) => candidate.id === sceneId)
+    const effectiveStateId = stateId ?? scene?.presentation?.initialStateId
+    const exact = effectiveStateId === undefined ? undefined : this.#locations.find((location) => (
       location.kind === 'slide-scene' &&
       location.sceneId === sceneId &&
-      (stateId === undefined || location.stateId === stateId)
+      location.stateId === effectiveStateId
+    ))
+    const target = exact ?? this.#locations.find((location) => (
+      location.kind === 'slide-scene' &&
+      location.sceneId === sceneId &&
+      location.stateId === undefined
+    )) ?? this.#locations.find((location) => (
+      location.kind === 'slide-scene' && location.sceneId === sceneId
     ))
     if (!target) throw new Error(`No published location addresses Slide scene ${sceneId}`)
-    return this.navigate(target.id, entryPoint)
+    const navigated = await this.navigate(target.id, entryPoint)
+    if (
+      navigated &&
+      effectiveStateId !== undefined &&
+      target.kind === 'slide-scene' &&
+      target.stateId !== effectiveStateId
+    ) {
+      await this.setPresentationState(target.surfaceId, effectiveStateId)
+    }
+    return navigated
   }
 
   async setPresentationState(surfaceId: string, stateId: string): Promise<void> {
@@ -276,6 +403,7 @@ export class PublishedCourseApp {
       replaceUrlLocation(location.id)
       this.#updateNavigationLabel()
     }
+    this.#globalInteractionController.refreshBindings()
   }
 
   presentationState(surfaceId: string): {
@@ -303,15 +431,47 @@ export class PublishedCourseApp {
           initialSceneId: firstLocation?.kind === 'slide-scene' ? firstLocation.sceneId : undefined,
           initialStateId: firstLocation?.kind === 'slide-scene' ? firstLocation.stateId : undefined,
           globalLayerItems: structuredClone(this.project.globalLayerItems),
+          interactionEvents: this.events,
+          executeAudioAction: (action) => this.#executeAudioAction(action),
+          emitInteractionMediaEvents: false,
+          deferInteractionEntry: true,
+          interactionActions: {
+            goToScene: (sceneId, stateId) => this.goToScene(sceneId, stateId, 'runtime'),
+            nextScene: () => this.next('runtime'),
+            previousScene: () => this.previous('runtime'),
+            replayScene: () => this.replay(),
+            restartCourse: () => this.restart(),
+          },
+          teacherControllerActions: {
+            goToScene: (sceneId, stateId) => this.goToScene(sceneId, stateId, 'teacher-controller'),
+            nextScene: () => this.next('teacher-controller'),
+            previousScene: () => this.previous('teacher-controller'),
+            replayScene: () => this.replay(),
+            restartCourse: () => this.restart(),
+          },
           componentHostFactory: this.#dynamicHosts.componentHost,
           runtimeHostFactory: this.#dynamicHosts.runtimeHost,
-          resolveLocationId: (sceneId, stateId) => this.#locations.find((location) => (
-            location.kind === 'slide-scene' && location.surfaceId === surface.id &&
-            location.sceneId === sceneId &&
-            (stateId === undefined || location.stateId === stateId)
-          ))?.id,
-          beforeTeacherControllerAction: (action) => this.#allowTeacherAction(surface.id, action),
-          onTeacherControllerAction: () => this.#syncSlideLocation(slide),
+          resolveLocationId: (sceneId, stateId) => {
+            const candidates = this.#locations.filter((location): location is Extract<CourseLocation, { kind: 'slide-scene' }> => (
+              location.kind === 'slide-scene' &&
+              location.surfaceId === surface.id &&
+              location.sceneId === sceneId
+            ))
+            return (
+              stateId === undefined
+                ? candidates.find((location) => location.stateId === undefined) ?? candidates[0]
+                : candidates.find((location) => location.stateId === stateId) ??
+                  candidates.find((location) => location.stateId === undefined)
+            )?.id
+          },
+          teacherControllerProgressText: () => this.#teacherControllerProgressText(),
+          onTeacherControllerAction: (action) => {
+            if (
+              action.type === 'scene.open-picker' ||
+              action.type === 'audio.toggle-mute' ||
+              action.type === 'player.fullscreen.toggle'
+            ) return this.#handleCourseTeacherAction(action)
+          },
         })
         this.#slideHosts.set(surface.id, slide)
         return slide
@@ -319,6 +479,8 @@ export class PublishedCourseApp {
       if (surface.type === 'flow') {
         const firstLocation = this.#locations.find((location) => location.surfaceId === surface.id)
         const flow = new FlowSurfaceHost(surface, {
+          resolveComponentName: (packageId, version) => Object.values(this.payload.components)
+            .find((component) => component.id === packageId && component.version === version)?.name,
           renderComponent: (block) => this.#dynamicHosts.renderFlowComponent(
             surface.id,
             block,
@@ -328,6 +490,7 @@ export class PublishedCourseApp {
           runtimeHostFactory: this.#dynamicHosts.runtimeHost,
           globalLayerItems: structuredClone(this.project.globalLayerItems),
           locationId: firstLocation?.id,
+          teacherControllerProgressText: () => this.#teacherControllerProgressText(),
           onTeacherControllerAction: (action) => {
             void this.#handleCourseTeacherAction(action)
           },
@@ -338,11 +501,12 @@ export class PublishedCourseApp {
       const firstLocation = this.#locations.find((location) => (
         location.kind === 'spatial-camera' && location.surfaceId === surface.id
       ))
-      const spatial = new SpatialSurfaceHost(surface, { width: 1120, height: 760 }, {
+      const spatial = new SpatialSurfaceHost(surface, SPATIAL_CANONICAL_VIEWPORT, {
         componentHostFactory: this.#dynamicHosts.componentHost,
         runtimeHostFactory: this.#dynamicHosts.runtimeHost,
         globalLayerItems: structuredClone(this.project.globalLayerItems),
         initialLocationId: firstLocation?.id,
+        teacherControllerProgressText: () => this.#teacherControllerProgressText(),
         onTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
       })
       this.#spatialHosts.set(surface.id, spatial)
@@ -369,6 +533,13 @@ export class PublishedCourseApp {
     shell.appendChild(stage)
     shell.appendChild(this.#createNavigation())
     this.#root.appendChild(shell)
+    this.#locationPicker = new ScenePickerOverlay({
+      stage,
+      scenes: this.#locations.map((location) => ({ id: location.id, name: location.label })),
+      onSelect: (locationId) => {
+        void this.navigate(locationId, 'teacher-controller')
+      },
+    })
 
     const linked = locationFromUrl()
     const initial = linked && this.#locationMap.has(linked) ? linked : this.project.startLocationId
@@ -418,51 +589,25 @@ export class PublishedCourseApp {
     return this.#locations.findIndex((location) => location.id === this.#currentLocationId)
   }
 
-  async #allowTeacherAction(surfaceId: string, action: TeacherControllerAction): Promise<boolean> {
-    if (action.type === 'course.restart' || action.type === 'scene.replay') return true
-    const host = this.#slideHosts.get(surfaceId)
-    if (!host) return false
-    let target: CourseLocation | undefined
-    if (action.type === 'scene.go') {
-      target = this.#locations.find((location) => (
-        location.kind === 'slide-scene' && location.surfaceId === surfaceId &&
-        location.sceneId === action.sceneId &&
-        (action.targetStateId === undefined || location.stateId === action.targetStateId)
-      ))
-    } else if (action.type === 'scene.next' || action.type === 'scene.previous') {
-      const sceneIndex = host.document.scenes.findIndex((scene) => scene.id === host.sceneId)
-      const scene = host.document.scenes[sceneIndex + (action.type === 'scene.next' ? 1 : -1)]
-      target = scene ? this.#locations.find((location) => (
-        location.kind === 'slide-scene' && location.surfaceId === surfaceId && location.sceneId === scene.id
-      )) : undefined
-    } else {
-      return true
-    }
-    if (!target) return true
-    const decision = this.courseState.requestNavigation({
-      entryPoint: 'teacher-controller',
-      ...(this.#currentLocationId ? { fromLocationId: this.#currentLocationId } : {}),
-      toLocationId: target.id,
-    })
-    if (!decision.allowed) {
-      const messages = decision.blockedBy.map((entry) => entry.message)
-      this.#options.onNavigationBlocked?.(messages)
-      this.#showNotice(messages.join('；'))
-    }
-    return decision.allowed
+  #currentLocation(): CourseLocation | undefined {
+    return this.#currentLocationId
+      ? this.#locationMap.get(this.#currentLocationId)
+      : undefined
   }
 
-  #syncSlideLocation(host: SlideSurfaceHost): void {
-    const location = this.#locations.find((candidate) => (
-      candidate.kind === 'slide-scene' && candidate.surfaceId === host.id &&
-      candidate.sceneId === host.sceneId &&
-      (candidate.stateId === undefined || candidate.stateId === host.stateId)
-    ))
-    if (location) {
-      this.#currentLocationId = location.id
-      replaceUrlLocation(location.id)
-      this.#updateNavigationLabel()
+  #activeSlideHost(): SlideSurfaceHost | undefined {
+    const location = this.#currentLocation()
+    return location?.kind === 'slide-scene'
+      ? this.#slideHosts.get(location.surfaceId)
+      : undefined
+  }
+
+  #executeAudioAction(action: AudioInteractionAction): boolean {
+    const executed = this.#audio.execute(action)
+    if (!executed && action.type === 'audio.play') {
+      throw new Error(`声音“${action.soundId}”无法播放；请检查素材与浏览器媒体权限。`)
     }
+    return executed
   }
 
   async #handleCourseTeacherAction(action: TeacherControllerAction): Promise<void> {
@@ -475,15 +620,25 @@ export class PublishedCourseApp {
       action.targetStateId,
       'teacher-controller',
     )
-    else if (action.type === 'audio.toggle-mute') {
+    else if (action.type === 'scene.open-picker') {
+      this.#locationPicker?.open(this.#currentLocationId)
+    } else if (action.type === 'audio.toggle-mute') {
       const media = this.#root.querySelectorAll<HTMLMediaElement>('audio, video')
-      const muted = ![...media].every((element) => element.muted)
-      media.forEach((element) => { element.muted = muted })
+      const muted = this.#audio.toggleMuted()
+      this.#audio.applyCourseMuteToMedia(media, muted)
     } else if (action.type === 'player.fullscreen.toggle') {
       const dom = this.#root.ownerDocument
       if (dom.fullscreenElement) await dom.exitFullscreen?.()
       else await this.#root.requestFullscreen?.()
     }
+  }
+
+  #teacherControllerProgressText(): string {
+    const index = this.#locationIndex()
+    const current = this.#currentLocation()
+    return current
+      ? `${index + 1} / ${this.#locations.length} · ${current.label}`
+      : `1 / ${this.#locations.length}`
   }
 
   #showNotice(message: string): void {

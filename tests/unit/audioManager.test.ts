@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AudioManager } from '@/player/AudioManager'
+import {
+  AudioManager,
+  type AudioManagerCourseDocument,
+} from '@/player/AudioManager'
 import { CourseEventBus } from '@/player/CourseEventBus'
-import { createProject } from '@/renderer/project/createProject'
 
 class FakeAudioElement extends EventTarget {
   preload = ''
@@ -40,9 +42,8 @@ class FakeAudioElement extends EventTarget {
   }
 }
 
-function testProject() {
-  const project = createProject({ id: 'audio-project', idFactory: () => 'fixed' })
-  Object.assign(project, {
+function testProject(): AudioManagerCourseDocument {
+  return {
     media: {
       audio: {
         defaultMuted: false,
@@ -95,14 +96,15 @@ function testProject() {
         },
       },
     },
-  })
-  return project
+  }
 }
 
 function harness(options: {
   mode?: 'preview' | 'capture'
   maxConcurrent?: Partial<Record<'sfx' | 'ui', number>>
   unlockTarget?: EventTarget
+  mediaRoot?: Node & ParentNode
+  mediaSelector?: string
   duckFadeMs?: number
 } = {}) {
   const events = new CourseEventBus()
@@ -287,6 +289,81 @@ describe('AudioManager', () => {
     registration.dispose()
     manager.setChannelVolume('video', 0.1)
     expect(video.volume).toBeCloseTo(0.25 * 0.8 * 0.6)
+  })
+
+  it('课程总静音保留并恢复每个媒体原本的静音状态', () => {
+    const { manager } = harness()
+    const authoredMuted = { muted: false, volume: 1 } as HTMLVideoElement
+    const authoredAudible = { muted: true, volume: 1 } as HTMLVideoElement
+    manager.registerVideo(authoredMuted, {
+      nodeId: 'authored-muted',
+      muted: true,
+    })
+    manager.registerVideo(authoredAudible, {
+      nodeId: 'authored-audible',
+      muted: false,
+    })
+    const runtimeMuted = { muted: true } as HTMLMediaElement
+    const runtimeAudible = { muted: false } as HTMLMediaElement
+    const media = [authoredMuted, authoredAudible, runtimeMuted, runtimeAudible]
+
+    const muted = manager.toggleMuted()
+    manager.applyCourseMuteToMedia(media, muted)
+    expect(muted).toBe(true)
+    expect(media.map((element) => element.muted)).toEqual([true, true, true, true])
+
+    const restored = manager.toggleMuted()
+    manager.applyCourseMuteToMedia(media, restored)
+    expect(restored).toBe(false)
+    expect(media.map((element) => element.muted)).toEqual([true, false, true, false])
+  })
+
+  it('课程已静音时接管后加入的媒体，解除后恢复它们加入时的状态', async () => {
+    const root = document.createElement('div')
+    const { manager } = harness({ mediaRoot: root })
+    expect(manager.toggleMuted()).toBe(true)
+
+    const lateAudible = document.createElement('video')
+    lateAudible.muted = false
+    const lateMuted = document.createElement('audio')
+    lateMuted.muted = true
+    root.append(lateAudible, lateMuted)
+
+    await vi.waitFor(() => {
+      expect(lateAudible.muted).toBe(true)
+      expect(lateMuted.muted).toBe(true)
+    })
+    lateMuted.muted = false
+    lateMuted.dispatchEvent(new Event('volumechange'))
+    expect(lateMuted.muted).toBe(true)
+    expect(manager.toggleMuted()).toBe(false)
+    expect(lateAudible.muted).toBe(false)
+    expect(lateMuted.muted).toBe(true)
+    manager.destroy()
+  })
+
+  it('可在 document 根上只接管课程画布媒体', async () => {
+    const canvas = document.createElement('div')
+    canvas.className = 'course-canvas-shell'
+    const courseVideo = document.createElement('video')
+    canvas.appendChild(courseVideo)
+    const authoringPreview = document.createElement('audio')
+    document.body.append(canvas, authoringPreview)
+    const { manager } = harness({
+      mediaRoot: document,
+      mediaSelector: '.course-canvas-shell audio, .course-canvas-shell video',
+    })
+
+    expect(manager.toggleMuted()).toBe(true)
+    await vi.waitFor(() => expect(courseVideo.muted).toBe(true))
+    expect(authoringPreview.muted).toBe(false)
+    expect(manager.toggleMuted()).toBe(false)
+    expect(courseVideo.muted).toBe(false)
+    expect(authoringPreview.muted).toBe(false)
+
+    manager.destroy()
+    canvas.remove()
+    authoringPreview.remove()
   })
 
   it('视频 duck 使用临时乘数，释放后保留用户在期间修改的音乐声道音量', () => {

@@ -95,11 +95,12 @@ describe('product identity configuration', () => {
   })
 
   it('injects the shared product name into the current product surfaces', async () => {
-    const [html, rendererConfig, playerConfig, toolbar, launcher] = await Promise.all([
+    const [html, rendererConfig, playerConfig, shell, studio, launcher] = await Promise.all([
       readFile(path.join(root, 'index.html'), 'utf8'),
       readFile(path.join(root, 'vite.renderer.config.ts'), 'utf8'),
       readFile(path.join(root, 'vite.player.config.ts'), 'utf8'),
-      readFile(path.join(root, 'src', 'renderer', 'ui', 'TopToolbar.tsx'), 'utf8'),
+      readFile(path.join(root, 'src', 'renderer', 'course', 'editor-shell', 'V9EditorShell.tsx'), 'utf8'),
+      readFile(path.join(root, 'src', 'renderer', 'course', 'CourseStudioApp.tsx'), 'utf8'),
       readFile(path.join(root, '启动课件编辑器.cmd'), 'utf8'),
     ])
 
@@ -108,8 +109,11 @@ describe('product identity configuration', () => {
     expect(rendererConfig).toContain("html.replaceAll('__APP_NAME__', APP_NAME)")
     expect(playerConfig).toContain("name: 'CoursewarePlayer'")
     expect(playerConfig).not.toContain('PhaserCoursewarePlayer')
-    expect(toolbar).toContain('title={APP_NAME}')
-    expect(toolbar).not.toContain('Phaser 轻量交互课件编辑器')
+    expect(shell).toContain("import { APP_NAME } from '../../../shared/constants'")
+    expect(shell).toContain('brandName = APP_NAME')
+    expect(studio).toContain("import { APP_NAME } from '../../shared/constants'")
+    expect(studio).toContain("- ${APP_NAME}`")
+    expect(shell).not.toContain('Phaser 轻量交互课件编辑器')
     expect(launcher).toContain('[ittoedu Courseware Editor]')
     expect(launcher).not.toContain('[Courseware Editor]')
   })

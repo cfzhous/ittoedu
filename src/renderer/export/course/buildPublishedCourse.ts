@@ -32,7 +32,7 @@ import {
 import { publishedCourseV2Schema } from '../../../shared/publishedCourseSchema'
 import type { AssetMeta, EmbeddedComponentPackageMeta } from '../../../shared/projectTypes'
 import { bytesToDataUrl } from '../base64'
-import { encodePublishedCode } from '../buildPublishedLesson'
+import { encodePublishedCourseCode } from './publishedCode'
 
 export interface CoursePublishSources {
   project: CourseProjectDocument
@@ -345,7 +345,7 @@ function publishComponent(
     apiVersion: 4,
     scopes: cloneJson(source.manifest.supportedScopes),
     renderMode: componentRenderMode(source.manifest),
-    code: encodePublishedCode(source.runtimeSource),
+    code: encodePublishedCourseCode(source.runtimeSource),
     assets,
   }
 }
@@ -372,7 +372,7 @@ function publishComponentProps(
     item.component.packageId,
     item.component.version,
   ).source
-  const { label: _label, locked: _locked, ...base } = item
+  const { locked: _locked, ...base } = item
   return {
     ...base,
     props: mergeComponentProps(component.manifest, item.props),
@@ -380,13 +380,13 @@ function publishComponentProps(
 }
 
 function publishRuntime(item: RuntimeLayerItem): PublishedRuntimeLayerItem {
-  const { label: _label, locked: _locked, runtime, ...base } = item
+  const { locked: _locked, runtime, ...base } = item
   const { source, ...runtimeData } = runtime
   return {
     ...base,
     runtime: {
       ...cloneJson(runtimeData),
-      code: encodePublishedCode(source),
+      code: encodePublishedCourseCode(source),
     },
   }
 }
@@ -397,7 +397,7 @@ function publishLayerItem(
 ): PublishedLayerItem {
   if (item.kind === 'runtime') return publishRuntime(item)
   if (item.kind === 'component') return publishComponentProps(sources, item)
-  const { label: _label, locked: _locked, ...published } = item
+  const { locked: _locked, ...published } = item
   return cloneJson(published)
 }
 

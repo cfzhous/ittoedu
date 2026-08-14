@@ -1,0 +1,64 @@
+.course-scene-thumbnail {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
+}
+
+.course-scene-thumbnail__canvas {
+  position: absolute;
+  inset: 0 auto auto 0;
+  overflow: hidden;
+  transform-origin: top left;
+}
+
+.course-scene-thumbnail__item {
+  box-sizing: border-box;
+  color: #172033;
+}
+
+.course-scene-thumbnail__item img,
+.course-scene-thumbnail__shape {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.course-scene-thumbnail__shape {
+  background: #dbeafe;
+  border: 8px solid #3b82f6;
+  border-radius: 18px;
+}
+
+.course-scene-thumbnail__text,
+.course-scene-thumbnail__formula,
+.course-scene-thumbnail__dynamic {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 10px;
+  overflow: hidden;
+  font: 700 38px/1.2 "Microsoft YaHei", sans-serif;
+  white-space: pre-wrap;
+}
+
+.course-scene-thumbnail__formula {
+  display: grid;
+  place-items: center;
+  color: #1d4ed8;
+  font-size: 72px;
+}
+
+.course-scene-thumbnail__dynamic {
+  display: grid;
+  place-items: center;
+  color: #4338ca;
+  background: #eef2ff;
+  border: 8px dashed #818cf8;
+  font-size: 30px;
+}

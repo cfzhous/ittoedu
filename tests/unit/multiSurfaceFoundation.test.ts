@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { SPATIAL_MAX_ZOOM } from '@/shared/courseProjectTypes'
 import {
   CoursePlayer,
   FlowSurfaceHost,
@@ -6,11 +7,13 @@ import {
   buildFlowStandaloneHtml,
   buildMixedDeepLink,
   buildSpatialMinimap,
+  cameraWorldViewport,
   cullSpatialItems,
   deleteFlowBlock,
   duplicateFlowBlock,
   expandAllFlowSections,
   findFlowBlock,
+  fitSpatialSurfaceCamera,
   insertFlowBlock,
   MixedCourseNavigator,
   moveFlowBlock,
@@ -22,6 +25,8 @@ import {
   searchFlowDocument,
   setFlowSectionCollapsed,
   SpatialSurfaceHost,
+  SPATIAL_CANONICAL_VIEWPORT,
+  spatialCameraFromPose,
   worldToScreen,
   zoomSpatialCameraAt,
   type FlowSurfaceDocument,
@@ -135,13 +140,50 @@ describe('Flow structured authoring foundation', () => {
       null,
       3,
     )
+    source.blocks.push({
+      id: 'outline-list',
+      type: 'list',
+      ordered: false,
+      items: [
+        { id: 'root-item', text: '一级项目', level: 0 },
+        { id: 'child-item', text: '二级项目', level: 1 },
+        { id: 'grandchild-item', text: '三级项目', level: 2 },
+        { id: 'root-item-2', text: '另一个一级项目', level: 0 },
+      ],
+    })
     const article = renderFlowDocument(source, { domDocument: document })
     expect(article.querySelector('[data-flow-block-id="question"]')).toHaveTextContent('对称轴')
     expect(article.querySelector('details')).not.toHaveAttribute('open')
+    expect(article.querySelector('[data-flow-list-item-id="root-item"] > ul > [data-flow-list-item-id="child-item"]')).not.toBeNull()
+    expect(article.querySelector('[data-flow-list-item-id="child-item"] > ul > [data-flow-list-item-id="grandchild-item"]')).not.toBeNull()
     const standalone = buildFlowStandaloneHtml(source, { expandSections: true })
     expect(standalone).toContain('<details open')
     expect(standalone).toContain('&lt;script&gt;bad()&lt;/script&gt;')
     expect(standalone).not.toContain('<script>bad()</script>')
+    expect(standalone).toContain('data-flow-list-level="2"')
+  })
+
+  it('uses the teacher component name in static Flow fallback instead of package identity', () => {
+    const source = flowDocument()
+    source.blocks.push({
+      id: 'component-fallback',
+      type: 'component',
+      component: { packageId: 'technical.package', version: '9.4.1' },
+      props: {},
+      staticFallbackAssetId: 'fallback-image',
+    })
+    const options = {
+      resolveAsset: () => 'asset://fallback-image',
+      resolveComponentName: () => '函数实验器',
+    }
+    const article = renderFlowDocument(source, { domDocument: document, ...options })
+    expect(article.querySelector('[data-flow-block-id="component-fallback"]')).toHaveTextContent('函数实验器')
+    expect(article.textContent).not.toContain('technical.package')
+    expect(article.textContent).not.toContain('9.4.1')
+    const standalone = buildFlowStandaloneHtml(source, options)
+    expect(standalone).toContain('函数实验器')
+    expect(standalone).not.toContain('technical.package')
+    expect(standalone).not.toContain('9.4.1')
   })
 
   it('freezes first-party Flow media and host animations on the same inspection DOM frame', async () => {
@@ -294,6 +336,7 @@ function spatialDocument(): SpatialSurfaceDocument {
       ],
     },
     camera: { home: { x: 0, y: 0, zoom: 1 }, frames: [] },
+    relations: [],
     semanticZoom: [{ id: 'detail-only', layerItemIds: ['center'], minZoom: 0, maxZoom: 1.5, visible: false }],
   }
 }
@@ -308,6 +351,27 @@ describe('Spatial 2D foundation', () => {
     const zoomed = zoomSpatialCameraAt(camera, 2, anchor)
     expect(screenToWorld(zoomed, anchor).x).toBeCloseTo(before.x)
     expect(screenToWorld(zoomed, anchor).y).toBeCloseTo(before.y)
+  })
+
+  it('fits and reloads saved cameras against the shared edit, play and print viewport', () => {
+    const spatial = spatialDocument()
+    const pose = fitSpatialSurfaceCamera(spatial)
+    const first = spatialCameraFromPose(pose, SPATIAL_CANONICAL_VIEWPORT)
+    const reloadedPose = JSON.parse(JSON.stringify(pose))
+    const reloaded = spatialCameraFromPose(reloadedPose, SPATIAL_CANONICAL_VIEWPORT)
+    expect(cameraWorldViewport(reloaded)).toEqual(cameraWorldViewport(first))
+    expect(first).toMatchObject({
+      viewportWidth: 1120,
+      viewportHeight: 760,
+    })
+    expect(Number.isFinite(first.x) && Number.isFinite(first.y)).toBe(true)
+    expect(first.zoom).toBeGreaterThan(0)
+    const visible = cameraWorldViewport(first)
+    expect(visible.x).toBeLessThanOrEqual(-500)
+    expect(visible.y).toBeLessThanOrEqual(-300)
+    expect(visible.x + visible.width).toBeGreaterThanOrEqual(500)
+    expect(visible.y + visible.height).toBeGreaterThanOrEqual(300)
+    expect(renderSpatialSvgMarkup(spatial, first)).toContain('viewBox="0 0 1120 760"')
   })
 
   it('culls outside nodes, selects semantic variants and builds minimap geometry', () => {
@@ -351,6 +415,8 @@ describe('Spatial 2D foundation', () => {
     root.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true }))
     await Promise.resolve()
     expect(host.camera.zoom).toBeGreaterThan(1)
+    await host.setCamera({ ...host.camera, zoom: SPATIAL_MAX_ZOOM * 2 })
+    expect(host.camera.zoom).toBe(SPATIAL_MAX_ZOOM)
     container.querySelector<HTMLButtonElement>('[data-camera-frame-id="detail"]')!.click()
     await Promise.resolve()
     expect(host.camera).toMatchObject({ x: 120, y: 40, zoom: 2 })
@@ -458,7 +524,22 @@ describe('Spatial 2D foundation', () => {
         },
       },
     }
-    spatial.world.layerItems = [text, ellipse, arrow, formula]
+    const component: ComponentLayerItem = {
+      layerItemId: 'teacher-component',
+      label: '课堂小测',
+      kind: 'component',
+      frame: { mode: 'absolute', x: -75, y: 75, width: 150, height: 40 },
+      order: 4,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      component: { packageId: 'component.internal.quiz', version: '4.0.0' },
+      props: {},
+    }
+    spatial.world.layerItems = [text, ellipse, arrow, formula, component]
     spatial.semanticZoom = []
     const camera = { ...spatial.camera.home, viewportWidth: 400, viewportHeight: 240 }
     const rendered = renderSpatialSurface(spatial, camera, { domDocument: document })
@@ -477,6 +558,8 @@ describe('Spatial 2D foundation', () => {
     expect(markup).toContain('<tspan')
     expect(markup).toContain('marker-end="url(#spatial-arrow-end)"')
     expect(markup).toContain('aria-label="二分之一"')
+    expect(markup).toContain('互动组件：课堂小测')
+    expect(markup).not.toContain('component.internal.quiz')
   })
 
   it('mounts live Runtime and Component foreignObjects in exact layer order without remounting on camera changes', async () => {

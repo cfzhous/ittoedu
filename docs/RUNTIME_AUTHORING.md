@@ -1,6 +1,6 @@
 # Runtime 作者边界
 
-Runtime 用于一个课件中的复杂动态机制。新项目把 Runtime 作为 V9 `RuntimeLayerItem` 放进统一图层；旧 V8 整画布 runtime 只通过 `legacy-runtime-v2` / `legacy-whole-canvas` 显式迁移。
+Runtime 用于一个课件中的复杂动态机制。项目把 Runtime 作为 V9 `RuntimeLayerItem` 放进统一图层，并只使用 Surface Runtime API 3；旧整画布 Runtime 不进入当前产品。
 
 ## 何时使用
 
@@ -14,7 +14,7 @@ Runtime 源码应是普通模块，经 Agent Kit 构建图装配。不要在 `bu
 
 文字和图片可以显式调用 `ctx.authoring.registerText/registerAsset`，也可在 DOM 上分别标记 `data-courseware-content-key` 或 `data-courseware-asset-key`。key 必须存在于 `runtime.content.values` 或 `runtime.assets`。宿主把命中转换为与派生 Inventory 完全一致的字段路径；运行时自己生成的 DOM ID 或会话 target ID 不能充当作者地址。
 
-`legacy-runtime-v2` 只为显式迁移的 V8 整画布 Runtime 保留。它仍可在发布 Player 中兼容执行，但不作为新 Runtime 起点，也不会把旧 underlay/overlay 暴露回 V9 作者模型。
+当前产品不提供 `legacy-runtime-v2`、underlay/overlay 或旧播放器执行分支。需要连续模拟或复杂交互时，从 Surface Runtime API 3 的统一图层项开始实现。
 
 ## V9 数据
 

@@ -26,6 +26,11 @@ export interface SurfaceCaptureRequest {
   purpose: 'thumbnail' | 'export' | 'authoring'
   /** Named camera/frame/state selected by the author. */
   frameId?: string
+  /**
+   * A live editor snapshot must preserve the frame exactly as it is already
+   * rendered. Static/offscreen exports use the default prepared behavior.
+   */
+  dynamicPreparation?: 'prepare' | 'preserve-current'
   width?: number
   height?: number
 }

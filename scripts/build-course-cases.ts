@@ -496,10 +496,10 @@ function historyBlocks(component: ComponentCapability, fallbackAssetId: string):
       collapsedByDefault: false,
       blocks: [
         { id: 'history-tools-list', type: 'list', ordered: true, items: [
-          { id: 'tool-author', text: '谁写的？他与事件有什么关系？' },
-          { id: 'tool-time', text: '什么时候写的？是同时记录还是事后回忆？' },
-          { id: 'tool-seen', text: '材料亲自看见了什么？' },
-          { id: 'tool-missing', text: '它可能遗漏了谁的经验？' },
+          { id: 'tool-author', text: '谁写的？他与事件有什么关系？', level: 0 },
+          { id: 'tool-time', text: '什么时候写的？是同时记录还是事后回忆？', level: 0 },
+          { id: 'tool-seen', text: '材料亲自看见了什么？', level: 0 },
+          { id: 'tool-missing', text: '它可能遗漏了谁的经验？', level: 0 },
         ] },
       ],
     },

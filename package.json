@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "test": "vitest run && npm run test:agent-kit",
     "test:agent-kit": "node --test agent-kit/tests/agent-kit.test.mjs",
-    "test:compat": "vitest run tests/unit/projectV8Schema.test.ts tests/unit/publishedLesson.test.ts tests/unit/runtimeHostV2.test.ts tests/unit/componentProtocolV4.test.ts",
+    "test:protocol": "vitest run tests/unit/courseProjectProtocol.test.ts tests/unit/coursePublishPipeline.test.ts tests/unit/currentDynamicExecution.test.ts tests/unit/componentProtocolV4.test.ts tests/unit/surfaceRuntimeV1.test.ts",
     "prepare:e2e": "npm run build:course-cases && npm run build:renderer && npm run build:electron",
     "pretest:e2e": "npm run prepare:e2e",
     "test:e2e": "playwright test tests/e2e/course-studio.spec.ts",

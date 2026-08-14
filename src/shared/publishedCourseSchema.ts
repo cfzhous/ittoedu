@@ -65,6 +65,7 @@ const publishedComponentSchema = z.object({
 
 const publishedLayerBaseFields = {
   layerItemId: stableIdSchema,
+  label: z.string().trim().min(1).max(500),
   frame: layerFrameSchema,
   order: z.number().int().nonnegative(),
   visible: z.boolean(),
@@ -75,10 +76,10 @@ const publishedLayerBaseFields = {
 } as const
 
 const publishedRuntimeSchema = z.object({
-  protocol: z.enum(['surface-v1', 'legacy-runtime-v2']),
-  runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
+  protocol: z.literal('surface-v1'),
+  runtimeApiVersion: z.literal(3),
   enabled: z.boolean(),
-  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
+  renderMode: z.literal('dom'),
   code: publishedCourseExecutableCodeSchema,
   content: runtimeContentSchema,
   assets: z.record(z.string(), z.object({ assetId: stableIdSchema }).strict()),
@@ -87,25 +88,7 @@ const publishedRuntimeSchema = z.object({
     assetId: stableIdSchema,
     coverage: z.enum(['surface', 'scene']),
   }).strict().optional(),
-}).strict().superRefine((runtime, context) => {
-  const validPair =
-    (runtime.protocol === 'legacy-runtime-v2' && runtime.runtimeApiVersion === 2) ||
-    (runtime.protocol === 'surface-v1' && runtime.runtimeApiVersion === 3)
-  if (!validPair) {
-    context.addIssue({
-      code: 'custom',
-      path: ['runtimeApiVersion'],
-      message: 'Runtime protocol and API version do not match',
-    })
-  }
-  if (runtime.protocol === 'surface-v1' && runtime.renderMode !== 'dom') {
-    context.addIssue({
-      code: 'custom',
-      path: ['renderMode'],
-      message: 'Surface Runtime V1 currently supports DOM rendering only',
-    })
-  }
-})
+}).strict()
 
 export const publishedLayerItemSchema: z.ZodType<PublishedLayerItem> = z.discriminatedUnion('kind', [
   z.object({
@@ -235,15 +218,14 @@ export const publishedCourseSurfaceSchema: z.ZodType<PublishedCourseSurface> = z
 
 function hydrateLayer(item: PublishedLayerItem): LayerItem {
   if (item.kind === 'native') {
-    return { ...item, label: item.layerItemId, locked: false }
+    return { ...item, locked: false }
   }
   if (item.kind === 'component') {
-    return { ...item, label: item.layerItemId, locked: false }
+    return { ...item, locked: false }
   }
   const { code: _code, ...runtime } = item.runtime
   return {
     ...item,
-    label: item.layerItemId,
     locked: false,
     runtime: {
       ...runtime,
@@ -286,6 +268,7 @@ function hydrateSurface(surface: PublishedCourseSurface): CourseProjectDocument[
     ...surface,
     surfaceLayerItems: base.surfaceLayerItems,
     world: { ...surface.world, layerItems: surface.world.layerItems.map(hydrateLayer) },
+    relations: [],
   }
 }
 

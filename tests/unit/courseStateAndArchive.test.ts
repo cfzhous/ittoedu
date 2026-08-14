@@ -10,14 +10,10 @@ import { importComponentPackage } from '@/renderer/components/importComponentPac
 import {
   createCourseProjectArchive,
   createCourseProjectArchiveAsync,
-  importProjectV8ArchiveAsCourseProject,
-  migrateProjectV8ArchiveToCourseProjectV9,
   openCourseProjectArchive,
   openCourseProjectArchiveAsync,
 } from '@/renderer/project/courseProjectArchive'
-import { createProject } from '@/renderer/project/createProject'
-import { createProjectArchive } from '@/renderer/project/projectArchive'
-import { migrateProjectV8ToCourseProjectV9 } from '@/shared/courseProjectModel'
+import { createCourseProject } from '@/renderer/course/courseStudioModel'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { ComponentManifest } from '@/shared/componentTypes'
 
@@ -75,14 +71,11 @@ function expectStateError(
 }
 
 function makeCourseProject(): CourseProjectDocument {
-  const v8 = createProject({
+  return createCourseProject({
     id: 'archive-fixture',
     title: '课程工程归档',
     now: NOW,
-    includeDefaultController: false,
-    controls: 'none',
   })
-  return migrateProjectV8ToCourseProjectV9(v8)
 }
 
 function makeComponent() {
@@ -267,6 +260,15 @@ describe('declarative course state', () => {
 describe('Course Project V9 archive', () => {
   it('round-trips schema, exact asset bytes and embedded component bytes', () => {
     const data = makeArchiveData()
+    const controller = data.project.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))
+    if (!controller || controller.item.kind !== 'native' || controller.item.content.nativeType !== 'teacher-controller') {
+      throw new Error('Default teacher controller missing')
+    }
+    controller.item.content.data.showSceneProgress = false
+    controller.item.content.data.collapsible = true
+    controller.item.content.data.defaultCollapsed = true
     const bytes = createCourseProjectArchive(data, { mtime: NOW })
     const reopened = openCourseProjectArchive(bytes)
 
@@ -279,6 +281,15 @@ describe('Course Project V9 archive', () => {
     expect([...reopened.componentFiles[componentKey]!['runtime.js']!]).toEqual(
       [...data.componentFiles[componentKey]!['runtime.js']!],
     )
+    const reopenedController = reopened.project.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))
+    expect(reopenedController?.item).toMatchObject({
+      content: {
+        nativeType: 'teacher-controller',
+        data: { showSceneProgress: false, collapsible: true, defaultCollapsed: true },
+      },
+    })
     expect(createCourseProjectArchive(reopened, { mtime: NOW })).toEqual(bytes)
   })
 
@@ -327,42 +338,11 @@ describe('Course Project V9 archive', () => {
     }))).toThrow(/project\.json 校验失败/)
   })
 
-  it('never silently opens V8 and provides a deliberate V8-to-V9 migration', () => {
-    const v8 = createProject({
-      id: 'legacy-explicit',
-      title: '显式迁移',
-      now: NOW,
-      includeDefaultController: false,
-      controls: 'none',
+  it('rejects every non-V9 archive through the ordinary unsupported-version boundary', () => {
+    const v8Bytes = zipSync({
+      'project.json': strToU8(JSON.stringify({ schemaVersion: 8 })),
     })
-    const assetBytes = new Uint8Array([10, 20, 30])
-    v8.assets.legacy = {
-      id: 'legacy',
-      filename: 'legacy.png',
-      mimeType: 'image/png',
-      kind: 'image',
-      path: 'assets/legacy.bin',
-      byteLength: assetBytes.byteLength,
-      width: 1,
-      height: 1,
-    }
-    const v8Bytes = createProjectArchive({
-      project: v8,
-      assetFiles: { legacy: assetBytes },
-      componentFiles: {},
-    }, { mtime: NOW })
 
-    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/显式迁移/)
-    const imported = importProjectV8ArchiveAsCourseProject(v8Bytes)
-    expect(imported).toMatchObject({
-      project: { schemaVersion: 9, id: 'legacy-explicit', revision: 0 },
-    })
-    expect([...imported.assetFiles.legacy!]).toEqual([...assetBytes])
-
-    const migratedBytes = migrateProjectV8ArchiveToCourseProjectV9(v8Bytes, { mtime: NOW })
-    const reopened = openCourseProjectArchive(migratedBytes)
-    expect(reopened.project.schemaVersion).toBe(9)
-    expect(reopened.project.surfaces[0]).toMatchObject({ type: 'slide' })
-    expect([...reopened.assetFiles.legacy!]).toEqual([...assetBytes])
+    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/Course Project V9/)
   })
 })

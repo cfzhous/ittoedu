@@ -6,15 +6,13 @@ import {
   NativeLayerContentEditor,
 } from '@/renderer/course/CourseAuthoringControls'
 import {
-  createFormulaNode,
-  createImageNode,
-  createProject,
-  createShapeNode,
-  createTeacherControllerNode,
-  createTextNode,
-  createVideoNode,
-} from '@/renderer/project/createProject'
-import { migrateProjectV8ToCourseProjectV9 } from '@/shared/courseProjectModel'
+  formulaNode,
+  imageNode,
+  shapeNode,
+  teacherControllerNode,
+  textNode,
+  videoNode,
+} from '../helpers/nativeNodeFixtures'
 import type {
   ComponentLayerItem,
   LayerItem,
@@ -26,25 +24,25 @@ import type { SceneNode } from '@/shared/projectTypes'
 afterEach(cleanup)
 
 function nativeItem(node: SceneNode): NativeLayerItem {
-  const project = createProject({ includeDefaultController: false, controls: 'none' })
-  if (node.type === 'image' || node.type === 'video') {
-    project.assets[node.assetId] = {
-      id: node.assetId,
-      filename: node.type === 'image' ? `${node.assetId}.png` : `${node.assetId}.mp4`,
-      mimeType: node.type === 'image' ? 'image/png' : 'video/mp4',
-      kind: node.type,
-      path: `assets/${node.assetId}.${node.type === 'image' ? 'png' : 'mp4'}`,
-      byteLength: 10,
-      ...(node.type === 'image' ? { width: 10, height: 10 } : { duration: 3 }),
-    }
+  if (node.type === 'external-component') throw new Error('expected native node')
+  const data = Object.fromEntries(Object.entries(node).filter(([key]) => ![
+    'id', 'name', 'type', 'x', 'y', 'width', 'height', 'rotation', 'opacity',
+    'visible', 'locked', 'playbackInitialVisibility',
+  ].includes(key)))
+  return {
+    layerItemId: node.id,
+    label: node.name,
+    kind: 'native',
+    frame: { mode: 'absolute', x: node.x, y: node.y, width: node.width, height: node.height },
+    order: 0,
+    visible: node.visible,
+    locked: node.locked,
+    rotation: node.rotation,
+    opacity: node.opacity,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: node.playbackInitialVisibility,
+    content: { nativeType: node.type, data } as NativeLayerItem['content'],
   }
-  project.scenes[0]!.nodes = [node]
-  const migrated = migrateProjectV8ToCourseProjectV9(project)
-  const surface = migrated.surfaces[0]
-  if (!surface || surface.type !== 'slide') throw new Error('missing slide')
-  const item = surface.scenes[0]?.layerItems[0]
-  if (!item || item.kind !== 'native') throw new Error('missing native layer')
-  return item
 }
 
 function mutableChange<T extends LayerItem>(item: T) {
@@ -102,12 +100,12 @@ function componentItem(): ComponentLayerItem {
 describe('CourseAuthoringControls', () => {
   it('provides a teacher-facing editor for every native layer type', () => {
     const cases: Array<{ item: NativeLayerItem; label: string; control: string }> = [
-      { item: nativeItem(createTextNode({ id: 'text', text: '课堂文字' })), label: '文字内容与样式', control: '文字内容' },
-      { item: nativeItem(createFormulaNode({ id: 'formula' })), label: '公式内容与样式', control: '公式的文字说明' },
-      { item: nativeItem(createImageNode({ id: 'image', assetId: 'image-asset' })), label: '图片内容与样式', control: '图片适应方式' },
-      { item: nativeItem(createVideoNode({ id: 'video', assetId: 'video-asset' })), label: '视频内容与播放', control: '视频适应方式' },
-      { item: nativeItem(createShapeNode('rectangle', { id: 'shape' })), label: '形状样式', control: '填充颜色' },
-      { item: nativeItem(createTeacherControllerNode({ id: 'controller' })), label: '教师控制器设置', control: '控制器标题' },
+      { item: nativeItem(textNode({ id: 'text', text: '课堂文字' })), label: '文字内容与样式', control: '文字内容' },
+      { item: nativeItem(formulaNode({ id: 'formula' })), label: '公式内容与样式', control: '公式内容（线性输入）' },
+      { item: nativeItem(imageNode({ id: 'image', assetId: 'image-asset' })), label: '图片内容与样式', control: '图片适应方式' },
+      { item: nativeItem(videoNode({ id: 'video', assetId: 'video-asset' })), label: '视频内容与播放', control: '视频适应方式' },
+      { item: nativeItem(shapeNode('rectangle', { id: 'shape' })), label: '形状样式', control: '填充颜色' },
+      { item: nativeItem(teacherControllerNode({ id: 'controller' })), label: '教师控制器设置', control: '控制器标题' },
     ]
 
     for (const { item, label, control } of cases) {
@@ -157,50 +155,63 @@ describe('CourseAuthoringControls', () => {
     expect(onBoolean).toHaveBeenCalledWith(true)
   })
 
-  it('strictly validates formula JSON and never submits invalid structure', () => {
+  it('edits formulas with teacher-facing linear syntax and never exposes JSON', () => {
     const onCommit = vi.fn()
     render(
       <AuthoringValueEditor
         entry={{
           field: 'content.data.ast',
-          label: '公式结构',
+          label: '公式内容（线性输入）',
           valueKind: 'formula',
           currentValue: { type: 'token', value: 'x' },
         }}
         onCommit={onCommit}
       />,
     )
-    const editor = screen.getByLabelText('公式结构')
-    fireEvent.change(editor, { target: { value: '{"type":"fraction","numerator":{"type":"token","value":"1"}}' } })
-    fireEvent.click(screen.getByRole('button', { name: '应用公式结构' }))
+    const editor = screen.getByLabelText('公式内容（线性输入）')
+    expect(editor).toHaveValue('x')
+    expect(screen.queryByText(/"type"/u)).not.toBeInTheDocument()
+    fireEvent.change(editor, { target: { value: '\\frac{1}' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用公式' }))
     expect(onCommit).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert')).toHaveTextContent('公式结构不完整')
+    expect(screen.getByRole('alert')).toHaveTextContent('公式无法应用')
 
-    fireEvent.change(editor, { target: { value: '{"type":"token","value":"y"}' } })
-    fireEvent.click(screen.getByRole('button', { name: '应用公式结构' }))
-    expect(onCommit).toHaveBeenCalledWith({ type: 'token', value: 'y' })
+    fireEvent.change(editor, { target: { value: 'y^2' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用公式' }))
+    expect(onCommit).toHaveBeenCalledWith({
+      type: 'script',
+      base: { type: 'token', value: 'y' },
+      superscript: { type: 'token', value: '2' },
+    })
   })
 
   it('updates native content and delegates image and video replacement by exact field', () => {
-    const text = nativeItem(createTextNode({ id: 'text-update', text: '原文' }))
+    const text = nativeItem(textNode({ id: 'text-update', text: '原文' }))
     const textState = mutableChange(text)
     const { unmount } = render(<NativeLayerContentEditor item={text} onChange={textState.onChange} />)
     fireEvent.change(screen.getByLabelText('字号'), { target: { value: '54' } })
     fireEvent.blur(screen.getByLabelText('字号'))
     fireEvent.click(screen.getByRole('checkbox', { name: '加粗' }))
+    fireEvent.change(screen.getByLabelText('字体'), { target: { value: 'SimSun, serif' } })
+    fireEvent.change(screen.getByLabelText('文字颜色拾色器'), { target: { value: '#2563eb' } })
     expect(textState.current.content.nativeType).toBe('text')
     if (textState.current.content.nativeType !== 'text') throw new Error('wrong native type')
-    expect(textState.current.content.data.style).toMatchObject({ fontSize: 54, bold: true })
+    expect(textState.current.content.data.style).toMatchObject({
+      fontSize: 54,
+      bold: true,
+      fontFamily: 'SimSun, serif',
+      color: '#2563EB',
+    })
     unmount()
 
     const replace = vi.fn()
-    const image = nativeItem(createImageNode({ id: 'image-update', assetId: 'old-image' }))
+    const image = nativeItem(imageNode({ id: 'image-update', assetId: 'old-image' }))
     const renderedImage = render(<NativeLayerContentEditor item={image} onChange={() => undefined} onReplaceAsset={replace} />)
     fireEvent.click(screen.getByRole('button', { name: '替换素材' }))
     expect(replace).toHaveBeenCalledWith('content.data.assetId')
     renderedImage.unmount()
 
-    const video = nativeItem(createVideoNode({ id: 'video-update', assetId: 'old-video', poster: { mode: 'video-frame', time: 0 } }))
+    const video = nativeItem(videoNode({ id: 'video-update', assetId: 'old-video', poster: { mode: 'video-frame', time: 0 } }))
     render(<NativeLayerContentEditor item={video} onChange={() => undefined} onReplaceAsset={replace} />)
     fireEvent.click(screen.getByRole('button', { name: '替换素材' }))
     expect(replace).toHaveBeenLastCalledWith('content.data.assetId')

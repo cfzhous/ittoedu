@@ -10,7 +10,6 @@ import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
 } from '@/renderer/components/componentPackageStore'
-import { createProject } from '@/renderer/project/createProject'
 
 function manifest(overrides: Partial<ComponentManifest> = {}): ComponentManifest {
   return {
@@ -234,16 +233,11 @@ describe('ComponentPackageStore', () => {
 
   it('converts between serializable archive files and Store package data', () => {
     const parsed = parseComponentPackageFiles(filesFor())
-    const project = createProject({
-      now: '2026-07-20T00:00:00.000Z',
-      idFactory: () => 'fixed',
-    })
-    project.componentPackages[parsed.manifest.id] = parsed.metadata
     const archiveFiles = componentPackagesToArchiveFiles({
       [parsed.manifest.id]: parsed,
     })
     const packages = componentPackagesFromArchive(
-      project,
+      { componentPackages: { [parsed.manifest.id]: parsed.metadata } },
       archiveFiles,
     )
 

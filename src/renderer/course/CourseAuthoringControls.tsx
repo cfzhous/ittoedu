@@ -1,8 +1,13 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
-import { formulaAstSchema } from '../../shared/projectSchema'
+import {
+  formulaAstToAccessibleText,
+  parseFormulaLinear,
+  serializeFormulaAst,
+} from '../../shared/formulaLinear'
 import {
   SHAPE_TYPES,
   type ArrowHead,
+  type FormulaAstNode,
   type ImageFit,
   type ShapeLineStyle,
   type ShapeType,
@@ -34,7 +39,10 @@ export interface AuthoringValueEditorProps {
 }
 
 function valueAsDraft(entry: AuthoringValueEditorEntry): string {
-  if (entry.valueKind === 'object' || entry.valueKind === 'array' || entry.valueKind === 'formula') {
+  if (entry.valueKind === 'formula') {
+    return serializeFormulaAst(entry.currentValue as FormulaAstNode)
+  }
+  if (entry.valueKind === 'object' || entry.valueKind === 'array') {
     return JSON.stringify(entry.currentValue, null, 2)
   }
   if (entry.valueKind === 'null') return 'null'
@@ -87,28 +95,20 @@ export function AuthoringValueEditor({
     try {
       value = JSON.parse(draft) as unknown
     } catch {
-      setError(`${valueKindName(entry.valueKind)}不是有效 JSON，请检查括号和引号。`)
+      setError(`${valueKindName(entry.valueKind)}格式不正确，请检查括号、引号和逗号。`)
       return
     }
     if (entry.valueKind === 'object' && (typeof value !== 'object' || value === null || Array.isArray(value))) {
-      setError('请输入一个 JSON 对象。')
+      setError('请输入键值形式的结构化内容。')
       return
     }
     if (entry.valueKind === 'array' && !Array.isArray(value)) {
-      setError('请输入一个 JSON 列表。')
+      setError('请输入列表形式的结构化内容。')
       return
     }
     if (entry.valueKind === 'null' && value !== null) {
       setError('空值只能保留为 null。')
       return
-    }
-    if (entry.valueKind === 'formula') {
-      const parsed = formulaAstSchema.safeParse(value)
-      if (!parsed.success) {
-        setError('公式结构不完整，请检查节点类型和必填内容。')
-        return
-      }
-      value = parsed.data
     }
     setError(null)
     onCommit(value)
@@ -151,10 +151,48 @@ export function AuthoringValueEditor({
     )
   }
 
+  if (entry.valueKind === 'formula') {
+    const commitFormula = () => {
+      try {
+        onCommit(parseFormulaLinear(draft))
+        setError(null)
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '公式无法解析。')
+      }
+    }
+    return (
+      <div className="course-field course-formula-field" data-field={entry.field}>
+        <label htmlFor={inputId}>{entry.label}</label>
+        <input
+          id={inputId}
+          value={draft}
+          disabled={entry.disabled}
+          spellCheck={false}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            setError(null)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              commitFormula()
+            }
+          }}
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={error ? `${inputId}-error` : `${inputId}-help`}
+        />
+        <span id={`${inputId}-help`} className="course-field-help">
+          例如 x^2、a/b、\sqrt&#123;x&#125;，应用后仍保存为可编辑公式。
+        </span>
+        <button type="button" disabled={entry.disabled} onClick={commitFormula}>应用公式</button>
+        {error && <span id={`${inputId}-error`} role="alert">公式无法应用：{error}</span>}
+      </div>
+    )
+  }
+
   if (
     entry.valueKind === 'object' ||
     entry.valueKind === 'array' ||
-    entry.valueKind === 'formula' ||
     entry.valueKind === 'null'
   ) {
     return (
@@ -165,7 +203,7 @@ export function AuthoringValueEditor({
           value={draft}
           disabled={entry.disabled}
           spellCheck={false}
-          rows={entry.valueKind === 'formula' ? 8 : 5}
+          rows={5}
           onChange={(event) => {
             setDraft(event.target.value)
             setError(null)
@@ -174,7 +212,7 @@ export function AuthoringValueEditor({
           aria-describedby={error ? `${inputId}-error` : undefined}
         />
         <button type="button" disabled={entry.disabled} onClick={commitJson}>
-          {entry.valueKind === 'formula' ? '应用公式结构' : '应用更改'}
+          应用更改
         </button>
         {error && <span id={`${inputId}-error`} role="alert">{error}</span>}
       </div>
@@ -252,6 +290,129 @@ function SelectField<T extends string>({
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
+    </div>
+  )
+}
+
+const teacherFontOptions: ReadonlyArray<Option<string>> = [
+  { value: '"Microsoft YaHei", "PingFang SC", sans-serif', label: '微软雅黑' },
+  { value: 'DengXian, "Microsoft YaHei", sans-serif', label: '等线' },
+  { value: 'SimSun, serif', label: '宋体' },
+  { value: 'SimHei, sans-serif', label: '黑体' },
+  { value: 'KaiTi, serif', label: '楷体' },
+  { value: 'Arial, sans-serif', label: 'Arial' },
+]
+
+function FontFamilyField({
+  field,
+  value,
+  disabled,
+  onCommit,
+}: {
+  field: string
+  value: string
+  disabled?: boolean
+  onCommit(value: string): void
+}) {
+  const options = teacherFontOptions.some((option) => option.value === value)
+    ? teacherFontOptions
+    : [{ value, label: '当前工程字体' }, ...teacherFontOptions]
+  return (
+    <SelectField
+      field={field}
+      label="字体"
+      value={value}
+      options={options}
+      disabled={disabled}
+      onCommit={onCommit}
+    />
+  )
+}
+
+function ColorField({
+  field,
+  label,
+  value,
+  disabled,
+  allowEmpty = false,
+  onCommit,
+}: {
+  field: string
+  label: string
+  value: string | null
+  disabled?: boolean
+  allowEmpty?: boolean
+  onCommit(value: string | null): void
+}) {
+  const inputId = useId()
+  const [draft, setDraft] = useState(value ?? '')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    setDraft(value ?? '')
+    setError(null)
+  }, [value, field])
+  const commitDraft = () => {
+    if (allowEmpty && draft.trim() === '') {
+      onCommit(null)
+      setError(null)
+      return
+    }
+    if (!/^#[0-9a-f]{6}$/iu.test(draft.trim())) {
+      setError('请输入六位十六进制颜色，例如 #2563EB。')
+      return
+    }
+    const next = draft.trim().toUpperCase()
+    setDraft(next)
+    setError(null)
+    onCommit(next)
+  }
+  return (
+    <div className="course-field course-color-field" data-field={field}>
+      <label htmlFor={inputId}>{label}</label>
+      <div className="course-color-control">
+        <input
+          id={inputId}
+          className="course-color-swatch"
+          type="color"
+          value={value ?? '#000000'}
+          disabled={disabled || value === null}
+          aria-label={`${label}拾色器`}
+          onChange={(event) => {
+            const next = event.currentTarget.value.toUpperCase()
+            setDraft(next)
+            setError(null)
+            onCommit(next)
+          }}
+        />
+        <input
+          value={draft}
+          disabled={disabled}
+          placeholder={allowEmpty ? '无' : '#000000'}
+          aria-label={`${label}颜色值`}
+          onChange={(event) => {
+            setDraft(event.currentTarget.value)
+            setError(null)
+          }}
+          onBlur={commitDraft}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+          }}
+        />
+        {allowEmpty && (
+          <button
+            type="button"
+            disabled={disabled || value === null}
+            onClick={() => {
+              setDraft('')
+              setError(null)
+              onCommit(null)
+            }}
+          >
+            清除
+          </button>
+        )}
+      </div>
+      {error && <span role="alert">{error}</span>}
     </div>
   )
 }
@@ -372,15 +533,15 @@ export function NativeLayerContentEditor({
           })}
         />
         <EditorGroup title="文字样式">
-          <AuthoringValueEditor entry={scalarEntry('content.data.style.fontFamily', '字体', 'string', data.style.fontFamily, disabled)} onCommit={(value) => commitStyle('fontFamily', String(value))} />
+          <FontFamilyField field="content.data.style.fontFamily" value={data.style.fontFamily} disabled={disabled} onCommit={(value) => commitStyle('fontFamily', value)} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.fontSize', '字号', 'number', data.style.fontSize, disabled)} onCommit={(value) => commitStyle('fontSize', Number(value))} />
-          <AuthoringValueEditor entry={scalarEntry('content.data.style.color', '文字颜色', 'string', data.style.color, disabled)} onCommit={(value) => commitStyle('color', String(value))} />
+          <ColorField field="content.data.style.color" label="文字颜色" value={data.style.color} disabled={disabled} onCommit={(value) => { if (value) commitStyle('color', value) }} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.bold', '加粗', 'boolean', data.style.bold, disabled)} onCommit={(value) => commitStyle('bold', Boolean(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.italic', '斜体', 'boolean', data.style.italic, disabled)} onCommit={(value) => commitStyle('italic', Boolean(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.underline', '下划线', 'boolean', data.style.underline, disabled)} onCommit={(value) => commitStyle('underline', Boolean(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.strike', '删除线', 'boolean', data.style.strike, disabled)} onCommit={(value) => commitStyle('strike', Boolean(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.emphasis', '着重号', 'boolean', data.style.emphasis, disabled)} onCommit={(value) => commitStyle('emphasis', Boolean(value))} />
-          <AuthoringValueEditor entry={scalarEntry('content.data.style.highlightColor', '强调色（留空为无）', 'string', data.style.highlightColor ?? '', disabled)} onCommit={(value) => commitStyle('highlightColor', String(value).trim() || null)} />
+          <ColorField field="content.data.style.highlightColor" label="强调色" value={data.style.highlightColor ?? null} allowEmpty disabled={disabled} onCommit={(value) => commitStyle('highlightColor', value)} />
           <SelectField field="content.data.style.align" label="水平对齐" value={data.style.align} options={textAlignOptions} disabled={disabled} onCommit={(value) => commitStyle('align', value)} />
           <SelectField field="content.data.style.verticalAlign" label="垂直对齐" value={data.style.verticalAlign} options={verticalAlignOptions} disabled={disabled} onCommit={(value) => commitStyle('verticalAlign', value)} />
           <SelectField field="content.data.style.writingMode" label="排文方向" value={data.style.writingMode} options={writingModeOptions} disabled={disabled} onCommit={(value) => commitStyle('writingMode', value)} />
@@ -388,7 +549,7 @@ export function NativeLayerContentEditor({
           <AuthoringValueEditor entry={scalarEntry('content.data.style.lineSpacing', '行距', 'number', data.style.lineSpacing, disabled)} onCommit={(value) => commitStyle('lineSpacing', Number(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.letterSpacing', '字距', 'number', data.style.letterSpacing, disabled)} onCommit={(value) => commitStyle('letterSpacing', Number(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.padding', '内边距', 'number', data.style.padding, disabled)} onCommit={(value) => commitStyle('padding', Number(value))} />
-          <AuthoringValueEditor entry={scalarEntry('content.data.style.backgroundColor', '背景颜色', 'string', data.style.backgroundColor, disabled)} onCommit={(value) => commitStyle('backgroundColor', String(value))} />
+          <ColorField field="content.data.style.backgroundColor" label="背景颜色" value={data.style.backgroundColor} disabled={disabled} onCommit={(value) => { if (value) commitStyle('backgroundColor', value) }} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.backgroundOpacity', '背景不透明度', 'number', data.style.backgroundOpacity, disabled)} onCommit={(value) => commitStyle('backgroundOpacity', Number(value))} />
           <AuthoringValueEditor entry={scalarEntry('content.data.style.cornerRadius', '圆角', 'number', data.style.cornerRadius, disabled)} onCommit={(value) => commitStyle('cornerRadius', Number(value))} />
         </EditorGroup>
@@ -400,15 +561,19 @@ export function NativeLayerContentEditor({
     const data = item.content.data
     return (
       <div className="course-authoring-controls" aria-label="公式内容与样式">
-        <AuthoringValueEditor entry={scalarEntry('content.data.accessibleText', '公式的文字说明', 'string', data.accessibleText, disabled)} onCommit={(value) => update('formula', (content) => {
-          if (content.nativeType === 'formula') content.data.accessibleText = String(value)
+        <AuthoringValueEditor entry={scalarEntry('content.data.ast', '公式内容（线性输入）', 'formula', data.ast, disabled)} onCommit={(value) => update('formula', (content) => {
+          if (content.nativeType !== 'formula') return
+          const previousAutomatic = content.data.accessibleText.replace(/\s+/gu, '') === formulaAstToAccessibleText(content.data.ast).replace(/\s+/gu, '')
+          const ast = value as FormulaAstNode
+          content.data.ast = ast
+          if (previousAutomatic) content.data.accessibleText = formulaAstToAccessibleText(ast)
         })} />
-        <AuthoringValueEditor entry={scalarEntry('content.data.ast', '公式结构', 'formula', data.ast, disabled)} onCommit={(value) => update('formula', (content) => {
-          if (content.nativeType === 'formula') content.data.ast = formulaAstSchema.parse(value)
+        <AuthoringValueEditor entry={scalarEntry('content.data.accessibleText', '公式朗读说明', 'string', data.accessibleText, disabled)} onCommit={(value) => update('formula', (content) => {
+          if (content.nativeType === 'formula') content.data.accessibleText = String(value)
         })} />
         <EditorGroup title="公式样式">
           <AuthoringValueEditor entry={scalarEntry('content.data.style.fontSize', '字号', 'number', data.style.fontSize, disabled)} onCommit={(value) => update('formula', (content) => { if (content.nativeType === 'formula') content.data.style.fontSize = Number(value) })} />
-          <AuthoringValueEditor entry={scalarEntry('content.data.style.color', '颜色', 'string', data.style.color, disabled)} onCommit={(value) => update('formula', (content) => { if (content.nativeType === 'formula') content.data.style.color = String(value) })} />
+          <ColorField field="content.data.style.color" label="颜色" value={data.style.color} disabled={disabled} onCommit={(value) => update('formula', (content) => { if (content.nativeType === 'formula' && value) content.data.style.color = value })} />
           <SelectField field="content.data.style.align" label="对齐" value={data.style.align} options={textAlignOptions} disabled={disabled} onCommit={(value) => update('formula', (content) => { if (content.nativeType === 'formula') content.data.style.align = value })} />
         </EditorGroup>
       </div>
@@ -480,9 +645,9 @@ export function NativeLayerContentEditor({
     return (
       <div className="course-authoring-controls" aria-label="形状样式">
         <SelectField field="content.data.shapeType" label="形状" value={data.shapeType} options={SHAPE_TYPES.map((value) => ({ value, label: shapeTypeLabel(value) }))} disabled={disabled} onCommit={(value) => update('shape', (content) => { if (content.nativeType === 'shape') content.data.shapeType = value })} />
-        <AuthoringValueEditor entry={scalarEntry('content.data.style.fillColor', '填充颜色', 'string', data.style.fillColor, disabled)} onCommit={(value) => update('shape', (content) => { if (content.nativeType === 'shape') content.data.style.fillColor = String(value) })} />
+        <ColorField field="content.data.style.fillColor" label="填充颜色" value={data.style.fillColor} disabled={disabled} onCommit={(value) => update('shape', (content) => { if (content.nativeType === 'shape' && value) content.data.style.fillColor = value })} />
         <AuthoringValueEditor entry={scalarEntry('content.data.style.fillOpacity', '填充不透明度', 'number', data.style.fillOpacity, disabled)} onCommit={(value) => styleNumber('fillOpacity', value)} />
-        <AuthoringValueEditor entry={scalarEntry('content.data.style.borderColor', '边框颜色', 'string', data.style.borderColor, disabled)} onCommit={(value) => update('shape', (content) => { if (content.nativeType === 'shape') content.data.style.borderColor = String(value) })} />
+        <ColorField field="content.data.style.borderColor" label="边框颜色" value={data.style.borderColor} disabled={disabled} onCommit={(value) => update('shape', (content) => { if (content.nativeType === 'shape' && value) content.data.style.borderColor = value })} />
         <AuthoringValueEditor entry={scalarEntry('content.data.style.borderOpacity', '边框不透明度', 'number', data.style.borderOpacity, disabled)} onCommit={(value) => styleNumber('borderOpacity', value)} />
         <AuthoringValueEditor entry={scalarEntry('content.data.style.borderWidth', '边框粗细', 'number', data.style.borderWidth, disabled)} onCommit={(value) => styleNumber('borderWidth', value)} />
         <SelectField field="content.data.style.lineStyle" label="边框线型" value={data.style.lineStyle} options={lineStyleOptions} disabled={disabled} onCommit={(value) => update('shape', (content) => { if (content.nativeType === 'shape') content.data.style.lineStyle = value })} />

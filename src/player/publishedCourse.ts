@@ -63,26 +63,23 @@ function restoreLayerItem(item: PublishedLayerItem): LayerItem {
   if (item.kind === 'native') {
     return {
       ...structuredClone(item),
-      label: item.layerItemId,
       locked: false,
     }
   }
   if (item.kind === 'component') {
     return {
       ...structuredClone(item),
-      label: item.layerItemId,
       locked: false,
     }
   }
   const { code, ...runtime } = item.runtime
   return {
     ...structuredClone(item),
-    label: item.layerItemId,
     locked: false,
     kind: 'runtime',
     runtime: {
       ...structuredClone(runtime),
-      source: decodePublishedCourseCode(code, `Runtime ${item.layerItemId}`),
+      source: decodePublishedCourseCode(code, `互动内容“${item.label}”`),
     },
   }
 }
@@ -133,6 +130,7 @@ function restoreSurface(surface: PublishedCourseSurface): CourseSurfaceDocument 
       layerItems: surface.world.layerItems.map(restoreLayerItem),
     },
     camera: structuredClone(surface.camera),
+    relations: [],
     semanticZoom: structuredClone(surface.semanticZoom),
   }
 }

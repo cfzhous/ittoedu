@@ -1,7 +1,6 @@
 import type {
   AudioChannel,
   ProjectAudioSettings,
-  ProjectDocument,
   SoundDefinition,
   VideoNode,
 } from '../shared/projectTypes'
@@ -27,6 +26,12 @@ export type SoundChannel = Exclude<AudioChannel, 'video'>
 export type AudioLifetime = 'scene' | 'course'
 export type AudioIfPlaying = 'restart' | 'continue' | 'ignore'
 export type AudioManagerProjectSettings = ProjectAudioSettings
+/** The audio runtime only needs the V8/V9 shared media contract. */
+export interface AudioManagerCourseDocument {
+  media: {
+    audio: ProjectAudioSettings
+  }
+}
 export type AudioTarget = AudioActionTarget
 export type { AudioChannel, SoundDefinition }
 
@@ -76,6 +81,10 @@ export interface CourseAudioApi {
   muted(): boolean
   setMuted(value: boolean): void
   toggleMuted(): boolean
+  applyCourseMuteToMedia(
+    elements: Iterable<HTMLMediaElement>,
+    courseMuted: boolean,
+  ): void
   masterVolume(): number
   setMasterVolume(value: number): void
   channelVolume(channel: AudioChannel): number
@@ -95,6 +104,10 @@ export interface AudioManagerOptions {
   mode?: RuntimeExecutionMode
   createAudio?: (source: string) => HTMLAudioElement
   unlockTarget?: EventTarget
+  /** Root whose current and later media elements obey the course mute authority. */
+  mediaRoot?: Node & ParentNode
+  /** Narrows observation when the root also contains authoring-only media. */
+  mediaSelector?: string
   maxConcurrent?: Partial<Record<'sfx' | 'ui', number>>
 }
 
@@ -151,7 +164,7 @@ function isSoundChannel(value: unknown): value is SoundChannel {
   return value === 'music' || value === 'narration' || value === 'sfx' || value === 'ui'
 }
 
-function normalizedSettings(project: ProjectDocument): AudioManagerProjectSettings {
+function normalizedSettings(project: AudioManagerCourseDocument): AudioManagerProjectSettings {
   const raw = project.media?.audio
   const rawChannels = raw?.channelVolumes
   const channelVolumes = Object.fromEntries(
@@ -223,6 +236,10 @@ export class AudioManager implements CourseAudioApi {
   private readonly maxConcurrent: Record<'sfx' | 'ui', number>
   private readonly voices: ManagedVoice[] = []
   private readonly videos = new Set<RegisteredVideo>()
+  private readonly mediaMutedBeforeCourseMute = new Map<HTMLMediaElement, boolean>()
+  private readonly mediaRoot?: Node & ParentNode
+  private readonly mediaSelector: string
+  private readonly mediaObserver: MutationObserver | null
   private readonly eventDisposers: RuntimeEventDisposer[] = []
   private readonly mutedSounds = new Set<string>()
   private readonly mutedChannels = new Set<SoundChannel>()
@@ -243,7 +260,7 @@ export class AudioManager implements CourseAudioApi {
   private unlockListenersInstalled = false
 
   constructor(
-    private readonly project: ProjectDocument,
+    project: AudioManagerCourseDocument,
     private readonly resolveAssetUrl: (assetId: string) => string,
     private readonly events: CourseEventBus,
     options: AudioManagerOptions = {},
@@ -254,10 +271,26 @@ export class AudioManager implements CourseAudioApi {
     this.captureMode = options.mode === 'capture'
     this.createAudio = options.createAudio ?? defaultAudioFactory
     this.unlockTarget = options.unlockTarget
+    this.mediaRoot = options.mediaRoot
+    this.mediaSelector = options.mediaSelector ?? 'audio, video'
     this.maxConcurrent = {
       sfx: positiveInteger(options.maxConcurrent?.sfx, 8),
       ui: positiveInteger(options.maxConcurrent?.ui, 4),
     }
+    const mediaDocument = this.mediaRoot && 'defaultView' in this.mediaRoot
+      ? this.mediaRoot as Document
+      : this.mediaRoot && 'ownerDocument' in this.mediaRoot
+        ? this.mediaRoot.ownerDocument
+        : undefined
+    const MediaObserver = mediaDocument?.defaultView?.MutationObserver
+    this.mediaObserver = this.mediaRoot && MediaObserver
+      ? new MediaObserver(() => this.syncObservedMedia())
+      : null
+    if (this.mediaRoot) {
+      this.mediaObserver?.observe(this.mediaRoot, { childList: true, subtree: true })
+    }
+    this.mediaRoot?.addEventListener('play', this.handleObservedMediaState, true)
+    this.mediaRoot?.addEventListener('volumechange', this.handleObservedMediaState, true)
 
     this.eventDisposers.push(
       events.on<{ sceneId?: string }>('scene:enter', (detail) => {
@@ -275,6 +308,7 @@ export class AudioManager implements CourseAudioApi {
       events.on('course:destroy', () => this.destroy()),
     )
     this.installUnlockListeners()
+    this.syncObservedMedia()
   }
 
   muted(): boolean {
@@ -285,12 +319,51 @@ export class AudioManager implements CourseAudioApi {
     if (this.destroyed || this.mutedValue === value) return
     this.mutedValue = value
     this.applyAllVolumes()
+    if (value) this.syncObservedMedia()
+    else this.restoreMediaMutedBeforeCourseMute()
     this.emitChange()
   }
 
   toggleMuted(): boolean {
     this.setMuted(!this.mutedValue)
     return this.mutedValue
+  }
+
+  /**
+   * Applies the course-level mute authority to media elements which may live
+   * inside a Runtime or Component. Registered Native videos keep using their
+   * authored `muted` value; unmanaged media is restored to its own prior value
+   * when course sound is turned back on.
+   */
+  applyCourseMuteToMedia(
+    elements: Iterable<HTMLMediaElement>,
+    courseMuted: boolean,
+  ): void {
+    if (this.destroyed) return
+    const current = [...elements]
+    const registeredByElement = new Map<HTMLMediaElement, RegisteredVideo>(
+      [...this.videos].map((registration) => [registration.element, registration]),
+    )
+
+    if (courseMuted) {
+      for (const element of current) {
+        const registration = registeredByElement.get(element)
+        if (registration) {
+          this.applyVideoVolume(registration)
+          continue
+        }
+        if (!this.mediaMutedBeforeCourseMute.has(element)) {
+          this.mediaMutedBeforeCourseMute.set(element, element.muted)
+        }
+        if (!element.muted) element.muted = true
+      }
+      return
+    }
+
+    for (const registration of registeredByElement.values()) {
+      this.applyVideoVolume(registration)
+    }
+    this.restoreMediaMutedBeforeCourseMute()
   }
 
   masterVolume(): number {
@@ -579,6 +652,10 @@ export class AudioManager implements CourseAudioApi {
     this.backgroundDuckTokens.clear()
     this.backgroundPauseTokens.clear()
     this.backgroundPausedVoices.clear()
+    this.restoreMediaMutedBeforeCourseMute()
+    this.mediaObserver?.disconnect()
+    this.mediaRoot?.removeEventListener('play', this.handleObservedMediaState, true)
+    this.mediaRoot?.removeEventListener('volumechange', this.handleObservedMediaState, true)
     this.videos.clear()
     this.removeUnlockListeners()
     this.eventDisposers.splice(0).forEach((dispose) => dispose())
@@ -873,6 +950,35 @@ export class AudioManager implements CourseAudioApi {
       video.volume * this.masterVolumeValue * this.settings.channelVolumes.video,
       1,
     )
+  }
+
+  private restoreMediaMutedBeforeCourseMute(): void {
+    for (const [element, muted] of this.mediaMutedBeforeCourseMute) {
+      element.muted = muted
+    }
+    this.mediaMutedBeforeCourseMute.clear()
+  }
+
+  private observedMedia(): HTMLMediaElement[] {
+    if (!this.mediaRoot) return []
+    return [...this.mediaRoot.querySelectorAll<HTMLMediaElement>(this.mediaSelector)]
+  }
+
+  private syncObservedMedia(): void {
+    if (!this.mutedValue || this.destroyed) return
+    this.applyCourseMuteToMedia(this.observedMedia(), true)
+  }
+
+  private handleObservedMediaState = (event: Event): void => {
+    if (!this.mutedValue || this.destroyed) return
+    const Media = this.mediaRoot && 'defaultView' in this.mediaRoot
+      ? (this.mediaRoot as Document).defaultView?.HTMLMediaElement
+      : this.mediaRoot && 'ownerDocument' in this.mediaRoot
+        ? this.mediaRoot.ownerDocument?.defaultView?.HTMLMediaElement
+        : undefined
+    if (!Media || !(event.target instanceof Media)) return
+    if (!event.target.matches(this.mediaSelector)) return
+    this.applyCourseMuteToMedia([event.target], true)
   }
 
   private pauseMusicForBackgroundInterruption(): void {

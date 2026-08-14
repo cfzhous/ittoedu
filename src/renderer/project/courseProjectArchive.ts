@@ -1,7 +1,6 @@
 import { strToU8, unzip, unzipSync, zip, zipSync } from 'fflate'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { migrateProjectV8ToCourseProjectV9 } from '@/shared/courseProjectModel'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { UserFacingError } from '@/shared/errors'
 import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
@@ -11,9 +10,6 @@ import {
   componentPackageKey,
   isArchiveDirectory,
 } from './archivePath'
-import {
-  openProjectArchive,
-} from './projectArchive'
 
 const PROJECT_DOCUMENT_PATH = 'project.json'
 const MAX_COURSE_PROJECT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -86,18 +82,10 @@ function readCourseProject(bytes: Uint8Array): CourseProjectDocument {
   const schemaVersion = declaredSchemaVersion(value)
   if (schemaVersion !== 9) {
     const cause = new UnsupportedCourseProjectVersionError(schemaVersion)
-    if (schemaVersion === 8) {
-      throw new UserFacingError(
-        '需要显式迁移旧工程',
-        '该文件是 Project V8，不会在打开时静默改写为 Course Project V9；请显式迁移。',
-        '请使用明确的 V8 → V9 迁移命令，并将结果另存为新文件。',
-        { cause },
-      )
-    }
     throw new UserFacingError(
       '课程工程版本不支持',
       `该文件的格式版本为 ${schemaVersion ?? '未声明'}，当前只支持 Course Project V9。`,
-      '请使用对应版本的编辑器打开，或先执行受支持的显式迁移。',
+      '请选择当前产品生成的 Course Project V9 工程。',
       { cause },
     )
   }
@@ -459,30 +447,4 @@ export async function openCourseProjectArchiveAsync(
     }
   })
   return parseCourseProjectArchiveFiles(files)
-}
-
-/**
- * Deliberate V8 import boundary. Normal V9 open never calls this function.
- * The returned data can be reviewed before it is saved as a new V9 archive.
- */
-export function importProjectV8ArchiveAsCourseProject(
-  bytes: Uint8Array,
-): CourseProjectArchiveData {
-  const legacy = openProjectArchive(bytes)
-  return {
-    project: migrateProjectV8ToCourseProjectV9(legacy.project),
-    assetFiles: legacy.assetFiles,
-    componentFiles: legacy.componentFiles,
-  }
-}
-
-/** Explicitly converts a V8 archive into new V9 archive bytes. */
-export function migrateProjectV8ArchiveToCourseProjectV9(
-  bytes: Uint8Array,
-  options: Pick<CreateCourseProjectArchiveOptions, 'mtime'> = {},
-): Uint8Array {
-  return createCourseProjectArchive(
-    importProjectV8ArchiveAsCourseProject(bytes),
-    options,
-  )
 }

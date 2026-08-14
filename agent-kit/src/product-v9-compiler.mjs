@@ -362,6 +362,7 @@ function spatialSurface(surface, options, componentPackages, locations) {
       home: { x: 0, y: 0, zoom: 1 },
       frames: [{ id: cameraFrameId, name: surface.id, x: 0, y: 0, zoom: 1 }],
     },
+    relations: [],
     semanticZoom: [],
   }
 }

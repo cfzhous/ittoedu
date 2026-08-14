@@ -328,7 +328,7 @@ export interface ComponentPackageData {
   /** Recomputed by package parsing; raw test/build sources may omit the cache. */
   readonly contentSha256?: string
   thumbnailUrl?: string
-  /** Import provenance used to lock exact executable bytes in Project V8. */
+  /** Import provenance used to lock the exact executable bytes in an authoring project. */
   provenance?: {
     sha256: string
     importedAt: string

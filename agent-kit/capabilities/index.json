@@ -1,26 +1,25 @@
 {
   "cards": [
     {
-      "authoringBoundary": "The V9 document is authoritative; Authoring Inventory is derived and V8 is import-only.",
+      "authoringBoundary": "The V9 document is the only editable project authority; Authoring Inventory is derived.",
       "id": "project:course-v9",
       "inputs": [
         "CourseProjectDocument"
       ],
       "label": "Course Project V9",
       "limitations": [
-        "V1-V7 are not reopened by the current V9 path."
+        "Only Course Project V9 archives are accepted by the editor."
       ],
       "outputs": [
         ".h5lesson",
         "Authoring Inventory"
       ],
-      "purpose": "Persist an editable multi-surface course with stable identities and explicit V8 migration.",
+      "purpose": "Create and persist an editable multi-surface V9 course with stable identities.",
       "source": "../../src/shared/courseProjectTypes.ts",
       "status": "stable",
       "tags": [
         "project",
         "archive",
-        "migration",
         "v9"
       ]
     },

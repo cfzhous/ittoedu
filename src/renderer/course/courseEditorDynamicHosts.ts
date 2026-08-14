@@ -1,4 +1,3 @@
-import { evaluateAssessment } from '../../shared/assessmentEvaluators'
 import type {
   ComponentAuthoringTarget,
   ComponentCreateContextV4Dom,
@@ -11,21 +10,14 @@ import type { ComponentLayerItem, FlowBlock, RuntimeLayerItem } from '../../shar
 import type { ExternalComponentNode } from '../../shared/projectTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,
-  RuntimeCreateContextDom,
-  RuntimeDefinition,
-  RuntimeInstanceLifecycle,
   RuntimePresentationApi,
 } from '../../shared/runtimeTypes'
 import { ComponentAuthoringTargetRegistry } from '../../player/ComponentAuthoringTargetRegistry'
 import { ComponentRegistry } from '../../player/ComponentRegistry'
 import { CourseEventBus } from '../../player/CourseEventBus'
-import { CourseStateStore } from '../../player/CourseStateStore'
 import type { DeclarativeCourseState } from '../../player/DeclarativeCourseState'
-import { RuntimeAuthoringTargetRegistry } from '../../player/RuntimeAuthoringTargetRegistry'
-import { RuntimeRegistry } from '../../player/RuntimeRegistry'
-import type { RuntimeHost } from '../../player/RuntimeHost'
 import type { RenderedNodeHandle } from '../../player/renderNode'
-import type { LegacyMiniPhaserStage } from '../../player/surfaces/legacyMiniPhaserStage'
+import type { ComponentMiniPhaserStage } from '../../player/surfaces/componentMiniPhaserStage'
 import { SurfaceRuntimeAuthoringBridge } from '../../player/SurfaceRuntimeAuthoring'
 import { SurfaceRuntimeRegistry } from '../../player/SurfaceRuntimeRegistry'
 import type {
@@ -38,16 +30,14 @@ import type {
   SlideItemMountContext,
 } from '../../player/surfaces/slide/SlideSurfaceHost'
 
-async function loadLegacyPhaserSupport() {
-  const [runtimeHostModule, renderNodeModule, stageModule] = await Promise.all([
-    import('../../player/RuntimeHost'),
+async function loadComponentPhaserSupport() {
+  const [renderNodeModule, stageModule] = await Promise.all([
     import('../../player/renderNode'),
-    import('../../player/surfaces/legacyMiniPhaserStage'),
+    import('../../player/surfaces/componentMiniPhaserStage'),
   ])
   return {
-    RuntimeHost: runtimeHostModule.RuntimeHost,
     renderNode: renderNodeModule.renderNode,
-    LegacyMiniPhaserStage: stageModule.LegacyMiniPhaserStage,
+    ComponentMiniPhaserStage: stageModule.ComponentMiniPhaserStage,
   }
 }
 import type { FlowRenderedComponent } from '../../player/surfaces/flow/FlowSurfaceHost'
@@ -244,7 +234,7 @@ interface LoadedComponentDefinition {
 class EditorComponentHost implements SlideItemHost<ComponentLayerItem> {
   #instance: ComponentInstanceLifecycle | null = null
   #phaserHandle: RenderedNodeHandle | null = null
-  #phaserStage: LegacyMiniPhaserStage | null = null
+  #phaserStage: ComponentMiniPhaserStage | null = null
   #authoring: ComponentAuthoringTargetRegistry | null = null
   #overlay: TargetOverlay | null = null
   #item: ComponentLayerItem
@@ -410,10 +400,14 @@ class EditorComponentHost implements SlideItemHost<ComponentLayerItem> {
     this.#phaserHandle?.update(componentNode(this.#item))
   }
   async capture(): Promise<{ format: 'html'; content: string } | void> {
-    await this.#instance?.prepareCapture?.()
-    await this.#phaserHandle?.prepareCapture?.()
-    await Promise.all(this.#capturePromises.splice(0))
-    if (this.#phaserStage) return { format: 'html', content: this.#phaserStage.captureHtml() }
+    try {
+      await this.#instance?.prepareCapture?.()
+      await this.#phaserHandle?.prepareCapture?.()
+      await Promise.all(this.#capturePromises.splice(0))
+      if (this.#phaserStage) return { format: 'html', content: this.#phaserStage.captureHtml() }
+    } finally {
+      this.#capturePromises.length = 0
+    }
   }
   #reportSavedStateFallback(reason: string): void {
     const context = this.#context
@@ -435,7 +429,7 @@ class EditorComponentHost implements SlideItemHost<ComponentLayerItem> {
   destroy(): void { this.#cleanupInstance(); this.#context = null }
 
   async #mountPhaserComponent(context: SlideItemMountContext<ComponentLayerItem>): Promise<void> {
-    const { LegacyMiniPhaserStage, renderNode } = await loadLegacyPhaserSupport()
+    const { ComponentMiniPhaserStage, renderNode } = await loadComponentPhaserSupport()
     this.#overlay = new TargetOverlay(context.container, this.#mode, context.reportHit)
     const componentAssets: Record<string, { mimeType: string; dataUrl: string }> = {}
     for (const [key, path] of Object.entries(this.#pkg.manifest.assets)) {
@@ -463,7 +457,7 @@ class EditorComponentHost implements SlideItemHost<ComponentLayerItem> {
         },
       },
     }
-    const stage = new LegacyMiniPhaserStage(
+    const stage = new ComponentMiniPhaserStage(
       context.container,
       this.#item.frame.width,
       this.#item.frame.height,
@@ -578,7 +572,17 @@ class EditorSurfaceRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
   suspend(): void { this.#active = false; this.#instance?.suspend?.(); this.#instance?.setVisible?.(false) }
   resume(): void { this.activate() }
   setInspectionMode(mode: 'playback' | 'inspect'): void { this.#mode = mode; this.#authoring?.setMode(mode); this.#instance?.setMode?.(mode); mode === 'inspect' ? this.#instance?.suspend?.() : this.#active && this.#instance?.resume?.() }
-  async capture(): Promise<void> { const mode = this.#mode; this.#instance?.setMode?.('capture'); await this.#instance?.prepareCapture?.(); await Promise.all(this.#capturePromises.splice(0)); this.#instance?.setMode?.(mode) }
+  async capture(): Promise<void> {
+    const mode = this.#mode
+    this.#instance?.setMode?.('capture')
+    try {
+      await this.#instance?.prepareCapture?.()
+      await Promise.all(this.#capturePromises.splice(0))
+    } finally {
+      this.#capturePromises.length = 0
+      this.#instance?.setMode?.(mode)
+    }
+  }
   reset(): void {}
   #reportSavedStateFallback(reason: string): void {
     const context = this.#context
@@ -596,248 +600,11 @@ class EditorSurfaceRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
   destroy(): void { this.#cleanupInstance(); this.#context = null }
 }
 
-class EditorLegacyRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
-  #instance: RuntimeInstanceLifecycle | null = null
-  #runtimeHost: RuntimeHost | null = null
-  #phaserStage: LegacyMiniPhaserStage | null = null
-  #authoring: RuntimeAuthoringTargetRegistry | null = null
-  #overlay: TargetOverlay | null = null
-  #item: RuntimeLayerItem
-  #mode: 'playback' | 'inspect' = 'playback'
-  #active = false
-  #context: SlideItemMountContext<RuntimeLayerItem> | null = null
-  readonly #localState = new CourseStateStore()
-  constructor(
-    item: RuntimeLayerItem,
-    private readonly definition: RuntimeDefinition,
-    private readonly registry: RuntimeRegistry,
-    private readonly environment: CourseEditorDynamicEnvironment,
-  ) { this.#item = structuredClone(item) }
-  async mount(context: SlideItemMountContext<RuntimeLayerItem>): Promise<void> {
-    this.#context = context
-    if (this.#item.runtime.renderMode !== 'dom') {
-      await this.#mountPhaserRuntime(context)
-      return
-    }
-    this.#mode = context.mode
-    const underlay = context.container.ownerDocument.createElement('div')
-    const overlay = context.container.ownerDocument.createElement('div')
-    ;[underlay, overlay].forEach((root) => { Object.assign(root.style, { position: 'absolute', inset: '0' }); context.container.appendChild(root) })
-    this.#overlay = new TargetOverlay(context.container, this.#mode, context.reportHit, (field) => field)
-    this.#authoring = new RuntimeAuthoringTargetRegistry({
-      scope: 'scene', sceneId: context.sceneId,
-      width: this.#item.frame.width, height: this.#item.frame.height,
-      content: this.#item.runtime.content, assets: this.#item.runtime.assets,
-      domRoots: { underlay, overlay },
-      onTargetsChanged: (update) => this.#overlay?.render(update.targets.map((target): ComponentAuthoringTarget => ({
-        kind: target.kind === 'text' ? 'component-text' : 'component-asset',
-        targetId: target.targetId, scope: 'scene', sceneId: context.sceneId,
-        nodeId: this.#item.layerItemId, componentId: 'legacy-runtime',
-        key: target.kind === 'text' ? `runtime/content/values/${pointerEscape(target.key)}` : `runtime/assets/${pointerEscape(target.key)}/assetId`,
-        label: target.label ?? target.key, source: target.source,
-        bounds: {
-          x: target.bounds.x * this.#item.frame.width / 1280,
-          y: target.bounds.y * this.#item.frame.height / 720,
-          width: target.bounds.width * this.#item.frame.width / 1280,
-          height: target.bounds.height * this.#item.frame.height / 720,
-        }, rotation: 0,
-        ...(target.kind === 'text' ? { multiline: target.multiline ?? false, ...(target.maxLength ? { maxLength: target.maxLength } : {}) } : {}),
-      } as ComponentAuthoringTarget))),
-    })
-    const runtime = this.#item.runtime
-    const createContext: RuntimeCreateContextDom = {
-      runtimeApiVersion: 2, renderMode: 'dom', scope: 'scene', mode: 'preview', sceneId: context.sceneId,
-      width: this.#item.frame.width, height: this.#item.frame.height,
-      content: { get: (key) => { const value = this.#item.runtime.content.values[key]; if (value === undefined) throw new Error(`Unknown content key ${key}`); return value }, all: () => Object.freeze({ ...this.#item.runtime.content.values }) },
-      assets: { url: (key) => { const id = this.#item.runtime.assets[key]?.assetId; return id ? this.environment.resolveProjectAsset(id) ?? '' : '' }, projectUrl: (id) => this.environment.resolveProjectAsset(id) ?? '' },
-      presentation: presentationPort(context.surfaceId, this.environment.navigation), actions: actionPort(this.environment.navigation, 'runtime'), events: this.environment.events,
-      localState: this.#localState, courseState: courseStatePort(this.environment.courseState), capture: { waitUntil: () => undefined },
-      navigation: { guard: () => () => undefined }, assessment: { evaluate: evaluateAssessment }, evidence: { recordAction: () => undefined },
-      authoring: this.definition.authoringApiVersion === 1 ? this.#authoring : undefined,
-      emit: (name, payload) => this.environment.events.emit(name, payload), domRoot: overlay, dom: { root: overlay, underlay, overlay },
-    }
-    this.#instance = this.definition.create(createContext)
-    if (!this.#instance || typeof this.#instance.destroy !== 'function') throw new Error(`Legacy Runtime ${runtime.protocol} 返回无效生命周期`)
-    this.#authoring.invalidate()
-    if (this.#mode === 'inspect') this.#instance.suspend?.()
-  }
-  async update(item: RuntimeLayerItem): Promise<void> {
-    const mustRemount = this.#phaserStage && (
-      item.runtime.source !== this.#item.runtime.source ||
-      item.runtime.renderMode !== this.#item.runtime.renderMode ||
-      item.runtime.enabled !== this.#item.runtime.enabled ||
-      JSON.stringify(item.runtime.content) !== JSON.stringify(this.#item.runtime.content) ||
-      JSON.stringify(item.runtime.assets) !== JSON.stringify(this.#item.runtime.assets) ||
-      JSON.stringify(item.runtime.nodeBindings) !== JSON.stringify(this.#item.runtime.nodeBindings)
-    )
-    this.#item = structuredClone(item)
-    if (this.#context) this.#context = { ...this.#context, item }
-    if (mustRemount && this.#context) {
-      this.#cleanupPhaserRuntime()
-      this.#overlay?.destroy()
-      this.#overlay = null
-      this.#context.container.replaceChildren()
-      await this.#mountPhaserRuntime(this.#context)
-      return
-    }
-    this.#instance?.resize?.(item.frame.width, item.frame.height)
-    this.#runtimeHost?.resize(item.frame.width, item.frame.height)
-    this.#phaserStage?.resize(item.frame.width, item.frame.height)
-    this.#authoring?.resize(item.frame.width, item.frame.height)
-    this.#authoring?.invalidate()
-    this.#runtimeHost?.invalidateAuthoringTargets()
-  }
-  activate(): void {
-    this.#active = true
-    this.#instance?.setVisible?.(true)
-    this.#runtimeHost?.setVisible(true)
-    this.#phaserStage?.setVisible(true)
-    if (this.#mode === 'inspect') {
-      this.#instance?.suspend?.()
-      this.#runtimeHost?.suspend()
-      this.#phaserStage?.setPaused(true)
-    } else {
-      this.#instance?.resume?.()
-      this.#runtimeHost?.resume()
-      this.#phaserStage?.setPaused(false)
-    }
-  }
-  suspend(): void {
-    this.#active = false
-    this.#instance?.suspend?.()
-    this.#instance?.setVisible?.(false)
-    this.#runtimeHost?.suspend()
-    this.#runtimeHost?.setVisible(false)
-    this.#phaserStage?.setPaused(true)
-    this.#phaserStage?.setVisible(false)
-  }
-  resume(): void { this.activate() }
-  setInspectionMode(mode: 'playback' | 'inspect'): void {
-    this.#mode = mode
-    this.#overlay?.setMode(mode)
-    this.#phaserStage?.setInteractive(mode === 'playback')
-    if (mode === 'inspect') {
-      this.#instance?.suspend?.()
-      this.#runtimeHost?.suspend()
-      this.#phaserStage?.setPaused(true)
-    } else if (this.#active) {
-      this.#instance?.resume?.()
-      this.#runtimeHost?.resume()
-      this.#phaserStage?.setPaused(false)
-    }
-    this.#authoring?.invalidate()
-    this.#runtimeHost?.invalidateAuthoringTargets()
-  }
-  reset(): void { this.#localState.clear() }
-  async capture(): Promise<{ format: 'html'; content: string } | void> {
-    await this.#instance?.prepareCapture?.()
-    await this.#runtimeHost?.waitForCaptureReady()
-    if (this.#phaserStage) return { format: 'html', content: this.#phaserStage.captureHtml() }
-  }
-  destroy(): void {
-    this.#instance?.destroy(); this.#instance = null
-    this.#authoring?.destroy(); this.#authoring = null
-    this.#overlay?.destroy(); this.#overlay = null
-    this.#cleanupPhaserRuntime()
-    this.#localState.clear()
-    this.#context = null
-  }
-
-  async #mountPhaserRuntime(context: SlideItemMountContext<RuntimeLayerItem>): Promise<void> {
-    const { LegacyMiniPhaserStage, RuntimeHost } = await loadLegacyPhaserSupport()
-    this.#mode = context.mode
-    this.#overlay = new TargetOverlay(context.container, this.#mode, context.reportHit, (field) => field)
-    const stage = new LegacyMiniPhaserStage(
-      context.container,
-      this.#item.frame.width,
-      this.#item.frame.height,
-      context.signal,
-    )
-    this.#phaserStage = stage
-    const roots = await stage.ready
-    if (context.signal.aborted) return
-    const runtime = this.#item.runtime
-    if (runtime.protocol !== 'legacy-runtime-v2' || runtime.runtimeApiVersion !== 2) {
-      throw new Error(`Legacy Runtime ${this.#item.layerItemId} 协议无效`)
-    }
-    this.#runtimeHost = new RuntimeHost({
-      registry: this.registry,
-      runtime: {
-        runtimeApiVersion: 2,
-        enabled: runtime.enabled,
-        renderMode: runtime.renderMode,
-        source: runtime.source,
-        content: structuredClone(runtime.content),
-        assets: structuredClone(runtime.assets),
-        ...(runtime.nodeBindings ? { nodeBindings: structuredClone(runtime.nodeBindings) } : {}),
-      },
-      label: this.#item.label,
-      scope: 'scene',
-      mode: 'preview',
-      sceneId: context.sceneId,
-      width: this.#item.frame.width,
-      height: this.#item.frame.height,
-      environment: {
-        phaser: { scene: roots.scene, underlay: roots.underlay, overlay: roots.overlay },
-        dom: roots.dom,
-        resolveNode: (nodeId) => stage.resolveSiblingNode(nodeId),
-        presentation: presentationPort(context.surfaceId, this.environment.navigation),
-      },
-      actions: actionPort(this.environment.navigation, 'runtime'),
-      events: this.environment.events,
-      courseState: courseStatePort(this.environment.courseState),
-      assetUrl: (assetId) => this.environment.resolveProjectAsset(assetId) ?? '',
-      registerNavigationGuard: () => () => undefined,
-      authoring: {
-        onTargetsChanged: (update) => this.#overlay?.render(update.targets.map((target): ComponentAuthoringTarget => ({
-          kind: target.kind === 'text' ? 'component-text' : 'component-asset',
-          targetId: target.targetId,
-          scope: 'scene',
-          sceneId: context.sceneId,
-          nodeId: this.#item.layerItemId,
-          componentId: 'legacy-runtime',
-          key: target.kind === 'text'
-            ? `runtime/content/values/${pointerEscape(target.key)}`
-            : `runtime/assets/${pointerEscape(target.key)}/assetId`,
-          label: target.label ?? target.key,
-          source: target.source,
-          bounds: {
-            x: target.bounds.x * this.#item.frame.width / 1280,
-            y: target.bounds.y * this.#item.frame.height / 720,
-            width: target.bounds.width * this.#item.frame.width / 1280,
-            height: target.bounds.height * this.#item.frame.height / 720,
-          },
-          rotation: 0,
-          ...(target.kind === 'text' ? {
-            multiline: target.multiline ?? false,
-            ...(target.maxLength ? { maxLength: target.maxLength } : {}),
-          } : {}),
-        } as ComponentAuthoringTarget))),
-      },
-    })
-    stage.syncSiblingNodes()
-    stage.setInteractive(this.#mode === 'playback')
-    if (!this.#active || this.#mode === 'inspect') {
-      this.#runtimeHost.suspend()
-      stage.setPaused(true)
-    }
-  }
-
-  #cleanupPhaserRuntime(): void {
-    this.#runtimeHost?.destroy()
-    this.#runtimeHost = null
-    this.#phaserStage?.destroy()
-    this.#phaserStage = null
-  }
-}
-
 export class CourseEditorDynamicHostRegistry {
   readonly #components = new ComponentRegistry()
-  readonly #legacyRuntimes = new RuntimeRegistry()
   readonly #surfaceRuntimes = new SurfaceRuntimeRegistry()
   readonly #componentDefinitions = new Map<string, ComponentDefinitionV4>()
   readonly #componentSources = new Map<string, string>()
-  readonly #legacyDefinitions = new Map<string, RuntimeDefinition>()
   readonly #surfaceDefinitions = new Map<string, SurfaceRuntimeDefinition>()
   readonly #flowHosts = new Set<{ host: SlideItemHost<ComponentLayerItem>; controller: AbortController }>()
   constructor(private readonly environment: CourseEditorDynamicEnvironment) {}
@@ -881,11 +648,6 @@ export class CourseEditorDynamicHostRegistry {
   runtimeHost = (item: RuntimeLayerItem): SlideItemHost<RuntimeLayerItem> => {
     if (item.runtime.protocol === 'surface-v1' && item.runtime.runtimeApiVersion === 3) {
       return new EditorSurfaceRuntimeHost(item, this.#loadSurfaceRuntime(item), this.#loadSurfaceRuntime, this.environment)
-    }
-    if (item.runtime.protocol === 'legacy-runtime-v2' && item.runtime.runtimeApiVersion === 2) {
-      let definition = this.#legacyDefinitions.get(item.layerItemId)
-      if (!definition) { definition = this.#legacyRuntimes.executeRuntime(item.runtime.source, item.layerItemId, 2); this.#legacyDefinitions.set(item.layerItemId, definition) }
-      return new EditorLegacyRuntimeHost(item, definition, this.#legacyRuntimes, this.environment)
     }
     throw new Error(`不支持的 Runtime 协议 ${item.runtime.protocol}@${item.runtime.runtimeApiVersion}`)
   }
@@ -998,11 +760,15 @@ export class CourseEditorDynamicHostRegistry {
     if (fallback) {
       const image = root.ownerDocument.createElement('img')
       image.src = fallback
-      image.alt = `互动组件 ${block.component.packageId} 的静态后备`
+      const componentName = this.environment.resolveComponent(
+        block.component.packageId,
+        block.component.version,
+      )?.manifest.name
+      image.alt = `${componentName || '互动组件'}的静态预览`
       root.appendChild(image)
     }
     const message = root.ownerDocument.createElement('p')
-    message.textContent = `互动组件无法运行：${error.message}`
+    message.textContent = '互动组件暂时无法运行，请在“开发”面板查看详情。'
     root.appendChild(message)
   }
 
@@ -1012,7 +778,7 @@ export class CourseEditorDynamicHostRegistry {
       void host.destroy?.()
     }
     this.#flowHosts.clear()
-    this.#components.dispose(); this.#legacyRuntimes.dispose(); this.#surfaceRuntimes.dispose()
-    this.#componentDefinitions.clear(); this.#componentSources.clear(); this.#legacyDefinitions.clear(); this.#surfaceDefinitions.clear()
+    this.#components.dispose(); this.#surfaceRuntimes.dispose()
+    this.#componentDefinitions.clear(); this.#componentSources.clear(); this.#surfaceDefinitions.clear()
   }
 }

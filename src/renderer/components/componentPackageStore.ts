@@ -162,7 +162,7 @@ export function componentPackagesFromArchive(
       throw new UserFacingError(
         '工程文件损坏',
         `工程包含多个同 ID 的组件“${meta.packageId}”。`,
-        'Project V8 工程只能同时使用一个组件 ID 的一个版本，请移除重复版本。',
+        'Course Project V9 工程只能同时使用一个组件 ID 的一个版本，请移除重复版本。',
       )
     }
     const key = componentPackageKey(meta.packageId, meta.version)

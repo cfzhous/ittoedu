@@ -9,7 +9,7 @@ import {
   type VideoActionCommands,
 } from '@/player/renderVideoNode'
 import { CourseEventBus } from '@/player/CourseEventBus'
-import { createProject, createVideoNode } from '@/renderer/project/createProject'
+import { videoNode } from '../helpers/nativeNodeFixtures'
 
 vi.mock('phaser', () => ({
   Math: {
@@ -215,7 +215,10 @@ function sceneHarness() {
 }
 
 function contextHarness(events: CourseEventBus) {
-  const project = createProject({ idFactory: () => 'fixed' })
+  const sceneId = 'scene-fixture'
+  const project = {
+    scenes: [{ id: sceneId }],
+  } as unknown as RenderNodeContext['payload']['project']
   const registration = { update: vi.fn(), dispose: vi.fn() }
   const registerVideo = vi.fn(() => registration)
   const interruptionReleases: ReturnType<typeof vi.fn>[] = []
@@ -241,7 +244,7 @@ function contextHarness(events: CourseEventBus) {
     events,
     audio: { registerVideo, beginBackgroundAudioInterruption },
     mode: 'preview',
-    sceneId: project.scenes[0]!.id,
+    sceneId,
     textureKey: (assetId: string) => `asset:${assetId}`,
   } as unknown as RenderNodeContext
   return {
@@ -250,7 +253,7 @@ function contextHarness(events: CourseEventBus) {
     registerVideo,
     beginBackgroundAudioInterruption,
     interruptionReleases,
-    sceneId: project.scenes[0]!.id,
+    sceneId,
   }
 }
 
@@ -315,7 +318,7 @@ describe('renderVideoNode', () => {
     events.on('video:time', timed)
     const { scene, video, roots } = sceneHarness()
     const { context, registration, registerVideo, sceneId } = contextHarness(events)
-    const node = createVideoNode({
+    const node = videoNode({
       id: 'video-1',
       assetId: 'asset_video',
       autoplay: false,
@@ -371,7 +374,7 @@ describe('renderVideoNode', () => {
     const { scene, video } = sceneHarness()
     const { context } = contextHarness(events)
     context.mode = 'capture'
-    const node = createVideoNode({
+    const node = videoNode({
       id: 'video-capture',
       assetId: 'asset_video',
       autoplay: true,
@@ -395,7 +398,7 @@ describe('renderVideoNode', () => {
       beginBackgroundAudioInterruption,
       interruptionReleases,
     } = contextHarness(events)
-    const node = createVideoNode({
+    const node = videoNode({
       id: 'video-background-audio',
       assetId: 'asset_video',
       backgroundAudioMode: 'duck',

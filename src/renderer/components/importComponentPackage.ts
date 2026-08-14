@@ -77,7 +77,7 @@ function readManifest(bytes: Uint8Array): ComponentManifest {
       throw new UserFacingError(
         '旧组件格式不受支持',
         `该组件使用格式版本 ${schemaVersion}，当前编辑器只接受版本 ${COMPONENT_SCHEMA_VERSION}。`,
-        '请让组件作者迁移到 Component API 4；历史包仅能使用归档版编辑器打开。',
+        '请让组件作者升级并重新导出当前格式；本编辑器不提供旧格式打开入口。',
       )
     }
     if (typeof schemaVersion === 'number' && schemaVersion > COMPONENT_SCHEMA_VERSION) {

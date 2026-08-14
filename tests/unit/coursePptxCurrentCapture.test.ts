@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SlideSurfaceHost } from '@/player/surfaces/slide/SlideSurfaceHost'
+import {
+  slideItemCaptureFailureWarning,
+  type SlideSurfaceHost,
+} from '@/player/surfaces/slide/SlideSurfaceHost'
 import type { RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import { captureMountedElementPng } from '@/renderer/export/playerCapture'
-import { captureCurrentSlideDynamicItem } from '@/renderer/course/coursePptxCurrentCapture'
+import {
+  captureCurrentSlideDynamicItem,
+  currentPptxDynamicCapture,
+} from '@/renderer/course/coursePptxCurrentCapture'
+import { createCourseProject } from '@/renderer/course/courseStudioModel'
 
 vi.mock('@/renderer/export/playerCapture', () => ({
   captureMountedElementPng: vi.fn(),
@@ -62,7 +69,7 @@ function mountedHost(warnings: string[] = []) {
 describe('Course Studio current dynamic PPTX capture', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('settles the same mounted host and rasterizes its captured current-frame clone', async () => {
+  it('rasterizes the same mounted current frame without running mutating capture preparation', async () => {
     const mounted = mountedHost()
     vi.mocked(captureMountedElementPng).mockImplementation(async (element) => {
       expect(element).not.toBe(mounted.content)
@@ -80,7 +87,10 @@ describe('Course Studio current dynamic PPTX capture', () => {
     await expect(captureCurrentSlideDynamicItem(mounted.host, item)).resolves.toBe(
       'data:image/png;base64,Q1VSUkVOVA==',
     )
-    expect(mounted.capture).toHaveBeenCalledWith({ purpose: 'export' })
+    expect(mounted.capture).toHaveBeenCalledWith({
+      purpose: 'export',
+      dynamicPreparation: 'preserve-current',
+    })
     expect(mounted.root.style.position).toBe('relative')
     expect(mounted.wrapper.style.transform).toBe('rotate(12deg)')
     expect(mounted.wrapper.style.opacity).toBe('0.6')
@@ -88,10 +98,29 @@ describe('Course Studio current dynamic PPTX capture', () => {
   })
 
   it('reports a failed item capture contract instead of presenting a stale image', async () => {
-    const mounted = mountedHost([`${item.label} capture failed`])
+    const mounted = mountedHost([slideItemCaptureFailureWarning(item.label)])
     await expect(captureCurrentSlideDynamicItem(mounted.host, item)).rejects.toThrow(
-      /capture 契约执行失败/,
+      /画面生成失败/,
     )
     expect(captureMountedElementPng).not.toHaveBeenCalled()
+  })
+
+  it('拒绝把当前复核画面快照混入另一个初始画面', async () => {
+    const project = createCourseProject({ id: 'pptx-current-state-guard' })
+    const surface = project.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('expected slide')
+    const scene = surface.scenes[0]!
+    scene.presentation = {
+      initialStateId: 'state-a',
+      states: [
+        { id: 'state-a', name: '初始画面', layerItemOverrides: {} },
+        { id: 'state-b', name: '复核画面', layerItemOverrides: {} },
+      ],
+    }
+    const host = { sceneId: scene.id, stateId: 'state-b' } as unknown as SlideSurfaceHost
+    const captureItem = vi.fn().mockResolvedValue('data:image/png;base64,AAAA')
+    const capture = currentPptxDynamicCapture(() => host, () => surface.id, captureItem)
+    await expect(capture({ project, surface, scene, item })).rejects.toThrow(/初始画面/u)
+    expect(captureItem).not.toHaveBeenCalled()
   })
 })

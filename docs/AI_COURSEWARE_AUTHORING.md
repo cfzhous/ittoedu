@@ -68,10 +68,10 @@ npm run patch:course-project -- --project <project.h5lesson> --patch <patch.json
 
 ## 当前协议边界
 
-- Course Project Schema V9；V8 只显式迁移。
+- Course Project Schema V9；不生成、导入或迁移 V8 工程。
 - Published Course V2；发布数据不可回导为作者工程。
 - Slide、Flow、Spatial 2D 和 Mixed。
-- Runtime 兼容当前 Runtime API 2/3 定义；Component API 4。
+- Runtime 只使用 Surface Runtime API 3；Component 使用当前 API 4。
 - 统一图层；无公开 underlay/overlay。
 - 有限声明式课程状态与普通导航守卫；无任意表达式。
 - `hitId` 是会话身份；`authoringAddress` 是稳定作者地址；Patch 必须携带当前 revision。

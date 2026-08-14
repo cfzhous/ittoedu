@@ -34,7 +34,7 @@ CoursewareSurfaceRuntime.define({
   }
 });`
 
-function runtimeItem(renderMode: 'dom' | 'phaser' | 'hybrid' = 'dom'): RuntimeLayerItem {
+function runtimeItem(): RuntimeLayerItem {
   return {
     layerItemId: 'runtime-surface-v1',
     label: 'Runtime V1',
@@ -51,7 +51,7 @@ function runtimeItem(renderMode: 'dom' | 'phaser' | 'hybrid' = 'dom'): RuntimeLa
       protocol: 'surface-v1',
       runtimeApiVersion: 3,
       enabled: true,
-      renderMode,
+      renderMode: 'dom',
       source: SURFACE_RUNTIME_SOURCE,
       content: { values: { 'title/a~b': '可命中文字' } },
       assets: { 'hero/x~y': { assetId: 'asset-hero' } },
@@ -178,7 +178,10 @@ describe('Surface Runtime V1 DOM contract', () => {
   })
 
   it('limits the published Surface V1 promise to its implemented DOM renderer', () => {
-    const invalid = runtimeItem('phaser')
+    const invalid = structuredClone(runtimeItem()) as unknown as {
+      runtime: Omit<RuntimeLayerItem['runtime'], 'renderMode'> & { renderMode: string }
+    }
+    invalid.runtime.renderMode = 'phaser'
     expect(courseRuntimeDefinitionSchema.safeParse(invalid.runtime).success).toBe(false)
     const { source: _source, ...publishedRuntime } = invalid.runtime
     expect(publishedLayerItemSchema.safeParse({

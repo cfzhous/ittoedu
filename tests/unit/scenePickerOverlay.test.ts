@@ -37,7 +37,7 @@ describe('ScenePickerOverlay', () => {
     const buttons = [...stage.querySelectorAll<HTMLButtonElement>(
       '.lesson-scene-picker__item',
     )]
-    expect(dialog).toHaveAccessibleName('场景目录')
+    expect(dialog).toHaveAccessibleName('课程目录')
     expect(buttons.map((button) => button.dataset.sceneId)).toEqual([
       'scene_intro',
       'scene_practice',

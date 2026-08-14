@@ -2,7 +2,6 @@ import { z } from 'zod'
 import { sceneInteractionsSchema } from './interactionSchema'
 import {
   formulaAstSchema,
-  projectDocumentSchema,
   sceneNodeSchema,
 } from './projectSchema'
 import type {
@@ -10,13 +9,14 @@ import type {
   BaseNode,
   EmbeddedComponentPackageMeta,
   ProjectDesignTokens,
-  ProjectDocument,
   ProjectMediaSettings,
   ProjectPlaybackSettings,
   SceneNode,
 } from './projectTypes'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  SPATIAL_MAX_ZOOM,
+  SPATIAL_MIN_ZOOM,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
@@ -91,22 +91,12 @@ export const strictCourseInteractionsSchema = strictExistingSchema(
 )
 
 export const layerFrameSchema = z.object({
-  mode: z.enum(['absolute', 'legacy-whole-canvas']),
+  mode: z.literal('absolute'),
   x: finiteNumber,
   y: finiteNumber,
   width: finiteNumber.positive(),
   height: finiteNumber.positive(),
-}).strict().superRefine((frame, context) => {
-  if (
-    frame.mode === 'legacy-whole-canvas' &&
-    (frame.x !== 0 || frame.y !== 0 || frame.width !== 1280 || frame.height !== 720)
-  ) {
-    context.addIssue({
-      code: 'custom',
-      message: 'A legacy whole-canvas frame must be exactly 0,0,1280,720',
-    })
-  }
-})
+}).strict()
 
 const layerItemBaseFields = {
   layerItemId: stableIdSchema,
@@ -241,10 +231,10 @@ export const runtimeContentSchema = z.object({
 }).strict()
 
 export const courseRuntimeDefinitionSchema = z.object({
-  protocol: z.enum(['surface-v1', 'legacy-runtime-v2']),
-  runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
+  protocol: z.literal('surface-v1'),
+  runtimeApiVersion: z.literal(3),
   enabled: z.boolean(),
-  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
+  renderMode: z.literal('dom'),
   source: z.string().trim().min(1).refine(
     (source) => new TextEncoder().encode(source).byteLength <= 2 * 1024 * 1024,
     'Runtime source cannot exceed 2 MiB of UTF-8',
@@ -257,23 +247,6 @@ export const courseRuntimeDefinitionSchema = z.object({
     coverage: z.enum(['surface', 'scene']),
   }).strict().optional(),
 }).strict().superRefine((runtime, context) => {
-  const validPair =
-    (runtime.protocol === 'legacy-runtime-v2' && runtime.runtimeApiVersion === 2) ||
-    (runtime.protocol === 'surface-v1' && runtime.runtimeApiVersion === 3)
-  if (!validPair) {
-    context.addIssue({
-      code: 'custom',
-      path: ['runtimeApiVersion'],
-      message: 'Runtime protocol and API version do not match',
-    })
-  }
-  if (runtime.protocol === 'surface-v1' && runtime.renderMode !== 'dom') {
-    context.addIssue({
-      code: 'custom',
-      path: ['renderMode'],
-      message: 'Surface Runtime V1 currently supports DOM rendering only',
-    })
-  }
   Object.keys(runtime.content.metadata ?? {}).forEach((key) => {
     if (!Object.prototype.hasOwnProperty.call(runtime.content.values, key)) {
       context.addIssue({
@@ -309,28 +282,7 @@ export const layerItemSchema: z.ZodType<LayerItem> = z.discriminatedUnion('kind'
   nativeLayerItemSchema,
   componentLayerItemSchema,
   runtimeLayerItemSchema,
-]).superRefine((item, context) => {
-  if (item.frame.mode === 'legacy-whole-canvas' && (
-    item.kind !== 'runtime' || item.runtime.protocol !== 'legacy-runtime-v2'
-  )) {
-    context.addIssue({
-      code: 'custom',
-      path: ['frame', 'mode'],
-      message: 'Only a migrated legacy Runtime may use a legacy whole-canvas frame',
-    })
-  }
-  if (
-    item.kind === 'runtime' &&
-    item.runtime.protocol === 'legacy-runtime-v2' &&
-    item.frame.mode !== 'legacy-whole-canvas'
-  ) {
-    context.addIssue({
-      code: 'custom',
-      path: ['frame', 'mode'],
-      message: 'A legacy Runtime must retain its explicit whole-canvas frame marker',
-    })
-  }
-})
+])
 
 function materializeNativeLayerItem(item: Extract<LayerItem, { kind: 'native' }>): SceneNode {
   return {
@@ -412,7 +364,7 @@ export const scopedLayerItemListSchema = z.array(scopedLayerItemSchema).max(20_0
 export const layerItemOverrideSchema = z.object({
   label: z.string().trim().min(1).max(200).optional(),
   frame: z.object({
-    mode: z.enum(['absolute', 'legacy-whole-canvas']).optional(),
+    mode: z.literal('absolute').optional(),
     x: finiteNumber.optional(),
     y: finiteNumber.optional(),
     width: finiteNumber.positive().optional(),
@@ -575,12 +527,32 @@ const flowListBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('list'),
   ordered: z.boolean(),
-  items: z.array(z.object({ id: stableIdSchema, text: z.string() }).strict()).min(1).max(10_000),
+  items: z.array(z.object({
+    id: stableIdSchema,
+    text: z.string(),
+    level: z.union([
+      z.literal(0), z.literal(1), z.literal(2),
+      z.literal(3), z.literal(4), z.literal(5),
+    ]),
+  }).strict()).min(1).max(10_000),
 }).strict().superRefine((block, context) => {
   const ids = block.items.map((item) => item.id)
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: 'custom', path: ['items'], message: 'List item ids must be unique' })
   }
+  if (block.items[0]?.level !== 0) {
+    context.addIssue({ code: 'custom', path: ['items', 0, 'level'], message: 'The first list item must be at level 0' })
+  }
+  block.items.forEach((item, index) => {
+    const previous = block.items[index - 1]
+    if (previous && item.level > previous.level + 1) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index, 'level'],
+        message: 'A list item cannot skip a nesting level',
+      })
+    }
+  })
 })
 
 const flowQuoteBlockSchema = z.object({
@@ -696,7 +668,7 @@ export const flowBlockSchema: z.ZodType<FlowBlock> = z.lazy(() =>
 export const spatialCameraPoseSchema = z.object({
   x: finiteNumber,
   y: finiteNumber,
-  zoom: finiteNumber.positive().max(1_000),
+  zoom: finiteNumber.min(SPATIAL_MIN_ZOOM).max(SPATIAL_MAX_ZOOM),
 }).strict()
 
 export const spatialCameraFrameSchema = z.object({
@@ -704,7 +676,7 @@ export const spatialCameraFrameSchema = z.object({
   name: z.string().trim().min(1).max(200),
   x: finiteNumber,
   y: finiteNumber,
-  zoom: finiteNumber.positive().max(1_000),
+  zoom: finiteNumber.min(SPATIAL_MIN_ZOOM).max(SPATIAL_MAX_ZOOM),
 }).strict()
 
 const surfaceBaseFields = {
@@ -778,6 +750,14 @@ const spatialSurfaceSchema = z.object({
     home: spatialCameraPoseSchema,
     frames: z.array(spatialCameraFrameSchema).max(10_000),
   }).strict(),
+  relations: z.array(z.object({
+    id: stableIdSchema,
+    name: z.string().trim().min(1).max(200),
+    sourceLayerItemId: stableIdSchema,
+    targetLayerItemId: stableIdSchema,
+    lineLayerItemId: stableIdSchema,
+    labelLayerItemId: stableIdSchema.optional(),
+  }).strict()).max(20_000),
   semanticZoom: z.array(z.object({
     id: stableIdSchema,
     layerItemIds: z.array(stableIdSchema).min(1).max(20_000),
@@ -791,6 +771,40 @@ const spatialSurfaceSchema = z.object({
     context.addIssue({ code: 'custom', path: ['camera', 'frames'], message: 'Camera frame ids must be unique' })
   }
   const itemIds = new Set(surface.world.layerItems.map((item) => item.layerItemId))
+  const itemById = new Map(surface.world.layerItems.map((item) => [item.layerItemId, item]))
+  const relationIds = new Set<string>()
+  const relationVisualIds = new Set<string>()
+  surface.relations.forEach((relation, index) => {
+    if (relationIds.has(relation.id)) {
+      context.addIssue({ code: 'custom', path: ['relations', index, 'id'], message: 'Spatial relation ids must be unique' })
+    }
+    relationIds.add(relation.id)
+    if (relation.sourceLayerItemId === relation.targetLayerItemId) {
+      context.addIssue({ code: 'custom', path: ['relations', index], message: 'Spatial relation endpoints must be different' })
+    }
+    const source = itemById.get(relation.sourceLayerItemId)
+    const target = itemById.get(relation.targetLayerItemId)
+    if (!source) context.addIssue({ code: 'custom', path: ['relations', index, 'sourceLayerItemId'], message: 'Spatial relation source is missing' })
+    if (!target) context.addIssue({ code: 'custom', path: ['relations', index, 'targetLayerItemId'], message: 'Spatial relation target is missing' })
+    const line = itemById.get(relation.lineLayerItemId)
+    if (!line || line.kind !== 'native' || line.content.nativeType !== 'shape' || line.content.data.shapeType !== 'line') {
+      context.addIssue({ code: 'custom', path: ['relations', index, 'lineLayerItemId'], message: 'Spatial relation line must reference a Native line' })
+    }
+    if (relationVisualIds.has(relation.lineLayerItemId)) {
+      context.addIssue({ code: 'custom', path: ['relations', index, 'lineLayerItemId'], message: 'Spatial relation visuals cannot be reused' })
+    }
+    relationVisualIds.add(relation.lineLayerItemId)
+    if (relation.labelLayerItemId) {
+      const label = itemById.get(relation.labelLayerItemId)
+      if (!label || label.kind !== 'native' || label.content.nativeType !== 'text') {
+        context.addIssue({ code: 'custom', path: ['relations', index, 'labelLayerItemId'], message: 'Spatial relation label must reference Native text' })
+      }
+      if (relationVisualIds.has(relation.labelLayerItemId)) {
+        context.addIssue({ code: 'custom', path: ['relations', index, 'labelLayerItemId'], message: 'Spatial relation visuals cannot be reused' })
+      }
+      relationVisualIds.add(relation.labelLayerItemId)
+    }
+  })
   const ruleIds = new Set<string>()
   surface.semanticZoom.forEach((rule, index) => {
     if (ruleIds.has(rule.id)) {
@@ -831,7 +845,16 @@ const assetMetaSchema: z.ZodType<AssetMeta> = z.object({
   width: finiteNumber.positive().optional(),
   height: finiteNumber.positive().optional(),
   duration: finiteNumber.nonnegative().optional(),
-}).strict()
+}).strict().superRefine((asset, context) => {
+  const expectedPrefix = `${asset.kind}/`
+  if (!asset.mimeType.toLocaleLowerCase('en-US').startsWith(expectedPrefix)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['mimeType'],
+      message: `Asset MIME type must match kind ${asset.kind}`,
+    })
+  }
+})
 
 const componentPackageSchema: z.ZodType<EmbeddedComponentPackageMeta> = z.object({
   packageId: stableIdSchema,
@@ -1058,9 +1081,25 @@ export const courseProjectDocumentSchema = z.object({
   if (surfacesById.size !== project.surfaces.length) {
     addReferenceIssue(context, ['surfaces'], 'Surface ids must be unique')
   }
+  const slideSceneIds = project.surfaces.flatMap((surface) => (
+    surface.type === 'slide' ? surface.scenes.map((scene) => scene.id) : []
+  ))
+  if (new Set(slideSceneIds).size !== slideSceneIds.length) {
+    addReferenceIssue(context, ['surfaces'], 'Slide scene ids must be unique across the course')
+  }
 
-  const checkAsset = (assetId: string | undefined, path: Array<string | number>): void => {
-    if (assetId && !assetIds.has(assetId)) addReferenceIssue(context, path, `Missing asset: ${assetId}`)
+  const checkAsset = (
+    assetId: string | undefined,
+    path: Array<string | number>,
+    expectedKind?: AssetMeta['kind'],
+  ): void => {
+    if (!assetId) return
+    const asset = project.assets[assetId]
+    if (!asset || !assetIds.has(assetId)) {
+      addReferenceIssue(context, path, `Missing asset: ${assetId}`)
+    } else if (expectedKind && asset.kind !== expectedKind) {
+      addReferenceIssue(context, path, `Asset ${assetId} must be ${expectedKind}, received ${asset.kind}`)
+    }
   }
   const checkComponent = (
     reference: { packageId: string; version: string },
@@ -1074,15 +1113,15 @@ export const courseProjectDocumentSchema = z.object({
   const checkLayer = (item: LayerItem, path: Array<string | number>): void => {
     if (item.kind === 'component') {
       checkComponent(item.component, [...path, 'component'])
-      checkAsset(item.staticFallbackAssetId, [...path, 'staticFallbackAssetId'])
+      checkAsset(item.staticFallbackAssetId, [...path, 'staticFallbackAssetId'], 'image')
     } else if (item.kind === 'runtime') {
       Object.values(item.runtime.assets).forEach((binding) => checkAsset(binding.assetId, [...path, 'runtime', 'assets']))
-      checkAsset(item.runtime.staticFallback?.assetId, [...path, 'runtime', 'staticFallback', 'assetId'])
+      checkAsset(item.runtime.staticFallback?.assetId, [...path, 'runtime', 'staticFallback', 'assetId'], 'image')
     } else if (item.content.nativeType === 'image') {
-      checkAsset(item.content.data.assetId, [...path, 'content', 'data', 'assetId'])
+      checkAsset(item.content.data.assetId, [...path, 'content', 'data', 'assetId'], 'image')
     } else if (item.content.nativeType === 'video') {
-      checkAsset(item.content.data.assetId, [...path, 'content', 'data', 'assetId'])
-      checkAsset(item.content.data.poster.assetId, [...path, 'content', 'data', 'poster', 'assetId'])
+      checkAsset(item.content.data.assetId, [...path, 'content', 'data', 'assetId'], 'video')
+      checkAsset(item.content.data.poster.assetId, [...path, 'content', 'data', 'poster', 'assetId'], 'image')
     }
   }
   const checkScoped = (entry: ScopedLayerItem, path: Array<string | number>): void => {
@@ -1186,19 +1225,19 @@ export const courseProjectDocumentSchema = z.object({
           ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'interactions'],
           sceneItemIds,
         )
-        checkAsset(scene.backgroundAssetId ?? undefined, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'backgroundAssetId'])
+        checkAsset(scene.backgroundAssetId ?? undefined, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'backgroundAssetId'], 'image')
         scene.layerItems.forEach((item, itemIndex) => checkLayer(item, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'layerItems', itemIndex]))
         scene.presentation?.states.forEach((state, stateIndex) => {
-          checkAsset(state.backgroundAssetId ?? undefined, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'presentation', 'states', stateIndex, 'backgroundAssetId'])
+          checkAsset(state.backgroundAssetId ?? undefined, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'presentation', 'states', stateIndex, 'backgroundAssetId'], 'image')
         })
       })
     } else if (surface.type === 'flow') {
       checkUnifiedLayerFact(sharedLayerItems, ['surfaces', surfaceIndex, 'effectiveLayerItems'])
       walkFlowBlocks(surface.blocks, (block) => {
-        if (block.type === 'media') checkAsset(block.assetId, ['surfaces', surfaceIndex, 'blocks', block.id, 'assetId'])
+        if (block.type === 'media') checkAsset(block.assetId, ['surfaces', surfaceIndex, 'blocks', block.id, 'assetId'], block.mediaKind)
         if (block.type === 'component') {
           checkComponent(block.component, ['surfaces', surfaceIndex, 'blocks', block.id, 'component'])
-          checkAsset(block.staticFallbackAssetId, ['surfaces', surfaceIndex, 'blocks', block.id, 'staticFallbackAssetId'])
+          checkAsset(block.staticFallbackAssetId, ['surfaces', surfaceIndex, 'blocks', block.id, 'staticFallbackAssetId'], 'image')
         }
       })
     } else {
@@ -1209,7 +1248,7 @@ export const courseProjectDocumentSchema = z.object({
       surface.world.layerItems.forEach((item, itemIndex) => checkLayer(item, ['surfaces', surfaceIndex, 'world', 'layerItems', itemIndex]))
     }
   })
-  Object.values(project.media.audio.sounds).forEach((sound) => checkAsset(sound.assetId, ['media', 'audio', 'sounds', sound.id, 'assetId']))
+  Object.values(project.media.audio.sounds).forEach((sound) => checkAsset(sound.assetId, ['media', 'audio', 'sounds', sound.id, 'assetId'], 'audio'))
 
   project.locations.forEach((location, index) => {
     const surface = surfacesById.get(location.surfaceId)
@@ -1304,8 +1343,5 @@ export const courseProjectDocumentSchema = z.object({
 const _courseProjectSchemaTypeContract: z.ZodType<CourseProjectDocument> = courseProjectDocumentSchema
 void _courseProjectSchemaTypeContract
 
-/** Explicit input boundary for callers that need to distinguish V8 from V9. */
-export const authoringProjectVersionSchema = z.union([
-  strictExistingSchema(projectDocumentSchema, 'Project V8'),
-  courseProjectDocumentSchema,
-])
+/** The authoring boundary accepts only the current native Course Project V9. */
+export const authoringProjectVersionSchema = courseProjectDocumentSchema

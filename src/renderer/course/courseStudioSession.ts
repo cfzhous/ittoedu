@@ -14,6 +14,7 @@ export interface CourseStudioSessionCallbacks {
     current: string | null
     states: Array<{ id: string; name: string; description?: string }>
   }
+  resetPlayback?(scope: 'surface' | 'course', target: CourseLocation): void
   onBlocked(message: string): void
 }
 
@@ -25,10 +26,27 @@ export interface CourseStudioSessionRestore {
 function locationForScene(
   project: CourseProjectDocument,
   sceneId: string,
+  stateId?: string,
 ): CourseLocation | undefined {
-  return project.locations.find((location) => (
+  const scene = project.surfaces
+    .filter((surface) => surface.type === 'slide')
+    .flatMap((surface) => surface.scenes)
+    .find((candidate) => candidate.id === sceneId)
+  const effectiveStateId = stateId ?? scene?.presentation?.initialStateId
+  const exact = effectiveStateId === undefined ? undefined : project.locations.find((location) => (
+    location.kind === 'slide-scene' &&
+    location.sceneId === sceneId &&
+    location.stateId === effectiveStateId
+  ))
+  if (exact) return exact
+  const base = project.locations.find((location) => (
+    location.kind === 'slide-scene' &&
+    location.sceneId === sceneId &&
+    location.stateId === undefined
+  )) ?? project.locations.find((location) => (
     location.kind === 'slide-scene' && location.sceneId === sceneId
   ))
+  return base
 }
 
 /** One V9 editor playback session: state, guard chain and navigation authority. */
@@ -84,10 +102,18 @@ export class CourseStudioPlaybackSession {
     stateId?: string,
     entryPoint: 'runtime' | 'component' | 'teacher-controller' = 'runtime',
   ): boolean {
-    const location = locationForScene(this.project, sceneId)
+    const location = locationForScene(this.project, sceneId, stateId)
     if (!location) return false
-    const target = stateId && location.kind === 'slide-scene' ? { ...location, stateId } : location
-    return this.navigate(target, entryPoint)
+    const navigated = this.navigate(location, entryPoint)
+    if (
+      navigated &&
+      stateId !== undefined &&
+      location.kind === 'slide-scene' &&
+      location.stateId !== stateId
+    ) {
+      this.setPresentationState(location.surfaceId, stateId)
+    }
+    return navigated
   }
 
   next(entryPoint: 'runtime' | 'component' | 'teacher-controller' = 'runtime'): boolean {
@@ -104,6 +130,7 @@ export class CourseStudioPlaybackSession {
 
   replay(): boolean {
     const current = this.project.locations.find((location) => location.id === this.#currentLocationId)
+    if (current) this.callbacks.resetPlayback?.('surface', current)
     return current ? this.navigate(current, 'replay') : false
   }
 
@@ -113,6 +140,7 @@ export class CourseStudioPlaybackSession {
     const decision = this.state.restart()
     const location = this.project.locations.find((candidate) => candidate.id === decision.toLocationId)
     if (!location) return false
+    this.callbacks.resetPlayback?.('course', location)
     this.#currentLocationId = location.id
     this.callbacks.activateLocation(location)
     return true
@@ -128,7 +156,17 @@ export class CourseStudioPlaybackSession {
   }
 
   setPresentationState(surfaceId: string, stateId: string): boolean {
-    return this.callbacks.setPresentationState(surfaceId, stateId)
+    const accepted = this.callbacks.setPresentationState(surfaceId, stateId)
+    if (!accepted) return false
+    const sceneId = this.callbacks.getActiveSceneId(surfaceId)
+    if (sceneId) this.syncPresentationLocation(surfaceId, sceneId, stateId)
+    return true
+  }
+
+  /** Synchronizes course scope/progress after the live Slide host changes state itself. */
+  syncPresentationLocation(surfaceId: string, sceneId: string, stateId: string): void {
+    const location = locationForScene(this.project, sceneId, stateId)
+    if (location?.surfaceId === surfaceId) this.#currentLocationId = location.id
   }
 
   presentationState(surfaceId: string) {

@@ -15,9 +15,14 @@ import type {
   VideoNode,
   AssetMeta,
 } from './projectTypes'
-import type { RuntimeRenderMode } from './runtimeTypes'
 
 export const COURSE_PROJECT_SCHEMA_VERSION = 9 as const
+
+/** Persisted Spatial cameras and every runtime/export camera share this range. */
+export const SPATIAL_MIN_ZOOM = 0.05
+export const SPATIAL_MAX_ZOOM = 32
+/** Edit, Player and print preserve this logical viewport and scale it uniformly. */
+export const SPATIAL_CANONICAL_VIEWPORT = Object.freeze({ width: 1120, height: 760 })
 
 export const COURSE_SURFACE_TYPES = ['slide', 'flow', 'spatial-2d'] as const
 export type CourseSurfaceType = typeof COURSE_SURFACE_TYPES[number]
@@ -27,13 +32,8 @@ export type LayerItemKind = typeof LAYER_ITEM_KINDS[number]
 
 export type LayerHitPolicy = 'auto' | 'surface' | 'pass-through'
 
-/**
- * `legacy-whole-canvas` is an explicit migration marker, not a new layout mode.
- * New authoring writes `absolute`; a host may use the legacy marker only while
- * adapting a Project V8 runtime that originally owned the complete 1280x720 canvas.
- */
 export interface LayerFrame {
-  mode: 'absolute' | 'legacy-whole-canvas'
+  mode: 'absolute'
   x: number
   y: number
   width: number
@@ -98,11 +98,10 @@ export interface CourseRuntimeContent {
 }
 
 export interface CourseRuntimeDefinition {
-  /** New runtimes use `surface-v1`; migrated V8 runtimes remain explicit. */
-  protocol: 'surface-v1' | 'legacy-runtime-v2'
-  runtimeApiVersion: 2 | 3
+  protocol: 'surface-v1'
+  runtimeApiVersion: 3
   enabled: boolean
-  renderMode: RuntimeRenderMode
+  renderMode: 'dom'
   source: string
   content: CourseRuntimeContent
   assets: Record<string, { assetId: string }>
@@ -205,7 +204,12 @@ export interface FlowParagraphBlock extends FlowBlockBase {
 export interface FlowListBlock extends FlowBlockBase {
   type: 'list'
   ordered: boolean
-  items: Array<{ id: string; text: string }>
+  items: Array<{
+    id: string
+    text: string
+    /** Zero-based semantic nesting level. The first item is always level 0. */
+    level: 0 | 1 | 2 | 3 | 4 | 5
+  }>
 }
 
 export interface FlowQuoteBlock extends FlowBlockBase {
@@ -313,6 +317,20 @@ export interface SpatialSemanticZoomRule {
   visible: boolean
 }
 
+/**
+ * A teacher-authored relationship binds two world nodes to ordinary editable
+ * line/text LayerItems. Player and exports render the LayerItems; the relation
+ * keeps endpoints and its optional label structurally synchronized in Studio.
+ */
+export interface SpatialRelation {
+  id: string
+  name: string
+  sourceLayerItemId: string
+  targetLayerItemId: string
+  lineLayerItemId: string
+  labelLayerItemId?: string
+}
+
 export interface SpatialSurfaceDocument extends SurfaceBase {
   type: 'spatial-2d'
   world: {
@@ -331,6 +349,7 @@ export interface SpatialSurfaceDocument extends SurfaceBase {
     home: SpatialCameraPose
     frames: SpatialCameraFrame[]
   }
+  relations: SpatialRelation[]
   semanticZoom: SpatialSemanticZoomRule[]
 }
 

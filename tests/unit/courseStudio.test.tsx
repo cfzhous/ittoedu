@@ -15,6 +15,7 @@ import {
   SlideCourseCanvas,
   SpatialCourseCanvas,
 } from '@/renderer/course/CourseSurfaceCanvas'
+import { applyFlowBlockEditorChange } from '@/renderer/course/flow/applyFlowBlockEditorChange'
 import {
   CourseEditorDynamicHostRegistry,
   componentPropKeyToInventoryField,
@@ -34,6 +35,7 @@ import {
   createCourseHistory,
   createCourseProject,
   deleteFlowBlock,
+  deleteNestedFlowBlock,
   duplicateFlowBlock,
   insertNestedFlowBlock,
   redoCourseHistory,
@@ -42,6 +44,7 @@ import {
   updateFlowBlock,
   updateNestedFlowBlock,
   updateLayerItem,
+  updateLayerItems,
   updateCourseProject,
 } from '@/renderer/course/courseStudioModel'
 import {
@@ -192,8 +195,46 @@ describe('Course Studio concentrated authoring flow', () => {
     expect(flow.blocks.filter((block) => block.type === 'paragraph')).toHaveLength(3)
     const duplicate = flow.blocks.find((block) => block.type === 'paragraph' && block.id !== 'paragraph-a' && block.id !== 'paragraph-b')!
     expect(project.locations.some((location) => location.kind === 'flow-block' && location.blockId === duplicate.id)).toBe(true)
+    const documentOrder = flow.blocks.map((block) => block.id)
+    expect(project.locations.flatMap((location) => (
+      location.kind === 'flow-block' && location.surfaceId === 'flow-main' ? [location.blockId] : []
+    ))).toEqual(documentOrder)
     project = deleteFlowBlock(project, 'flow-main', duplicate.id)
     expect(project.locations.some((location) => location.kind === 'flow-block' && location.blockId === duplicate.id)).toBe(false)
+  })
+
+  it('records a structured section edit as one history action and keeps nested locations valid', () => {
+    let project = flowProject()
+    project = addFlowBlock(project, 'flow-main', {
+      id: 'section-main',
+      type: 'section',
+      title: '原分节',
+      collapsedByDefault: false,
+      blocks: [
+        { id: 'paragraph-a', type: 'paragraph', text: '甲' },
+        { id: 'paragraph-b', type: 'paragraph', text: '乙' },
+      ],
+    })
+    const surface = project.surfaces.find((entry): entry is FlowSurfaceDocument => entry.id === 'flow-main' && entry.type === 'flow')!
+    const previous = surface.blocks.find((block) => block.id === 'section-main')
+    if (!previous || previous.type !== 'section') throw new Error('missing section')
+    const next = structuredClone(previous)
+    next.title = '新分节'
+    next.collapsedByDefault = true
+    next.blocks = [
+      { id: 'list-new', type: 'list', ordered: true, items: [{ id: 'item-new', text: '新项目', level: 0 }] },
+      { id: 'paragraph-b', type: 'paragraph', text: '乙已修改' },
+    ]
+
+    const changed = applyFlowBlockEditorChange(project, 'flow-main', previous, next)
+    const committed = commitCourseHistory(createCourseHistory(project), changed)
+    expect(committed.past).toHaveLength(1)
+    const changedSurface = changed.surfaces.find((entry): entry is FlowSurfaceDocument => entry.id === 'flow-main' && entry.type === 'flow')!
+    expect(changedSurface.blocks.find((block) => block.id === 'section-main')).toEqual(next)
+    expect(changed.locations.some((location) => location.kind === 'flow-block' && location.blockId === 'paragraph-a')).toBe(false)
+    expect(changed.locations.some((location) => location.kind === 'flow-block' && location.blockId === 'list-new')).toBe(true)
+    expect(changed.locations.find((location) => location.kind === 'flow-block' && location.blockId === 'paragraph-b')?.label).toBe('乙已修改')
+    expect(undoCourseHistory(committed).present).toEqual(project)
   })
 
   it('keeps undo and redo around complete Course Project revisions', () => {
@@ -205,6 +246,38 @@ describe('Course Studio concentrated authoring flow', () => {
     const committed = commitCourseHistory(createCourseHistory(original), changed)
     expect(undoCourseHistory(committed).present.revision).toBe(original.revision)
     expect(redoCourseHistory(undoCourseHistory(committed)).present.revision).toBe(changed.revision)
+  })
+
+  it('commits a multi-layer transform as one V9 revision', () => {
+    let project = createCourseProject({ id: 'batch-transform', now: '2026-08-14T00:00:00.000Z' })
+    const slide = project.surfaces[0]
+    if (!slide || slide.type !== 'slide') throw new Error('missing slide')
+    const sceneId = slide.scenes[0]!.id
+    project = addSlideTextLayer(project, slide.id, sceneId, 'A', { id: 'layer-a' })
+    project = addSlideTextLayer(project, slide.id, sceneId, 'B', { id: 'layer-b' })
+    const revisionBeforeGesture = project.revision
+    const next = updateLayerItems(project, [
+      {
+        surfaceId: slide.id,
+        sceneId,
+        source: 'scene',
+        layerItemId: 'layer-a',
+        update: (item) => { item.frame.x += 30; item.frame.y += 10 },
+      },
+      {
+        surfaceId: slide.id,
+        sceneId,
+        source: 'scene',
+        layerItemId: 'layer-b',
+        update: (item) => { item.frame.x += 30; item.frame.y += 10 },
+      },
+    ], '2026-08-14T00:00:03.000Z')
+    expect(next.revision).toBe(revisionBeforeGesture + 1)
+    const nextSlide = next.surfaces[0]
+    if (!nextSlide || nextSlide.type !== 'slide') throw new Error('missing slide')
+    const items = new Map(nextSlide.scenes[0]!.layerItems.map((item) => [item.layerItemId, item]))
+    expect(items.get('layer-a')?.frame).toMatchObject({ x: 150, y: 130 })
+    expect(items.get('layer-b')?.frame).toMatchObject({ x: 150, y: 130 })
   })
 
   it('updates Spatial world items and adds navigable camera frames', () => {
@@ -247,7 +320,7 @@ describe('Course Studio concentrated authoring flow', () => {
         onEdit={onEdit}
       />,
     )
-    const editor = screen.getByRole('textbox', { name: '编辑paragraph块' })
+    const editor = screen.getByRole('textbox', { name: '编辑正文' })
     fireEvent.change(editor, { target: { value: '修改后正文' } })
     fireEvent.blur(editor)
     expect(onEdit).toHaveBeenCalledWith('paragraph', '修改后正文')
@@ -528,6 +601,46 @@ describe('Course Studio concentrated authoring flow', () => {
     expect(onHostReady.mock.calls.filter(([host]) => host !== null).map(([host]) => host)).toEqual([mountedHost])
   })
 
+  it('uses CourseLocation ids for Slide scoped layers in the editor host', async () => {
+    let project = createCourseProject({ id: 'slide-location-scope' })
+    const originalLocationId = project.locations[0]!.id
+    project = updateCourseProject(project, (draft) => {
+      draft.locations[0]!.id = 'location-visible'
+      draft.startLocationId = 'location-visible'
+      draft.globalLayerItems[0]!.visibility = {
+        mode: 'include',
+        locationIds: ['location-visible'],
+      }
+      draft.navigationGuards.forEach((guard) => {
+        guard.fromLocationIds = guard.fromLocationIds?.map((id) => id === originalLocationId ? 'location-visible' : id)
+        guard.toLocationIds = guard.toLocationIds?.map((id) => id === originalLocationId ? 'location-visible' : id)
+      })
+    })
+    const slide = project.surfaces[0]
+    if (slide?.type !== 'slide') throw new Error('missing slide')
+    const controllerId = project.globalLayerItems[0]!.item.layerItemId
+    const props = {
+      surface: slide,
+      sceneId: slide.scenes[0]!.id,
+      selectedLayerItemId: null,
+      resolveAsset: () => undefined,
+      onLayerHit: () => undefined,
+      onError: (message: string) => { throw new Error(message) },
+      mode: 'inspect' as const,
+      globalLayerItems: project.globalLayerItems,
+    }
+    const { container, rerender } = render(
+      <SlideCourseCanvas {...props} locationId="location-visible" />,
+    )
+    await waitFor(() => expect(
+      container.querySelector(`[data-layer-item-id="${controllerId}"]`),
+    ).not.toBeNull())
+    rerender(<SlideCourseCanvas {...props} locationId="another-location" />)
+    await waitFor(() => expect(
+      container.querySelector(`[data-layer-item-id="${controllerId}"]`),
+    ).toHaveAttribute('hidden'))
+  })
+
   it('uses one declarative guard chain, freezes inspect state and restarts playback defaults', () => {
     let project = createCourseProject({ id: 'session-course' })
     const slide = project.surfaces[0]!
@@ -569,6 +682,128 @@ describe('Course Studio concentrated authoring flow', () => {
     expect(session.state.get('unlocked')).toBe(false)
   })
 
+  it('删除 Flow 内容时原子修复作用范围与翻页条件引用', () => {
+    let project = flowProject()
+    project = addFlowBlock(project, 'flow-main', {
+      id: 'later-block',
+      type: 'section',
+      title: '后续探究',
+      collapsedByDefault: false,
+      blocks: [{ id: 'nested-later', type: 'paragraph', text: '子内容' }],
+    }, '2026-08-14T00:00:02.000Z')
+    const laterLocation = project.locations.find((location) => (
+      location.kind === 'flow-block' && location.blockId === 'later-block'
+    ))!
+    const nestedLocation = project.locations.find((location) => (
+      location.kind === 'flow-block' && location.blockId === 'nested-later'
+    ))!
+    project = updateCourseProject(project, (draft) => {
+      draft.courseState = [{ key: 'missing', valueType: 'boolean', defaultValue: false }]
+      draft.globalLayerItems[0]!.visibility = {
+        mode: 'include',
+        locationIds: [laterLocation.id, nestedLocation.id],
+      }
+      draft.navigationGuards = [{
+        id: 'later-guard',
+        effect: 'block',
+        toLocationIds: [laterLocation.id, nestedLocation.id],
+        match: 'all',
+        conditions: [{ type: 'exists', key: 'missing', exists: true }],
+        message: '先完成当前任务',
+      }]
+    })
+
+    project = deleteNestedFlowBlock(project, 'flow-main', 'nested-later')
+    expect(project.globalLayerItems[0]!.visibility.locationIds).toEqual([laterLocation.id])
+    expect(project.navigationGuards[0]!.toLocationIds).toEqual([laterLocation.id])
+
+    project = deleteFlowBlock(project, 'flow-main', 'later-block')
+    expect(project.globalLayerItems[0]!.visibility.locationIds).not.toContain(laterLocation.id)
+    expect(project.navigationGuards).toEqual([])
+  })
+
+  it('uses the exact course location for a named scene state in Studio playback', () => {
+    let project = createCourseProject({ id: 'session-named-state' })
+    const slide = project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('missing slide')
+    const scene = slide.scenes[0]!
+    project = updateCourseProject(project, (draft) => {
+      const currentSlide = draft.surfaces[0]
+      if (currentSlide?.type !== 'slide') throw new Error('missing slide')
+      currentSlide.scenes[0]!.presentation!.states.push({
+        id: 'state-b',
+        name: '讲解结果',
+        layerItemOverrides: {},
+      })
+      draft.locations.push({
+        id: 'location-state-b',
+        label: '讲解结果',
+        kind: 'slide-scene',
+        surfaceId: currentSlide.id,
+        sceneId: currentSlide.scenes[0]!.id,
+        stateId: 'state-b',
+      })
+    })
+    const activateLocation = vi.fn()
+    const session = new CourseStudioPlaybackSession(project, {
+      getActiveSurfaceId: () => slide.id,
+      getActiveSceneId: () => scene.id,
+      activateLocation,
+      setPresentationState: () => true,
+      presentationState: () => ({ current: null, states: [] }),
+      onBlocked: vi.fn(),
+    })
+    expect(session.goToScene(scene.id, 'state-b')).toBe(true)
+    expect(session.currentLocationId).toBe('location-state-b')
+    expect(activateLocation).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: 'location-state-b',
+      stateId: 'state-b',
+    }))
+
+    session.authorActivate(project.locations.find((location) => location.id === project.startLocationId)!)
+    expect(session.setPresentationState(slide.id, 'state-b')).toBe(true)
+    expect(session.currentLocationId).toBe('location-state-b')
+  })
+
+  it('opens the authored initial review frame and supports a saved frame without a dedicated location', () => {
+    let project = createCourseProject({ id: 'session-base-location-state' })
+    const slide = project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('missing slide')
+    const scene = slide.scenes[0]!
+    const baseLocation = project.locations.find((location) => (
+      location.kind === 'slide-scene' && location.sceneId === scene.id
+    ))!
+    project = updateCourseProject(project, (draft) => {
+      const currentSlide = draft.surfaces[0]
+      if (currentSlide?.type !== 'slide') throw new Error('missing slide')
+      currentSlide.scenes[0]!.presentation = {
+        initialStateId: 'state-b',
+        states: [
+          { id: 'state-a', name: '画面 A', layerItemOverrides: {} },
+          { id: 'state-b', name: '画面 B', layerItemOverrides: {} },
+        ],
+      }
+    })
+    const activateLocation = vi.fn()
+    const setPresentationState = vi.fn(() => true)
+    const session = new CourseStudioPlaybackSession(project, {
+      getActiveSurfaceId: () => slide.id,
+      getActiveSceneId: () => scene.id,
+      activateLocation,
+      setPresentationState,
+      presentationState: () => ({ current: null, states: [] }),
+      onBlocked: vi.fn(),
+    })
+
+    expect(session.goToScene(scene.id)).toBe(true)
+    expect(session.currentLocationId).toBe(baseLocation.id)
+    expect(activateLocation).toHaveBeenLastCalledWith(expect.objectContaining({ id: baseLocation.id }))
+
+    expect(session.goToScene(scene.id, 'state-a')).toBe(true)
+    expect(session.currentLocationId).toBe(baseLocation.id)
+    expect(setPresentationState).toHaveBeenCalledWith(slide.id, 'state-a')
+  })
+
   it('exports real editable Slide PPTX bytes and reports non-Slide omissions', async () => {
     let project = createCourseProject({ id: 'pptx-course', title: '多表面导出' })
     const slide = project.surfaces[0]!
@@ -579,10 +814,50 @@ describe('Course Studio concentrated authoring flow', () => {
     const built = await buildCoursePptx(project, {})
     expect([...built.bytes.slice(0, 2)]).toEqual([0x50, 0x4b])
     expect(built.slideCount).toBe(1)
-    expect(built.warnings.join('\n')).toMatch(/flow|spatial-2d/)
+    expect(built.warnings.join('\n')).toMatch(/流式讲义|空间画布/u)
+    expect(built.warnings.join('\n')).not.toMatch(/\bflow\b|spatial-2d|\bsurface\b/u)
     expect(built.differences.some((difference) => (
       difference.target === 'pptx' && difference.disposition === 'omitted'
     ))).toBe(true)
+  })
+
+  it('PPTX 按幻灯片初始画面的精确课程位置筛选共享图层', async () => {
+    const project = createCourseProject({ id: 'pptx-state-location' })
+    const surface = project.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('missing slide')
+    const scene = surface.scenes[0]!
+    scene.presentation = {
+      initialStateId: 'state-b',
+      states: [
+        { id: 'state-a', name: '画面 A', layerItemOverrides: {} },
+        { id: 'state-b', name: '画面 B', layerItemOverrides: {} },
+      ],
+    }
+    project.locations = [
+      { id: 'location-a', label: '画面 A', kind: 'slide-scene', surfaceId: surface.id, sceneId: scene.id, stateId: 'state-a' },
+      { id: 'location-b', label: '画面 B', kind: 'slide-scene', surfaceId: surface.id, sceneId: scene.id, stateId: 'state-b' },
+    ]
+    project.startLocationId = 'location-b'
+    const stateOnly = runtimeItem('')
+    stateOnly.layerItemId = 'state-only-internal'
+    stateOnly.label = '状态专属互动内容'
+    project.globalLayerItems = [{
+      item: stateOnly,
+      visibility: { mode: 'include', locationIds: ['location-b'] },
+    }]
+    const built = await buildCoursePptx(project, {})
+    expect(built.warnings.join('\n')).toContain('状态专属互动内容')
+    expect(built.warnings.join('\n')).not.toMatch(/state-only-internal|\bruntime\b|surface-v1/u)
+
+    project.locations = [
+      project.locations[0]!,
+      { id: 'location-generic', label: '进入初始画面', kind: 'slide-scene', surfaceId: surface.id, sceneId: scene.id },
+    ]
+    const genericBuilt = await buildCoursePptx(project, {})
+    expect(genericBuilt.warnings.join('\n')).not.toContain('状态专属互动内容')
+
+    project.locations = [project.locations[0]!]
+    await expect(buildCoursePptx(project, {})).rejects.toThrow(/初始画面对应的课程位置/u)
   })
 
   it('wires PPTX dynamic export to the currently mounted Slide instance', async () => {
@@ -591,7 +866,10 @@ describe('Course Studio concentrated authoring flow', () => {
     if (surface.type !== 'slide') throw new Error('missing slide')
     const scene = surface.scenes[0]!
     const dynamic = runtimeItem('CoursewareSurfaceRuntime.define({runtimeApiVersion:3,create(){return{destroy(){}}}})')
-    const host = { sceneId: scene.id } as unknown as SlideSurfaceHost
+    const host = {
+      sceneId: scene.id,
+      stateId: scene.presentation?.initialStateId,
+    } as unknown as SlideSurfaceHost
     const captureItem = vi.fn().mockResolvedValue('data:image/png;base64,Q1VSUkVOVA==')
     const capture = currentPptxDynamicCapture(() => host, () => surface.id, captureItem)
 

@@ -276,4 +276,101 @@ describe('Flow unified authored layers', () => {
     await app.destroy()
     root.remove()
   })
+
+  it('drives a mixed published course from the last Slide into Flow and exposes real directory, sound and fullscreen controls', async () => {
+    let project = addCourseSurface(createCourseProject({ id: 'published-mixed-controller' }), 'flow', { id: 'flow-after-slide' })
+    const slideLocation = project.locations.find((location) => location.kind === 'slide-scene')
+    const flowLocation = project.locations.find((location) => location.kind === 'flow-block')
+    if (!slideLocation || !flowLocation) throw new Error('Mixed location fixture missing')
+    project = updateCourseProject(project, (draft) => {
+      draft.startLocationId = slideLocation.id
+      draft.courseState = [{ key: 'canContinue', valueType: 'boolean', defaultValue: false }]
+      draft.navigationGuards = [{
+        id: 'guard-after-slide', effect: 'block', toLocationIds: [flowLocation.id], match: 'all',
+        conditions: [{ type: 'compare', key: 'canContinue', operator: 'eq', value: true }],
+        message: '请先完成本页讲解',
+      }]
+      const controller = draft.globalLayerItems.find((entry) => (
+        entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      ))
+      if (!controller || controller.item.kind !== 'native' || controller.item.content.nativeType !== 'teacher-controller') {
+        throw new Error('Default teacher controller missing')
+      }
+      controller.item.content.data.showSceneProgress = true
+      controller.item.content.data.collapsible = true
+      controller.item.content.data.defaultCollapsed = false
+      controller.item.content.data.buttons = [
+        { id: 'next', label: '下一页', visible: true, action: { type: 'scene.next' } },
+        { id: 'picker', label: '课程目录', visible: true, action: { type: 'scene.open-picker' } },
+        { id: 'sound', label: '声音', visible: true, action: { type: 'audio.toggle-mute' } },
+        { id: 'fullscreen', label: '全屏', visible: true, action: { type: 'player.fullscreen.toggle' } },
+      ]
+    })
+    const payload = buildPublishedCourseV2Payload({ project, assetFiles: {}, components: {} })
+    const root = document.createElement('div')
+    const requestFullscreen = vi.fn(async () => undefined)
+    Object.defineProperty(root, 'requestFullscreen', { configurable: true, value: requestFullscreen })
+    document.body.appendChild(root)
+    const blocked = vi.fn()
+    const app = await PublishedCourseApp.create(payload, root, { onNavigationBlocked: blocked })
+    const activeController = () => root.querySelector<HTMLElement>(
+      '.course-surface-host:not([hidden]) .slide-native-teacher-controller, ' +
+      '.course-surface-host:not([hidden]) .spatial-native-teacher-controller',
+    )!
+
+    expect(activeController().querySelector('[data-teacher-controller-progress]'))
+      .toHaveTextContent(`1 / ${project.locations.length} · ${slideLocation.label}`)
+    activeController().querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.click()
+    await vi.waitFor(() => expect(blocked).toHaveBeenCalledWith(['请先完成本页讲解']))
+    expect(app.currentLocationId).toBe(slideLocation.id)
+
+    app.courseState.set('canContinue', true)
+    activeController().querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe(flowLocation.id))
+    expect(activeController().querySelector('[data-teacher-controller-progress]'))
+      .toHaveTextContent(`${project.locations.findIndex((location) => location.id === flowLocation.id) + 1} / ${project.locations.length} · ${flowLocation.label}`)
+
+    const media = document.createElement('video')
+    media.muted = false
+    const authoredMutedMedia = document.createElement('video')
+    authoredMutedMedia.muted = true
+    root.appendChild(media)
+    root.appendChild(authoredMutedMedia)
+    activeController().querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => {
+      expect(media.muted).toBe(true)
+      expect(authoredMutedMedia.muted).toBe(true)
+    })
+    const lateMedia = document.createElement('video')
+    lateMedia.muted = false
+    const lateAuthoredMutedMedia = document.createElement('audio')
+    lateAuthoredMutedMedia.muted = true
+    root.append(lateMedia, lateAuthoredMutedMedia)
+    await vi.waitFor(() => {
+      expect(lateMedia.muted).toBe(true)
+      expect(lateAuthoredMutedMedia.muted).toBe(true)
+    })
+    activeController().querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => {
+      expect(media.muted).toBe(false)
+      expect(authoredMutedMedia.muted).toBe(true)
+      expect(lateMedia.muted).toBe(false)
+      expect(lateAuthoredMutedMedia.muted).toBe(true)
+    })
+    activeController().querySelector<HTMLButtonElement>('[data-controller-button-id="fullscreen"]')!.click()
+    await vi.waitFor(() => expect(requestFullscreen).toHaveBeenCalledTimes(1))
+
+    activeController().querySelector<HTMLButtonElement>('[data-controller-button-id="picker"]')!.click()
+    const picker = await vi.waitFor(() => {
+      const found = root.querySelector<HTMLElement>('[data-scene-picker]')
+      expect(found).toBeVisible()
+      return found!
+    })
+    expect(picker.querySelectorAll('.lesson-scene-picker__item')).toHaveLength(project.locations.length)
+    picker.querySelector<HTMLButtonElement>(`[data-scene-id="${slideLocation.id}"]`)!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe(slideLocation.id))
+
+    await app.destroy()
+    root.remove()
+  })
 })
