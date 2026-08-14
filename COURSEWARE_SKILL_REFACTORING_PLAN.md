@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W00 [G00]`
+> `ACTIVE_WAVE: W01 [G01]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -15,7 +15,7 @@
 > `PRIMARY_COORDINATOR: 当前根代理；复杂架构任务优先使用 GPT-5.6 Sol / max`
 > `ATOMIC_EXECUTOR: GPT-5.6 Terra / max`
 > `ULTRA_WORKFLOW: 仅由主协调者按需用于只读审计、独立验证或已通过隔离预检的执行波`
-> `PLAN_STATUS: audited-final / implementation-not-started`
+> `PLAN_STATUS: audited-final / implementation-active`
 > `CURRENT_PRODUCT_STATUS: unusable`
 
 本文件是仓库根目录唯一长期开发计划。它不是把当前失败的 V9 前端改得“像 V8”，而是从真正包含成熟 V8 前端的 `3e41ec0` 出发，在原文件、原 DOM、原画布和原交互链中逐步换入 V9 数据与运行内核。
@@ -858,85 +858,88 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 
 ## 10. 当前唯一 ACTIVE_WAVE
 
-### W00｜基线分支启动波
+### 已完成检查点
+
+- `G00 accepted`：`8c7a530492e553f8bd1b560a3de598f4da24497c`
+- 当前分支：`codex/v9-editor-v8-base`
+- 基线证明：`3e41ec058627d38c4b9f5439b454cc72331e1485` 是当前 HEAD 的祖先；相对基线唯一差异为本计划；工作区干净。
+
+### W01｜真实工程基线冻结波
 
 - Status: `ready`
-- Common accepted parent SHA: `f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
-- Write cards: `G00`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `8c7a530492e553f8bd1b560a3de598f4da24497c`
+- Write cards: `G01`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: 不适用；G00 明确禁止 worktree
-- Integration order: `G00`
-- Stop condition: G00 未满足精确 Git 基线即停止；通过后自动物化串行 `W01 [G01]`
+- Parallel preflight: 不适用；G01 是协调者专属基线卡且不改产品代码
+- Integration order: `G01`
+- Stop condition: 依赖无法解析或命令无法启动时停止并保留原始证据；普通基线测试失败只记录、不在本卡修复；完成后自动计算 `G02 ‖ G03` 的隔离条件
 
-### G00｜从真实 V8 前端提交创建执行分支
+### ACTIVE_CARD｜G01 记录真实工程基线
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Accepted parent SHA: `f77ba9e477f9cb496e3219eb58babdb4f4becf7d`（仅表示当前计划所在分支，不是目标代码基线）
-- Dependencies: 无
-- 唯一结果：创建以 `3e41ec0` 为父历史的 `codex/v9-editor-v8-base`，该分支相对基线只多本计划，不带入 `f77ba9e` 的产品代码。
-- Before：当前工作区在 `codex/v9-editor-rewrite-snapshot`，只有本计划为已修改文件。
-- After：目标分支 merge-base 为 `3e41ec0`；`git diff 3e41ec0...HEAD` 只含本计划；未创建第二 worktree、未复制 `node_modules`、未运行 `npm ci`。
+- Wave: `W01`
+- Accepted parent SHA: `8c7a530492e553f8bd1b560a3de598f4da24497c`
+- Dependencies: `G00 accepted @ 8c7a530492e553f8bd1b560a3de598f4da24497c`
+- Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
+- Assigned branch: `codex/v9-editor-v8-base`
+- Parallel eligibility: `serial`
+- File-overlap proof: 不适用
+- Integration order: `1`
+- 唯一可见/模型结果: `docs/verification/V9_EDITOR_V8_BASELINE_20260814.md` 冻结 typecheck、unit、renderer/electron/player build、archive 与 publish 的真实退出状态和失败签名。
+- Before: `3e41ec0` 的真实工程基线尚无本轮可复核记录。
+- After: 六类基线均有精确命令、退出码、通过计数或失败摘要；工作区除基线记录外无变化，失败不会在本卡被修复或弱化。
 
 读取来源：
 
-- CURRENT: `COURSEWARE_SKILL_REFACTORING_PLAN.md`
-- BASE3E: Git commit `3e41ec058627d38c4b9f5439b454cc72331e1485`
-- DONORF77: 无产品文件
+- BASE3E: `package.json`、`package-lock.json`、`vitest.config.ts`、`vite.renderer.config.ts`、`vite.player.config.ts`、`tsconfig.electron.json`
+- DONORF77: 无
+- CURRENT: `tests/unit/courseStateAndArchive.test.ts`、`tests/unit/coursePublishPipeline.test.ts`、`tests/unit/courseProjectProtocol.test.ts`
 
 产品修改白名单：无。
 
 文档修改白名单：
 
-- `COURSEWARE_SKILL_REFACTORING_PLAN.md`
+- `docs/verification/V9_EDITOR_V8_BASELINE_20260814.md`
+
+测试修改白名单：无。
 
 明确禁止：
 
-- 把 `f77ba9e` 作为目标分支父历史；
-- merge/cherry-pick `f77ba9e`；
-- checkout/restore 整个 `src/renderer`；
-- 新建 worktree；
-- 复制或重装 `node_modules`；
-- 顺手修改代码；
+- 修改产品、测试、配置、依赖、lockfile、生成脚本或现有 fixture；
+- 为通过基线而更新 snapshot、弱化断言或删除失败测试；
+- 运行 `npm install`、`npm ci`、格式化、清理或发布命令；
+- 把旧 `dist-*` 的存在当作新构建成功；
 - push。
 
-执行命令：
+实现步骤：
+
+1. 核对分支、accepted parent、依赖树和干净工作区，逐条运行六类基线命令并记录实际退出码、测试计数、构建产物与可复现失败签名。
+2. 只用上述事实新增基线文档；提交前核对相对 accepted parent 的全部变化只含该文档。
+
+验证命令：
 
 ```powershell
+git status --short
 git branch --show-current
-git status --short
+git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
+npm ls --depth=0
+npm run typecheck
+npm test
+npm run build:player
+npm run build:renderer
+npm run build:electron
+npx vitest run tests/unit/courseStateAndArchive.test.ts tests/unit/coursePublishPipeline.test.ts tests/unit/courseProjectProtocol.test.ts
 git diff --check
-
-# 只有当前分支正确且 status 恰好只有计划文件时继续。
-git add -- COURSEWARE_SKILL_REFACTORING_PLAN.md
-git commit -m "docs: freeze audited V8-based V9 editor plan"
-$planCommit = git rev-parse HEAD
-
-# 若目标分支已存在，停止并报告，不得覆盖。
-git show-ref --verify --quiet refs/heads/codex/v9-editor-v8-base
-if ($LASTEXITCODE -eq 0) { throw '目标分支已存在，需协调者审计' }
-
-git switch -c codex/v9-editor-v8-base 3e41ec0
-git restore --source=$planCommit -- COURSEWARE_SKILL_REFACTORING_PLAN.md
-git add -- COURSEWARE_SKILL_REFACTORING_PLAN.md
-git commit -m "docs: add audited editor convergence plan"
-
-git merge-base --is-ancestor 3e41ec0 HEAD
-git diff --name-status 3e41ec0...HEAD
-git status --short
+git diff --name-only
+git diff --cached --name-only
+git diff --name-only 8c7a530492e553f8bd1b560a3de598f4da24497c
 ```
 
-验收：
+鼠标/截图证据：不适用。
 
-- `git diff --name-status 3e41ec0...HEAD` 只有 `A/M COURSEWARE_SKILL_REFACTORING_PLAN.md`；
-- `git status --short` 为空；
-- 当前分支为 `codex/v9-editor-v8-base`；
-- 未触碰产品代码。
-
-Commit：`docs: add audited editor convergence plan`
-Rollback：删除尚未共享的目标分支；不得 reset 已共享分支。
-
-G00 accepted 后，协调者把 G01 编译为下一张精确卡并更新本节为 `W01 [G01]`，无需等待用户再次提示。Terra Max 不得自行开始 G01。
+Commit: `docs: freeze 3e V8 editor engineering baseline`
+Rollback: `git revert <task-sha>`
 
 ---
 
