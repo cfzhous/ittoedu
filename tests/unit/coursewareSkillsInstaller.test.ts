@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 const execFileAsync = promisify(execFile)
 const root = path.resolve(__dirname, '..', '..')
 const installer = path.join(root, 'scripts', 'install-courseware-skills.ps1')
-const windowsDescribe = process.platform === 'win32' ? describe : describe.skip
+const windowsDescribe = describe.runIf(process.platform === 'win32')
 
 let temporaryRoot = ''
 let sourceRoot = ''

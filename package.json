@@ -41,6 +41,8 @@
     "verify": "npm run build",
     "verify:full": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run prepare:e2e && npm run test:e2e:run",
     "verify:clean-windows": "tsx scripts/verify-clean-windows.ts",
+    "verify:editor-preservation": "tsx scripts/verify-editor-preservation.ts --entry-mode=transition",
+    "verify:editor-preservation:visual": "tsx scripts/verify-editor-preservation.ts --entry-mode=transition --visual",
     "build:icons": "tsx scripts/build-icons.ts"
   },
   "dependencies": {
