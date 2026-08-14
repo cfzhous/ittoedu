@@ -70,6 +70,7 @@ function clonePureData<T>(value: T, key: string): T {
 
 export class CourseStateStore implements CourseStateStoreContract {
   private readonly values = new Map<string, CourseStateData>()
+  private frozen: boolean
 
   constructor(
     private readonly onChange?: (
@@ -79,7 +80,24 @@ export class CourseStateStore implements CourseStateStoreContract {
         value?: unknown
       }>,
     ) => void,
-  ) {}
+    frozen = false,
+  ) {
+    this.frozen = frozen
+  }
+
+  /**
+   * Freezes mutations without hiding the current session snapshot. The editor
+   * uses this while inspecting a live interaction frame: runtimes may keep
+   * reading the state that produced the frame, but cannot leak transient
+   * student actions into later authoring updates.
+   */
+  setFrozen(frozen: boolean): void {
+    this.frozen = frozen
+  }
+
+  isFrozen(): boolean {
+    return this.frozen
+  }
 
   get<T = CourseStateData>(key: string): T | undefined {
     if (!this.values.has(key)) return undefined
@@ -87,18 +105,21 @@ export class CourseStateStore implements CourseStateStoreContract {
   }
 
   set(key: string, value: unknown): void {
+    if (this.frozen) return
     const cloned = clonePureData(value, key) as CourseStateData
     this.values.set(key, cloned)
     this.onChange?.({ type: 'set', key, value: clonePureData(cloned, key) })
   }
 
   delete(key: string): void {
+    if (this.frozen) return
     if (this.values.delete(key)) {
       this.onChange?.({ type: 'delete', key })
     }
   }
 
   clear(): void {
+    if (this.frozen) return
     const hadValues = this.values.size > 0
     this.values.clear()
     if (hadValues) this.onChange?.({ type: 'clear' })

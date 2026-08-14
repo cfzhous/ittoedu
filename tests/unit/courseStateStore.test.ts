@@ -91,4 +91,24 @@ describe('CourseStateStore', () => {
     expect(store.get('two')).toBeUndefined()
     expect(store.snapshot()).toEqual({})
   })
+
+  it('检查模式冻结写入但保留当前会话快照，退出后恢复写入', () => {
+    const changes: unknown[] = []
+    const store = new CourseStateStore((change) => changes.push(change))
+    store.set('attempts', 2)
+    store.setFrozen(true)
+
+    expect(store.isFrozen()).toBe(true)
+    expect(store.get('attempts')).toBe(2)
+    store.set('attempts', 3)
+    store.delete('attempts')
+    store.clear()
+    expect(store.snapshot()).toEqual({ attempts: 2 })
+    expect(changes).toHaveLength(1)
+
+    store.setFrozen(false)
+    store.set('attempts', 3)
+    expect(store.snapshot()).toEqual({ attempts: 3 })
+    expect(changes).toHaveLength(2)
+  })
 })

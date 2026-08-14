@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App'
+import ProductApp from './ProductApp'
 import './styles/globals.css'
 import { useEditorStore } from './store/editorStore'
 import { AppErrorBoundary } from './ui/AppErrorBoundary'
@@ -19,7 +19,7 @@ if (!root) throw new Error('应用根节点不存在')
 createRoot(root).render(
   <StrictMode>
     <AppErrorBoundary>
-      <App />
+      <ProductApp />
     </AppErrorBoundary>
   </StrictMode>,
 )

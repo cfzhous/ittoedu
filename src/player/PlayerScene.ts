@@ -123,6 +123,7 @@ export class PlayerScene extends Phaser.Scene {
   private readonly globalVisibilityByNodeId = new Map<string, boolean>()
   private documentVisible = true
   private runtimesSuspended = false
+  private inspectionMode = false
 
   constructor(
     private readonly payload: ExportPayload,
@@ -157,7 +158,7 @@ export class PlayerScene extends Phaser.Scene {
 
   create(): void {
     this.ready = true
-    if (this.authoringMode) this.input.enabled = false
+    if (this.isAuthoringActive()) this.input.enabled = false
     // PlayerApp may observe a hidden document before Phaser has created this
     // scene. Prime the kernel now; its own cached state is inherited by the
     // global and scene runtimes mounted below.
@@ -181,6 +182,11 @@ export class PlayerScene extends Phaser.Scene {
     const canvas = this.game.canvas
     canvas.setAttribute('aria-label', this.payload.project.title)
     canvas.setAttribute('role', 'img')
+    if (this.inspectionMode) {
+      this.time.paused = true
+      this.tweens.pauseAll()
+      this.scene.pause()
+    }
   }
 
   /**
@@ -202,7 +208,7 @@ export class PlayerScene extends Phaser.Scene {
       return false
     }
     if (!force && index === this.currentSceneIndex && this.pendingNavigation === null) {
-      if (targetStateId === null && this.authoringMode) {
+      if (targetStateId === null && this.isAuthoringActive()) {
         return this.showAuthoringBaseState()
       }
       return typeof targetStateId === 'string'
@@ -250,7 +256,7 @@ export class PlayerScene extends Phaser.Scene {
   }
 
   showAuthoringBaseState(): boolean {
-    if (!this.authoringMode || !this.ready || this.currentSceneIndex < 0) {
+    if (!this.isAuthoringActive() || !this.ready || this.currentSceneIndex < 0) {
       return false
     }
     if (
@@ -644,7 +650,7 @@ export class PlayerScene extends Phaser.Scene {
     if (!request.force && request.index === this.currentSceneIndex) {
       // A later request may cancel an in-flight navigation after its textures
       // have loaded. Drop those now-unused textures while keeping this scene.
-      if (request.targetStateId === null && this.authoringMode) {
+      if (request.targetStateId === null && this.isAuthoringActive()) {
         this.showAuthoringBaseState()
       } else if (typeof request.targetStateId === 'string') {
         this.setPresentationState(request.targetStateId)
@@ -694,7 +700,7 @@ export class PlayerScene extends Phaser.Scene {
         audio: this.audio,
         mode: this.authoringMode || this.interactionsEnabled ? 'preview' : 'capture',
         authoring: this.authoringMode,
-        ...(this.authoringMode && this.onComponentAuthoringTargetsChanged
+        ...(this.onComponentAuthoringTargetsChanged
           ? {
               onComponentAuthoringTargetsChanged:
                 this.onComponentAuthoringTargetsChanged,
@@ -839,7 +845,7 @@ export class PlayerScene extends Phaser.Scene {
   private validateAuthoringContext(
     context: PlayerAuthoringContext,
   ): PlayerSceneAuthoringPatchResult | null {
-    if (!this.authoringMode) {
+    if (!this.isAuthoringActive()) {
       return this.authoringFailure(
         'unsupported-host-mode',
         '当前 Player 未以统一画布编辑宿主模式启动。',
@@ -1096,12 +1102,54 @@ export class PlayerScene extends Phaser.Scene {
   }
 
   resumeRuntimes(): void {
+    if (this.inspectionMode) return
     const wasSuspended = this.runtimesSuspended
     this.runtimesSuspended = false
     if (!this.ready || !wasSuspended) return
     this.runtimeKernel.resume()
     for (const handle of this.renderedNodes) handle.resume?.()
     for (const { handle } of this.renderedGlobalItems) handle.resume?.()
+  }
+
+  /**
+   * Freezes the current rendered frame in place without rebuilding the Player.
+   * Runtime/component lifecycle hooks, media and Phaser time stop together;
+   * rendered objects remain available for authoring patches and hit testing.
+   */
+  setInspectionMode(enabled: boolean): boolean {
+    if (this.authoringMode || this.inspectionMode === enabled) return true
+    this.inspectionMode = enabled
+    if (!this.ready) {
+      this.runtimesSuspended = enabled
+      return true
+    }
+    this.input.enabled = !enabled
+    for (const handle of this.renderedNodes) {
+      handle.setInspectionMode?.(enabled)
+    }
+    for (const { handle } of this.renderedGlobalItems) {
+      handle.setInspectionMode?.(enabled)
+    }
+    if (enabled) {
+      this.suspendRuntimes()
+      this.time.paused = true
+      this.tweens.pauseAll()
+      this.scene.pause()
+    } else {
+      this.scene.resume()
+      this.time.paused = false
+      this.tweens.resumeAll()
+      if (this.documentVisible) this.resumeRuntimes()
+    }
+    return true
+  }
+
+  isInspectionMode(): boolean {
+    return this.inspectionMode
+  }
+
+  private isAuthoringActive(): boolean {
+    return this.authoringMode || this.inspectionMode
   }
 
   private createLayerRoots(): void {
@@ -1237,10 +1285,10 @@ export class PlayerScene extends Phaser.Scene {
           ...(state.description ? { description: state.description } : {}),
         }))
       },
-      setState: (stateId) => this.authoringMode
+      setState: (stateId) => this.isAuthoringActive()
         ? false
         : this.setPresentationState(stateId),
-      transitionTo: (stateId, transition) => this.authoringMode
+      transitionTo: (stateId, transition) => this.isAuthoringActive()
         ? false
         : this.setPresentationState(stateId, transition),
     }
@@ -1277,7 +1325,7 @@ export class PlayerScene extends Phaser.Scene {
           audio: this.audio,
           mode: this.authoringMode || this.interactionsEnabled ? 'preview' : 'capture',
           authoring: this.authoringMode,
-          ...(this.authoringMode && this.onComponentAuthoringTargetsChanged
+          ...(this.onComponentAuthoringTargetsChanged
             ? {
                 onComponentAuthoringTargetsChanged:
                   this.onComponentAuthoringTargetsChanged,
@@ -1349,6 +1397,7 @@ export class PlayerScene extends Phaser.Scene {
     // Object.create-based unit harnesses predate these fields, so undefined is
     // intentionally treated as the normal visible/running default.
     handle.setPageVisible?.(this.documentVisible !== false)
+    if (this.inspectionMode) handle.setInspectionMode?.(true)
     if (this.runtimesSuspended === true) handle.suspend?.()
   }
 

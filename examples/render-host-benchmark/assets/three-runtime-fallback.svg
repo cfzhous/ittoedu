@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
-  <defs><radialGradient id="earth" cx="34%" cy="28%"><stop stop-color="#93c5fd"/><stop offset=".48" stop-color="#2563eb"/><stop offset="1" stop-color="#082f49"/></radialGradient></defs>
-  <rect x="62" y="122" width="1156" height="432" rx="30" fill="#0f172a" stroke="#818cf8" stroke-width="2"/>
-  <text x="88" y="174" fill="#e0e7ff" font-family="Microsoft YaHei,sans-serif" font-size="24" font-weight="700">Runtime API 2 · Three.js 真 3D 增强</text>
-  <circle cx="870" cy="344" r="148" fill="url(#earth)" stroke="#bfdbfe" stroke-opacity=".5"/>
-  <ellipse cx="870" cy="344" rx="260" ry="98" fill="none" stroke="#a5b4fc" stroke-width="3" opacity=".55" transform="rotate(-18 870 344)"/>
-  <circle cx="1088" cy="272" r="31" fill="#dbeafe"/>
-</svg>

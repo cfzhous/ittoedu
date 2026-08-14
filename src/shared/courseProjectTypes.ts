@@ -1,0 +1,441 @@
+import type { InteractionRule } from './interactionTypes'
+import type {
+  BaseNode,
+  EmbeddedComponentPackageMeta,
+  FormulaAstNode,
+  FormulaNode,
+  ImageNode,
+  ProjectDesignTokens,
+  ProjectMediaSettings,
+  ProjectPlaybackSettings,
+  SceneNode,
+  ShapeNode,
+  TeacherControllerNode,
+  TextNode,
+  VideoNode,
+  AssetMeta,
+} from './projectTypes'
+import type { RuntimeRenderMode } from './runtimeTypes'
+
+export const COURSE_PROJECT_SCHEMA_VERSION = 9 as const
+
+export const COURSE_SURFACE_TYPES = ['slide', 'flow', 'spatial-2d'] as const
+export type CourseSurfaceType = typeof COURSE_SURFACE_TYPES[number]
+
+export const LAYER_ITEM_KINDS = ['native', 'component', 'runtime'] as const
+export type LayerItemKind = typeof LAYER_ITEM_KINDS[number]
+
+export type LayerHitPolicy = 'auto' | 'surface' | 'pass-through'
+
+/**
+ * `legacy-whole-canvas` is an explicit migration marker, not a new layout mode.
+ * New authoring writes `absolute`; a host may use the legacy marker only while
+ * adapting a Project V8 runtime that originally owned the complete 1280x720 canvas.
+ */
+export interface LayerFrame {
+  mode: 'absolute' | 'legacy-whole-canvas'
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface LayerItemBase {
+  /** Stable authoring identity. It survives save/reopen and is not a hit-test id. */
+  layerItemId: string
+  label: string
+  frame: LayerFrame
+  /**
+   * Canonical sparse back-to-front key in the effective scene composition.
+   * Global, surface and scene/world items share this ordering fact; the
+   * containing arrays are storage scopes, not independent visual planes.
+   */
+  order: number
+  visible: boolean
+  locked: boolean
+  rotation: number
+  opacity: number
+  hitPolicy: LayerHitPolicy
+  playbackInitialVisibility: 'inherit' | 'hidden'
+}
+
+type NativeNodeData<T extends SceneNode> = Omit<T, keyof BaseNode>
+
+export type NativeElementContent =
+  | { nativeType: 'text'; data: NativeNodeData<TextNode> }
+  | { nativeType: 'formula'; data: NativeNodeData<FormulaNode> }
+  | { nativeType: 'image'; data: NativeNodeData<ImageNode> }
+  | { nativeType: 'video'; data: NativeNodeData<VideoNode> }
+  | { nativeType: 'shape'; data: NativeNodeData<ShapeNode> }
+  | {
+      nativeType: 'teacher-controller'
+      data: NativeNodeData<TeacherControllerNode>
+    }
+
+export interface NativeLayerItem extends LayerItemBase {
+  kind: 'native'
+  content: NativeElementContent
+}
+
+export interface ComponentLayerItem extends LayerItemBase {
+  kind: 'component'
+  component: {
+    packageId: string
+    version: string
+  }
+  props: Record<string, unknown>
+  staticFallbackAssetId?: string
+}
+
+export interface CourseRuntimeContent {
+  values: Record<string, string>
+  metadata?: Record<string, {
+    label?: string
+    description?: string
+    multiline?: boolean
+    maxLength?: number
+  }>
+}
+
+export interface CourseRuntimeDefinition {
+  /** New runtimes use `surface-v1`; migrated V8 runtimes remain explicit. */
+  protocol: 'surface-v1' | 'legacy-runtime-v2'
+  runtimeApiVersion: 2 | 3
+  enabled: boolean
+  renderMode: RuntimeRenderMode
+  source: string
+  content: CourseRuntimeContent
+  assets: Record<string, { assetId: string }>
+  nodeBindings?: Record<string, string>
+  staticFallback?: {
+    assetId: string
+    coverage: 'surface' | 'scene'
+  }
+}
+
+export interface RuntimeLayerItem extends LayerItemBase {
+  kind: 'runtime'
+  runtime: CourseRuntimeDefinition
+}
+
+export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
+
+export interface LocationVisibility {
+  mode: 'all' | 'include' | 'exclude'
+  locationIds: string[]
+}
+
+export interface ScopedLayerItem {
+  item: LayerItem
+  visibility: LocationVisibility
+}
+
+export interface LayerItemOverride {
+  label?: string
+  frame?: Partial<LayerFrame>
+  order?: number
+  visible?: boolean
+  locked?: boolean
+  rotation?: number
+  opacity?: number
+  hitPolicy?: LayerHitPolicy
+  playbackInitialVisibility?: 'inherit' | 'hidden'
+  nativeData?: Record<string, unknown>
+  componentProps?: Record<string, unknown>
+}
+
+export interface SlidePresentationState {
+  id: string
+  name: string
+  description?: string
+  backgroundColor?: string
+  backgroundAssetId?: string | null
+  layerItemOverrides: Record<string, LayerItemOverride>
+  layerItemOrder?: string[]
+}
+
+export interface SlidePresentation {
+  initialStateId: string
+  thumbnailStateId?: string
+  states: SlidePresentationState[]
+}
+
+export interface SlideSceneDocument {
+  id: string
+  name: string
+  backgroundColor: string
+  backgroundAssetId?: string | null
+  layerItems: LayerItem[]
+  presentation?: SlidePresentation
+  interactions: InteractionRule[]
+}
+
+export interface SurfaceBase {
+  id: string
+  title: string
+  /** Persistent surface UI/content, ordered by the same rule as scene/world items. */
+  surfaceLayerItems: ScopedLayerItem[]
+}
+
+export interface SlideSurfaceDocument extends SurfaceBase {
+  type: 'slide'
+  canvas: {
+    width: 1280
+    height: 720
+  }
+  scenes: SlideSceneDocument[]
+}
+
+export interface FlowBlockBase {
+  /** Stable across reorder, save/reopen, export and AI patching. */
+  id: string
+}
+
+export interface FlowHeadingBlock extends FlowBlockBase {
+  type: 'heading'
+  level: 1 | 2 | 3 | 4 | 5 | 6
+  text: string
+}
+
+export interface FlowParagraphBlock extends FlowBlockBase {
+  type: 'paragraph'
+  text: string
+}
+
+export interface FlowListBlock extends FlowBlockBase {
+  type: 'list'
+  ordered: boolean
+  items: Array<{ id: string; text: string }>
+}
+
+export interface FlowQuoteBlock extends FlowBlockBase {
+  type: 'quote'
+  text: string
+  citation?: string
+}
+
+export interface FlowDividerBlock extends FlowBlockBase {
+  type: 'divider'
+}
+
+export interface FlowMediaBlock extends FlowBlockBase {
+  type: 'media'
+  assetId: string
+  mediaKind: 'image' | 'audio' | 'video'
+  altText?: string
+  caption?: string
+  layout: 'content-width' | 'wide' | 'full-width'
+}
+
+export interface FlowTableBlock extends FlowBlockBase {
+  type: 'table'
+  caption?: string
+  columns: Array<{ id: string; header: string }>
+  rows: Array<{ id: string; cells: Record<string, string> }>
+}
+
+export interface FlowFormulaBlock extends FlowBlockBase {
+  type: 'formula'
+  formulaId: string
+  accessibleText: string
+  ast: FormulaAstNode
+}
+
+export interface FlowCodeBlock extends FlowBlockBase {
+  type: 'code'
+  language?: string
+  code: string
+}
+
+export interface FlowCalloutBlock extends FlowBlockBase {
+  type: 'callout'
+  tone: 'note' | 'example' | 'warning' | 'conclusion'
+  title?: string
+  body: string
+}
+
+export interface FlowSectionBlock extends FlowBlockBase {
+  type: 'section'
+  title: string
+  collapsedByDefault: boolean
+  blocks: FlowBlock[]
+}
+
+export interface FlowComponentBlock extends FlowBlockBase {
+  type: 'component'
+  component: {
+    packageId: string
+    version: string
+  }
+  props: Record<string, unknown>
+  staticFallbackAssetId: string
+}
+
+export type FlowBlock =
+  | FlowHeadingBlock
+  | FlowParagraphBlock
+  | FlowListBlock
+  | FlowQuoteBlock
+  | FlowDividerBlock
+  | FlowMediaBlock
+  | FlowTableBlock
+  | FlowFormulaBlock
+  | FlowCodeBlock
+  | FlowCalloutBlock
+  | FlowSectionBlock
+  | FlowComponentBlock
+
+export interface FlowSurfaceDocument extends SurfaceBase {
+  type: 'flow'
+  layout: {
+    readingWidth: number
+    wideContentWidth: number
+  }
+  blocks: FlowBlock[]
+}
+
+export interface SpatialCameraPose {
+  x: number
+  y: number
+  zoom: number
+}
+
+export interface SpatialCameraFrame extends SpatialCameraPose {
+  id: string
+  name: string
+}
+
+export interface SpatialSemanticZoomRule {
+  id: string
+  layerItemIds: string[]
+  minZoom: number
+  maxZoom: number
+  visible: boolean
+}
+
+export interface SpatialSurfaceDocument extends SurfaceBase {
+  type: 'spatial-2d'
+  world: {
+    bounds:
+      | { mode: 'infinite' }
+      | {
+          mode: 'finite'
+          x: number
+          y: number
+          width: number
+          height: number
+        }
+    layerItems: LayerItem[]
+  }
+  camera: {
+    home: SpatialCameraPose
+    frames: SpatialCameraFrame[]
+  }
+  semanticZoom: SpatialSemanticZoomRule[]
+}
+
+export type CourseSurfaceDocument =
+  | SlideSurfaceDocument
+  | FlowSurfaceDocument
+  | SpatialSurfaceDocument
+
+export type CourseStateScalar = boolean | number | string | null
+
+export type CourseStateDeclaration =
+  | { key: string; valueType: 'boolean'; defaultValue: boolean }
+  | { key: string; valueType: 'number'; defaultValue: number }
+  | { key: string; valueType: 'string'; defaultValue: string }
+  | { key: string; valueType: 'null'; defaultValue: null }
+
+export type CourseStateCondition =
+  | { type: 'exists'; key: string; exists: boolean }
+  | {
+      type: 'compare'
+      key: string
+      operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'
+      value: CourseStateScalar
+    }
+
+/** A declarative guard may only block; it cannot redirect or execute code. */
+export interface CourseNavigationGuard {
+  id: string
+  effect: 'block'
+  fromLocationIds?: string[]
+  toLocationIds: string[]
+  match: 'all' | 'any'
+  conditions: CourseStateCondition[]
+  message: string
+}
+
+export type CourseLocation =
+  | {
+      id: string
+      label: string
+      kind: 'slide-scene'
+      surfaceId: string
+      sceneId: string
+      stateId?: string
+    }
+  | {
+      id: string
+      label: string
+      kind: 'flow-block'
+      surfaceId: string
+      blockId: string
+    }
+  | {
+      id: string
+      label: string
+      kind: 'spatial-camera'
+      surfaceId: string
+      cameraFrameId: string
+    }
+
+export type MixedPrintEntry =
+  | {
+      id: string
+      kind: 'slide-scenes'
+      surfaceId: string
+      sceneIds: string[]
+    }
+  | {
+      id: string
+      kind: 'flow-document'
+      surfaceId: string
+    }
+  | {
+      id: string
+      kind: 'spatial-frames'
+      surfaceId: string
+      cameraFrameIds: string[]
+    }
+
+export interface MixedPrintPlan {
+  pageSize: 'A4' | 'letter' | 'surface-native'
+  orientation: 'auto' | 'portrait' | 'landscape'
+  entries: MixedPrintEntry[]
+}
+
+export interface CourseProjectDocument {
+  schemaVersion: typeof COURSE_PROJECT_SCHEMA_VERSION
+  id: string
+  /** Monotonic authoring transaction revision; unrelated to approval hashes. */
+  revision: number
+  title: string
+  createdAt: string
+  updatedAt: string
+  assets: Record<string, AssetMeta>
+  componentPackages: Record<string, EmbeddedComponentPackageMeta>
+  designTokens: ProjectDesignTokens
+  media: ProjectMediaSettings
+  playback: ProjectPlaybackSettings
+  courseState: CourseStateDeclaration[]
+  navigationGuards: CourseNavigationGuard[]
+  locations: CourseLocation[]
+  startLocationId: string
+  globalLayerItems: ScopedLayerItem[]
+  globalInteractions: InteractionRule[]
+  surfaces: CourseSurfaceDocument[]
+  /** Required only for a project containing more than one surface. */
+  mixedPrintPlan?: MixedPrintPlan
+}

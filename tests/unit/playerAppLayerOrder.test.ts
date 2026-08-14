@@ -6,6 +6,10 @@ const appMocks = vi.hoisted(() => ({
   componentDispose: vi.fn(),
   runtimeDestroy: vi.fn(),
   audioDestroy: vi.fn(),
+  audioSuspend: vi.fn(),
+  audioResume: vi.fn(),
+  courseStateFrozen: [] as boolean[],
+  inspectionModes: [] as boolean[],
   sceneLifecycleOrder: [] as string[],
   sceneSetDocumentVisible: vi.fn(),
   sceneIndex: 0,
@@ -29,7 +33,6 @@ vi.mock('phaser', () => ({
     constructor(config: { parent: HTMLElement }) {
       config.parent.append(this.canvas)
     }
-
     destroy(): void {
       appMocks.gameDestroy()
       this.canvas.remove()
@@ -66,6 +69,10 @@ vi.mock('../../src/player/CourseRuntimeKernel', () => ({
       appMocks.hostConstructionOrder.push('runtime-kernel')
       appMocks.runtimeKernelOptions.push(options)
     }
+    setCourseStateFrozen(value: boolean): void {
+      appMocks.courseStateFrozen.push(value)
+    }
+    invalidateAuthoringTargets(): void {}
     destroy(): void { appMocks.runtimeDestroy() }
   },
 }))
@@ -88,6 +95,8 @@ vi.mock('../../src/player/HostEvidenceRecorder', () => ({
 vi.mock('../../src/player/AudioManager', () => ({
   AudioManager: class FakeAudioManager {
     toggleMuted(): void {}
+    suspend(): void { appMocks.audioSuspend() }
+    resumeSuspended(): void { appMocks.audioResume() }
     destroy(): void { appMocks.audioDestroy() }
   },
 }))
@@ -106,6 +115,10 @@ vi.mock('../../src/player/PlayerScene', () => ({
     }
     resumeRuntimes(): void {
       appMocks.sceneLifecycleOrder.push('resume')
+    }
+    setInspectionMode(value: boolean): boolean {
+      appMocks.inspectionModes.push(value)
+      return true
     }
     async waitForCaptureReady(): Promise<void> {
       appMocks.sceneLifecycleOrder.push('prepare')
@@ -162,10 +175,50 @@ afterEach(() => {
   appMocks.showSceneBlockedReasons.length = 0
   appMocks.runtimeEventHandlers.clear()
   appMocks.presenterInputOptions.length = 0
+  appMocks.courseStateFrozen.length = 0
+  appMocks.inspectionModes.length = 0
   document.body.replaceChildren()
 })
 
 describe('PlayerApp fixed renderer planes', () => {
+  it('在同一个 Player 实例中冻结最后一帧并恢复，不重建 Canvas', () => {
+    const root = document.createElement('div')
+    document.body.append(root)
+    const player = new PlayerApp({
+      project: createProject({ includeDefaultController: false, controls: 'none' }),
+      assets: {},
+      components: {},
+    }, root, {
+      controls: false,
+      mode: 'preview',
+      onRuntimeAuthoringTargetsChanged: vi.fn(),
+      onComponentAuthoringTargetsChanged: vi.fn(),
+    })
+    const canvas = root.querySelector('canvas')
+    const stage = root.querySelector<HTMLElement>('.lesson-stage')!
+    Object.defineProperty(stage, 'getAnimations', {
+      configurable: true,
+      value: () => [],
+    })
+
+    expect(player.setInspectionMode(true)).toBe(true)
+    expect(player.isInspectionMode()).toBe(true)
+    expect(root.querySelector('canvas')).toBe(canvas)
+    expect(appMocks.courseStateFrozen).toEqual([true])
+    expect(appMocks.audioSuspend).toHaveBeenCalledOnce()
+    expect(appMocks.inspectionModes).toEqual([true])
+    expect(stage).toHaveClass('lesson-stage--inspection')
+
+    expect(player.setInspectionMode(false)).toBe(true)
+    expect(player.isInspectionMode()).toBe(false)
+    expect(root.querySelector('canvas')).toBe(canvas)
+    expect(appMocks.courseStateFrozen).toEqual([true, false])
+    expect(appMocks.audioResume).toHaveBeenCalledOnce()
+    expect(appMocks.inspectionModes).toEqual([true, false])
+    expect(stage).not.toHaveClass('lesson-stage--inspection')
+    player.destroy()
+  })
+
   it('使全局/场景 underlay 位于 Phaser 下方，overlay 位于上方', () => {
     const root = document.createElement('div')
     document.body.append(root)

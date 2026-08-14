@@ -21,6 +21,8 @@ import {
   validateProjectArchiveBytes,
 } from '@/renderer/project/validateProjectArchive'
 import { runValidateProjectCli } from '../../scripts/validate-project'
+import { createCourseProject } from '@/renderer/course/courseStudioModel'
+import { createCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 
 function emptyArchiveData(): ProjectArchiveData {
   return {
@@ -149,6 +151,26 @@ function publicValidatorCommand(
 }
 
 describe('headless Project V8 validation', () => {
+  it('uses the public validator for current V9 archives before the explicit V8 compatibility path', async () => {
+    const bytes = createCourseProjectArchive({
+      project: createCourseProject({ id: 'v9-validator', title: 'V9 校验课例', now: '2026-08-14T00:00:00.000Z' }),
+      assetFiles: {},
+      componentFiles: {},
+    })
+    const stdout: string[] = []
+    const exitCode = await runValidateProjectCli(['v9.h5lesson'], {
+      stdout: (value) => stdout.push(value),
+      stderr: () => undefined,
+      read: async () => bytes,
+    })
+    expect(exitCode).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toMatchObject({
+      reportVersion: 2,
+      status: 'valid',
+      schema: { schemaVersion: 9 },
+      project: { id: 'v9-validator', surfaceCount: 1, surfaces: { slide: 1 } },
+    })
+  })
   it('returns a deterministic four-surface report for a valid archive', () => {
     const source = emptyArchiveData()
     const bytes = createProjectArchive(source, {

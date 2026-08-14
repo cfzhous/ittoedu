@@ -9,10 +9,17 @@ import {
   type PlayerAuthoringErrorMessage,
 } from '../shared/playerAuthoringProtocol'
 import {
+  PLAYER_INSPECTION_MESSAGE_TYPES,
+  PLAYER_INSPECTION_PROTOCOL_VERSION,
+  parsePlayerInstallAuthoringAssetCommand,
+  parsePlayerInspectionModeCommand,
+} from '../shared/playerInspectionProtocol'
+import {
   decodeExportPayload,
   loadExportPayloadFromUrl,
   normalizePlayerPayload,
 } from './payload'
+import { startPublishedCourse } from './PublishedCourseApp'
 
 let authoringTargetsMessageRevision = 0
 
@@ -68,8 +75,7 @@ function startAndExposePlayer(
     const authoringSessionId = window.__H5_LESSON_BRIDGE_TOKEN__
     const options: PlayerAppOptions = {
       ...configuredOptions,
-      ...(configuredOptions.hostMode === 'authoring' &&
-        typeof authoringSessionId === 'string' && authoringSessionId
+      ...(typeof authoringSessionId === 'string' && authoringSessionId
         ? {
             onRuntimeAuthoringTargetsChanged: (update) => {
               postEditorBridgeMessage({
@@ -153,7 +159,10 @@ function authoringErrorMessage(
 }
 
 function postAuthoringReadyIfNeeded(player: PlayerApp): void {
-  if (authoringReadyPosted || player.getHostMode() !== 'authoring') return
+  if (
+    authoringReadyPosted ||
+    (player.getHostMode() !== 'authoring' && !player.isInspectionMode())
+  ) return
   const sessionId = window.__H5_LESSON_BRIDGE_TOKEN__
   if (typeof sessionId !== 'string' || !sessionId) return
   const ready = player.getAuthoringReadyMessage(sessionId)
@@ -237,6 +246,57 @@ function handleEditorBridgeMessage(event: MessageEvent): void {
   } | null
   const player = window.__H5_LESSON_PLAYER__
   if (handleAuthoringBridgeMessage(event.data, player)) return
+  if (message?.type === PLAYER_INSPECTION_MESSAGE_TYPES.installAsset) {
+    const command = parsePlayerInstallAuthoringAssetCommand(event.data)
+    const expectedSessionId = window.__H5_LESSON_BRIDGE_TOKEN__
+    if (
+      !command ||
+      typeof expectedSessionId !== 'string' ||
+      command.sessionId !== expectedSessionId ||
+      !player
+    ) return
+    if (typeof URL.createObjectURL !== 'function') return
+    const url = URL.createObjectURL(new Blob([command.bytes], {
+      type: command.asset.mimeType,
+    }))
+    const accepted = player.installAuthoringAsset(command.asset, url)
+    if (!accepted && typeof URL.revokeObjectURL === 'function') {
+      URL.revokeObjectURL(url)
+    }
+    postEditorBridgeMessage({
+      type: PLAYER_INSPECTION_MESSAGE_TYPES.assetInstalled,
+      protocolVersion: PLAYER_INSPECTION_PROTOCOL_VERSION,
+      sessionId: command.sessionId,
+      assetId: command.asset.id,
+      accepted,
+    })
+    return
+  }
+  if (message?.type === PLAYER_INSPECTION_MESSAGE_TYPES.set) {
+    const command = parsePlayerInspectionModeCommand(event.data)
+    const expectedSessionId = window.__H5_LESSON_BRIDGE_TOKEN__
+    if (
+      !command ||
+      typeof expectedSessionId !== 'string' ||
+      command.sessionId !== expectedSessionId ||
+      !player
+    ) {
+      return
+    }
+    if (command.enabled) authoringReadyPosted = false
+    const accepted = player.setInspectionMode(command.enabled)
+    postEditorBridgeMessage({
+      type: PLAYER_INSPECTION_MESSAGE_TYPES.changed,
+      protocolVersion: PLAYER_INSPECTION_PROTOCOL_VERSION,
+      sessionId: command.sessionId,
+      enabled: player.isInspectionMode(),
+      accepted,
+      sceneId: player.getCurrentSceneId(),
+      stateId: player.getCurrentPresentationStateId(),
+    })
+    if (command.enabled && accepted) postAuthoringReadyIfNeeded(player)
+    return
+  }
   if (!message || !player || typeof message.type !== 'string') return
   if (
     message.type === 'courseware-editor:set-scene' &&
@@ -248,12 +308,12 @@ function handleEditorBridgeMessage(event: MessageEvent): void {
     if (player.getCurrentSceneId() === message.sceneId) {
       // Calling through also cancels a possible in-flight request for another
       // scene. No future scene-change event is guaranteed for this no-op.
-      player.goToSceneById(message.sceneId)
+      player.goToSceneById(message.sceneId, undefined, true)
       pendingBridgeScene = null
       applyPendingBridgeState(player)
       return
     }
-    const accepted = player.goToSceneById(message.sceneId)
+    const accepted = player.goToSceneById(message.sceneId, undefined, true)
     pendingBridgeScene = {
       sceneId: message.sceneId,
       retryOnMismatch: !accepted,
@@ -429,15 +489,49 @@ export function bootstrapPlayer(): PlayerApp | null {
   return inlinePayload ? startAndExposePlayer(inlinePayload) : null
 }
 
+export async function bootstrapPublishedCourse(): Promise<import('./PublishedCourseApp').PublishedCourseApp | null> {
+  if (window.__H5_COURSE_PLAYER__) return window.__H5_COURSE_PLAYER__
+  const payload = window.__H5_COURSE_PAYLOAD__
+  if (!payload) return null
+  try {
+    const player = await startPublishedCourse(payload, 'course-root')
+    window.__H5_COURSE_PLAYER__ = player
+    return player
+  } catch (error) {
+    console.error('Published course player failed to start', error)
+    const root = document.getElementById('course-root')
+    if (root) {
+      const message = document.createElement('div')
+      message.className = 'course-player-error'
+      message.textContent = '课件加载失败，其他文件未受影响。'
+      root.replaceChildren(message)
+    }
+    return null
+  }
+}
+
+function bootstrapAvailablePlayer(): void {
+  if (window.__H5_COURSE_PAYLOAD__) void bootstrapPublishedCourse()
+  else bootstrapPlayer()
+}
+
+function destroyPublishedCourse(event: PageTransitionEvent): void {
+  if (event.persisted) return
+  const player = window.__H5_COURSE_PLAYER__
+  delete window.__H5_COURSE_PLAYER__
+  if (player) void player.destroy()
+}
+
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('message', handleEditorBridgeMessage)
   window.addEventListener('courseware-scene-change', forwardPlayerEvent)
   window.addEventListener('courseware-presentation-change', forwardPlayerEvent)
   window.addEventListener('pagehide', destroyExposedPlayer)
+  window.addEventListener('pagehide', destroyPublishedCourse)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapPlayer, { once: true })
+    document.addEventListener('DOMContentLoaded', bootstrapAvailablePlayer, { once: true })
   } else {
-    bootstrapPlayer()
+    bootstrapAvailablePlayer()
   }
 }
 
@@ -449,3 +543,10 @@ export {
 } from './payload'
 export { PlayerApp } from './PlayerApp'
 export { PlayerScene } from './PlayerScene'
+export { PublishedCourseApp, startPublishedCourse } from './PublishedCourseApp'
+export {
+  decodePublishedCourseCode,
+  isPublishedCourseV2Payload,
+  publishedCourseToPlayerDocument,
+} from './publishedCourse'
+export * from './surfaces'

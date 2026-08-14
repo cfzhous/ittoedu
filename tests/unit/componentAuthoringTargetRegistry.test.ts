@@ -397,4 +397,59 @@ describe('ComponentAuthoringTargetRegistry', () => {
 
     registry.destroy()
   })
+
+  it('图片目标必须绑定 editor image 属性，并发布可重挂载的稳定 prop path', async () => {
+    const assetManifest = componentManifestSchema.parse({
+      ...manifest,
+      defaultProps: {
+        ...manifest.defaultProps,
+        media: { heroAssetId: 'asset-default' },
+      },
+      editor: {
+        ...manifest.editor,
+        properties: [
+          ...(manifest.editor?.properties ?? []),
+          { key: 'media.heroAssetId', label: '主图', type: 'image' },
+        ],
+      },
+    }) as ComponentManifestV4
+    const onTargetsChanged = vi.fn()
+    const registry = new ComponentAuthoringTargetRegistry({
+      manifest: assetManifest,
+      node: node({
+        x: 10,
+        y: 20,
+        rotation: 0,
+        props: {
+          content: { title: '实例标题', body: '实例正文' },
+          media: { heroAssetId: 'asset-instance' },
+        },
+      }),
+      scope: 'scene',
+      sceneId: 'scene-one',
+      onTargetsChanged,
+    })
+    registry.registerAssetRegion({
+      key: 'media.heroAssetId',
+      getBounds: () => ({ x: 30, y: 40, width: 220, height: 100 }),
+    })
+    registry.registerAssetRegion({
+      key: 'content.title',
+      getBounds: () => ({ x: 0, y: 0, width: 10, height: 10 }),
+    })
+    await flushTargets()
+
+    expect(onTargetsChanged).toHaveBeenCalledOnce()
+    expect(onTargetsChanged.mock.calls[0]?.[0]).toMatchObject({
+      nodeId: 'component-one',
+      targets: [{
+        kind: 'component-asset',
+        targetId: 'registered-asset:1',
+        key: 'media.heroAssetId',
+        label: '主图',
+        bounds: { x: 40, y: 60, width: 220, height: 100 },
+      }],
+    })
+    registry.destroy()
+  })
 })

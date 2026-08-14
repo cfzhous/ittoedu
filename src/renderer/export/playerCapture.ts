@@ -690,6 +690,43 @@ function stageHasCompositedDom(stage: HTMLElement): boolean {
   ].join(',')) !== null
 }
 
+/**
+ * Rasterizes one already-mounted DOM subtree after its Runtime/Component
+ * capture hook has settled. Keeping this beside the Player compositor makes
+ * PPTX item snapshots use the same image, canvas, SVG and text painting rules
+ * as the existing PDF/PPTX player captures.
+ */
+export async function captureMountedElementPng(
+  element: HTMLElement,
+): Promise<string> {
+  const rect = element.getBoundingClientRect()
+  const width = Math.ceil(rect.width)
+  const height = Math.ceil(rect.height)
+  if (width <= 0 || height <= 0) {
+    throw new Error('动态实例没有可捕获的画面尺寸')
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('无法创建动态实例快照画布')
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  await paintNode(element, 1, {
+    context,
+    stageRect: rect,
+    imageCache: new Map(),
+    // Copy every live Canvas immediately. This is essential for current
+    // Runtime/Component instances whose drawing buffer may be transient.
+    canvasCache: snapshotDomCanvases(element),
+  })
+  const dataUrl = canvas.toDataURL('image/png')
+  if (!dataUrl.startsWith('data:image/png')) {
+    throw new Error('动态实例快照未生成 PNG')
+  }
+  return dataUrl
+}
+
 function phaserSnapshot(player: PlayerApp): Promise<string> {
   return new Promise((resolve, reject) => {
     player.game.renderer.snapshot((snapshot) => {

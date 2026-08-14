@@ -1,7 +1,9 @@
 # 互动课件创作路由
 
-- 教学需求、课例设计、内容闭合、呈现脚本、必要的视觉方向和哈希审批，使用仓库机器执行权威 [orchestrate-courseware](.agents/skills/orchestrate-courseware/SKILL.md)。它按 `fast | standard | high-risk` 选择最薄充分路径；`request_user_input` 可用时直接调用。学科专有要求优先由用户材料、学科 Skill 或本次提示词补充，不堆入通用流程。
-- 只有课例经 V2 校验器派生出当前有效的 `implementation-ready` 后，才使用仓库机器执行权威 [build-project-v8-courseware](.agents/skills/build-project-v8-courseware/SKILL.md) 选择载体、维护 Authoring Inventory、构建或局部 Patch、验证 Project V8 并交付证据。内容、批准或 Capability 失效时返回编排，不从聊天摘要、旧工程或模板补写。
-- [通用创作编排规范](docs/AI_COURSEWARE_ORCHESTRATION.md) 与 [当前创作与接入规范](docs/AI_COURSEWARE_AUTHORING.md) 是供人类审阅和工程维护的背景/设计说明；AI 按 Skill 路由并只加载任务所需章节，不以完整阅读两份长文作为每次创作的前置门禁。
+- 教学主题、教材、教案、题目、课程标准或既有课件先交给仓库内的 [orchestrate-courseware](.agents/skills/orchestrate-courseware/SKILL.md)。它只维护教师可直接阅读和修改的 `01-teaching-plan.md` 与 `02-presentation-script.md`；材料充分时少问，材料稀缺时围绕高影响缺口继续追问。
+- 两份当前 Markdown 经教师确认后，使用 [build-courseware-project](.agents/skills/build-courseware-project/SKILL.md)。Builder 从文件冷启动，按需查询 [Agent Kit 能力卡](agent-kit/capabilities/index.json)，先做高风险纵切，再增量装配、局部修复和验证 Course Project V9。
+- 通用 Skill 不规定课型、场景数、教学法、页面模板或视觉风格。Native、Runtime 与 Component 是实现载体：稳定内容优先 Native；一次性复杂动态机制用 Runtime；只有确有跨课例复用价值时才使用 Component。
+- 所有 Native、Runtime、Component 与教师控制器都进入统一图层。画布文字必须可命中，普通可替换图片应可命中；临时 `hitId` 不得代替跨保存稳定的 `authoringAddress`。
+- 教师工作流不使用 Hash、签名、审批状态机、候选等级或 Evidence 清单。工程仍必须通过当前 Schema、类型、保存重开、真实 Player、导出和体验复核。
 
-当前生成协议仅为固定 1280×720 的 PPT 兼容模式：Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4。不得伪造尚未发布的长文、无限画布、混合表面或其他 Project 字段；自动化管线最多给出 `engineering candidate`，`art candidate` 还需真实视觉/互动证据，`accepted` 必须来自明确的人类验收。
+当前产品协议是 Course Project V9、Published Course V2、Runtime API 2/3 兼容与 Component API 4。V8 只作为显式导入迁移和必要兼容测试存在，不得作为新课件默认生成路线。长期开发方向只看根目录 [唯一计划](COURSEWARE_SKILL_REFACTORING_PLAN.md)，当前产品事实以源码、Schema 与能力卡为准。自动化最多证明 `engineering candidate`；具体课例只有经过真实视觉/互动复核才可称 `art candidate`，`accepted` 必须来自教师明确验收。

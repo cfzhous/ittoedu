@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "id": "ittoedu.evidence-sort",
+  "name": "证据分类",
+  "version": "1.0.0",
+  "description": "把可编辑证据条目按键盘或指针移动到可配置分组；不内置学科内容或正确答案。",
+  "entry": "runtime.js",
+  "defaultSize": { "width": 900, "height": 460 },
+  "minSize": { "width": 540, "height": 320 },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "title": "整理证据",
+    "columns": {
+      "left": "支持",
+      "middle": "质疑",
+      "right": "仍需核实"
+    },
+    "items": {
+      "one": "证据一",
+      "two": "证据二",
+      "three": "证据三",
+      "four": "证据四",
+      "five": "证据五",
+      "six": "证据六"
+    },
+    "completionStateKey": "",
+    "requiredMoves": 0
+  },
+  "supportedScopes": ["scene"],
+  "renderMode": "dom",
+  "editor": {
+    "properties": [
+      { "key": "title", "label": "组件标题", "type": "text" },
+      { "key": "columns.left", "label": "左分组", "type": "text" },
+      { "key": "columns.middle", "label": "中分组", "type": "text" },
+      { "key": "columns.right", "label": "右分组", "type": "text" },
+      { "key": "items.one", "label": "证据一", "type": "textarea" },
+      { "key": "items.two", "label": "证据二", "type": "textarea" },
+      { "key": "items.three", "label": "证据三", "type": "textarea" },
+      { "key": "items.four", "label": "证据四", "type": "textarea" },
+      { "key": "items.five", "label": "证据五", "type": "textarea" },
+      { "key": "items.six", "label": "证据六", "type": "textarea" }
+      ,{ "key": "completionStateKey", "label": "完成状态键（可选）", "type": "text" }
+      ,{ "key": "requiredMoves", "label": "触发完成所需移动数", "type": "number", "min": 0, "max": 6, "step": 1 }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ import type { DesktopAPI } from '../shared/ipcTypes'
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
   openProject: 'project:open',
+  selectCourseAuthoringPatch: 'project:select-authoring-patch',
   listRecentProjects: 'project:list-recent',
   openRecentProject: 'project:open-recent',
   saveProject: 'project:save',
@@ -30,6 +31,7 @@ const IPC_CHANNELS = {
   openPreview: 'preview:open',
   confirmDiscard: 'app:confirm-discard',
   dirtyState: 'app:dirty-state',
+  updateCurrentCourseSelection: 'app:update-current-course-selection',
   requestSave: 'app:request-save',
   requestSaveAndClose: 'app:request-save-and-close',
   saveAndCloseResult: 'app:save-and-close-result',
@@ -97,6 +99,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 const desktopAPI = Object.freeze<DesktopAPI>({
   openProject: () => invoke(IPC_CHANNELS.openProject),
+  selectCourseAuthoringPatch: () => invoke(IPC_CHANNELS.selectCourseAuthoringPatch),
   listRecentProjects: () => invoke(IPC_CHANNELS.listRecentProjects),
   openRecentProject: (input) => invoke(IPC_CHANNELS.openRecentProject, input),
   saveProject: (input) => invoke(IPC_CHANNELS.saveProject, input),
@@ -130,6 +133,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   openPreview: (input) => invoke(IPC_CHANNELS.openPreview, input),
   confirmDiscardChanges: () => invoke(IPC_CHANNELS.confirmDiscard),
   setDirtyState: (dirty) => invoke(IPC_CHANNELS.dirtyState, dirty),
+  updateCurrentCourseSelection: (input) => invoke(IPC_CHANNELS.updateCurrentCourseSelection, input),
   onRequestSave: (handler) => {
     if (typeof handler !== 'function') {
       throw new TypeError('保存请求处理器必须是函数。')

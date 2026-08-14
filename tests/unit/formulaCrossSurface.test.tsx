@@ -21,6 +21,7 @@ import { SceneThumbnail } from '../../src/renderer/ui/SceneThumbnail'
 import {
   analyzeFormulaNodeLayout,
   renderFormulaNodeCanvas,
+  renderFormulaNodeSvg,
 } from '../../src/shared/formulaRenderer'
 
 function canvasContext() {
@@ -178,6 +179,7 @@ describe('FormulaNode shared renderer surfaces', () => {
     })
 
     const rendered = renderFormulaNodeCanvas(formula, formula.width, formula.height, 2)
+    const headless = renderFormulaNodeSvg(formula)
     const analysis = analyzeFormulaNodeLayout(formula)
 
     expect(rendered.canvas.width).toBe(formula.width * 2)
@@ -191,6 +193,11 @@ describe('FormulaNode shared renderer surfaces', () => {
     expect(context.fillText).toHaveBeenCalled()
     expect(context.stroke).toHaveBeenCalled()
     expect(context.lineTo).toHaveBeenCalled()
+    expect(headless.svg).toContain('<line')
+    expect(headless.svg).toContain('<polyline')
+    expect(headless.svg).toContain('aria-label=')
+    expect(headless.contentWidth).toBeGreaterThan(0)
+    expect(headless.contentHeight).toBeGreaterThan(formula.style.fontSize)
   })
 
   it('uses the same canvas in Player and refreshes it on state updates', () => {

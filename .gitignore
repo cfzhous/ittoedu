@@ -5,8 +5,6 @@ dist-renderer/
 release/
 release-rebuild-*/
 artifacts/*
-!artifacts/ai-capabilities/
-!artifacts/ai-capabilities/**
 output/
 test-results/
 tmp/

@@ -5,7 +5,11 @@ import {
   type ShapeNode,
   type TextNode,
 } from '../../shared/projectTypes'
-import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
+import {
+  renderFormulaNodeCanvas,
+  renderFormulaNodeSvg,
+} from '../../shared/formulaRenderer'
+import { bytesToDataUrl } from './base64'
 import {
   renderTextNodeCanvas,
   textNodeHasEmphasis,
@@ -188,9 +192,14 @@ export function addPptxFormulaNode(
   node: FormulaNode,
   scale: CanvasScale,
 ): void {
-  const rendered = renderFormulaNodeCanvas(node, node.width, node.height, 2)
+  const data = typeof document === 'undefined'
+    ? bytesToDataUrl(
+        new TextEncoder().encode(renderFormulaNodeSvg(node).svg),
+        'image/svg+xml',
+      )
+    : renderFormulaNodeCanvas(node, node.width, node.height, 2).canvas.toDataURL('image/png')
   slide.addImage({
-    data: rendered.canvas.toDataURL('image/png'),
+    data,
     ...pptxNodePosition(node, scale),
     rotate: pptxRotation(node.rotation),
     transparency: pptxTransparency(node.opacity),

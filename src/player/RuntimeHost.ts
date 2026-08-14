@@ -614,6 +614,10 @@ export class RuntimeHost {
     }
   }
 
+  invalidateAuthoringTargets(): void {
+    this.authoringRegistry?.invalidate()
+  }
+
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true

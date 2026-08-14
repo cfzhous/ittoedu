@@ -1,5 +1,20 @@
 @import './variables.css';
 
+.product-route-switch {
+  position: fixed;
+  top: 9px;
+  right: 12px;
+  z-index: 1000;
+  min-height: 32px;
+  padding: 5px 11px;
+  color: #fff;
+  background: #6d28d9;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: 0 3px 12px rgb(15 23 42 / 18%);
+  cursor: pointer;
+}
+
 .app-crash {
   min-height: 100vh;
   display: grid;

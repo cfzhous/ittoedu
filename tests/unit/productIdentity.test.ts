@@ -78,16 +78,20 @@ describe('product identity configuration', () => {
     )
   })
 
-  it('uses only the new managed Skill manifest and source identity', async () => {
+  it('installs only the two current local Skills without a managed state manifest', async () => {
     const installer = await readFile(
       path.join(root, 'scripts', 'install-courseware-skills.ps1'),
       'utf8',
     )
 
     expect(installer).toContain(
-      "$manifestFileName = '.ittoedu-courseware-editor-managed-skills.json'",
+      "$currentSkillNames = @('orchestrate-courseware', 'build-courseware-project')",
     )
-    expect(installer).toContain("$sourceId = 'ittoedu-courseware-editor'")
+    expect(installer).toContain(
+      "$retiredSkillNames = @('build-project-v8-courseware', 'build-project-v7-courseware')",
+    )
+    expect(installer).not.toContain('.ittoedu-courseware-editor-managed-skills.json')
+    expect(installer).not.toContain('Get-DirectoryTreeSignature')
   })
 
   it('injects the shared product name into the current product surfaces', async () => {

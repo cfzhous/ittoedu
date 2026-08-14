@@ -7,6 +7,7 @@ export const APP_USER_DATA_DIRECTORY_NAME = APP_EXECUTABLE_NAME
 export const APP_PREVIEW_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-preview`
 export const APP_PDF_TEMP_FILE_PREFIX = 'ittoedu-courseware-pdf-'
 export const APP_E2E_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-e2e`
+export const CURRENT_COURSE_SELECTION_FILE_NAME = `${APP_EXECUTABLE_NAME}-current-selection.json`
 export const APP_VERSION = '1.0.0'
 export const CANVAS_WIDTH = 1280 as const
 export const CANVAS_HEIGHT = 720 as const

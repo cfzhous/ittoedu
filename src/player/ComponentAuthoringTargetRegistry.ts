@@ -1,11 +1,15 @@
 import type {
+  ComponentAuthoringAssetTarget,
+  ComponentAuthoringTarget,
   ComponentAuthoringTargetUpdate,
   ComponentAuthoringTextTarget,
+  ComponentEditableAssetRegion,
   ComponentEditableTextBounds,
   ComponentEditableTextRegion,
   ComponentEditorHost,
   ComponentManifest,
   ComponentScope,
+  ComponentImageProperty,
   ComponentTextProperty,
 } from '../shared/componentTypes'
 import {
@@ -31,6 +35,11 @@ export interface ComponentAuthoringTargetRegistryOptions {
 interface StoredTextRegion {
   id: number
   region: ComponentEditableTextRegion
+}
+
+interface StoredAssetRegion {
+  id: number
+  region: ComponentEditableAssetRegion
 }
 
 function isFinitePositiveBounds(
@@ -82,10 +91,10 @@ function sameBounds(
 }
 
 function sameTarget(
-  left: Readonly<ComponentAuthoringTextTarget>,
-  right: Readonly<ComponentAuthoringTextTarget>,
+  left: Readonly<ComponentAuthoringTarget>,
+  right: Readonly<ComponentAuthoringTarget>,
 ): boolean {
-  return left.kind === right.kind &&
+  if (!(left.kind === right.kind &&
     left.targetId === right.targetId &&
     left.scope === right.scope &&
     left.sceneId === right.sceneId &&
@@ -93,16 +102,19 @@ function sameTarget(
     left.componentId === right.componentId &&
     left.key === right.key &&
     left.label === right.label &&
-    left.multiline === right.multiline &&
-    left.maxLength === right.maxLength &&
     left.source === right.source &&
     left.rotation === right.rotation &&
-    sameBounds(left.bounds, right.bounds)
+    sameBounds(left.bounds, right.bounds))) return false
+  return left.kind === 'component-asset' || (
+    right.kind === 'component-text' &&
+    left.multiline === right.multiline &&
+    left.maxLength === right.maxLength
+  )
 }
 
 function sameTargets(
-  left: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> | null,
-  right: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>,
+  left: ReadonlyArray<Readonly<ComponentAuthoringTarget>> | null,
+  right: ReadonlyArray<Readonly<ComponentAuthoringTarget>>,
 ): boolean {
   return left !== null &&
     left.length === right.length &&
@@ -142,6 +154,7 @@ function offsetBoundsInsideRoot(
  */
 export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   private readonly textRegions = new Map<number, StoredTextRegion>()
+  private readonly assetRegions = new Map<number, StoredAssetRegion>()
   private readonly domElementIds = new WeakMap<Element, number>()
   private mutationObserver: MutationObserver | null = null
   private resizeObserver: ResizeObserver | null = null
@@ -149,8 +162,9 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   private node: ExternalComponentNode
   private domRoot: HTMLElement | undefined
   private previousTargets:
-    ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> | null = null
+    ReadonlyArray<Readonly<ComponentAuthoringTarget>> | null = null
   private nextTextRegionId = 1
+  private nextAssetRegionId = 1
   private nextDomElementId = 1
   private revision = 0
   private invalidationQueued = false
@@ -179,6 +193,24 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       if (!active) return
       active = false
       this.textRegions.delete(id)
+      this.invalidate()
+    }
+  }
+
+  registerAssetRegion(region: ComponentEditableAssetRegion): () => void {
+    if (this.destroyed) return () => undefined
+    if (typeof region !== 'object' || region === null) {
+      console.warn('组件忽略了格式无效的画布图片目标')
+      return () => undefined
+    }
+    const id = this.nextAssetRegionId++
+    this.assetRegions.set(id, { id, region })
+    this.invalidate()
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.assetRegions.delete(id)
       this.invalidate()
     }
   }
@@ -215,6 +247,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     this.destroyed = true
     this.invalidationQueued = false
     this.textRegions.clear()
+    this.assetRegions.clear()
     this.detachDomObservers()
     if ((this.previousTargets?.length ?? 0) > 0) {
       this.publish(Object.freeze([]))
@@ -223,11 +256,14 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   }
 
   private publishChangedTargets(): void {
-    const fields = this.resolveTextFields()
+    const textFields = this.resolveTextFields()
+    const assetFields = this.resolveAssetFields()
     const targets = Object.freeze(this.node.visible
       ? [
-          ...this.collectDomTargets(fields),
-          ...this.collectRegisteredTargets(fields),
+          ...this.collectDomTargets(textFields),
+          ...this.collectRegisteredTargets(textFields),
+          ...this.collectDomAssetTargets(assetFields),
+          ...this.collectRegisteredAssetTargets(assetFields),
         ]
       : [])
     if (sameTargets(this.previousTargets, targets)) return
@@ -236,7 +272,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   }
 
   private publish(
-    targets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>,
+    targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>,
   ): void {
     this.revision += 1
     try {
@@ -269,6 +305,22 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       }
       return [[property.key, property] as const]
     }))
+  }
+
+  private resolveAssetFields(): Map<string, ComponentImageProperty> {
+    const effectiveProps = mergeComponentProps(
+      this.options.manifest,
+      this.node.props,
+    )
+    return new Map(resolveComponentEditorProperties(
+      this.options.manifest,
+      this.node.props,
+    ).flatMap((property) => (
+      property.type === 'image' &&
+      typeof getComponentPropValue(effectiveProps, property.key) === 'string'
+        ? [[property.key, property] as const]
+        : []
+    )))
   }
 
   private collectRegisteredTargets(
@@ -345,6 +397,71 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     return targets
   }
 
+  private collectRegisteredAssetTargets(
+    fields: ReadonlyMap<string, ComponentImageProperty>,
+  ): ComponentAuthoringAssetTarget[] {
+    const targets: ComponentAuthoringAssetTarget[] = []
+    for (const stored of this.assetRegions.values()) {
+      const field = fields.get(stored.region.key)
+      if (!field) continue
+      let localBounds: unknown
+      try {
+        localBounds = stored.region.getBounds()
+      } catch (error) {
+        console.warn('组件画布图片目标读取失败', error)
+        continue
+      }
+      if (!isFinitePositiveBounds(localBounds)) continue
+      targets.push(this.createAssetTarget(
+        `registered-asset:${stored.id}`,
+        stored.region.key,
+        optionalTrimmed(stored.region.label) ?? field.label,
+        'registered',
+        localBounds,
+      ))
+    }
+    return targets
+  }
+
+  private collectDomAssetTargets(
+    fields: ReadonlyMap<string, ComponentImageProperty>,
+  ): ComponentAuthoringAssetTarget[] {
+    const root = this.domRoot
+    if (!root) return []
+    const candidates = [
+      ...root.querySelectorAll<HTMLElement>('[data-courseware-edit-key]'),
+    ]
+    const rootRect = root.getBoundingClientRect()
+    const canUseClientRect = isFinitePositiveRect(rootRect)
+    const targets: ComponentAuthoringAssetTarget[] = []
+    for (const element of candidates) {
+      const key = optionalTrimmed(element.dataset.coursewareEditKey)
+      const field = key ? fields.get(key) : undefined
+      if (!key || !field) continue
+      const offsetBounds = offsetBoundsInsideRoot(element, root)
+      const elementRect = offsetBounds ? null : element.getBoundingClientRect()
+      const localBounds = offsetBounds ?? (
+        canUseClientRect && elementRect && isFinitePositiveRect(elementRect)
+          ? {
+              x: ((elementRect.left - rootRect.left) / rootRect.width) * this.node.width,
+              y: ((elementRect.top - rootRect.top) / rootRect.height) * this.node.height,
+              width: (elementRect.width / rootRect.width) * this.node.width,
+              height: (elementRect.height / rootRect.height) * this.node.height,
+            }
+          : null
+      )
+      if (!localBounds || !isFinitePositiveBounds(localBounds)) continue
+      targets.push(this.createAssetTarget(
+        `dom-asset:${this.domElementId(element)}`,
+        key,
+        optionalTrimmed(element.dataset.coursewareEditLabel) ?? field.label,
+        'dom',
+        localBounds,
+      ))
+    }
+    return targets
+  }
+
   private createTarget(
     targetId: string,
     key: string,
@@ -376,6 +493,44 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       label,
       multiline,
       ...(maxLength !== undefined ? { maxLength } : {}),
+      source,
+      bounds: Object.freeze({
+        x: targetCenterX - localBounds.width / 2,
+        y: targetCenterY - localBounds.height / 2,
+        width: localBounds.width,
+        height: localBounds.height,
+      }),
+      rotation: this.node.rotation,
+    })
+  }
+
+  private createAssetTarget(
+    targetId: string,
+    key: string,
+    label: string,
+    source: 'registered' | 'dom',
+    localBounds: ComponentEditableTextBounds,
+  ): ComponentAuthoringAssetTarget {
+    const angle = this.node.rotation * Math.PI / 180
+    const cosine = Math.cos(angle)
+    const sine = Math.sin(angle)
+    const nodeCenterX = this.node.x + this.node.width / 2
+    const nodeCenterY = this.node.y + this.node.height / 2
+    const localCenterX = localBounds.x + localBounds.width / 2
+    const localCenterY = localBounds.y + localBounds.height / 2
+    const deltaX = localCenterX - this.node.width / 2
+    const deltaY = localCenterY - this.node.height / 2
+    const targetCenterX = nodeCenterX + deltaX * cosine - deltaY * sine
+    const targetCenterY = nodeCenterY + deltaX * sine + deltaY * cosine
+    return Object.freeze({
+      kind: 'component-asset',
+      targetId,
+      scope: this.options.scope,
+      ...(this.options.sceneId ? { sceneId: this.options.sceneId } : {}),
+      nodeId: this.node.id,
+      componentId: this.options.manifest.id,
+      key,
+      label,
       source,
       bounds: Object.freeze({
         x: targetCenterX - localBounds.width / 2,

@@ -5,16 +5,23 @@ import {
   Maximize2,
   Minus,
   MousePointer2,
+  Copy,
   Play,
   Plus,
   RotateCcw,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
+  ComponentAuthoringAssetTarget,
+  ComponentAuthoringTarget,
   ComponentAuthoringTextTarget,
   ComponentPackageData,
   ExportPayload,
 } from '../../shared/componentTypes'
+import {
+  resolveComponentEditorProperties,
+  setComponentPropValue,
+} from '../../shared/componentProps'
 import type {
   ExternalComponentNode,
   FormulaNode,
@@ -36,6 +43,11 @@ import {
   type PlayerHostMode,
   type PlayerRuntimeAuthoringTargetsMessage,
 } from '../../shared/playerAuthoringProtocol'
+import {
+  PLAYER_INSPECTION_MESSAGE_TYPES,
+  PLAYER_INSPECTION_PROTOCOL_VERSION,
+  type PlayerInspectionModeMessage,
+} from '../../shared/playerInspectionProtocol'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
 import { onElementAnimationPreviewRequested } from '../phaser/elementAnimationPreviewBus'
 import {
@@ -99,6 +111,10 @@ import {
   type RuntimeTargetEditSession,
 } from '../authoring/runtimeTargetEditSession'
 import type { ImportedImageAsset } from '../project/assetManager'
+import {
+  copyableAiSelectionReference,
+  type AuthoringCanvasTarget,
+} from '../authoring/aiSelectionReference'
 
 interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
@@ -237,7 +253,7 @@ function sanitizeRuntimeAuthoringTargets(
 function sanitizeComponentAuthoringTargets(
   update: PlayerComponentAuthoringTargetsMessage['update'],
   hostKey: string,
-): ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> {
+): ReadonlyArray<Readonly<ComponentAuthoringTarget>> {
   if (
     (update.scope !== 'scene' && update.scope !== 'global') ||
     typeof update.nodeId !== 'string' ||
@@ -248,11 +264,12 @@ function sanitizeComponentAuthoringTargets(
   ) {
     return []
   }
-  const sanitized: ComponentAuthoringTextTarget[] = []
+  const sanitized: ComponentAuthoringTarget[] = []
   for (const candidate of update.targets) {
     if (
       !candidate ||
-      candidate.kind !== 'component-text' ||
+      (candidate.kind !== 'component-text' &&
+        candidate.kind !== 'component-asset') ||
       candidate.scope !== update.scope ||
       candidate.sceneId !== update.sceneId ||
       candidate.nodeId !== update.nodeId ||
@@ -266,7 +283,8 @@ function sanitizeComponentAuthoringTargets(
       typeof candidate.key !== 'string' ||
       !candidate.key ||
       candidate.key.length > 256 ||
-      typeof candidate.multiline !== 'boolean' ||
+      (candidate.kind === 'component-text' &&
+        typeof candidate.multiline !== 'boolean') ||
       !Number.isFinite(candidate.rotation)
     ) {
       continue
@@ -283,19 +301,23 @@ function sanitizeComponentAuthoringTargets(
     if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation)) {
       continue
     }
-    const maxLength = candidate.maxLength
+    const maxLength = candidate.kind === 'component-text'
+      ? candidate.maxLength
+      : undefined
     sanitized.push(Object.freeze({
       ...candidate,
       targetId: `component:${hostKey}:${candidate.targetId}`,
       label: typeof candidate.label === 'string' && candidate.label.trim()
         ? candidate.label.slice(0, 120)
         : candidate.key.slice(0, 120),
-      ...(
-        maxLength === undefined ||
-        (Number.isSafeInteger(maxLength) && maxLength > 0 && maxLength <= 1_000_000)
-          ? { maxLength }
-          : { maxLength: undefined }
-      ),
+      ...(candidate.kind === 'component-text'
+        ? (
+            maxLength === undefined ||
+            (Number.isSafeInteger(maxLength) && maxLength > 0 && maxLength <= 1_000_000)
+              ? { maxLength }
+              : { maxLength: undefined }
+          )
+        : {}),
       bounds: Object.freeze({
         x,
         y,
@@ -309,7 +331,7 @@ function sanitizeComponentAuthoringTargets(
 
 type CanvasAuthoringHit =
   | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
-  | { kind: 'component'; target: Readonly<ComponentAuthoringTextTarget> }
+  | { kind: 'component'; target: Readonly<ComponentAuthoringTarget> }
 
 export function Workspace({
   onAddImage,
@@ -362,7 +384,7 @@ export function Workspace({
   >())
   const componentTargetsByHostRef = useRef(new Map<
     string,
-    ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
+    ReadonlyArray<Readonly<ComponentAuthoringTarget>>
   >())
   const previewStartupTimerRef = useRef<number | null>(null)
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
@@ -374,7 +396,7 @@ export function Workspace({
   const [runtimeTargets, setRuntimeTargets] =
     useState<ReadonlyArray<Readonly<RuntimeAuthoringTarget>>>([])
   const [componentTargets, setComponentTargets] =
-    useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
+    useState<ReadonlyArray<Readonly<ComponentAuthoringTarget>>>([])
   const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
     useState<Readonly<RuntimeTargetEditSession> | null>(null)
   const [activeComponentTextSession, setActiveComponentTextSession] =
@@ -383,8 +405,15 @@ export function Workspace({
     useState<Readonly<FormulaEditSession> | null>(null)
   const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
     useState<string | null>(null)
+  const [replacingComponentAssetTargetId, setReplacingComponentAssetTargetId] =
+    useState<string | null>(null)
   const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
     useState<string | null>(null)
+  const [lastAuthoringSelection, setLastAuthoringSelection] =
+    useState<AuthoringCanvasTarget | null>(null)
+  const projectRevisionRef = useRef(0)
+  const layoutRevisionRef = useRef(0)
+  const projectIdentityRef = useRef<string | null>(null)
   const [stageViewportSize, setStageViewportSize] = useState({
     width: STAGE_VIEWPORT_WIDTH,
     height: STAGE_VIEWPORT_HEIGHT,
@@ -422,6 +451,12 @@ export function Workspace({
   )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
 
+  useEffect(() => setLastAuthoringSelection(null), [
+    editingScope,
+    project.id,
+    scene.id,
+  ])
+
   const stageTransform = useMemo(() => createStageViewportTransform({
     viewport: {
       x: 0,
@@ -432,6 +467,20 @@ export function Workspace({
     zoom: view.zoom,
     pan: { x: view.x, y: view.y },
   }), [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
+
+  useEffect(() => {
+    if (projectIdentityRef.current !== project.id) {
+      projectIdentityRef.current = project.id
+      projectRevisionRef.current = 0
+      layoutRevisionRef.current = 0
+      return
+    }
+    projectRevisionRef.current += 1
+  }, [project])
+
+  useEffect(() => {
+    layoutRevisionRef.current += 1
+  }, [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
   const previewRebuildKey = useMemo(() => {
     const nodeIdentity = (node: SceneNode) => ({
       id: node.id,
@@ -443,35 +492,42 @@ export function Workspace({
           }
         : {}),
     })
-    // A playback Player is a continuous course session. Its own scene/state
-    // telemetry updates the editor's active context, but must not recreate the
-    // iframe (which would reset global components, audio and courseState).
-    // Project changes still rebuild the session because the complete Project
-    // V7 document participates in this mode-specific key.
-    if (canvasMode === 'run') {
-      return JSON.stringify({ mode: canvasMode, project })
-    }
+    const runtimeIdentity = (runtime: typeof project.globalRuntime) => runtime
+      ? {
+          enabled: runtime.enabled,
+          runtimeApiVersion: runtime.runtimeApiVersion,
+          renderMode: runtime.renderMode,
+          source: runtime.source,
+          nodeBindings: runtime.nodeBindings ?? null,
+          staticFallback: runtime.staticFallback ?? null,
+          contentKeys: Object.keys(runtime.content.values).sort(),
+          assetKeys: Object.keys(runtime.assets).sort(),
+        }
+      : null
+    // One structural key serves both playback and inspection. Mode, current
+    // scene and current presentation state are intentionally absent: changing
+    // any of them must preserve the same live Player instance and its last
+    // interaction frame. Complete native-node values are synchronized by the
+    // authoring patch channel instead of rebuilding the iframe.
     return JSON.stringify({
-      mode: canvasMode,
-      authoringContext: [editingScope, scene.id, activePresentationStateId],
-      sceneStructure: {
-        id: scene.id,
-        nodes: scene.nodes.map(nodeIdentity),
-        stateIds: ensureScenePresentation(scene).states.map((state) => state.id),
-        runtime: scene.runtime ?? null,
-      },
+      scenes: project.scenes.map((item) => ({
+        id: item.id,
+        nodes: item.nodes.map(nodeIdentity),
+        stateIds: ensureScenePresentation(item).states.map((state) => state.id),
+        runtime: runtimeIdentity(item.runtime),
+        interactions: item.interactions,
+      })),
       globalStructure: project.globalLayer.map((item) => ({
         ...nodeIdentity(item.node),
         layer: item.layer,
         visibility: item.visibility,
       })),
-      globalRuntime: project.globalRuntime ?? null,
-      assets: project.assets,
+      globalRuntime: runtimeIdentity(project.globalRuntime),
+      globalInteractions: project.globalInteractions,
+      playback: project.playback,
     })
-  }, [activePresentationStateId, canvasMode, editingScope, project, scene])
+  }, [project])
   const previewGeneration = useMemo<object>(() => ({}), [
-    assetFiles,
-    canvasMode,
     componentPackages,
     previewRebuildKey,
     previewRetryRevision,
@@ -674,6 +730,46 @@ export function Workspace({
     }
   }, [activePresentationStateId, scene.id])
 
+  const setPlayerInspectionMode = useCallback((enabled: boolean) => {
+    const init = previewInitRef.current
+    const target = runtimeFrameRef.current?.contentWindow
+    if (!init || !target) return false
+    authoringReadyRef.current = false
+    authoringSnapshotBarrierRef.current = null
+    if (enabled) {
+      setAcknowledgedPreviewGeneration(null)
+      setPreviewFeedback({
+        kind: 'loading',
+        title: '正在冻结当前交互画面',
+        message: '保留最后一帧，并重新测量可编辑文字与图片…',
+      })
+    }
+    target.postMessage({
+      type: PLAYER_INSPECTION_MESSAGE_TYPES.set,
+      protocolVersion: PLAYER_INSPECTION_PROTOCOL_VERSION,
+      sessionId: init.token,
+      enabled,
+    }, '*')
+    return true
+  }, [])
+
+  const installAuthoringAssetInPlayer = useCallback((
+    imported: ImportedImageAsset,
+  ) => {
+    const init = previewInitRef.current
+    const target = runtimeFrameRef.current?.contentWindow
+    if (!init || !target || canvasMode !== 'edit') return false
+    const bytes = imported.bytes.slice().buffer
+    target.postMessage({
+      type: PLAYER_INSPECTION_MESSAGE_TYPES.installAsset,
+      protocolVersion: PLAYER_INSPECTION_PROTOCOL_VERSION,
+      sessionId: init.token,
+      asset: imported.meta,
+      bytes,
+    }, '*', [bytes])
+    return true
+  }, [canvasMode])
+
   const postAuthoringPatch = useCallback((patch: PlayerAuthoringPatch) => {
     const init = previewInitRef.current
     const target = runtimeFrameRef.current?.contentWindow
@@ -863,13 +959,9 @@ export function Workspace({
     try {
       const editorState = useEditorStore.getState()
       const initialScene = selectActiveScene(editorState)
-      const hostMode: PlayerHostMode = canvasMode === 'edit'
-        ? 'authoring'
-        : 'playback'
-      const initialStateId = hostMode === 'authoring'
-        ? editorState.activePresentationStateId
-        : editorState.activePresentationStateId ??
-          ensureScenePresentation(initialScene).initialStateId
+      const hostMode: PlayerHostMode = 'playback'
+      const initialStateId = editorState.activePresentationStateId ??
+        ensureScenePresentation(initialScene).initialStateId
       payloadResources = createRuntimePreviewPayloadResources({
         project,
         assetFiles,
@@ -902,7 +994,9 @@ export function Workspace({
       setPreviewUrl(blobResources.documentUrl)
       setPreviewFeedback({
         kind: 'loading',
-        title: canvasMode === 'edit' ? '正在准备编辑画布' : '正在准备当前位置试运行',
+        title: useEditorStore.getState().canvasMode === 'edit'
+          ? '正在准备编辑画布'
+          : '正在准备当前位置试运行',
         message: '正在载入隔离 Player…',
       })
       previewStartupTimerRef.current = window.setTimeout(() => {
@@ -950,8 +1044,6 @@ export function Workspace({
       payloadResources = null
     }
   }, [
-    assetFiles,
-    canvasMode,
     clearRuntimePreviewStartupTimer,
     componentPackages,
     failRuntimePreview,
@@ -965,8 +1057,17 @@ export function Workspace({
   ])
 
   useEffect(() => {
-    if (canvasMode === 'run') syncRuntimePreview()
-  }, [canvasMode, syncRuntimePreview])
+    if (canvasMode === 'run') {
+      authoringReadyRef.current = false
+      authoringSnapshotBarrierRef.current = null
+      setAcknowledgedPreviewGeneration(null)
+      setPreviewFeedback(null)
+      setPlayerInspectionMode(false)
+      syncRuntimePreview()
+    } else {
+      setPlayerInspectionMode(true)
+    }
+  }, [canvasMode, setPlayerInspectionMode, syncRuntimePreview])
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -979,6 +1080,10 @@ export function Workspace({
         revision?: unknown
         message?: unknown
         code?: unknown
+        enabled?: unknown
+        accepted?: unknown
+        sceneId?: unknown
+        stateId?: unknown
         update?: PlayerRuntimeAuthoringTargetsMessage['update'] |
           PlayerComponentAuthoringTargetsMessage['update']
         detail?: {
@@ -1053,12 +1158,42 @@ export function Workspace({
         if (canvasMode === 'run') {
           clearRuntimePreviewStartupTimer()
           setPreviewFeedback(null)
+          setPlayerInspectionMode(false)
+          syncRuntimePreview()
+        } else {
+          setPlayerInspectionMode(true)
+        }
+        return
+      }
+      if (message.type === PLAYER_INSPECTION_MESSAGE_TYPES.changed) {
+        const inspection = message as PlayerInspectionModeMessage & {
+          token?: unknown
+        }
+        if (
+          inspection.protocolVersion !== PLAYER_INSPECTION_PROTOCOL_VERSION ||
+          inspection.sessionId !== previewInitRef.current?.token
+        ) return
+        if (!inspection.accepted) {
+          const token = previewInitRef.current?.token
+          if (token && canvasMode === 'edit') {
+            failRuntimePreview(
+              token,
+              '当前 Player 无法进入原地检查模式。请重新载入画布。',
+            )
+          }
+          return
+        }
+        if (!inspection.enabled) {
+          authoringReadyRef.current = false
+          authoringSnapshotBarrierRef.current = null
+          clearRuntimePreviewStartupTimer()
+          setPreviewFeedback(null)
         }
         return
       }
       if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
         const init = previewInitRef.current
-        if (!init || init.hostMode !== 'authoring') return
+        if (!init || canvasMode !== 'edit') return
         if (authoringReadyRef.current) return
         const parsed = parsePlayerAuthoringReadyMessage(event.data)
         if (!parsed.ok) {
@@ -1070,8 +1205,11 @@ export function Workspace({
         }
         if (
           parsed.ready.sessionId !== init.token ||
-          parsed.ready.context.sceneId !== init.initialSceneId ||
-          parsed.ready.context.stateId !== init.initialStateId
+          parsed.ready.context.sceneId !== selectActiveScene(
+            useEditorStore.getState(),
+          ).id ||
+          parsed.ready.context.stateId !==
+            useEditorStore.getState().activePresentationStateId
         ) {
           failRuntimePreview(
             init.token,
@@ -1080,21 +1218,13 @@ export function Workspace({
           return
         }
         authoringReadyRef.current = true
-        setPreviewFeedback({
-          kind: 'loading',
-          title: '正在同步编辑画布',
-          message: 'Player 已启动，正在应用当前画面的完整快照…',
-        })
-        const lastCommand = syncCompleteAuthoringSnapshot()
-        if (!lastCommand) {
-          failRuntimePreview(
-            init.token,
-            '当前画面的完整快照未能发送。请重新载入画布。',
-          )
-          return
-        }
-        authoringSnapshotBarrierRef.current =
-          playerAuthoringSnapshotBarrierForCommand(lastCommand)
+        authoringSnapshotBarrierRef.current = null
+        setAcknowledgedPreviewGeneration(previewGeneration)
+        clearRuntimePreviewStartupTimer()
+        setPreviewFeedback(null)
+        useEditorStore.getState().setStatus(
+          '已冻结当前位置，可直接点选并修改当前交互画面',
+        )
         return
       }
       if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack) {
@@ -1244,6 +1374,7 @@ export function Workspace({
     failRuntimePreview,
     flushAuthoringNodePatches,
     previewGeneration,
+    setPlayerInspectionMode,
     syncCompleteAuthoringSnapshot,
     syncRuntimePreview,
   ])
@@ -1335,7 +1466,8 @@ export function Workspace({
     ) {
       return undefined
     }
-    return visibleComponentTargets.find((target) => (
+    return visibleComponentTargets.find((target): target is ComponentAuthoringTextTarget => (
+      target.kind === 'component-text' &&
       componentTextTargetMatchesSession(target, activeComponentTextSession)
     ))
   }, [
@@ -1427,7 +1559,8 @@ export function Workspace({
         // a blur racing with target cleanup can never commit a retired target.
         targets: [...componentTargetsByHostRef.current.values()]
           .flat()
-          .filter((target) => (
+          .filter((target): target is Readonly<ComponentAuthoringTextTarget> => (
+            target.kind === 'component-text' &&
             target.scope === store.editingScope &&
             (target.scope === 'global' ||
               target.sceneId === store.activeSceneId) &&
@@ -1612,6 +1745,7 @@ export function Workspace({
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
+      installAuthoringAssetInPlayer(imported)
       const latestState = useEditorStore.getState()
       const result = validateRuntimeTargetEditSession(
         session,
@@ -1660,8 +1794,124 @@ export function Workspace({
     }
   }, [
     currentRuntimeTargetEditContext,
+    installAuthoringAssetInPlayer,
     onSelectImageAsset,
     replacingRuntimeAssetTargetId,
+  ])
+
+  const replaceComponentAsset = useCallback(async (
+    target: Readonly<ComponentAuthoringAssetTarget>,
+  ) => {
+    if (replacingComponentAssetTargetId) return
+    const startedState = useEditorStore.getState()
+    const startedNode = selectEditingNodes(startedState).find(
+      (node): node is ExternalComponentNode => (
+        node.id === target.nodeId &&
+        node.type === 'external-component' &&
+        node.component.packageId === target.componentId &&
+        node.visible
+      ),
+    )
+    const registered = [...componentTargetsByHostRef.current.values()]
+      .flat()
+      .some((candidate) => (
+        candidate.kind === 'component-asset' &&
+        candidate.targetId === target.targetId &&
+        candidate.scope === startedState.editingScope &&
+        (candidate.scope === 'global' ||
+          candidate.sceneId === startedState.activeSceneId) &&
+        candidate.nodeId === target.nodeId &&
+        candidate.componentId === target.componentId &&
+        candidate.key === target.key
+      ))
+    if (!startedNode || !registered) {
+      startedState.setStatus('组件图片目标已失效，请重新选择')
+      return
+    }
+    const packageData = Object.values(startedState.componentPackages).find(
+      (candidate) => (
+        candidate.manifest.id === startedNode.component.packageId &&
+        candidate.manifest.version === startedNode.component.version
+      ),
+    )
+    const imageField = packageData && resolveComponentEditorProperties(
+      packageData.manifest,
+      startedNode.props,
+    ).some((property) => property.key === target.key && property.type === 'image')
+    if (!imageField) {
+      startedState.setStatus('组件图片属性已失效，请重新选择')
+      return
+    }
+    const identity = {
+      projectId: startedState.project.id,
+      scope: startedState.editingScope,
+      sceneId: startedState.activeSceneId,
+      stateId: startedState.activePresentationStateId,
+      nodeId: startedNode.id,
+      componentId: startedNode.component.packageId,
+      componentVersion: startedNode.component.version,
+      key: target.key,
+      targetId: target.targetId,
+    } as const
+    startedState.selectNode(startedNode.id)
+    setReplacingComponentAssetTargetId(target.targetId)
+    try {
+      const imported = await onSelectImageAsset()
+      if (!imported) return
+      installAuthoringAssetInPlayer(imported)
+      const latest = useEditorStore.getState()
+      if (
+        latest.project.id !== identity.projectId ||
+        latest.editingScope !== identity.scope ||
+        latest.activeSceneId !== identity.sceneId ||
+        latest.activePresentationStateId !== identity.stateId
+      ) {
+        latest.setStatus('组件图片编辑上下文已切换，未写入修改')
+        return
+      }
+      const liveTarget = [...componentTargetsByHostRef.current.values()]
+        .flat()
+        .find((candidate): candidate is ComponentAuthoringAssetTarget => (
+          candidate.kind === 'component-asset' &&
+          candidate.targetId === identity.targetId &&
+          candidate.nodeId === identity.nodeId &&
+          candidate.componentId === identity.componentId &&
+          candidate.key === identity.key
+        ))
+      const liveNode = selectEditingNodes(latest).find(
+        (node): node is ExternalComponentNode => (
+          node.id === identity.nodeId &&
+          node.type === 'external-component' &&
+          node.component.packageId === identity.componentId &&
+          node.component.version === identity.componentVersion
+        ),
+      )
+      if (!liveTarget || !liveNode) {
+        latest.setStatus('组件图片目标已失效，未写入修改')
+        return
+      }
+      const previousTab = latest.activeTab
+      latest.importAsset(imported.meta, imported.bytes)
+      useEditorStore.setState({ activeTab: previousTab })
+      latest.updateNode(liveNode.id, {
+        props: setComponentPropValue(
+          liveNode.props,
+          identity.key,
+          imported.meta.id,
+        ),
+      })
+      latest.setStatus(
+        identity.stateId === null || identity.scope === 'global'
+          ? '已替换组件图片'
+          : '已替换当前演示状态中的组件图片',
+      )
+    } finally {
+      setReplacingComponentAssetTargetId(null)
+    }
+  }, [
+    installAuthoringAssetInPlayer,
+    onSelectImageAsset,
+    replacingComponentAssetTargetId,
   ])
 
   const canvasAuthoringHitAtClientPoint = useCallback((
@@ -1722,6 +1972,26 @@ export function Workspace({
     view.zoom,
     visibleComponentTargets,
   ])
+
+  const copyAiReferenceFor = useCallback(async (
+    selection: AuthoringCanvasTarget,
+  ) => {
+    const store = useEditorStore.getState()
+    const reference = copyableAiSelectionReference({
+      project: store.project,
+      projectRevision: projectRevisionRef.current,
+      layoutRevision: layoutRevisionRef.current,
+      surfaceId: 'slide:main',
+      activeSceneId: store.activeSceneId,
+      selection,
+    })
+    try {
+      await navigator.clipboard.writeText(reference)
+      store.setStatus('已复制稳定 AI 修改引用；可直接粘贴给 Codex')
+    } catch {
+      store.setStatus('复制 AI 修改引用失败，请检查系统剪贴板权限')
+    }
+  }, [])
 
   useLayoutEffect(() => {
     const host = gameHostRef.current
@@ -2089,10 +2359,18 @@ export function Workspace({
         event.preventDefault()
         event.stopPropagation()
         if (hit.kind === 'component') {
-          beginComponentTextEdit(hit.target)
+          setLastAuthoringSelection({ carrier: 'component', target: hit.target })
+          if (hit.target.kind === 'component-text') {
+            beginComponentTextEdit(hit.target)
+          } else {
+            setActiveComponentTextSession(null)
+            void replaceComponentAsset(hit.target)
+          }
         } else if (hit.target.kind === 'text') {
+          setLastAuthoringSelection({ carrier: 'runtime', target: hit.target })
           beginRuntimeTextEdit(hit.target)
         } else {
+          setLastAuthoringSelection({ carrier: 'runtime', target: hit.target })
           void replaceRuntimeAsset(hit.target)
         }
       }}
@@ -2130,6 +2408,21 @@ export function Workspace({
           <span title="Ctrl+滚轮缩放；按住空格或鼠标中键拖动画布">
             <Hand size={13} />
           </span>
+          <button
+            type="button"
+            aria-label="复制当前画布目标的 AI 修改引用"
+            title={lastAuthoringSelection
+              ? '复制稳定作者地址、当前 revision 和当前值'
+              : '请先点选一个 Runtime 或 Component 文字/图片'}
+            disabled={!lastAuthoringSelection}
+            onClick={() => {
+              if (lastAuthoringSelection) {
+                void copyAiReferenceFor(lastAuthoringSelection)
+              }
+            }}
+          >
+            <Copy size={13} />AI 引用
+          </button>
         </div>
       )}
       <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
@@ -2225,6 +2518,7 @@ export function Workspace({
                   onFocus={() => setHoveredAuthoringTargetId(target.targetId)}
                   onBlur={() => setHoveredAuthoringTargetId(null)}
                   onClick={() => {
+                    setLastAuthoringSelection({ carrier: 'runtime', target })
                     if (target.kind === 'text') {
                       beginRuntimeTextEdit(target)
                     } else {
@@ -2257,13 +2551,14 @@ export function Workspace({
                 <button
                   key={target.targetId}
                   type="button"
-                  className={`canvas-authoring-target canvas-authoring-target--component-text${
+                  className={`canvas-authoring-target canvas-authoring-target--${target.kind}${
                     hoveredAuthoringTargetId === target.targetId
                       ? ' canvas-authoring-target--hovered'
                       : ''
                   }`}
-                  aria-label={`${target.label}，双击编辑组件文字`}
-                  title={`双击编辑组件文字：${target.label}`}
+                  aria-label={`${target.label}，双击${target.kind === 'component-text' ? '编辑组件文字' : '替换组件图片'}`}
+                  title={`双击${target.kind === 'component-text' ? '编辑组件文字' : '替换组件图片'}：${target.label}`}
+                  disabled={replacingComponentAssetTargetId === target.targetId}
                   style={{
                     left: target.bounds.x,
                     top: target.bounds.y,
@@ -2274,10 +2569,21 @@ export function Workspace({
                   }}
                   onFocus={() => setHoveredAuthoringTargetId(target.targetId)}
                   onBlur={() => setHoveredAuthoringTargetId(null)}
-                  onClick={() => beginComponentTextEdit(target)}
+                  onClick={() => {
+                    setLastAuthoringSelection({ carrier: 'component', target })
+                    if (target.kind === 'component-text') {
+                      beginComponentTextEdit(target)
+                    } else {
+                      setActiveComponentTextSession(null)
+                      void replaceComponentAsset(target)
+                    }
+                  }}
                 >
                   <span className="canvas-authoring-target__badge" aria-hidden="true">
-                    T<span>{target.label}</span>
+                    {target.kind === 'component-asset'
+                      ? <ImagePlus size={14} />
+                      : 'T'}
+                    <span>{target.label}</span>
                   </span>
                 </button>
               ))}

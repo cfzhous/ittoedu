@@ -55,7 +55,7 @@ function normalizeShortAnswer(value: string): string {
 
 /**
  * Published, deterministic assessment invocation used by the capability index.
- * The approved case still owns the exact accepted values and tolerance cases.
+ * The authored lesson still owns the exact accepted values and tolerance cases.
  */
 export function evaluateAssessment(
   request: AssessmentEvaluationRequest,

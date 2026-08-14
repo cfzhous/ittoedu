@@ -28,9 +28,20 @@ interface FormulaBox {
   ascent: number
   descent: number
   draw(context: CanvasRenderingContext2D, x: number, baseline: number): void
+  svg(x: number, baseline: number): string
 }
 
 const MATH_FONT_FAMILY = '"Cambria Math", "STIX Two Math", "Times New Roman", serif'
+const SVG_MATH_FONT_FAMILY = 'Cambria Math, STIX Two Math, Times New Roman, serif'
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
 
 function formulaPadding(fontSize: number): number {
   return Math.max(6, fontSize * 0.18)
@@ -61,6 +72,9 @@ function textBox(
       context.textAlign = 'left'
       context.textBaseline = 'alphabetic'
       context.fillText(value, x + horizontalPadding, baseline)
+    },
+    svg(x, baseline) {
+      return `<text x="${x + horizontalPadding}" y="${baseline}" font-family="${SVG_MATH_FONT_FAMILY}" font-size="${size}" font-weight="400"${italic ? ' font-style="italic"' : ''} fill="${escapeSvgText(color)}">${escapeSvgText(value)}</text>`
     },
   }
 }
@@ -97,6 +111,14 @@ function buildFormulaBox(
             cursor += child.width
           })
         },
+        svg(x, baseline) {
+          let cursor = x
+          return children.map((child) => {
+            const markup = child.svg(cursor, baseline)
+            cursor += child.width
+            return markup
+          }).join('')
+        },
       }
     }
     case 'fraction': {
@@ -131,6 +153,12 @@ function buildFormulaBox(
           context.lineTo(x + width, barY)
           context.stroke()
           context.restore()
+        },
+        svg(x, baseline) {
+          const barY = baseline - barOffset
+          const numeratorBaseline = barY - gap - numerator.descent
+          const denominatorBaseline = barY + gap + lineWidth + denominator.ascent
+          return `${numerator.svg(x + (width - numerator.width) / 2, numeratorBaseline)}${denominator.svg(x + (width - denominator.width) / 2, denominatorBaseline)}<line x1="${x}" y1="${barY}" x2="${x + width}" y2="${barY}" stroke="${escapeSvgText(color)}" stroke-width="${lineWidth}"/>`
         },
       }
     }
@@ -181,6 +209,20 @@ function buildFormulaBox(
           context.restore()
           radicand.draw(context, bodyX, baseline)
         },
+        svg(x, baseline) {
+          const radicalX = x + indexReserve
+          const bodyX = radicalX + radicalWidth
+          const top = baseline - radicand.ascent - overlineGap
+          const bottom = baseline + radicand.descent * 0.38
+          const points = [
+            [radicalX, baseline - size * 0.18],
+            [radicalX + radicalWidth * 0.22, baseline - size * 0.02],
+            [radicalX + radicalWidth * 0.43, bottom],
+            [radicalX + radicalWidth * 0.7, top],
+            [x + width, top],
+          ].map(([pointX, pointY]) => `${pointX},${pointY}`).join(' ')
+          return `${index ? index.svg(x, baseline - radicand.ascent * 0.63) : ''}<polyline points="${points}" fill="none" stroke="${escapeSvgText(color)}" stroke-width="${lineWidth}" stroke-linejoin="round" stroke-linecap="round"/>${radicand.svg(bodyX, baseline)}`
+        },
       }
     }
     case 'script': {
@@ -219,6 +261,10 @@ function buildFormulaBox(
           superscript?.draw(context, scriptX, baseline - superscriptBaselineOffset)
           subscript?.draw(context, scriptX, baseline + subscriptBaselineOffset)
         },
+        svg(x, baseline) {
+          const scriptX = x + base.width + gap
+          return `${base.svg(x, baseline)}${superscript?.svg(scriptX, baseline - superscriptBaselineOffset) ?? ''}${subscript?.svg(scriptX, baseline + subscriptBaselineOffset) ?? ''}`
+        },
       }
     }
     case 'fenced': {
@@ -234,6 +280,9 @@ function buildFormulaBox(
           open.draw(context, x, baseline)
           body.draw(context, x + open.width, baseline)
           close.draw(context, x + open.width + body.width, baseline)
+        },
+        svg(x, baseline) {
+          return `${open.svg(x, baseline)}${body.svg(x + open.width, baseline)}${close.svg(x + open.width + body.width, baseline)}`
         },
       }
     }
@@ -314,4 +363,36 @@ export function renderFormulaNodeCanvas(
     contentWidth: box.width,
     contentHeight,
   }
+}
+
+export interface RenderedFormulaSvg {
+  svg: string
+  width: number
+  height: number
+  contentWidth: number
+  contentHeight: number
+}
+
+/**
+ * DOM-free semantic formula renderer for headless PPTX and clean builders.
+ * It shares the recursive box model and measurements with the Canvas path,
+ * so headless export does not replace a formula with a text placeholder.
+ */
+export function renderFormulaNodeSvg(
+  node: FormulaNode,
+  width = node.width,
+  height = node.height,
+): RenderedFormulaSvg {
+  const { box } = measureFormulaNode(node)
+  const contentHeight = box.ascent + box.descent
+  const padding = formulaPadding(node.style.fontSize)
+  const x = node.style.align === 'center'
+    ? (width - box.width) / 2
+    : node.style.align === 'right'
+      ? width - padding - box.width
+      : padding
+  const baseline = (height - contentHeight) / 2 + box.ascent
+  const clipId = `formula-clip-${node.id.replace(/[^A-Za-z0-9_-]/g, '-')}`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeSvgText(node.accessibleText)}"><defs><clipPath id="${clipId}"><rect width="${width}" height="${height}"/></clipPath></defs><g clip-path="url(#${clipId})">${box.svg(x, baseline)}</g></svg>`
+  return { svg, width, height, contentWidth: box.width, contentHeight }
 }

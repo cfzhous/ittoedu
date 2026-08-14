@@ -10,6 +10,7 @@ import type { AppState } from './appState'
 import { normalizeDesktopError, type DesktopErrorPayload } from './errors'
 import {
   openProjectFile,
+  selectCourseAuthoringPatchFile,
   openRecentProjectFile,
   saveProjectFile,
   selectAudioFile,
@@ -24,6 +25,8 @@ import {
   writeBinaryExportFile,
   writeWebPackageFile,
 } from './fileDialogs'
+import { publishCurrentCourseSelection } from './courseSelectionBridge'
+import { AUTHORING_ADDRESS_PROTOCOL_VERSION } from '../shared/authoringAddress'
 import { exportPdfFromHtml } from './pdfExport'
 import { openPreviewWindow } from './previewWindow'
 import {
@@ -105,7 +108,7 @@ const htmlSchema = z
 
 const binaryExportSchema = z.object({
   suggestedName: z.string().trim().min(1).max(160),
-  extension: z.enum(['pptx', 'json']),
+  extension: z.enum(['pptx', 'docx', 'json']),
   bytes: bytesSchema.refine((bytes) => bytes.byteLength <= 512 * 1024 * 1024, '导出文件过大'),
 }).strict()
 
@@ -126,6 +129,24 @@ const previewSchema = z
   .strict()
 
 const dirtySchema = z.boolean()
+
+const aiSelectionReferenceSchema = z.object({
+  protocolVersion: z.literal(AUTHORING_ADDRESS_PROTOCOL_VERSION),
+  projectId: z.string().min(1).max(500),
+  projectRevision: z.number().int().nonnegative(),
+  layoutRevision: z.number().int().nonnegative(),
+  hitId: z.string().max(2_000),
+  authoringAddress: z.string().startsWith('courseware://authoring/').max(8_000),
+  kind: z.enum(['text', 'asset', 'property']),
+  label: z.string().max(2_000),
+  currentValue: z.unknown(),
+}).strict()
+
+const currentCourseSelectionSchema = z.object({
+  projectPath: projectPathSchema.nullable(),
+  dirty: z.boolean(),
+  reference: aiSelectionReferenceSchema.nullable(),
+}).strict()
 
 const diagnosticSchema = z.object({
   source: z.enum(['renderer', 'preview', 'component']),
@@ -219,6 +240,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       requireNoArguments(args)
       return openProjectFile(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.selectCourseAuthoringPatch,
+    context,
+    {
+      code: 'AUTHORING_PATCH_SELECT_FAILED',
+      title: 'AI Patch 读取失败',
+      message: '无法读取所选 Course Authoring Patch。',
+      suggestion: '请确认 JSON 文件有效后重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return selectCourseAuthoringPatchFile(requireWindow(context))
     },
   )
 
@@ -619,6 +655,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, args) => {
       const dirty = dirtySchema.parse(requireSingleArgument(args))
       context.appState.setDirty(dirty)
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.updateCurrentCourseSelection,
+    context,
+    {
+      code: 'COURSE_SELECTION_UPDATE_FAILED',
+      title: 'AI 选择桥更新失败',
+      message: '无法发布当前精确编辑目标。',
+      suggestion: '请重新点选字段；工程编辑和保存不受影响。',
+    },
+    async (_event, args) => {
+      const input = currentCourseSelectionSchema.parse(requireSingleArgument(args))
+      await publishCurrentCourseSelection(input)
     },
   )
 
