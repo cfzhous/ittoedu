@@ -7,8 +7,8 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W08 [V02]`
-> `ACTIVE_WAVE_OWNER: Terra Max`
+> `ACTIVE_WAVE: W09 [V03]`
+> `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
 > `INTEGRATION_CURSOR: single / serial`
@@ -868,6 +868,7 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - `G05 accepted`：`dc190edb6a0d1b7b696e7308effd401d343134a2`
 - `K00 accepted`：`eb00ed257dd6a12adf92914e89252063a6bad654`
 - `V01 accepted`：`cf01dda082c14356f10853c89cc52aa9ded5d4af`
+- `V02 accepted`：`49faf2366671b121558142c67a66364aaba6f138`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 - 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
@@ -876,67 +877,69 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - 唯一入口：`ProductApp` 的产品 import graph 只到原 `App`；CourseStudio 源码保留但不可达；默认 `test:e2e` 已绑定 `v8-only` 真实 Electron preservation visual，三档壳层 mask 外像素差异为 0。
 - V9 新工程：`createCourseProject` 已直接生成含初始 Slide/state/location 与全局教师控制器的 schema-valid V9 文档，不再调用 V8 factory/migration；全量 143 个 Vitest 文件 / 904 个测试和 8 个 Agent Kit 测试全绿。
 - Slide 只读编辑投影：`buildSlideEditorView` 已在不依赖 Store/UI/Player 的前提下保留 global/surface/scene 三作用域、统一稀疏顺序、scope visibility、命名状态有效值和稳定 `layerItemId` 选择；全量 144 个 Vitest 文件 / 907 个测试和 8 个 Agent Kit 测试全绿。
+- Slide 最小写命令：稳定 `SlideEditorSelection` 与 scene Native text move 已在 base/命名状态中分别写入 frame/override；一次有效移动恰好 +1 revision/+1 history，零位移无历史，Undo/Redo 后 ID 稳定；全量 145 个 Vitest 文件 / 913 个测试和 8 个 Agent Kit 测试全绿。
 
-### W08｜稳定选择与文字移动命令波
+### W09｜原 Workspace 最窄注入边界波
 
 - Status: `ready`
-- Common accepted parent SHA: `cf01dda082c14356f10853c89cc52aa9ded5d4af`
-- Write cards: `V02`（单个 Terra Max，独立 worktree，串行）
+- Common accepted parent SHA: `49faf2366671b121558142c67a66364aaba6f138`
+- Write cards: `V03`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: ready set 只有依赖 V01 的 V02，不组成双写入波；主协调者在 Terra 写入期间保持只读。worktree 位于主仓库已忽略的 `output/worktrees/v02`，可向上解析主仓库 `node_modules`，不复制、不安装、不建立 junction/symlink；创建后必须先通过磁盘、分支、依赖解析和 V01 定向测试预检
-- Integration order: `V02`
-- Stop condition: 若 scene text 的 base/命名状态移动无法在一次 V9 revision 与一次 history commit 中闭环，或需要改 Store/UI/Schema、引入 V8 可写模型、扩大到 global/surface 命令，则 V02 blocked；通过后由主协调者串行审查、集成并自动物化 `W09 [V03]`
+- Parallel preflight: V03 修改第 5.8 节列出的高冲突冻结文件 `Workspace.tsx`，且要裁决临时只读兼容输入与旧 Store 的精确边界；本波不创建执行器 worktree、不并行写入
+- Integration order: `V03`
+- Stop condition: 若最小 V9 纵切必须改 App/Store/Phaser bridge、生成可写 V8 镜像、改变默认 DOM/几何或让注入与默认 Store 同时处理同一次 selection/move，V03 blocked；通过后自动物化串行 `W10 [V04]`
 
-### ACTIVE_CARD｜V02 建立稳定选择与 V9 Slide 文字移动命令
+### ACTIVE_CARD｜V03 为原 Workspace 建立可选 Slide 作者输入
 
-- Owner: `Terra Max`
+- Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W08`
-- Accepted parent SHA: `cf01dda082c14356f10853c89cc52aa9ded5d4af`
-- Dependencies: `V01 accepted @ cf01dda082c14356f10853c89cc52aa9ded5d4af`
-- Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器\output\worktrees\v02`
-- Assigned branch: `codex/v02-slide-text-move`
-- Parallel eligibility: `isolated-write`
-- File-overlap proof: 本波只有 V02；主工作区不写产品/测试，计划、guard、golden、Store/UI 均不在执行器白名单
+- Wave: `W09`
+- Accepted parent SHA: `49faf2366671b121558142c67a66364aaba6f138`
+- Dependencies: `V02 accepted @ 49faf2366671b121558142c67a66364aaba6f138`
+- Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
+- Assigned branch: `codex/v9-editor-v8-base`
+- Parallel eligibility: `serial`
+- File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: 只读 View 中的原始 `layerItemId` 可形成无替代 ID 的稳定 `SlideEditorSelection`；`moveSelectedSlideText` 对当前 Slide 的 scene-scope Native text 执行一次增量移动，base 写 frame、命名状态写 frame override，并且恰好产生一个 V9 revision 和一个 history entry。
-- Before: V01 已能稳定读出选择 ID 和有效 frame，但没有与 V9 history 相连的最小写命令；任何移动仍只能落到旧 Store 或失败前端私有回调。
-- After: 新纯命令模块不持有 Store，不挂 UI；选择只保存 location/state/`selectionId`，每次命令都对 `history.present` 重建 View 并重新验证类型/锁定/位置；有效移动返回新 history 且不修改输入，零位移返回同一 history，选择值在 revision、Undo/Redo 前后保持同一 `layerItemId`。
+- 唯一可见/模型结果: 原 `Workspace` 增加一个默认缺省的 `slideAuthoring` 只读输入缝隙；它只替换 Phaser 当前 document/component packages/selection 与 selection/move 回调，未传入时仍逐项使用原 V8 Store 值和原 action，DOM、类名、布局、画布尺寸与默认行为不变。
+- Before: `Workspace` 在组件内部直接从 V8 Store 计算 `SceneDocument`、selection，并在 Phaser selection/move-end 回调中直接写 Store；V04 无法在不分叉 Workspace 的前提下注入 V9 纵切。
+- After: 新的窄类型模块只描述一次性作者输入，不持有 Store、history 或 React 生命周期；`Workspace` 通过稳定 ref 把 Phaser selection 和单/多 move-end 事件只交给当前激活输入，注入存在时不再让这些事件落到 V8 action，缺省路径仍执行原 `selectNodes/updateNode/updateNodes` 语义；App 本卡不传入该值。
 
 读取来源：
 
-- BASE3E: `src/renderer/store/editorStore.ts` 的 `selectNode`、`updateNodes` 与一次 commit 语义（只读参考，不导入）
-- DONORF77: 无；不从 `CourseStudioApp` 或 `CourseSurfaceCanvas` 摘 UI/回调
-- CURRENT: `src/renderer/course/slideEditorView.ts` 的有效 LayerItem/稳定 ID；`src/renderer/course/courseStudioModel.ts` 的 `updateCourseProject`、`CourseHistoryState`、`commitCourseHistory`；`src/shared/courseProjectTypes.ts` 的 Slide state override
+- BASE3E: `src/renderer/ui/Workspace.tsx` 的 `document` materialization、`createEditorGame` bridge subscriptions、selection sync 与 `App.tsx` 原调用位置
+- DONORF77: 无；不得复制失败前端画布或 `CourseTransformOverlay`
+- CURRENT: V01/V02 只作为 V04 后续输入/回调来源；本卡不导入 Course Project，不接 V9 fixture
 
 产品修改白名单：
 
-- `src/renderer/course/slideEditorCommands.ts`（新建纯选择值与单一 move command）
+- `src/renderer/ui/workspaceSlideAuthoring.ts`（新建无 Store/React 的窄输入类型与二选一 resolver）
+- `src/renderer/ui/Workspace.tsx`（仅 props、document/packages/selection 选择和 bridge selection/move 回调区域）
 
 测试修改白名单：
 
-- `tests/unit/slideEditorCommands.test.ts`（新模块无既有覆盖，新增唯一精确合同）
+- `tests/unit/workspaceSlideAuthoring.test.ts`（新边界无既有覆盖，验证缺省/注入二选一与回调隔离）
 
 明确禁止：
 
-- 修改 V01 View、`courseStudioModel.ts`、Course Project/V8 types 或 Schema、Store、App/UI/Workspace/CSS、Player/Host、guard、golden、behavior map、package/lockfile、archive/export 或 IPC；
-- 导入 `projectTypes.ts`、`editorStore`、React、Phaser、Player/Host、`CourseStudioApp`、`CourseSurfaceCanvas`，或创建 Zustand/Context/command bus/cache/Adapter；
-- 生成复合/临时/替代选择 ID，把 selection 写入 Project/history，或从可写 V8 `SceneDocument` 读写；
-- 移动 global/surface、Runtime/Component/controller、非 text Native、locked item，或在命名状态中误写 base frame；这些边界必须明确失败，K03/S 系列再扩展；
-- 一次 move 调用 `updateCourseProject` 或 `commitCourseHistory` 多于一次；不得为零位移增加 revision/history；
-- 修改本计划、创建子智能体、运行 `npm install`/`npm ci`、merge/rebase/push。
+- 修改 `App.tsx`、Store、Phaser/bridge、Course Project/V8 Schema/types、V01/V02、其它 UI/CSS、Player/Host、guard、golden、behavior map、package/lockfile、archive/export 或 IPC；
+- 新建 Workspace/App/Shell、Store、Context、Provider、Adapter、EditorPort、command bus 或可写 `SceneDocument`；不得缓存、回写或把注入 document 放入 history/archive；
+- 改动任何 JSX DOM、className、style、data-testid、画布尺寸、缩放/平移、resize/rotate/text edit/runtime/component/preview/drop 行为；
+- 注入存在时同时调用注入和 V8 的 selection/move action，或因 props/callback 变化重建 Phaser game；
+- 修改默认 App 调用、增加启动参数、挂 V9 fixture；这些严格属于 V04；
+- 修改本计划以外的白名单外文件、运行 `npm install`/`npm ci`、push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- `output/v02/`（若需要；默认不产生）
+- `output/v03/`（visual guard 可使用现有输出；不得更新 golden）
 
 实现步骤：
 
-1. 定义冻结的 `SlideEditorSelection { locationId; stateId; selectionId }`；实现 `selectSlideEditorLayer(input)`，其中 `undefined` state 跟随 location、`null` 保持 base，非空 ID 必须原样存在于 V01 未过滤的 layers，清空选择使用 `selectionId: null`。
-2. 实现 `moveSelectedSlideText(history, selection, delta, now?)`：拒绝非有限 delta；`{x:0,y:0}` 原样返回；对当前 `history.present` 和明确 state 重建 View，要求目标为 unlocked scene Native text。
-3. 在唯一一次 `updateCourseProject` 中，base 直接把 scene item 的有效 `frame.x/y` 写回；命名状态只把有效新坐标合并到该 state 的 `layerItemOverrides[id].frame`，保留同一 override 的其他字段，不修改 base；再唯一一次 `commitCourseHistory`。
-4. 测试覆盖 base move 的 +1 revision/+1 past、输入隔离、稳定 ID、Undo/Redo；命名状态只写 override；无选择、失效 ID、controller、locked item、非有限 delta 明确失败；零位移不产生历史。
-5. 运行 View/model/旧 Store 定向回归、typecheck、Renderer build、静态 preservation guard 与全量单测；提交只含白名单两个新文件并报告 `done-awaiting-review`。
+1. 在窄模块定义 `WorkspaceSlideAuthoringInput`：一个临时只读 `SceneDocument`、component packages、只读 selected IDs，以及 bridge 原生 `NodeSelectionEvent`/`NodesMoveEndEvent` 回调；`resolveWorkspaceSlideAuthoringInput(fallback, injected)` 必须严格二选一，不合并两个 backend。
+2. 给原 `WorkspaceProps` 增加可选 `slideAuthoring`；保留全部现有 Store hooks。把当前 V8 materialized document、packages、selected IDs 和原 selection/move action 组成 fallback，再通过 resolver 选出 active input；用每次 render 更新的 ref 给一次性 bridge subscriptions 读取，不能把 props 放进创建 Phaser 的 effect 依赖。
+3. 原 bridge 的单选/加选逻辑原样进入 fallback selection callback；单 move 用 `updateNode`、多 move 用一次 `updateNodes` 原样进入 fallback move callback。subscriptions 只调用 active ref；Phaser load/update 和 selection sync 只读取 active document/packages/selected IDs。
+4. 新测试冻结两个互斥输入，验证无注入返回 fallback、有注入返回 injected，selection/move 只命中被选择的一侧且输入不被 resolver 修改；源码审查确认 `App.tsx` 无 diff、Workspace JSX 无 diff。
+5. 跑定向 boundary/Store/viewport/高价值 UI 测试、typecheck、Renderer build、全量单测和三尺寸真实 Electron preservation visual；默认壳 mask 外像素差异必须仍为 0。
 
 验证命令：
 
@@ -945,24 +948,24 @@ git status --short
 git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
 npm run verify:editor-preservation
-npx vitest run tests/unit/slideEditorCommands.test.ts tests/unit/slideEditorView.test.ts tests/unit/courseStudioModel.test.ts tests/unit/editorStore.test.ts
+npx vitest run tests/unit/workspaceSlideAuthoring.test.ts tests/unit/editorStore.test.ts tests/unit/stageViewportTransform.test.ts tests/unit/globalLayerUi.test.tsx tests/unit/sceneStateUi.test.tsx tests/unit/editorFormattingUi.test.tsx tests/unit/simpleEditorMode.test.tsx
 npm run typecheck
 npm run build:renderer
 npm test
-$forbidden = rg -n "projectTypes|editorStore|Workspace|React|Phaser|SlideSurfaceHost|Player|CourseStudioApp|CourseSurfaceCanvas" src/renderer/course/slideEditorCommands.ts 2>$null
-if ($LASTEXITCODE -eq 0) { $forbidden; throw 'V02 forbidden dependency found' }
+npm run test:e2e
+$forbidden = rg -n "courseProject|slideEditor|CourseStudio|CourseSurfaceCanvas|createContext|zustand|Player|SlideSurfaceHost" src/renderer/ui/workspaceSlideAuthoring.ts 2>$null
+if ($LASTEXITCODE -eq 0) { $forbidden; throw 'V03 boundary dependency found' }
 if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only cf01dda082c14356f10853c89cc52aa9ded5d4af
-git show --format= --name-only HEAD
+git diff --name-only 49faf2366671b121558142c67a66364aaba6f138
 ```
 
-鼠标/截图证据：不适用；纯模型卡不改变当前可见入口。Outcome status 仍为 `unusable`，自动化最多证明 `engineering candidate`。
+鼠标/截图证据：本卡不启用注入，真实交互仍由 G02 冻结证据覆盖；必须通过 `test:e2e` 的 1280×720、1366×768、1920×1080 live geometry/masked golden，mask 外逐像素差异为 0。Outcome status 仍为 `unusable`。
 
-Commit: `feat(course): add stable Slide text move command`
+Commit: `refactor(workspace): add optional Slide authoring input`
 Rollback: `git revert <task-sha>`
 
 ---
