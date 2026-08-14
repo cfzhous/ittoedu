@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W01 [G01]`
+> `ACTIVE_WAVE: W02 [G02]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -861,61 +861,78 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 ### 已完成检查点
 
 - `G00 accepted`：`8c7a530492e553f8bd1b560a3de598f4da24497c`
+- `G01 accepted`：`05bdee521de2fe3de9de166333aa22b012058b7b`
 - 当前分支：`codex/v9-editor-v8-base`
-- 基线证明：`3e41ec058627d38c4b9f5439b454cc72331e1485` 是当前 HEAD 的祖先；相对基线唯一差异为本计划；工作区干净。
+- 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 
-### W01｜真实工程基线冻结波
+### W02｜V8 原壳视觉与鼠标证据波
 
 - Status: `ready`
-- Common accepted parent SHA: `8c7a530492e553f8bd1b560a3de598f4da24497c`
-- Write cards: `G01`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `05bdee521de2fe3de9de166333aa22b012058b7b`
+- Write cards: `G02`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: 不适用；G01 是协调者专属基线卡且不改产品代码
-- Integration order: `G01`
-- Stop condition: 依赖无法解析或命令无法启动时停止并保留原始证据；普通基线测试失败只记录、不在本卡修复；完成后自动计算 `G02 ‖ G03` 的隔离条件
+- Parallel preflight: `G02 ‖ G03` 的文件可隔离、磁盘余量 28.95 GB，但二者均为第 7.1 节协调者专属，不能把 Owner 改写为 Terra Max；本波退回默认单写入，不创建 worktree
+- Integration order: `G02`
+- Stop condition: 原 App 无法在未改产品代码的条件下启动、真实鼠标链失败或任一尺寸发生壳层遮挡/页面级溢出时，G02 blocked 并由协调者先判定基线事实；通过后自动物化串行 `W03 [G03]`
 
-### ACTIVE_CARD｜G01 记录真实工程基线
+### ACTIVE_CARD｜G02 冻结 V8 原壳三尺寸与真实鼠标证据
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W01`
-- Accepted parent SHA: `8c7a530492e553f8bd1b560a3de598f4da24497c`
-- Dependencies: `G00 accepted @ 8c7a530492e553f8bd1b560a3de598f4da24497c`
+- Wave: `W02`
+- Accepted parent SHA: `05bdee521de2fe3de9de166333aa22b012058b7b`
+- Dependencies: `G01 accepted @ 05bdee521de2fe3de9de166333aa22b012058b7b`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: `docs/verification/V9_EDITOR_V8_BASELINE_20260814.md` 冻结 typecheck、unit、renderer/electron/player build、archive 与 publish 的真实退出状态和失败签名。
-- Before: `3e41ec0` 的真实工程基线尚无本轮可复核记录。
-- After: 六类基线均有精确命令、退出码、通过计数或失败摘要；工作区除基线记录外无变化，失败不会在本卡被修复或弱化。
+- 唯一可见/模型结果: 原 `App/Workspace` 在 1280×720、1366×768、1920×1080 的三张黄金基线、DOM 几何和一次真实鼠标选择/拖动/Undo 证据被固定，且由协调者逐图视觉复核。
+- Before: 原 V8 App 仅可通过当前 `ProductApp` 的“旧版 V8 编辑器”入口到达；仓库没有本轮三尺寸壳层 golden、几何闭包或真实鼠标基线。
+- After: 三张 PNG 像素尺寸精确；`.app-shell`、顶部、左栏、中央、画布视口、状态条、右栏、底部状态栏均可见且在 viewport 内；真实鼠标将新建文字移动并由 Undo 恢复；无页面错误、console error 或外网请求。
 
 读取来源：
 
-- BASE3E: `package.json`、`package-lock.json`、`vitest.config.ts`、`vite.renderer.config.ts`、`vite.player.config.ts`、`tsconfig.electron.json`
+- BASE3E: `src/renderer/ProductApp.tsx`、`src/renderer/App.tsx`、`src/renderer/ui/TopToolbar.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/SceneStateStrip.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/styles/globals.css`
 - DONORF77: 无
-- CURRENT: `tests/unit/courseStateAndArchive.test.ts`、`tests/unit/coursePublishPipeline.test.ts`、`tests/unit/courseProjectProtocol.test.ts`
+- CURRENT: `src/main/windowVisibility.ts`、`tests/e2e/course-studio.spec.ts`；历史鼠标语义只读参考 `3e41ec0^:tests/e2e/editor.spec.ts`
 
 产品修改白名单：无。
 
 文档修改白名单：
 
-- `docs/verification/V9_EDITOR_V8_BASELINE_20260814.md`
+- `docs/verification/V8_EDITOR_VISUAL_BASELINE_20260814.md`
+
+合同证据白名单：
+
+- `tests/contracts/v8-shell-baseline/1280x720.png`
+- `tests/contracts/v8-shell-baseline/1366x768.png`
+- `tests/contracts/v8-shell-baseline/1920x1080.png`
+- `tests/contracts/v8-shell-baseline/geometry.json`
 
 测试修改白名单：无。
 
 明确禁止：
 
-- 修改产品、测试、配置、依赖、lockfile、生成脚本或现有 fixture；
-- 为通过基线而更新 snapshot、弱化断言或删除失败测试；
-- 运行 `npm install`、`npm ci`、格式化、清理或发布命令；
-- 把旧 `dist-*` 的存在当作新构建成功；
+- 修改产品、现有测试、配置、依赖、lockfile、Schema、IPC 或 CSS；
+- 用 DOM 样式改写、`dispatchEvent` 或 Store 直调冒充鼠标移动；
+- 裁切截图隐藏边栏、状态条、溢出或错误；
+- 在截图间改变项目内容、编辑模式、选中对象或缩放；
+- 把 CourseStudio 壳截图当成原 App 基线；
+- 新建 worktree、运行 `npm install`/`npm ci`；
+- 在 G02 建 verifier 或改 behavior map；
 - push。
+
+临时证据路径（Git 忽略，不属于产品变更）：
+
+- `output/playwright/g02/capture-v8-baseline.mjs`
+- `output/playwright/g02/*.png`
+- `output/playwright/g02/geometry.json`
 
 实现步骤：
 
-1. 核对分支、accepted parent、依赖树和干净工作区，逐条运行六类基线命令并记录实际退出码、测试计数、构建产物与可复现失败签名。
-2. 只用上述事实新增基线文档；提交前核对相对 accepted parent 的全部变化只含该文档。
+1. 从干净执行父提交重新构建 Player/Renderer/Electron，用独立 Electron profile 启动默认产品，再通过可见按钮进入原 V8 App；只用 Playwright 真实鼠标新增、选中、拖动文字并 Undo，记录逻辑坐标前后值。
+2. 固定同一 UI 状态，依次把 Electron content viewport 设为三种精确尺寸；采集完整页面 PNG 与核心 DOM 矩形，机械检查边界、相邻栏不交叠和页面无溢出；协调者逐张查看后才把候选复制为合同证据并写结论文档。
 
 验证命令：
 
@@ -923,22 +940,24 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 git status --short
 git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
-npm ls --depth=0
-npm run typecheck
-npm test
 npm run build:player
 npm run build:renderer
 npm run build:electron
-npx vitest run tests/unit/courseStateAndArchive.test.ts tests/unit/coursePublishPipeline.test.ts tests/unit/courseProjectProtocol.test.ts
+node output/playwright/g02/capture-v8-baseline.mjs
+Get-FileHash -Algorithm SHA256 tests/contracts/v8-shell-baseline/1280x720.png,tests/contracts/v8-shell-baseline/1366x768.png,tests/contracts/v8-shell-baseline/1920x1080.png
 git diff --check
+git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only 8c7a530492e553f8bd1b560a3de598f4da24497c
+git diff --name-only 05bdee521de2fe3de9de166333aa22b012058b7b
 ```
 
-鼠标/截图证据：不适用。
+鼠标/截图证据：
 
-Commit: `docs: freeze 3e V8 editor engineering baseline`
+- Playwright `page.mouse` 在真实 Phaser canvas 上执行 pointer down/move/up；属性栏 X/Y 必须变化，Undo 后恢复。
+- 协调者使用本地图片查看器逐张复核三张完整截图；自动几何通过不能替代视觉复核。
+
+Commit: `test(contracts): freeze V8 editor visual baseline`
 Rollback: `git revert <task-sha>`
 
 ---
