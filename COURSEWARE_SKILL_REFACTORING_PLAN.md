@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W03 [G03]`
+> `ACTIVE_WAVE: W04 [G04]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -863,74 +863,82 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - `G00 accepted`：`8c7a530492e553f8bd1b560a3de598f4da24497c`
 - `G01 accepted`：`05bdee521de2fe3de9de166333aa22b012058b7b`
 - `G02 accepted`：`378c195f74e562f3ad5e47c494b94e709ccb57dd`
+- `G03 accepted`：`14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 - 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
+- 行为基线：12 个原高价值测试文件、151 个源码定义、7 个参数化定义、172 个实际用例全部映射为 `keep` 并全绿。
 
-### W03｜V8 高价值行为测试映射波
+### W04｜反重写守卫冻结波
 
 - Status: `ready`
-- Common accepted parent SHA: `378c195f74e562f3ad5e47c494b94e709ccb57dd`
-- Write cards: `G03`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
+- Write cards: `G04`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: `G04` 依赖 `G03` 的行为映射且 guard/map 都是协调者专属高冲突区；ready set 只有 `G03`，不满足第 5.8 节双写入条件，不创建 worktree
-- Integration order: `G03`
-- Stop condition: 第 6.2 节任一高价值测试文件缺失、普通或 `it.each` 测试定义无法完整映射、Vitest 展开计数不一致、定向测试失败，或出现无 replacement 的 `adapt/retire` 时，G03 blocked 并由协调者先解决基线事实；通过后自动物化串行 `W04 [G04]`
+- Parallel preflight: 第 5.8 节明确规定 `G04`、guard、golden 和 behavior map 为协调者专属高冲突区；ready set 只有 `G04`，不创建 worktree
+- Integration order: `G04`
+- Stop condition: 当前仓库正例、任一必失败负例、行为映射、三档 live geometry/golden 或禁用测试标记检查不符合预期时，G04 blocked；通过并冻结后自动物化串行 `W05 [G05]`
 
-### ACTIVE_CARD｜G03 冻结 V8 高价值行为测试映射
+### ACTIVE_CARD｜G04 建立并冻结反重写 verifier
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W03`
-- Accepted parent SHA: `378c195f74e562f3ad5e47c494b94e709ccb57dd`
-- Dependencies: `G01 accepted @ 05bdee521de2fe3de9de166333aa22b012058b7b`
+- Wave: `W04`
+- Accepted parent SHA: `14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
+- Dependencies: `G02 accepted @ 378c195f74e562f3ad5e47c494b94e709ccb57dd`；`G03 accepted @ 14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: 第 6.2 节 12 个高价值测试文件中的 151 个静态测试定义（含 7 个 `it.each`，由 Vitest 展开为 172 个执行用例）全部进入单一机器可读映射，每个定义都有 `keep/adapt/retire` 结论；当前基线不弱化任何断言，全部为 `keep`。
-- Before: 仓库保留了高价值 V8 单元/UI 测试，但没有可供后续 verifier 判断删除、弱化、适配或退休的行为清单。
-- After: `v8-behavior-map.json` 固定 baseline commit、受保护文件、文件 SHA-256、Vitest 收集到的完整测试名与源码位置、合同类别、处置和计数；总数与 Vitest collector 和实际运行结果一致；任何未来 `adapt/retire` 都必须提供非空原因与已存在的 V9 replacement test。
+- 唯一可见/模型结果: 一条固定命令同时守住 BASE3E 原路径、禁止新壳、ProductApp→原 App→五个壳层组件可达性、正式切换后的 CourseStudio 不可达模式、九个壳层 DOM 区域、三档 geometry/golden、172 个行为用例映射和全仓 `.skip/.todo/.only`；三个指定负例全部机械失败。
+- Before: golden 与 behavior map 已存在，但彼此独立，尚无持续阻止删除 `Workspace`、新建 `ConvergedEditorApp` 或重新接回 `CourseStudioApp` 的仓库级门禁。
+- After: `npm run verify:editor-preservation` 执行静态/合同门，`npm run verify:editor-preservation:visual` 在真实 Electron 中重建固定状态并对三档 viewport 做 live geometry 与 masked golden 对比；入口模式先冻结为 `transition`，G05 必须把两个脚本显式切为 `v8-only`，此后重引 CourseStudio 必失败。
 
 读取来源：
 
-- BASE3E: `tests/unit/editorStore.test.ts`、`globalEditorStore.test.ts`、`globalLayerUi.test.tsx`、`sceneStateUi.test.tsx`、`stageViewportTransform.test.ts`、`editorFormattingUi.test.tsx`、`simpleEditorMode.test.tsx`、`developerMode.test.tsx`、`mediaTab.test.tsx`、`componentPropertiesEditor.test.tsx`、`presenterSettingsUi.test.tsx`、`interactionEditor.test.tsx`
+- BASE3E: 第 2.1、2.2、6.1 节列出的原 App/UI/Workspace/Phaser/CSS、入口与壳层合同
 - DONORF77: 无
-- CURRENT: 第 6.2 节测试合同、`tests/contracts/v8-shell-baseline/geometry.json`
-- HISTORY: `3e41ec0^:tests/e2e/editor.spec.ts` 只作为真实鼠标语义来源登记，不把已经不在 `3e` 基线中的文件伪装成当前受保护测试。
+- CURRENT: `tests/contracts/v8-behavior-map.json`、`tests/contracts/v8-shell-baseline/*`、`package.json`、现有 Vitest/Playwright/Electron/sharp 依赖
 
 产品修改白名单：无。
 
-文档修改白名单：无。
+脚本/配置修改白名单：
 
-合同证据白名单：
+- `scripts/verify-editor-preservation.ts`
+- `package.json`（只新增 `verify:editor-preservation` 与 `verify:editor-preservation:visual`）
 
-- `tests/contracts/v8-behavior-map.json`
+文档与合同证据修改白名单：无；G02 golden 与 G03 behavior map 在本卡只读。
 
-测试修改白名单：无。
+测试修改白名单：
+
+- `tests/unit/editorPreservationGuard.test.ts`
+- `tests/unit/coursewareSkillsInstaller.test.ts`（只把 BASE3E 唯一的条件式 `describe.skip` 等价改为 `describe.runIf(process.platform === 'win32')`）
 
 明确禁止：
 
-- 修改产品、现有测试、golden、配置、依赖、lockfile、Schema、IPC 或 CSS；
-- 删除、改名、跳过、弱化或重写任何原 `describe/it/test`；
-- 用文件级 `keep` 掩盖漏掉的普通测试标题、`it.each` 模板或参数行；
-- 把当前不存在的 future replacement、CourseStudio 测试或历史 E2E 冒充已通过的替代合同；
-- 在 G03 建 verifier 或其负例；
+- 修改产品、除上述唯一条件式 API 替换外的现有测试、golden、behavior map、依赖、lockfile、Schema、IPC 或 CSS；
+- 让正例只查字符串存在而不检查 exact path、相对 import graph、文件 hash、图像尺寸或 geometry；
+- 用修改真实工作树、reset/checkout、临时提交或删除真实文件实现负例；负例必须在内存快照中变异；
+- 把静态 golden 文件自校验冒充 live 对比；visual 模式必须启动真实 Electron，动态画布区可以 mask，其余壳层不得整页放宽；
+- 在 transition 模式永久豁免 CourseStudio；G05 必须显式切换 package 脚本到 `v8-only`；
+- 新依赖或 lockfile 变化；
 - 新建 worktree、运行 `npm install`/`npm ci`；
 - push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- `output/g03/generate-v8-behavior-map.mjs`
-- `output/g03/verify-v8-behavior-map.mjs`
-- `output/g03/vitest-list*.json`
+- `output/editor-preservation/current-*.png`
+- `output/editor-preservation/diff-*.png`
+- `output/editor-preservation/report.json`
 
 实现步骤：
 
-1. 使用仓库现有 Vitest collector 的 `list --json --includeTaskLocation` 收集 12 个白名单文件的完整执行用例；按 `file + line + column` 聚合普通定义和 `it.each` 展开行，重复路径、缺失位置或计数不一致立即失败，不用正则近似代替最终清单，也不引入新解析依赖。
-2. 为每个文件写入第 6.2 节合同类别、BASE3E SHA-256、`keep` 处置、逐定义源码位置、全部展开测试名和计数；登记 G02 发现的空状态预览缺口与历史 E2E 来源，但二者不计入 151 个当前定义或 172 个执行用例。
-3. 独立 verifier 临时脚本重新调用 Vitest collector 并与 JSON 双向比对，然后运行 12 个原文件；不得为通过映射而改测试。
+1. 先把 BASE3E 唯一的 `describe.skip` 条件分支机械替换为 `describe.runIf(process.platform === 'win32')`；Windows 执行集合不变，非 Windows 仍条件禁用，不借此修改任何断言。
+2. 把仓库读取、相对 import graph、核心路径/新路径、DOM 字面合同、behavior map、golden/geometry 与禁用测试标记检查做成可注入的纯快照校验；CLI 从真实 Git 工作树构建快照，测试只克隆和变异内存模型。
+3. 实现 transition/v8-only 两种显式入口模式；两者都要求 `ProductApp → App → TopToolbar/ScenePanel/Workspace/SceneStateStrip/RightSidebar` 可达，后者还禁止 ProductApp 直接或间接导入 `CourseStudioApp/V9EditorShell/CourseSurfaceCanvas`。
+4. 增加删除 `Workspace`、新增 `src/renderer/converged/ConvergedEditorApp.tsx`、在 v8-only 快照中让 `ProductApp` 重新导入 `CourseStudioApp` 三个必失败测试，并先证明相应未变异快照通过。
+5. visual 模式复现 G02 的专业模式、命名状态“初始”、单一选中文字与“图层”页签；闭环设置三档 content viewport，机械检查 live geometry，并只 mask `canvasStage` 对其余像素做阈值受控 golden 对比，输出报告和差异图。
 
 验证命令：
 
@@ -938,20 +946,24 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 git status --short
 git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
-npx vitest list tests/unit/editorStore.test.ts tests/unit/globalEditorStore.test.ts tests/unit/globalLayerUi.test.tsx tests/unit/sceneStateUi.test.tsx tests/unit/stageViewportTransform.test.ts tests/unit/editorFormattingUi.test.tsx tests/unit/simpleEditorMode.test.tsx tests/unit/developerMode.test.tsx tests/unit/mediaTab.test.tsx tests/unit/componentPropertiesEditor.test.tsx tests/unit/presenterSettingsUi.test.tsx tests/unit/interactionEditor.test.tsx --json=output/g03/vitest-list-verify.json --includeTaskLocation
-node output/g03/verify-v8-behavior-map.mjs
-npx vitest run tests/unit/editorStore.test.ts tests/unit/globalEditorStore.test.ts tests/unit/globalLayerUi.test.tsx tests/unit/sceneStateUi.test.tsx tests/unit/stageViewportTransform.test.ts tests/unit/editorFormattingUi.test.tsx tests/unit/simpleEditorMode.test.tsx tests/unit/developerMode.test.tsx tests/unit/mediaTab.test.tsx tests/unit/componentPropertiesEditor.test.tsx tests/unit/presenterSettingsUi.test.tsx tests/unit/interactionEditor.test.tsx
+npm run verify:editor-preservation
+npx vitest run tests/unit/editorPreservationGuard.test.ts
+npx vitest run tests/unit/coursewareSkillsInstaller.test.ts
+npm run build:player
+npm run build:renderer
+npm run build:electron
+npm run verify:editor-preservation:visual
 npm run typecheck
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only 378c195f74e562f3ad5e47c494b94e709ccb57dd
+git diff --name-only 14890bb76d5743189114f0ff2d42c85a5aa8a4a2
 ```
 
-鼠标/截图证据：不适用；本卡是测试合同冻结，不产生 UI 结论。
+鼠标/截图证据：visual 模式的三档 current/diff/report 由协调者复核；它只证明 guard 能重现 G02 壳层，不提升产品总体 Outcome status。
 
-Commit: `test(contracts): map protected V8 editor behavior`
+Commit: `test(guard): freeze editor preservation verifier`
 Rollback: `git revert <task-sha>`
 
 ---
