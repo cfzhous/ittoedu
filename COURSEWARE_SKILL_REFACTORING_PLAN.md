@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W10 [V04]`
+> `ACTIVE_WAVE: W11 [V05]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -870,6 +870,7 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - `V01 accepted`：`cf01dda082c14356f10853c89cc52aa9ded5d4af`
 - `V02 accepted`：`49faf2366671b121558142c67a66364aaba6f138`
 - `V03 accepted`：`f00c01b1e870dea4db46a3434cbd99daa89deb82`
+- `V04 accepted`：`62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 - 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
@@ -880,69 +881,73 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - Slide 只读编辑投影：`buildSlideEditorView` 已在不依赖 Store/UI/Player 的前提下保留 global/surface/scene 三作用域、统一稀疏顺序、scope visibility、命名状态有效值和稳定 `layerItemId` 选择；全量 144 个 Vitest 文件 / 907 个测试和 8 个 Agent Kit 测试全绿。
 - Slide 最小写命令：稳定 `SlideEditorSelection` 与 scene Native text move 已在 base/命名状态中分别写入 frame/override；一次有效移动恰好 +1 revision/+1 history，零位移无历史，Undo/Redo 后 ID 稳定；全量 145 个 Vitest 文件 / 913 个测试和 8 个 Agent Kit 测试全绿。
 - Workspace 注入边界：原 Workspace 已以严格二选一的 `slideAuthoring` 输入承接 document/packages/selection 与 selection/move；缺省仍逐项调用原 V8 Store，App 尚未启用注入；全量 146 个 Vitest 文件 / 915 个测试和 8 个 Agent Kit 测试全绿，三尺寸 mask 外像素差异均为 0。
+- 测试 V9 单后端：只有精确 query 才让原 App/Workspace 读取直接 V9 fixture；一个 Native text 以稳定 `layerItemId` 投影、选择并一次性移动，V8 Store project 不变；全量 147 个 Vitest 文件 / 920 个测试和 8 个 Agent Kit 测试全绿，默认三尺寸 mask 外像素差异均为 0。
 
-### W10｜测试参数下的 V9 单后端纵切波
+### W11｜V9 最小纵切真实闭环波
 
 - Status: `ready`
-- Common accepted parent SHA: `f00c01b1e870dea4db46a3434cbd99daa89deb82`
-- Write cards: `V04`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
+- Write cards: `V05`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: V04 修改第 5.8 节列出的高冲突冻结文件 `App.tsx`，并裁决测试启动参数、临时只读兼容文档与 V8/V9 单写边界；`V01→V05` 按计划默认串行，本波不创建执行器 worktree、不并行写入
-- Integration order: `V04`
-- Stop condition: 若同一个原 App/Workspace 无法在不改 Store/Workspace/Phaser/Schema 的前提下显示并单写 V9 fixture，或需要运行时 backend toggle、双 Store 同步、可写 V8 镜像、新入口/壳层，V04 blocked；通过后自动物化串行 `W11 [V05]`
+- Parallel preflight: V05 修改第 5.8 节列出的高冲突冻结文件 `App.tsx`，且把真实鼠标、history、archive、进程生命周期和视觉证据汇合为 GATE-V 前唯一事实；`V01→V05` 按计划串行，本波不创建执行器 worktree、不并行写入
+- Integration order: `V05`
+- Stop condition: 若真实 Electron 指针不能通过原 Phaser bridge 只写 V9，Undo/Redo 不能恢复同一稳定 ID，archive 不是 schemaVersion 9，完全销毁进程后无法从文件恢复相同 text/frame/ID，或必须修改 Store/Workspace/Phaser/Schema/IPC/TopToolbar 才能闭环，则 `GATE-V = NO-GO` 并停止后续开发；全部通过后由主协调者立即执行 GATE-V 二元裁决
 
-### ACTIVE_CARD｜V04 在原 App 中启用测试专用 V9 单后端纵切
+### ACTIVE_CARD｜V05 闭合 V9 Slide 真实鼠标、历史与 archive 重开
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W10`
-- Accepted parent SHA: `f00c01b1e870dea4db46a3434cbd99daa89deb82`
-- Dependencies: `V03 accepted @ f00c01b1e870dea4db46a3434cbd99daa89deb82`
+- Wave: `W11`
+- Accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
+- Dependencies: `V04 accepted @ 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: 只有精确测试启动参数 `?editor-backend=v9-slide-test` 才让同一个原 `App/Workspace` 读取一个直接 V9 fixture，并把一个 Native text 的稳定 ID、选择和移动仅写入 V9 history；默认启动仍完全走 V8，单次 selection/move 不会同时写两个 backend。
-- Before: V03 已允许原 Workspace 接收二选一的 Slide 作者输入，但原 App 从不传入它；默认产品只显示 V8 Store materialization，V9 View/command 尚未汇合到真实 App。
-- After: 一个无 React/Store/Player 依赖的临时 V9 纵切模块持有 fixture、history/selection reducer 和只读 `SceneDocument` snapshot；原 App 在 mount 时只读取一次精确 query，测试模式把该 snapshot/callback 传给 V03 缝隙，缺省模式传 `undefined`；V8 Store 不被 V9 纵切的 selection/move 修改。
+- 唯一可见/模型结果: 同一个原 App/Workspace 在测试 backend 下用真实 Electron 指针拖动 V9 text，一次拖动只增加一次 revision/history；键盘 Undo/Redo 可逆；保存文件为 schemaVersion 9；彻底关闭 Electron 后重新启动、打开该文件，文字、frame 与 `layerItemId` 不变且可继续拖动。
+- Before: V04 已把 V9 fixture、selection/move history 接进原 Workspace，但 V9 测试状态尚无 dirty/saved baseline、Undo/Redo、App 文件生命周期或进程重开证据；原 App 的保存/打开和快捷键仍只调用 V8 Store。
+- After: V9 slice 以 project object identity 记录 saved baseline/path，并提供纯 undo/redo/open/save-completion；原 App 只在测试 backend 下把现有新建/打开/最近/保存、窗口 dirty/title 和键盘 Undo/Redo 路由到 V9，默认路径逐行保留 V8；新的真实 Electron E2E 保存 Undo 态、Redo 态，销毁整个进程后重开 archive，并从恢复位置继续拖动和保存。
 
 读取来源：
 
-- BASE3E: `src/renderer/App.tsx` 的原 `App` 函数组件、hooks 与唯一 `<Workspace />` 调用；`src/renderer/store/editorStore.ts` 只用于测试证明 V8 状态未被写入
-- DONORF77: 无；不得复制 `CourseStudioApp`、`V9EditorShell`、`CourseSurfaceCanvas` 或新 Workspace
-- CURRENT: `src/renderer/course/courseProjectModel.ts` 的 V9 factory/history/update；`src/renderer/course/slideEditorView.ts`；`src/renderer/course/slideEditorCommands.ts`；`src/renderer/ui/workspaceSlideAuthoring.ts`
+- BASE3E: `src/renderer/App.tsx` 的 `confirmDiscardIfNeeded`、`handleNew/handleOpen/handleOpenRecent/handleSave`、dirty/title effect、save-and-close IPC listener 和 keyboard handler；原 `TopToolbar` 只通过既有 App callbacks 触发文件动作，本卡不修改它
+- DONORF77: 无；不得复制失败前端的 Store、Shell、Canvas 或 E2E
+- CURRENT: `src/renderer/course/v9SlideVerticalSlice.ts`；`src/renderer/project/courseProjectArchive.ts` 的正常 V9 create/open；V02 history command；V03 Workspace 单输入；V04 精确启动选择
 
 产品修改白名单：
 
-- `src/renderer/course/v9SlideVerticalSlice.ts`（新建纯 fixture/state/reducer 与临时只读 Workspace snapshot）
-- `src/renderer/App.tsx`（仅启动参数一次性选择、V9 slice state/memo/callback 和原 `<Workspace />` 的可选 prop）
+- `src/renderer/course/v9SlideVerticalSlice.ts`（只增加 saved baseline/path、dirty、undo/redo、open/save-completion 纯状态函数）
+- `src/renderer/App.tsx`（只在现有文件动作、dirty/title 和 keyboard 分支增加测试 backend 二选一；默认 V8 分支原样保留）
 
 测试修改白名单：
 
-- `tests/unit/v9SlideVerticalSlice.test.ts`（新纵切无既有覆盖，验证精确启动选择、V9 投影/选择/移动/history 和 V8 Store 未写）
+- `tests/unit/v9SlideVerticalSlice.test.ts`（扩展 dirty/Undo/Redo/save baseline 与 V9 archive roundtrip）
+- `tests/e2e/v9SlideVerticalSlice.spec.ts`（新建真实 Electron 指针、保存、完全关闭重启、打开、截图闭环）
 
 明确禁止：
 
-- 修改 `ProductApp.tsx`、`main.tsx`、Workspace、Store、Phaser/bridge、Course Project/V8 Schema/types、V01/V02/V03、其它 UI/CSS、Player/Host、guard、golden、behavior map、package/lockfile、archive/export 或 IPC；
-- 新建 App/Shell/Workspace、第二个 Store、Context、Provider、Adapter、EditorPort、command bus，或把临时 `SceneDocument` 持久化、放入 V9 history/archive、反向写回 Course Project；
-- 运行时 backend toggle、宽松/多值参数匹配、localStorage/env 自动切换，或默认启动启用 V9；测试参数必须在 App mount 时只读一次；
-- 同一次 selection/move 同时调用 V9 reducer 与 V8 Store action；不得用 V8 node ID 代替 `layerItemId`，不得为选择生成 alternate ID；
-- 扩展到 Undo/Redo、保存/打开、进程重开、键盘或真实鼠标断言；这些严格属于 V05；
-- 改动 JSX DOM、className、style、data-testid、画布尺寸或现有 UI 控件；不得更新 golden；
+- 修改 `ProductApp.tsx`、`main.tsx`、TopToolbar、Workspace、Store、Phaser/bridge、Course Project/V8 Schema/types、V01/V02/V03、其它 UI/CSS、Player/Host、guard、golden、behavior map、package/lockfile、archive/export 实现或 IPC；
+- 新建 App/Shell/Workspace、Store、Context、Provider、Adapter、EditorPort、command bus，或把临时 `SceneDocument` 写入 history/archive、从兼容 View 反向构造工程；archive 只能读取 `history.present`；
+- 运行时 backend toggle、修改启动 query、默认启用 V9、静默打开/迁移 V8、持久化测试 flag，或让同一次文件/历史/移动动作落到两个 project backend；
+- 把 project object identity dirty 判断替换成只比较 revision 数字；不得因撤销分支复用 revision 而误报 clean；
+- 为通过 E2E 暴露 test-only DOM/global API、直接调用 reducer、直接改 Canvas/Player DOM，或把 Playwright `dispatchEvent` 当真实拖动；必须从原 canvas 坐标输入并由保存文件证明写入；
+- 扩展到 TopToolbar Undo/Redo 按钮、恢复副本、resize/rotate/keyboard nudge、通用 V9 lifecycle/Port；这些分别属于 A02/K09/S04；
+- 改动 JSX DOM、className、style、data-testid、画布尺寸或 UI 控件；不得更新 golden；
 - 修改本计划以外的白名单外文件、运行 `npm install`/`npm ci`、push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- `output/v04/`（默认 preservation visual 可使用现有脚本输出；不得更新 golden）
+- `output/v05/` 与 `test-results/v05/`（截图、archive 检查和系统级鼠标证据；不得更新 golden）
 
 实现步骤：
 
-1. 新模块定义精确 startup backend parser、直接 V9 fixture、`CourseHistoryState + SlideEditorSelection` 状态，以及通过 V01 生成只读 Workspace snapshot 的纯函数；snapshot 只投影 scene-scope Native text，ID 必须等于 `layerItemId`，空 component packages 为稳定只读对象。
-2. selection reducer 只接受零或一个稳定 text ID，并复用 V02 selection；move reducer只接受 bridge 的单节点绝对坐标，按当前 V01 effective frame 算 delta，调用 V02 一次，未知/多节点/非有限坐标保持原 state。
-3. 原 App 用 `useState` initializer 从 `window.location.search` 只读一次 backend；仅在精确测试模式创建 V9 slice state，用 `useMemo` 生成 V03 输入和 functional state callbacks，并只给现有 `<Workspace />` 增加 `slideAuthoring` prop。默认路径传 `undefined`，不改 DOM/布局。
-4. 新测试证明 parser 精确、fixture 为 schemaVersion 9、snapshot 可见一个稳定 text ID、选择后一次 move 恰好 +1 revision/+1 past、V8 Store project 不变，并冻结未知/多节点/非有限输入的 no-op 边界。
-5. 跑反重写守卫、纵切和原 Store 定向测试、typecheck、Renderer build、全量测试与默认三尺寸 Electron preservation visual；默认壳 mask 外像素差异必须仍为 0。
+1. 扩展 V9 slice state：`savedProject` 必须保存真实 project object reference，`projectPath` 与工程分离；dirty 为 `history.present !== savedProject`。undo/redo 复用现有 V9 history 并重验稳定 selection；open 以 archive project 建新 history/saved baseline，save-completion 只记录实际写盘的 project reference/path。
+2. 原 App 保持一次性 backend 选择；用 ref 镜像当前 V9 slice 以处理异步保存完成，不建立 Store。测试 backend 下，新建生成新 fixture，打开/最近只走 `openCourseProjectArchiveAsync`，保存只把 `history.present` 和空 fixture 文件闭包交给 `createCourseProjectArchiveAsync`，默认分支继续原 V8 archive。
+3. active dirty/title 在测试 backend 下来自 V9；现有 main dirty IPC 与 save-and-close callback 因此正确。Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 只调用 V9 undo/redo；默认仍调用原 Store。TopToolbar 的 Save/Open 继续经 App callback；本卡不迁移其直接 Store history/title 读取。
+4. 单测冻结：move 后 dirty、undo 回 saved reference 后 clean、redo dirty、保存后 clean、保存后 undo dirty；同步创建/打开 V9 archive 后 text/frame/ID 和 schemaVersion 9 不变，V8 Store project 不变。
+5. E2E 在 1366×768 原 App 中用 canvas 坐标执行真实 click/drag；以窗口 dirty title 和保存 archive 证明一次移动、Undo、Redo。保存后彻底销毁 Electron，启动新进程、打开同一 archive，再从恢复后的 text 坐标继续拖动并保存；检查稳定 ID、frame 增量、无 renderer/console/external 错误，保存截图并逐项比对冻结壳层几何。
+6. 另跑默认三尺寸 preservation visual；mask 外像素差异必须仍为 0。主协调者再用可见 Electron 的 Windows 系统级鼠标做一次独立移动/Undo 复核，证据写入忽略目录，不替代自动化。
 
 验证命令：
 
@@ -954,21 +959,24 @@ npm run verify:editor-preservation
 npx vitest run tests/unit/v9SlideVerticalSlice.test.ts tests/unit/slideEditorView.test.ts tests/unit/slideEditorCommands.test.ts tests/unit/workspaceSlideAuthoring.test.ts tests/unit/editorStore.test.ts
 npm run typecheck
 npm run build:renderer
+npm run build:electron
 npm test
+npm run prepare:e2e
+npx playwright test tests/e2e/v9SlideVerticalSlice.spec.ts --workers=1
 npm run test:e2e
 $forbidden = rg -n "editorStore|zustand|react|CourseStudio|CourseSurfaceCanvas|V9EditorShell|Player|SlideSurfaceHost|archive|migrate" src/renderer/course/v9SlideVerticalSlice.ts 2>$null
-if ($LASTEXITCODE -eq 0) { $forbidden; throw 'V04 pure slice dependency found' }
+if ($LASTEXITCODE -eq 0) { $forbidden; throw 'V05 pure slice dependency found' }
 if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only f00c01b1e870dea4db46a3434cbd99daa89deb82
+git diff --name-only 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6
 ```
 
-鼠标/截图证据：本卡只挂接测试 backend，不宣称 V05 的真实鼠标闭环；默认启动必须通过 `test:e2e` 的 1280×720、1366×768、1920×1080 live geometry/masked golden，mask 外逐像素差异为 0。测试模式的真实鼠标、Undo/Redo、archive 和完全重开统一由下一张 V05 验收。Outcome status 仍为 `unusable`。
+鼠标/截图证据：`tests/e2e/v9SlideVerticalSlice.spec.ts` 必须产生 1366×768 重开截图和两次从真实 canvas 坐标进入 Phaser 的拖动；archive 分别证明 Undo 恢复、Redo 恢复移动以及重开后继续移动。另保留 Windows `SendInput` 可见 Electron 的 move/Undo 坐标、前后 frame 和截图。默认三尺寸 preservation mask 外逐像素差异仍为 0。通过仅可记为 `engineering candidate`；GATE-V 由主协调者另行二元裁决。
 
-Commit: `feat(editor): wire test-only V9 Slide vertical slice`
+Commit: `feat(editor): close V9 Slide gate vertical slice`
 Rollback: `git revert <task-sha>`
 
 ---
