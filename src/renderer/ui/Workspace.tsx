@@ -59,6 +59,10 @@ import {
 import { TextEditOverlay } from './TextEditOverlay'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { FormulaEditDialog } from './FormulaEditDialog'
+import {
+  resolveWorkspaceSlideAuthoringInput,
+  type WorkspaceSlideAuthoringInput,
+} from './workspaceSlideAuthoring'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
@@ -120,6 +124,7 @@ interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
   onAddVideo(x?: number, y?: number): void
   onSelectImageAsset(): Promise<ImportedImageAsset | null>
+  slideAuthoring?: WorkspaceSlideAuthoringInput
 }
 
 interface FormulaEditSession {
@@ -337,6 +342,7 @@ export function Workspace({
   onAddImage,
   onAddVideo,
   onSelectImageAsset,
+  slideAuthoring,
 }: WorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement>(null)
   const stageViewportRef = useRef<HTMLDivElement>(null)
@@ -1379,7 +1385,7 @@ export function Workspace({
     syncRuntimePreview,
   ])
 
-  const document = useMemo<SceneDocument>(() => {
+  const fallbackDocument = useMemo<SceneDocument>(() => {
     if (editingScope === 'scene') {
       return materializeScene(scene, activePresentationStateId)
     }
@@ -1395,6 +1401,44 @@ export function Workspace({
         .map((item) => item.node),
     }
   }, [activePresentationStateId, editingScope, globalLayer, scene])
+  const fallbackSlideAuthoring = useMemo<WorkspaceSlideAuthoringInput>(() => ({
+    document: fallbackDocument,
+    componentPackages,
+    selectedNodeIds,
+    onSelectionChange: ({ nodeIds, additive }) => {
+      const store = useEditorStore.getState()
+      if (!additive) {
+        store.selectNodes(nodeIds)
+        return
+      }
+      const merged = new Set(store.selectedNodeIds)
+      for (const nodeId of nodeIds) {
+        if (merged.has(nodeId)) merged.delete(nodeId)
+        else merged.add(nodeId)
+      }
+      store.selectNodes([...merged])
+    },
+    onMoveEnd: ({ nodes }) => {
+      const store = useEditorStore.getState()
+      if (nodes.length === 1) {
+        const [{ nodeId, x, y }] = nodes
+        store.updateNode(nodeId, { x, y })
+        return
+      }
+      store.updateNodes(
+        nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
+      )
+    },
+  }), [componentPackages, fallbackDocument, selectedNodeIds])
+  const activeSlideAuthoring = resolveWorkspaceSlideAuthoringInput(
+    fallbackSlideAuthoring,
+    slideAuthoring,
+  )
+  const activeSlideAuthoringRef = useRef(activeSlideAuthoring)
+  activeSlideAuthoringRef.current = activeSlideAuthoring
+  const document = activeSlideAuthoring.document
+  const authoringComponentPackages = activeSlideAuthoring.componentPackages
+  const authoringSelectedNodeIds = activeSlideAuthoring.selectedNodeIds
 
   const editingNode = useMemo(
     () =>
@@ -2009,19 +2053,9 @@ export function Workspace({
     observer.observe(host, { childList: true })
 
     const unsubscribers = [
-      handle.bridge.onNodeSelected(({ nodeIds, additive }) => {
-        const store = useEditorStore.getState()
-        if (!additive) {
-          store.selectNodes(nodeIds)
-          return
-        }
-        const merged = new Set(store.selectedNodeIds)
-        for (const nodeId of nodeIds) {
-          if (merged.has(nodeId)) merged.delete(nodeId)
-          else merged.add(nodeId)
-        }
-        store.selectNodes([...merged])
-      }),
+      handle.bridge.onNodeSelected((event) =>
+        activeSlideAuthoringRef.current.onSelectionChange(event),
+      ),
       handle.bridge.onNodesTransformPreview(({ nodes }) => {
         const store = useEditorStore.getState()
         if (store.canvasMode !== 'edit') return
@@ -2041,13 +2075,11 @@ export function Workspace({
           )
         }
       }),
-      handle.bridge.onNodeMoveEnd(({ nodeId, x, y }) =>
-        useEditorStore.getState().updateNode(nodeId, { x, y }),
+      handle.bridge.onNodeMoveEnd((event) =>
+        activeSlideAuthoringRef.current.onMoveEnd({ nodes: [event] }),
       ),
-      handle.bridge.onNodesMoveEnd(({ nodes }) =>
-        useEditorStore.getState().updateNodes(
-          nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
-        ),
+      handle.bridge.onNodesMoveEnd((event) =>
+        activeSlideAuthoringRef.current.onMoveEnd(event),
       ),
       handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) => {
         const store = useEditorStore.getState()
@@ -2134,14 +2166,14 @@ export function Workspace({
     if (!handle) return
     const previous = previousSceneRef.current
     const componentsChanged =
-      previousComponentPackagesRef.current !== componentPackages
+      previousComponentPackagesRef.current !== authoringComponentPackages
 
     if (
       !previous ||
       previous.id !== document.id ||
       componentsChanged
     ) {
-      handle.bridge.loadScene(document, componentPackages)
+      handle.bridge.loadScene(document, authoringComponentPackages)
     } else {
       const previousById = new Map(previous.nodes.map((node) => [node.id, node]))
       const nextById = new Map(document.nodes.map((node) => [node.id, node]))
@@ -2194,10 +2226,10 @@ export function Workspace({
       }
     }
     previousSceneRef.current = structuredClone(document)
-    previousComponentPackagesRef.current = componentPackages
+    previousComponentPackagesRef.current = authoringComponentPackages
   }, [
+    authoringComponentPackages,
     canvasMode,
-    componentPackages,
     document,
     editingScope,
     postAuthoringPatch,
@@ -2205,8 +2237,8 @@ export function Workspace({
   ])
 
   useEffect(() => {
-    gameRef.current?.bridge.selectNodes(selectedNodeIds)
-  }, [selectedNodeIds])
+    gameRef.current?.bridge.selectNodes([...authoringSelectedNodeIds])
+  }, [authoringSelectedNodeIds])
 
   useEffect(() => {
     gameRef.current?.bridge.setTextEditing(editingTextNodeId)
