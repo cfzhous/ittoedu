@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W05 [G05]`
+> `ACTIVE_WAVE: W06 [K00]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -865,80 +865,73 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - `G02 accepted`：`378c195f74e562f3ad5e47c494b94e709ccb57dd`
 - `G03 accepted`：`14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
 - `G04 accepted`：`95fbb13934a17594a7a556f7b2627372d0732d89`
+- `G05 accepted`：`dc190edb6a0d1b7b696e7308effd401d343134a2`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 - 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
 - 行为基线：12 个原高价值测试文件、151 个源码定义、7 个参数化定义、172 个实际用例全部映射为 `keep` 并全绿。
 - 守卫基线：静态门、三项必失败内存负例、三档 live geometry/masked golden 全绿；画布区外逐像素差异为 0；全量 143 个 Vitest 文件 / 903 个测试和 8 个 Agent Kit 测试全绿。
+- 唯一入口：`ProductApp` 的产品 import graph 只到原 `App`；CourseStudio 源码保留但不可达；默认 `test:e2e` 已绑定 `v8-only` 真实 Electron preservation visual，三档壳层 mask 外像素差异为 0。
 
-### W05｜唯一产品入口切换波
+### W06｜直接 V9 新工程基础波
 
 - Status: `ready`
-- Common accepted parent SHA: `95fbb13934a17594a7a556f7b2627372d0732d89`
-- Write cards: `G05`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `dc190edb6a0d1b7b696e7308effd401d343134a2`
+- Write cards: `K00`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: 第 5.8 节明确规定 `G05` 和主入口切换默认串行；`K00` 依赖 G05 的唯一入口事实，不能并行，不创建 worktree
-- Integration order: `G05`
-- Stop condition: ProductApp 仍可达 CourseStudio、原 App 不可达、v8-only guard/三档 live golden/全量单测任一失败，或必须靠隐藏 query/env 后门维持旧 E2E 时，G05 blocked；通过后自动物化串行 `W06 [K00]`
+- Parallel preflight: K00 位于第 7.11 节规定的 `G04→G05→K00→V01→V05` 高耦合串行链，且改动公共课程模型 factory；不满足双写入条件，不创建 worktree
+- Integration order: `K00`
+- Stop condition: 直接 factory 若不能在不改 Schema/类型、不新增依赖且不调用 V8 factory/migration 的条件下生成可通过当前 V9 Schema 的单 Slide 工程、初始状态和全局教师控制器，K00 blocked；通过后自动物化串行 `W07 [V01]`
 
-### ACTIVE_CARD｜G05 把原 App 切为唯一可见产品入口
+### ACTIVE_CARD｜K00 直接创建 Course Project V9 初始工程
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W05`
-- Accepted parent SHA: `95fbb13934a17594a7a556f7b2627372d0732d89`
-- Dependencies: `G04 accepted @ 95fbb13934a17594a7a556f7b2627372d0732d89`
+- Wave: `W06`
+- Accepted parent SHA: `dc190edb6a0d1b7b696e7308effd401d343134a2`
+- Dependencies: `G05 accepted @ dc190edb6a0d1b7b696e7308effd401d343134a2`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: 默认启动、任意 `?editor=` query 和产品 import graph 都只进入同一个原 `App`；不存在返回 CourseStudio 的按钮或运行时路由；CourseStudio 源码暂留但从产品入口不可达，守卫永久切到 `v8-only`。`ProductApp` 允许且只允许一个无 class/data/style/语义的中性 `div` 包住 `App`，以保持 G02 已冻结的高分辨率 720px 原壳几何；该容器不是 App/Shell/路由。
-- Before: `ProductApp` 默认渲染 `CourseStudioApp`，仍提供“旧版 V8 编辑器”按钮、query 路由和返回按钮；守卫处于临时 `transition` 模式，默认 CourseStudio E2E 依赖该失败入口。
-- After: `ProductApp` 只导入并渲染原 `App`，除维持 G02 几何所需的单个无属性中性容器外不引入任何 UI 或行为；两个 preservation 脚本固定为 `v8-only`；默认 npm E2E 改跑真实 Electron preservation visual 闭环。既有 `course-studio.spec.ts` 和 CourseStudio 源码不修改、不删除、不设 skip，但不再冒充产品入口测试，留待最终清理节点随失效源码一起删除。
+- 唯一可见/模型结果: `createCourseProject` 不创建 Project V8、不调用 V8→V9 migration，直接返回通过 `courseProjectDocumentSchema` 的 revision 0 Course Project V9；工程含一个 1280×720 Slide、一个带 `state_initial` 的初始场景、对应 start location，以及一个 course-global、全 location 可见的默认教师控制器。
+- Before: `createCourseProject` 先调用 `createProject(... includeDefaultController: true)` 生成 Project V8，再调用 `migrateProjectV8ToCourseProjectV9`；V9 新工程的第一事实依赖已禁止的旧顶层协议。
+- After: `createCourseProject` 直接组装当前 Course Project V9 类型并由当前 Schema parse；默认标题、设计 token、声音、播放设置、初始状态、场景/location 关系和教师控制器语义保持当前输出；同文件其他 Native 插入路径仍留给 K01/K02，不在本卡扩大。
 
 读取来源：
 
-- BASE3E: `src/renderer/ProductApp.tsx`、`src/renderer/App.tsx`、原 UI/Workspace/CSS
-- DONORF77: 无
-- CURRENT: `scripts/verify-editor-preservation.ts`、`tests/unit/editorPreservationGuard.test.ts`、`package.json`、`tests/e2e/course-studio.spec.ts`
+- BASE3E: `src/renderer/project/createProject.ts` 中默认 project/controller 值；`src/shared/courseProjectSchema.ts` 当前严格 Schema
+- DONORF77: `src/renderer/course/courseStudioModel.ts` 中 `initialSlidePresentation`、`createCourseProject`、`createDefaultTeacherController` 的函数级实现；只摘取 K00 所需字段，不覆盖整文件
+- CURRENT: `src/renderer/course/courseStudioModel.ts` 的 `stableId`、`createCourseProject`；`src/shared/courseProjectTypes.ts` 的 `CourseProjectDocument/LayerItem/SlideSceneDocument`；`tests/unit/courseStudioModel.test.ts`
 
 产品修改白名单：
 
-- `src/renderer/ProductApp.tsx`
-
-脚本/配置修改白名单：
-
-- `package.json`（只把两个 preservation 脚本从 `transition` 改为 `v8-only`，并把 `test:e2e` / `test:e2e:run` 指向 preservation visual）
-- `scripts/verify-editor-preservation.ts`（只修复 `v8-only` 隐藏窗口调整尺寸时原生窗口已更新、渲染视口及 ResizeObserver 几何仍受后台节流滞后的同步等待；不得改 guard 范围、golden mask、期望几何或任何阈值）
-
-文档与合同证据修改白名单：无；golden 与 behavior map 在本卡只读。
+- `src/renderer/course/courseStudioModel.ts`（只改 factory 所需 import、常量/私有 helper 与 `createCourseProject`）
 
 测试修改白名单：
 
-- `tests/unit/editorPreservationGuard.test.ts`
+- `tests/unit/courseStudioModel.test.ts`
 
 明确禁止：
 
-- 修改原 `App/ui/Workspace/CSS`、CourseStudio 源码/E2E、guard 的结构/import/像素/几何/诊断门禁、golden、behavior map、依赖、lockfile、Schema 或 IPC；
-- 保留 `ProductEditorRoute`、`useState`、query 参数、切换按钮、CourseStudio import、环境变量或测试专用后门；
-- 删除/移动 CourseStudio 文件来制造“不可达”，或把其 E2E 标成 skip/todo；本卡只做入口断开；
-- 另建 App/Shell/Workspace，或让 `main.tsx` 绕过 ProductApp 形成第二入口；
-- 把 test:e2e 指向静态检查；必须仍运行真实 Electron visual 闭环；
+- 修改 `courseProjectTypes.ts`、`courseProjectSchema.ts`、V8 `createProject.ts`、migration/archive、Store、App/UI/Workspace/CSS、guard、golden、behavior map、package/lockfile、Schema 或 IPC；
+- 删除或改写 `migrateProjectV8ToCourseProjectV9`，或把同文件其余 Native 插入 helper 提前迁移；K00 只切断“新建 V9 工程”这一条 V8 依赖；
+- 新建通用 factory 层、Store、Adapter、App/Shell/Workspace、兼容 View、运行时 flag 或测试后门；
+- 改变默认教师控制器的 frame、按钮动作/可见性、样式、播放设置或静态导出语义；
 - 新建 worktree、运行 `npm install`/`npm ci`；
 - push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- 复用 `output/editor-preservation/current-*.png`、`diff-*.png`、`report.json`
+- `output/k00/`（若需要；默认不产生）
 
 实现步骤：
 
-1. 将 `ProductApp.tsx` 收敛为只导入原 `App`，用一个无属性中性 `div` 包住 `App` 以机械保持 G02 已冻结几何；删除所有路由类型、状态、query 解析、按钮和 CourseStudio import，不改 `main.tsx`，不新增 class、testid、style 或交互。
-2. 把 package 中两个 preservation 命令固定为 `--entry-mode=v8-only`；将 `test:e2e` 与 `test:e2e:run` 绑定到同一真实 Electron visual 命令，保留 `pretest:e2e` 的完整构建。
-3. 更新 guard 单测，使真实当前快照本身先通过 `v8-only`，再直接在该快照上重引 CourseStudio 并证明失败；保留另两项负例。
-4. 在每次原生窗口尺寸修正后，等待渲染视口追上该次原生 content size，再计算下一次修正；视口收敛后等待既有严格 golden 几何成立再截图，消除隐藏窗口后台节流造成的旧尺寸反向校正与 ResizeObserver 短暂滞后；保留全部精确尺寸、几何和像素断言。
-5. 跑全量单测、renderer build、静态 v8-only guard 与 `npm run test:e2e`；协调者查看 1366×768 current/diff，确认没有 ProductApp 悬浮控制、CourseStudio UI 或壳层漂移。
+1. 增加仅服务本卡的初始 Slide presentation 与默认教师控制器 V9 literal helper；所有稳定 ID 由现有 `stableId` 生成，controller 为 `globalLayerItems` 中 order 1、`visibility.mode='all'` 的 Native layer。
+2. 把 `createCourseProject` 改为直接构造 `schemaVersion: 9` 的单 Slide 工程；scene/location/startLocation 使用同一个稳定 scene ID，初始 presentation 明确包含 `state_initial`，最后仍由 `courseProjectDocumentSchema.parse` 封口。
+3. 在既有 model 单测中新增直接 factory 合同：验证 revision/时间、Schema、surface-scene-location 对齐、初始状态、默认 playback 和教师控制器完整语义，并机械断言该函数体不调用 `createProject` 或 `migrateProjectV8ToCourseProjectV9`。
+4. 跑定向 model/archive/validator 测试、typecheck、renderer build、静态 preservation guard 与全量单测；核对只改白名单两文件。
 
 验证命令：
 
@@ -947,22 +940,20 @@ git status --short
 git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
 npm run verify:editor-preservation
-npx vitest run tests/unit/editorPreservationGuard.test.ts
+npx vitest run tests/unit/courseStudioModel.test.ts tests/unit/courseProjectPatchCli.test.ts tests/unit/validateProject.test.ts
+npm run typecheck
 npm run build:renderer
 npm test
-npm run test:e2e
-npm run typecheck
-rg -n "CourseStudioApp|ProductEditorRoute|legacy-v8|course-v9|open-course-v9|open-legacy-v8" src/renderer/ProductApp.tsx
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only 95fbb13934a17594a7a556f7b2627372d0732d89
+git diff --name-only dc190edb6a0d1b7b696e7308effd401d343134a2
 ```
 
-鼠标/截图证据：默认启动的真实 Electron 必须直接出现原壳；visual report 三档像素门全绿，协调者至少复核 1366×768 current 与 diff mask；不提升产品总体 Outcome status。
+鼠标/截图证据：不适用；纯模型卡不改变当前可见入口。Outcome status 仍为 `unusable`，自动化最多证明 `engineering candidate`。
 
-Commit: `refactor(renderer): make original App the only product entry`
+Commit: `refactor(course): create new projects directly as V9`
 Rollback: `git revert <task-sha>`
 
 ---
