@@ -1,0 +1,1853 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "sourceCommit": "3e41ec058627d38c4b9f5439b454cc72331e1485",
+    "acceptedParent": "378c195f74e562f3ad5e47c494b94e709ccb57dd",
+    "planExecutionCommit": "31f936aa063abf59f4a18d1d0900df3d48eef057",
+    "collector": "vitest list --json --includeTaskLocation",
+    "protectedSuiteCount": 12,
+    "staticDefinitionCount": 151,
+    "parameterizedDefinitionCount": 7,
+    "expandedCaseCount": 172,
+    "expectedVitestResult": {
+      "filesPassed": 12,
+      "testsPassed": 172
+    }
+  },
+  "policy": {
+    "allowedDispositions": [
+      "keep",
+      "adapt",
+      "retire"
+    ],
+    "keep": "The original collected case names and behavioral assertions remain authoritative in the original file.",
+    "adapt": "Requires a non-empty reason and one or more existing V9 replacement test paths before the original may change.",
+    "retire": "Allowed only for an explicitly retired protocol and requires a non-empty reason plus one or more existing V9 replacement test paths.",
+    "currentBaselineDecision": "All protected definitions are keep; no assertion is weakened or replaced in G03."
+  },
+  "suites": [
+    {
+      "path": "tests/unit/editorStore.test.ts",
+      "contract": "scene/layer/state/history/native CRUD, atomic transforms, and clipboard",
+      "disposition": "keep",
+      "sha256": "94e2bb73e735e040746a80f4c8aec653cad5711399263612f5899e975d04ac58",
+      "staticDefinitionCount": 47,
+      "expandedCaseCount": 59,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:88:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 88,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > adds scenes, switches to the new scene, and records each addition"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:104:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 104,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > never deletes the final scene and does not create a no-op history entry"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:114:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 114,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > renames, recolours, reorders, and deletes scenes with undoable commits"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:147:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 147,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > ignores invalid reorder requests without changing history"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:162:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 162,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > keeps a high defensive scene limit without the former 30-scene product cap"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:179:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 179,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > duplicates a scene with independent scene and node identities"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:236:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 236,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene operations > rewrites a duplicated scene self-entry while preserving its valid state target"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:277:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 277,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "interaction rule authoring order > duplicates with fresh ids, reorders within rule kind, and undoes both"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:339:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 339,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "animation completion dependency cleanup > cascades through second-order completion rules when the source rule is deleted"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:431:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 431,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > adds text, rectangle, and image nodes with their required defaults"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:457:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 457,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > keeps newly dropped nodes at least 20px inside the visible canvas edge"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:472:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 472,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > keeps a high defensive node limit without the former 100-node product cap"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:492:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 492,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > deletes a selected node and undo restores it"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:505:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 505,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > commits a completed drag/resize as exactly one history step"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:530:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 530,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > keeps a live text draft in the project and commits it as exactly one history step"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:565:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 565,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > keeps auto-width changes inside the same vertical text transaction"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:599:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 599,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > cancels a text transaction without adding history or leaving the project dirty"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:620:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 620,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > deterministically commits text before switching nodes or scenes"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:654:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 654,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > finalizes the current text draft when a save is marked complete"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:670:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 670,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > reorders nodes using scene.nodes as the only layer order"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:688:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 688,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > rolls back and restores a new image node, metadata, and bytes atomically"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:703:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 703,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > undoes a reused asset node without deleting pre-existing bytes"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:715:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 715,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > deletes an unused asset through history and restores its bytes on undo"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:731:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 731,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > undoes and redoes an asset imported only into the media library"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:746:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 746,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > keeps component import and later node placement as separate undo steps"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:785:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 785,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "node operations > rejects a second version of the same component ID without corrupting references"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:808:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 808,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > normalizes legacy scenes and enters the authored initial state when run mode starts"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:831:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 831,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > stores state edits as overrides while keeping the canonical base editable"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:871:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 871,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > never lets base or state property patches rewrite stable node identity"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:893:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 893,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > adds and deletes nodes locally in a state without destroying the base identity"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:921:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 921,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > commits text editing in a state as one undoable override transaction"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:950:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 950,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > rewrites override node ids when duplicating a scene"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:974:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 974,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > keeps state ordering local, undoable, and cleans it when a base node is deleted"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1018:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1018,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > falls back to the runtime initial state when the active thumbnail state is deleted"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1042:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1042,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation states > falls cross-scene entry rules back to the target initial state when a state is deleted"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1091:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1091,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "multi-selection operations > duplicates each selected node with its own click mappings exactly once"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1151:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1151,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "multi-selection operations > supports additive toggling and filters invalid or duplicate selection IDs"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1176:75",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 1176,
+          "sourceColumn": 75,
+          "expandedCaseCount": 6,
+          "collectedCaseNames": [
+            "multi-selection operations > aligns the selected nodes to left in one history step",
+            "multi-selection operations > aligns the selected nodes to center in one history step",
+            "multi-selection operations > aligns the selected nodes to right in one history step",
+            "multi-selection operations > aligns the selected nodes to top in one history step",
+            "multi-selection operations > aligns the selected nodes to middle in one history step",
+            "multi-selection operations > aligns the selected nodes to bottom in one history step"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1210:47",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 1210,
+          "sourceColumn": 47,
+          "expandedCaseCount": 2,
+          "collectedCaseNames": [
+            "multi-selection operations > distributes three selected nodes with equal horizontal gaps",
+            "multi-selection operations > distributes three selected nodes with equal vertical gaps"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1248:75",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 1248,
+          "sourceColumn": 75,
+          "expandedCaseCount": 6,
+          "collectedCaseNames": [
+            "multi-selection operations > aligns 45-degree nodes by their visual left boundary using translation only",
+            "multi-selection operations > aligns 45-degree nodes by their visual center boundary using translation only",
+            "multi-selection operations > aligns 45-degree nodes by their visual right boundary using translation only",
+            "multi-selection operations > aligns 45-degree nodes by their visual top boundary using translation only",
+            "multi-selection operations > aligns 45-degree nodes by their visual middle boundary using translation only",
+            "multi-selection operations > aligns 45-degree nodes by their visual bottom boundary using translation only"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1310:47",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 1310,
+          "sourceColumn": 47,
+          "expandedCaseCount": 2,
+          "collectedCaseNames": [
+            "multi-selection operations > distributes 45-degree nodes with equal visual horizontal gaps using translation only",
+            "multi-selection operations > distributes 45-degree nodes with equal visual vertical gaps using translation only"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1368:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1368,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "multi-selection operations > copies a multi-selection snapshot and pastes independent unlocked nodes"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1410:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1410,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "history semantics > stores incremental Immer patches rather than cloning the full long-course project"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1426:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1426,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "history semantics > undoes an addition and redo restores it"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1440:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1440,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "history semantics > limits undo history to 50 entries and clears redo after a new commit"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1458:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1458,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "history semantics > new and opened projects clear history while save keeps it"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorStore.test.ts:1478:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 1478,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "factory compatibility > supports the Store positional factory forms and protects component props"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/globalEditorStore.test.ts",
+      "contract": "global layer, teacher controller, scope, and global interaction",
+      "disposition": "keep",
+      "sha256": "3d0e25f490844ed8f41f5782458419059a3f1e69971fe0f26751072582831e44",
+      "staticDefinitionCount": 10,
+      "expandedCaseCount": 10,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:67:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 67,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > 在隐藏、关闭与恢复教师控制器时始终维持双向一致"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:125:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 125,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > accepts only global-capable V4 packages and creates an undoable placement"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:169:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 169,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > moves, resizes, edits copy, and persists layer and stable scene visibility"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:236:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 236,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > keeps filtered global visibility schema-valid while the UI changes mode"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:252:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 252,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > canonicalizes include/exclude visibility when its last referenced scene is deleted"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:279:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 279,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > authors native text, image, and shape nodes in the persistent global layer"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:333:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 333,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > edits scene and global runtime content without changing source and supports undo"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:381:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 381,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > keeps scene editing isolated when switching to and from the global layer"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:406:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 406,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > authors, duplicates, copies, and cleans global node interactions"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalEditorStore.test.ts:456:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 456,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor store > keeps scene copies in global scopes and removes deleted controller targets"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/globalLayerUi.test.tsx",
+      "contract": "fixed global entry, scene switching, global components, and properties",
+      "disposition": "keep",
+      "sha256": "4f73126014234c4e68a2c83c7b8bb850fbc6891afd4df9d44192ebe618714f46",
+      "staticDefinitionCount": 4,
+      "expandedCaseCount": 4,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:76:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 76,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor UI > switches explicitly between the fixed global entry and a scene"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:91:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 91,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor UI > shows native elements and only enables global-compatible component packages"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:123:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 123,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor UI > edits global placement, every component copy field, and both runtime content tables"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:222:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 222,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "Project V8 global-layer editor UI > offers a state-free scene directory and keeps fixed scene targets as an advanced action"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/sceneStateUi.test.tsx",
+      "contract": "state strip, roles, overrides, visibility, and thumbnail state",
+      "disposition": "keep",
+      "sha256": "ea5205ad22a890ef1afa9e9a761af589214bd2d4f1062c6544e3c2d686adb39c",
+      "staticDefinitionCount": 6,
+      "expandedCaseCount": 6,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/sceneStateUi.test.tsx:51:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 51,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation state UI > keeps scene automation in a dedicated tab and adds through the store"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/sceneStateUi.test.tsx:74:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 74,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation state UI > keeps state cards as accessible buttons and describes every state role"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/sceneStateUi.test.tsx:104:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 104,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation state UI > explains named-state override behavior for a multi-selection"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/sceneStateUi.test.tsx:121:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 121,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation state UI > edits playback initial visibility without changing stable canvas visibility"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/sceneStateUi.test.tsx:139:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 139,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation state UI > keeps video diagnostics scoped to the selected scene when legacy ids repeat"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/sceneStateUi.test.tsx:196:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 196,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "scene presentation state UI > labels which authored state is used by each scene thumbnail"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/stageViewportTransform.test.ts",
+      "contract": "1280x720 design space, 50%-200% zoom, fit, pan, and coordinate transforms",
+      "disposition": "keep",
+      "sha256": "2de169e95a16c9f1cbdfbcd8b5fdde1a44eb3f164718ae25cbdca502cfb69aaa",
+      "staticDefinitionCount": 14,
+      "expandedCaseCount": 23,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:36:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 36,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > uses the fixed Project V8 Slide design size and editor zoom range"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:43:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 43,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > fits by width and centers vertically in client space"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:59:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 59,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > fits by height and centers horizontally in client space"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:73:40",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 73,
+          "sourceColumn": 40,
+          "expandedCaseCount": 6,
+          "collectedCaseNames": [
+            "stage viewport transform > applies user zoom 0.5 around the fitted stage center",
+            "stage viewport transform > applies user zoom 0.75 around the fitted stage center",
+            "stage viewport transform > applies user zoom 1 around the fitted stage center",
+            "stage viewport transform > applies user zoom 1.25 around the fitted stage center",
+            "stage viewport transform > applies user zoom 1.5 around the fitted stage center",
+            "stage viewport transform > applies user zoom 2 around the fitted stage center"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:93:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 93,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > clamps zoom to the supported 50%-200% range"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:102:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 102,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > applies pan in CSS pixels without changing scale or Project coordinates"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:120:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 120,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > maps world points to expected client positions and back"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:145:5",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 145,
+          "sourceColumn": 5,
+          "expandedCaseCount": 4,
+          "collectedCaseNames": [
+            "stage viewport transform > round-trips client and world points at zoom 0.5 with pan { x: +0, y: +0 }",
+            "stage viewport transform > round-trips client and world points at zoom 1 with pan { x: 35.5, y: -72.25 }",
+            "stage viewport transform > round-trips client and world points at zoom 1.35 with pan { x: -200, y: 140 }",
+            "stage viewport transform > round-trips client and world points at zoom 2 with pan { x: 420, y: -310 }"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:172:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 172,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > converts selection rectangles without losing their geometry"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:186:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 186,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > converts drag deltas using scale only, independent of viewport origin and pan"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:199:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 199,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > copies mutable inputs so later UI state changes cannot alter a transform"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:212:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 212,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > keeps edge targets when rotation brings their original bounds onto the stage"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:230:5",
+          "kind": "each",
+          "disposition": "keep",
+          "sourceLine": 230,
+          "sourceColumn": 5,
+          "expandedCaseCount": 2,
+          "collectedCaseNames": [
+            "stage viewport transform > rejects non-positive viewport dimensions: { Object (x, y, ...) }",
+            "stage viewport transform > rejects non-positive viewport dimensions: { x: +0, y: +0, width: 1280, …(1) }"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:234:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 234,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > rejects non-finite viewport, zoom, and pan values"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/editorFormattingUi.test.tsx",
+      "contract": "font, text background, rich text, IME, and editing under zoom",
+      "disposition": "keep",
+      "sha256": "e954ed4912ee332ac2081d9ce977581976df90c37ae7a01624e3cecf8b7a8eb9",
+      "staticDefinitionCount": 17,
+      "expandedCaseCount": 17,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:23:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 23,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "shape editing UI > creates braces as stroke-only shapes with usable defaults"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:31:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 31,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "shape editing UI > hides ineffective fill controls and labels brace styling as line styling"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:44:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 44,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "shape editing UI > commits a dragged range control once instead of filling the undo stack"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:65:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 65,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "basic text property semantics > shows transparency rather than stored opacity for nodes and backgrounds"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:93:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 93,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "basic text property semantics > offers both vertical directions and keeps vertical height editable"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:123:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 123,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "basic text property semantics > toggles node-level emphasis through the normal undoable property command"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:149:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 149,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "event-driven motion authoring entry point > keeps only playback initial visibility in common properties"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:174:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 174,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "elements panel > keeps all quick entries under Common and Media focused on management"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:232:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 232,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > keeps property text changes in one transaction and one undo step"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:258:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 258,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > remaps existing rich runs when the plain text field is edited"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:281:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 281,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > serializes explicit false rich-style overrides instead of inheriting the base style"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:317:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 317,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > keeps the exact rich-text selection while the emphasis toolbar button is pressed"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:373:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 373,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > does not rewrite an in-progress contentEditable value when the node resizes"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:419:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 419,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > 缩放或平移只改变视觉矩形时仍跟随 Player 画布"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:460:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 460,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "rich text editing UI > waits for IME composition to finish before committing a blur"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:499:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 499,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "font family picker > reports system-font availability through document.fonts"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/editorFormattingUi.test.tsx:520:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 520,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "font family picker > opens the full list without clearing, filters while typing, and accepts custom values"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/simpleEditorMode.test.tsx",
+      "contract": "simple/professional mode and progressive disclosure",
+      "disposition": "keep",
+      "sha256": "820306acfa44207e6f59cc8808f6796f4fac63ba924f3b1bd0026fa80e17f253",
+      "staticDefinitionCount": 6,
+      "expandedCaseCount": 6,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/simpleEditorMode.test.tsx:53:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 53,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "simple and professional editor modes > uses one categorized element browser and exposes advanced authoring only in professional mode"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/simpleEditorMode.test.tsx:131:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 131,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "simple and professional editor modes > filters element contents without exposing professional-only component results"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/simpleEditorMode.test.tsx:158:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 158,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "simple and professional editor modes > creates, updates, removes, and restores a complete entrance animation atomically"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/simpleEditorMode.test.tsx:233:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 233,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "simple and professional editor modes > does not overwrite an advanced entrance rule from simple mode"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/simpleEditorMode.test.tsx:278:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 278,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "simple and professional editor modes > does not claim an equivalent-shaped professional node activation rule"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/simpleEditorMode.test.tsx:327:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 327,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "simple and professional editor modes > keeps simple entrance animations isolated between presentation states"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/developerMode.test.tsx",
+      "contract": "Runtime/Component developer workspace and history",
+      "disposition": "keep",
+      "sha256": "7fba8cbf9ef67a7668399b68e5f21ca8b4b39094aa19fa8d80c2832f72a913ed",
+      "staticDefinitionCount": 10,
+      "expandedCaseCount": 10,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:74:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 74,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 生成的可编辑副本 ID 会消除随机后缀中的分隔符边界"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:80:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 80,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 专业模式显示开发工作流，切回简洁模式时安全返回属性"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:113:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 113,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 场景运行时源码更新进入正常撤销历史"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:135:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 135,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 代码编辑器拒绝模块语法，只提交通过校验的运行时源码"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:166:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 166,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 开发工作区一次只呈现一类任务，并给未就绪任务明确空状态"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:184:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 184,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:227:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 227,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 拒绝直接改写第三方组件代码"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:237:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 237,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 不会把名称中碰巧含 editable 的第三方组件视为可编辑副本"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:247:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 247,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 命名状态下阻止创建组件副本且不产生孤儿包"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/developerMode.test.tsx:268:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 268,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "专业开发模式 > 可编辑组件提交前复用完整包校验并保护现有实例作用域"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/mediaTab.test.tsx",
+      "contract": "assets, sound, video, and audio settings",
+      "disposition": "keep",
+      "sha256": "0a85712152944d201686401c650bb12af852002f6244df7d47093b5bef627b46",
+      "staticDefinitionCount": 7,
+      "expandedCaseCount": 7,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:102:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 102,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "MediaTab > 调用顶部声音和视频导入入口"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:118:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 118,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "MediaTab > 编辑全局静音、主音量、五个声道和旁白压低设置，并支持撤销重做"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:166:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 166,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "MediaTab > 用临时 Blob URL 试听并编辑声音定义，卸载时释放 URL"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:201:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 201,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "MediaTab > 显示媒体元数据，把视频添加为画布元素，并删除未使用图片"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:228:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 228,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "MediaTab > 可复用已导入图片，在当前场景创建新的可编辑图片元素"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:247:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 247,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "MediaTab > 删除声音定义，并在素材字节缺失时禁用视频添加"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/mediaTab.test.tsx:267:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 267,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "media formatting > 格式化时长和文件大小"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/componentPropertiesEditor.test.tsx",
+      "contract": "component props, variants, presets, and nested content",
+      "disposition": "keep",
+      "sha256": "592ab20686b11ce3b82637d5fa1dcaee3ea4f9b86de1610f268cf278bf88aeaa",
+      "staticDefinitionCount": 5,
+      "expandedCaseCount": 5,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/componentPropertiesEditor.test.tsx:173:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 173,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "ComponentPropertiesEditor > edits every supported property type and switches internal preview pages"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/componentPropertiesEditor.test.tsx:202:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 202,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "ComponentPropertiesEditor > applies variants and presets as complete prop updates"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/componentPropertiesEditor.test.tsx:214:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 214,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "ComponentPropertiesEditor > auto-renders and persists every nested content string with explicit overrides"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/componentPropertiesEditor.test.tsx:243:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 243,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "ComponentsTab component presets > shows presets as independent add choices and applies their props"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/componentPropertiesEditor.test.tsx:272:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 272,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "ComponentsTab component presets > keeps nested-content presets available for scene component instances"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/presenterSettingsUi.test.tsx",
+      "contract": "teacher controller, shortcuts, and repair entry",
+      "disposition": "keep",
+      "sha256": "b9f23cb9908f4219fa7fd61578ed7fc882afe111ee9feb867fc6f437d9c2a54c",
+      "staticDefinitionCount": 5,
+      "expandedCaseCount": 5,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/presenterSettingsUi.test.tsx:18:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 18,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "presenter settings editor > 关闭画布控制器后显示警告，并可一键修复"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/presenterSettingsUi.test.tsx:35:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 35,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "presenter settings editor > updates the enabled state and the authored-command strategy"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/presenterSettingsUi.test.tsx:53:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 53,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "presenter settings editor > detects, saves, replaces, and removes an additional hardware binding"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/presenterSettingsUi.test.tsx:88:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 88,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "presenter settings editor > recognizes PageDown as built in and does not duplicate it"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/presenterSettingsUi.test.tsx:104:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 104,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "presenter settings editor > saves a modified PageDown because only the unmodified key is built in"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/interactionEditor.test.tsx",
+      "contract": "interactions, actions, rules, and scene/state/media targets",
+      "disposition": "keep",
+      "sha256": "0d39b8f6a5d953dfbf41462b9b66ba724b1f86ab13b4e30e8c0a8af7539425ed",
+      "staticDefinitionCount": 20,
+      "expandedCaseCount": 20,
+      "definitions": [
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:288:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 288,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > creates a quick click-to-state rule using the active-state scope"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:313:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 313,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > uses all states when quick-linking from the base scene"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:322:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 322,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > edits enabled state, scope, state target, and transition duration"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:376:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 376,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > edits scene, sound, and video targets through labelled controls"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:430:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 430,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > edits event-relative motion timing, previews the action, and protects completion references"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:495:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 495,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > inserts a new action before terminal navigation and deletes the rule"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:523:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 523,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > shows only click rules belonging to the selected node"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:544:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 544,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "InteractionEditor > reserves new video clicks for playback while exposing legacy conflicts"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:574:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 574,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > exposes undoable rule copy and ordering controls"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:596:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 596,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > explains a rule as 当、如果、就 and makes parallel timing readable"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:633:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 633,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > filters and searches rules related to the selected element"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:674:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 674,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > creates a sequential entrance template and prepares playback visibility"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:725:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 725,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > routes selected-element clicks to properties and starts current-position preview"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:739:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 739,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > shows rule-level conflict hints and can filter to warnings"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:764:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 764,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > authors exit motion from an animation-completed trigger and exposes preview controls"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:804:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 804,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > authors persistent global rules with an editable scene.in scope"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:847:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 847,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > adds a scoped scene-enter rule and never repeats node-click rules"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:875:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 875,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > offers presenter commands now that the presenter input layer exists"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:883:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 883,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > edits state, audio, video, component, and scoped runtime-event triggers"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/interactionEditor.test.tsx:981:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 981,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "SceneAutomationEditor > reuses state scope and the complete state/scene/audio/video action editor"
+          ]
+        }
+      ]
+    }
+  ],
+  "historicalReferences": [
+    {
+      "commit": "3e41ec058627d38c4b9f5439b454cc72331e1485^",
+      "path": "tests/e2e/editor.spec.ts",
+      "role": "Read-only source for mature V8 real-pointer and full-editor workflow semantics.",
+      "protectedCurrentTest": false
+    }
+  ],
+  "knownBaselineGaps": [
+    {
+      "id": "V8-NULL-ACTIVE-PRESENTATION-STATE-PREVIEW",
+      "observedBy": "G02",
+      "behavior": "Adding a text node while activePresentationStateId is null can make the runtime preview reject the returned initial state as inconsistent.",
+      "currentSafeBaseline": "Select the existing named state 初始 before insertion.",
+      "plannedTasks": [
+        "V04",
+        "V05"
+      ],
+      "protectedTestCountImpact": 0
+    }
+  ]
+}
