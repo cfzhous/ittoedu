@@ -7,7 +7,7 @@
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W04 [G04]`
+> `ACTIVE_WAVE: W05 [G05]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
@@ -864,81 +864,81 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - `G01 accepted`：`05bdee521de2fe3de9de166333aa22b012058b7b`
 - `G02 accepted`：`378c195f74e562f3ad5e47c494b94e709ccb57dd`
 - `G03 accepted`：`14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
+- `G04 accepted`：`95fbb13934a17594a7a556f7b2627372d0732d89`
 - 当前分支：`codex/v9-editor-v8-base`
 - 工程基线：typecheck、142 个 Vitest 文件 / 899 个测试、8 个 Agent Kit 测试、Player/Renderer/Electron build、3 个 archive/publish 文件 / 24 个测试全绿；构建告警已冻结在基线记录中。
 - 原壳基线：三档 golden 和 DOM 几何全绿；Windows 系统级真实鼠标完成 `(440,320) → (540.9,387.3) → Undo → (440,320)`；高分辨率下原壳固定 720 px 高及底部留空已作为基线事实冻结。
 - 行为基线：12 个原高价值测试文件、151 个源码定义、7 个参数化定义、172 个实际用例全部映射为 `keep` 并全绿。
+- 守卫基线：静态门、三项必失败内存负例、三档 live geometry/masked golden 全绿；画布区外逐像素差异为 0；全量 143 个 Vitest 文件 / 903 个测试和 8 个 Agent Kit 测试全绿。
 
-### W04｜反重写守卫冻结波
+### W05｜唯一产品入口切换波
 
 - Status: `ready`
-- Common accepted parent SHA: `14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
-- Write cards: `G04`（主协调者，主工作区，串行）
+- Common accepted parent SHA: `95fbb13934a17594a7a556f7b2627372d0732d89`
+- Write cards: `G05`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
-- Parallel preflight: 第 5.8 节明确规定 `G04`、guard、golden 和 behavior map 为协调者专属高冲突区；ready set 只有 `G04`，不创建 worktree
-- Integration order: `G04`
-- Stop condition: 当前仓库正例、任一必失败负例、行为映射、三档 live geometry/golden 或禁用测试标记检查不符合预期时，G04 blocked；通过并冻结后自动物化串行 `W05 [G05]`
+- Parallel preflight: 第 5.8 节明确规定 `G05` 和主入口切换默认串行；`K00` 依赖 G05 的唯一入口事实，不能并行，不创建 worktree
+- Integration order: `G05`
+- Stop condition: ProductApp 仍可达 CourseStudio、原 App 不可达、v8-only guard/三档 live golden/全量单测任一失败，或必须靠隐藏 query/env 后门维持旧 E2E 时，G05 blocked；通过后自动物化串行 `W06 [K00]`
 
-### ACTIVE_CARD｜G04 建立并冻结反重写 verifier
+### ACTIVE_CARD｜G05 把原 App 切为唯一可见产品入口
 
 - Owner: `strong-coordinator`
 - Status: `ready`
-- Wave: `W04`
-- Accepted parent SHA: `14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
-- Dependencies: `G02 accepted @ 378c195f74e562f3ad5e47c494b94e709ccb57dd`；`G03 accepted @ 14890bb76d5743189114f0ff2d42c85a5aa8a4a2`
+- Wave: `W05`
+- Accepted parent SHA: `95fbb13934a17594a7a556f7b2627372d0732d89`
+- Dependencies: `G04 accepted @ 95fbb13934a17594a7a556f7b2627372d0732d89`
 - Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - File-overlap proof: 不适用
 - Integration order: `1`
-- 唯一可见/模型结果: 一条固定命令同时守住 BASE3E 原路径、禁止新壳、ProductApp→原 App→五个壳层组件可达性、正式切换后的 CourseStudio 不可达模式、九个壳层 DOM 区域、三档 geometry/golden、172 个行为用例映射和全仓 `.skip/.todo/.only`；三个指定负例全部机械失败。
-- Before: golden 与 behavior map 已存在，但彼此独立，尚无持续阻止删除 `Workspace`、新建 `ConvergedEditorApp` 或重新接回 `CourseStudioApp` 的仓库级门禁。
-- After: `npm run verify:editor-preservation` 执行静态/合同门，`npm run verify:editor-preservation:visual` 在真实 Electron 中重建固定状态并对三档 viewport 做 live geometry 与 masked golden 对比；入口模式先冻结为 `transition`，G05 必须把两个脚本显式切为 `v8-only`，此后重引 CourseStudio 必失败。
+- 唯一可见/模型结果: 默认启动、任意 `?editor=` query 和产品 import graph 都只进入同一个原 `App`；不存在返回 CourseStudio 的按钮或运行时路由；CourseStudio 源码暂留但从产品入口不可达，守卫永久切到 `v8-only`。`ProductApp` 允许且只允许一个无 class/data/style/语义的中性 `div` 包住 `App`，以保持 G02 已冻结的高分辨率 720px 原壳几何；该容器不是 App/Shell/路由。
+- Before: `ProductApp` 默认渲染 `CourseStudioApp`，仍提供“旧版 V8 编辑器”按钮、query 路由和返回按钮；守卫处于临时 `transition` 模式，默认 CourseStudio E2E 依赖该失败入口。
+- After: `ProductApp` 只导入并渲染原 `App`，除维持 G02 几何所需的单个无属性中性容器外不引入任何 UI 或行为；两个 preservation 脚本固定为 `v8-only`；默认 npm E2E 改跑真实 Electron preservation visual 闭环。既有 `course-studio.spec.ts` 和 CourseStudio 源码不修改、不删除、不设 skip，但不再冒充产品入口测试，留待最终清理节点随失效源码一起删除。
 
 读取来源：
 
-- BASE3E: 第 2.1、2.2、6.1 节列出的原 App/UI/Workspace/Phaser/CSS、入口与壳层合同
+- BASE3E: `src/renderer/ProductApp.tsx`、`src/renderer/App.tsx`、原 UI/Workspace/CSS
 - DONORF77: 无
-- CURRENT: `tests/contracts/v8-behavior-map.json`、`tests/contracts/v8-shell-baseline/*`、`package.json`、现有 Vitest/Playwright/Electron/sharp 依赖
+- CURRENT: `scripts/verify-editor-preservation.ts`、`tests/unit/editorPreservationGuard.test.ts`、`package.json`、`tests/e2e/course-studio.spec.ts`
 
-产品修改白名单：无。
+产品修改白名单：
+
+- `src/renderer/ProductApp.tsx`
 
 脚本/配置修改白名单：
 
-- `scripts/verify-editor-preservation.ts`
-- `package.json`（只新增 `verify:editor-preservation` 与 `verify:editor-preservation:visual`）
+- `package.json`（只把两个 preservation 脚本从 `transition` 改为 `v8-only`，并把 `test:e2e` / `test:e2e:run` 指向 preservation visual）
+- `scripts/verify-editor-preservation.ts`（只修复 `v8-only` 隐藏窗口调整尺寸时原生窗口已更新、渲染视口及 ResizeObserver 几何仍受后台节流滞后的同步等待；不得改 guard 范围、golden mask、期望几何或任何阈值）
 
-文档与合同证据修改白名单：无；G02 golden 与 G03 behavior map 在本卡只读。
+文档与合同证据修改白名单：无；golden 与 behavior map 在本卡只读。
 
 测试修改白名单：
 
 - `tests/unit/editorPreservationGuard.test.ts`
-- `tests/unit/coursewareSkillsInstaller.test.ts`（只把 BASE3E 唯一的条件式 `describe.skip` 等价改为 `describe.runIf(process.platform === 'win32')`）
 
 明确禁止：
 
-- 修改产品、除上述唯一条件式 API 替换外的现有测试、golden、behavior map、依赖、lockfile、Schema、IPC 或 CSS；
-- 让正例只查字符串存在而不检查 exact path、相对 import graph、文件 hash、图像尺寸或 geometry；
-- 用修改真实工作树、reset/checkout、临时提交或删除真实文件实现负例；负例必须在内存快照中变异；
-- 把静态 golden 文件自校验冒充 live 对比；visual 模式必须启动真实 Electron，动态画布区可以 mask，其余壳层不得整页放宽；
-- 在 transition 模式永久豁免 CourseStudio；G05 必须显式切换 package 脚本到 `v8-only`；
-- 新依赖或 lockfile 变化；
+- 修改原 `App/ui/Workspace/CSS`、CourseStudio 源码/E2E、guard 的结构/import/像素/几何/诊断门禁、golden、behavior map、依赖、lockfile、Schema 或 IPC；
+- 保留 `ProductEditorRoute`、`useState`、query 参数、切换按钮、CourseStudio import、环境变量或测试专用后门；
+- 删除/移动 CourseStudio 文件来制造“不可达”，或把其 E2E 标成 skip/todo；本卡只做入口断开；
+- 另建 App/Shell/Workspace，或让 `main.tsx` 绕过 ProductApp 形成第二入口；
+- 把 test:e2e 指向静态检查；必须仍运行真实 Electron visual 闭环；
 - 新建 worktree、运行 `npm install`/`npm ci`；
 - push。
 
 临时证据路径（Git 忽略，不属于产品变更）：
 
-- `output/editor-preservation/current-*.png`
-- `output/editor-preservation/diff-*.png`
-- `output/editor-preservation/report.json`
+- 复用 `output/editor-preservation/current-*.png`、`diff-*.png`、`report.json`
 
 实现步骤：
 
-1. 先把 BASE3E 唯一的 `describe.skip` 条件分支机械替换为 `describe.runIf(process.platform === 'win32')`；Windows 执行集合不变，非 Windows 仍条件禁用，不借此修改任何断言。
-2. 把仓库读取、相对 import graph、核心路径/新路径、DOM 字面合同、behavior map、golden/geometry 与禁用测试标记检查做成可注入的纯快照校验；CLI 从真实 Git 工作树构建快照，测试只克隆和变异内存模型。
-3. 实现 transition/v8-only 两种显式入口模式；两者都要求 `ProductApp → App → TopToolbar/ScenePanel/Workspace/SceneStateStrip/RightSidebar` 可达，后者还禁止 ProductApp 直接或间接导入 `CourseStudioApp/V9EditorShell/CourseSurfaceCanvas`。
-4. 增加删除 `Workspace`、新增 `src/renderer/converged/ConvergedEditorApp.tsx`、在 v8-only 快照中让 `ProductApp` 重新导入 `CourseStudioApp` 三个必失败测试，并先证明相应未变异快照通过。
-5. visual 模式复现 G02 的专业模式、命名状态“初始”、单一选中文字与“图层”页签；闭环设置三档 content viewport，机械检查 live geometry，并只 mask `canvasStage` 对其余像素做阈值受控 golden 对比，输出报告和差异图。
+1. 将 `ProductApp.tsx` 收敛为只导入原 `App`，用一个无属性中性 `div` 包住 `App` 以机械保持 G02 已冻结几何；删除所有路由类型、状态、query 解析、按钮和 CourseStudio import，不改 `main.tsx`，不新增 class、testid、style 或交互。
+2. 把 package 中两个 preservation 命令固定为 `--entry-mode=v8-only`；将 `test:e2e` 与 `test:e2e:run` 绑定到同一真实 Electron visual 命令，保留 `pretest:e2e` 的完整构建。
+3. 更新 guard 单测，使真实当前快照本身先通过 `v8-only`，再直接在该快照上重引 CourseStudio 并证明失败；保留另两项负例。
+4. 在每次原生窗口尺寸修正后，等待渲染视口追上该次原生 content size，再计算下一次修正；视口收敛后等待既有严格 golden 几何成立再截图，消除隐藏窗口后台节流造成的旧尺寸反向校正与 ResizeObserver 短暂滞后；保留全部精确尺寸、几何和像素断言。
+5. 跑全量单测、renderer build、静态 v8-only guard 与 `npm run test:e2e`；协调者查看 1366×768 current/diff，确认没有 ProductApp 悬浮控制、CourseStudio UI 或壳层漂移。
 
 验证命令：
 
@@ -948,22 +948,21 @@ git branch --show-current
 git merge-base --is-ancestor 3e41ec058627d38c4b9f5439b454cc72331e1485 HEAD
 npm run verify:editor-preservation
 npx vitest run tests/unit/editorPreservationGuard.test.ts
-npx vitest run tests/unit/coursewareSkillsInstaller.test.ts
-npm run build:player
 npm run build:renderer
-npm run build:electron
-npm run verify:editor-preservation:visual
+npm test
+npm run test:e2e
 npm run typecheck
+rg -n "CourseStudioApp|ProductEditorRoute|legacy-v8|course-v9|open-course-v9|open-legacy-v8" src/renderer/ProductApp.tsx
 git diff --check
 git diff --cached --check
 git diff --name-only
 git diff --cached --name-only
-git diff --name-only 14890bb76d5743189114f0ff2d42c85a5aa8a4a2
+git diff --name-only 95fbb13934a17594a7a556f7b2627372d0732d89
 ```
 
-鼠标/截图证据：visual 模式的三档 current/diff/report 由协调者复核；它只证明 guard 能重现 G02 壳层，不提升产品总体 Outcome status。
+鼠标/截图证据：默认启动的真实 Electron 必须直接出现原壳；visual report 三档像素门全绿，协调者至少复核 1366×768 current 与 diff mask；不提升产品总体 Outcome status。
 
-Commit: `test(guard): freeze editor preservation verifier`
+Commit: `refactor(renderer): make original App the only product entry`
 Rollback: `git revert <task-sha>`
 
 ---
