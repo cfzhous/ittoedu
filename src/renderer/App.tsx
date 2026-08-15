@@ -830,11 +830,14 @@ export default function App() {
     })
     const editingScope = v9SlideVerticalSlice.editingScope
     const scopedLayers = view.layers.filter((layer) => layer.source === editingScope)
-    const unsupportedScopedLayerCount = scopedLayers.filter((layer) => !(
-      layer.item.kind === 'native' &&
+    // Native and component layers both enter the unified layer; runtime layers
+    // and scene teacher controllers remain outside the Nodes/Properties lists.
+    const unsupportedScopedLayerCount = scopedLayers.filter((layer) => (
+      layer.item.kind === 'runtime' ||
       (
-        editingScope === 'global' ||
-        layer.item.content.nativeType !== 'teacher-controller'
+        layer.item.kind === 'native' &&
+        editingScope !== 'global' &&
+        layer.item.content.nativeType === 'teacher-controller'
       )
     )).length
     const editingScene = editingScope === 'scene'
