@@ -34,6 +34,7 @@ const FIXTURE_NOW = '2026-08-15T02:00:00.000Z'
 export type EditorStartupBackend = 'v8' | typeof V9_SLIDE_TEST_BACKEND
 
 export interface V9SlideVerticalSliceState {
+  readonly sessionId: string
   readonly history: CourseHistoryState
   readonly selection: SlideEditorSelection
   readonly savedSnapshot: CourseProjectArchiveData | null
@@ -135,6 +136,7 @@ function createFixtureProject() {
 }
 
 function freezeState(
+  sessionId: string,
   history: CourseHistoryState,
   selection: SlideEditorSelection,
   savedSnapshot: CourseProjectArchiveData | null,
@@ -144,6 +146,7 @@ function freezeState(
   componentPackages: Record<string, ComponentPackageData>,
 ): V9SlideVerticalSliceState {
   return Object.freeze({
+    sessionId,
     history,
     selection,
     savedSnapshot,
@@ -156,6 +159,15 @@ function freezeState(
 
 export function createV9SlideVerticalSliceState(): V9SlideVerticalSliceState {
   const project = createFixtureProject()
+  return openV9SlideVerticalSliceState({
+    project,
+    assetFiles: {},
+    componentFiles: {},
+  }, null)
+}
+
+export function createV9CourseEditorState(): V9SlideVerticalSliceState {
+  const project = createCourseProject({ title: '未命名课件' })
   return openV9SlideVerticalSliceState({
     project,
     assetFiles: {},
@@ -178,6 +190,7 @@ export function openV9SlideVerticalSliceState(
   })
   const componentPackages = componentPackagesFromArchive(project, componentFiles)
   return freezeState(
+    crypto.randomUUID(),
     history,
     selection,
     options.markDirty ? null : archive,
@@ -211,12 +224,17 @@ export function completeV9SlideVerticalSliceSave(
   state: V9SlideVerticalSliceState,
   savedSnapshot: CourseProjectArchiveData,
   projectPath: string,
+  expectedSessionId: string = state.sessionId,
 ): V9SlideVerticalSliceState {
+  if (state.sessionId !== expectedSessionId) {
+    throw new Error('保存结果不属于当前课件会话')
+  }
   if (state.history.present.id !== savedSnapshot.project.id) {
-    throw new Error('保存结果不属于当前 V9 Slide 工程')
+    throw new Error('保存结果不属于当前课件工程')
   }
   if (state.savedSnapshot === savedSnapshot && state.projectPath === projectPath) return state
   return freezeState(
+    state.sessionId,
     state.history,
     state.selection,
     savedSnapshot,
@@ -238,6 +256,7 @@ export function renameV9SlideVerticalSlice(
     draft.title = normalized
   }, now)
   return freezeState(
+    state.sessionId,
     commitCourseHistory(state.history, project),
     state.selection,
     state.savedSnapshot,
@@ -348,7 +367,7 @@ export function selectV9SlideVerticalSlice(
 ): V9SlideVerticalSliceState {
   if (input.nodeIds.length === 0) {
     if (input.additive || state.selection.selectionId === null) return state
-    return freezeState(state.history, selectSlideEditorLayer({
+    return freezeState(state.sessionId, state.history, selectSlideEditorLayer({
       project: state.history.present,
       locationId: state.selection.locationId,
       stateId: state.selection.stateId,
@@ -362,7 +381,7 @@ export function selectV9SlideVerticalSlice(
     ? null
     : selectionId
   if (nextSelectionId === state.selection.selectionId) return state
-  return freezeState(state.history, selectSlideEditorLayer({
+  return freezeState(state.sessionId, state.history, selectSlideEditorLayer({
     project: state.history.present,
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
@@ -394,6 +413,7 @@ export function moveV9SlideVerticalSlice(
   }, now)
   if (history === state.history && selection === state.selection) return state
   return freezeState(
+    state.sessionId,
     history,
     selection,
     state.savedSnapshot,
@@ -431,6 +451,7 @@ export function undoV9SlideVerticalSlice(
   const history = undoCourseHistory(state.history)
   if (history === state.history) return state
   return freezeState(
+    state.sessionId,
     history,
     selectionForHistory(state, history),
     state.savedSnapshot,
@@ -447,6 +468,7 @@ export function redoV9SlideVerticalSlice(
   const history = redoCourseHistory(state.history)
   if (history === state.history) return state
   return freezeState(
+    state.sessionId,
     history,
     selectionForHistory(state, history),
     state.savedSnapshot,

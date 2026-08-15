@@ -41,18 +41,7 @@ import { renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
 import {
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
-  completeV9SlideVerticalSliceSave,
-  createV9SlideVerticalSliceState,
   isV9SlideVerticalSliceDirty,
-  moveV9SlideVerticalSlice,
-  openV9SlideVerticalSliceState,
-  redoV9SlideVerticalSlice,
-  renameV9SlideVerticalSlice,
-  resolveEditorStartupBackend,
-  selectV9SlideVerticalSlice,
-  undoV9SlideVerticalSlice,
-  V9_SLIDE_TEST_BACKEND,
-  type V9SlideVerticalSliceState,
 } from './course/v9SlideVerticalSlice'
 import {
   componentPackagesFromArchive,
@@ -282,13 +271,7 @@ function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
 }
 
 export default function App() {
-  const [v9SlideVerticalSlice, setV9SlideVerticalSlice] =
-    useState<V9SlideVerticalSliceState | null>(() => (
-      resolveEditorStartupBackend(window.location.search) === V9_SLIDE_TEST_BACKEND
-        ? createV9SlideVerticalSliceState()
-        : null
-    ))
-  const v9SlideVerticalSliceRef = useRef(v9SlideVerticalSlice)
+  const v9SlideVerticalSlice = useEditorStore((state) => state.courseSession)
   const [busy, setBusy] = useState(false)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
     | {
@@ -382,23 +365,11 @@ export default function App() {
       ...snapshot,
       onSelectionChange: (event) => {
         if (lifecycleOperationInFlightRef.current) return
-        setV9SlideVerticalSlice((current) => {
-          const next = current === null
-            ? null
-            : selectV9SlideVerticalSlice(current, event)
-          v9SlideVerticalSliceRef.current = next
-          return next
-        })
+        useEditorStore.getState().selectCourseLayers(event)
       },
       onMoveEnd: (event) => {
         if (lifecycleOperationInFlightRef.current) return
-        setV9SlideVerticalSlice((current) => {
-          const next = current === null
-            ? null
-            : moveV9SlideVerticalSlice(current, event)
-          v9SlideVerticalSliceRef.current = next
-          return next
-        })
+        useEditorStore.getState().moveCourseLayers(event)
       },
     }
   }, [v9SlideVerticalSlice])
@@ -428,11 +399,7 @@ export default function App() {
       useEditorStore.getState().undo()
       return
     }
-    setV9SlideVerticalSlice((current) => {
-      const next = current === null ? null : undoV9SlideVerticalSlice(current)
-      v9SlideVerticalSliceRef.current = next
-      return next
-    })
+    useEditorStore.getState().undoCourseProject()
   }, [v9BackendActive])
 
   const redoActiveDocument = useCallback(() => {
@@ -441,11 +408,7 @@ export default function App() {
       useEditorStore.getState().redo()
       return
     }
-    setV9SlideVerticalSlice((current) => {
-      const next = current === null ? null : redoV9SlideVerticalSlice(current)
-      v9SlideVerticalSliceRef.current = next
-      return next
-    })
+    useEditorStore.getState().redoCourseProject()
   }, [v9BackendActive])
 
   const renameActiveDocument = useCallback((title: string) => {
@@ -454,11 +417,7 @@ export default function App() {
       useEditorStore.getState().renameProject(title)
       return
     }
-    setV9SlideVerticalSlice((current) => {
-      const next = current === null ? null : renameV9SlideVerticalSlice(current, title)
-      v9SlideVerticalSliceRef.current = next
-      return next
-    })
+    useEditorStore.getState().renameCourseProject(title)
   }, [v9BackendActive])
 
   const run = useCallback(
@@ -535,9 +494,7 @@ export default function App() {
         console.error('清理恢复数据失败', error)
       })
       if (v9BackendActive) {
-        const next = createV9SlideVerticalSliceState()
-        v9SlideVerticalSliceRef.current = next
-        setV9SlideVerticalSlice(next)
+        useEditorStore.getState().createNewCourseProject()
         return
       }
       createNewProject()
@@ -551,9 +508,7 @@ export default function App() {
       if (!file) return
       if (v9BackendActive) {
         const archive = await openCourseProjectArchiveAsync(file.bytes)
-        const next = openV9SlideVerticalSliceState(archive, file.path)
-        v9SlideVerticalSliceRef.current = next
-        setV9SlideVerticalSlice(next)
+        useEditorStore.getState().loadCourseProject(archive, file.path)
         await clearRecoveryCopy().catch((error) => {
           console.error('清理恢复数据失败', error)
         })
@@ -579,9 +534,7 @@ export default function App() {
       const file = await desktopApi().openRecentProject({ path })
       if (v9BackendActive) {
         const archive = await openCourseProjectArchiveAsync(file.bytes)
-        const next = openV9SlideVerticalSliceState(archive, file.path)
-        v9SlideVerticalSliceRef.current = next
-        setV9SlideVerticalSlice(next)
+        useEditorStore.getState().loadCourseProject(archive, file.path)
         await clearRecoveryCopy().catch((error) => {
           console.error('清理恢复数据失败', error)
         })
@@ -609,8 +562,9 @@ export default function App() {
       try {
         await run(async () => {
           if (v9BackendActive) {
-            const state = v9SlideVerticalSliceRef.current
-            if (state === null) throw new Error('V9 Slide 测试 backend 状态不可用')
+            const state = useEditorStore.getState().courseSession
+            if (state === null) throw new Error('当前课件状态不可用')
+            const sessionId = state.sessionId
             const savedSnapshot = captureV9SlideVerticalSliceArchive(state)
             const bytes = await createCourseProjectArchiveAsync(savedSnapshot)
             const result = await desktopApi().saveProject({
@@ -619,16 +573,11 @@ export default function App() {
               bytes,
             })
             if (result) {
-              const current = v9SlideVerticalSliceRef.current
-              if (current === null) throw new Error('V9 Slide 测试 backend 已关闭')
-              const next = completeV9SlideVerticalSliceSave(
-                current,
+              savedCurrentRevision = useEditorStore.getState().completeCourseProjectSave(
+                sessionId,
                 savedSnapshot,
                 result.path,
               )
-              savedCurrentRevision = !isV9SlideVerticalSliceDirty(next)
-              v9SlideVerticalSliceRef.current = next
-              setV9SlideVerticalSlice(next)
               if (savedCurrentRevision) {
                 await clearRecoveryCopy().catch((error) => {
                   console.error('清理恢复数据失败', error)
@@ -1193,10 +1142,6 @@ export default function App() {
   }, [])
 
   useLayoutEffect(() => {
-    v9SlideVerticalSliceRef.current = v9SlideVerticalSlice
-  }, [v9SlideVerticalSlice])
-
-  useLayoutEffect(() => {
     window.__COURSEWARE_EDITOR_DIRTY__ = activeDocumentDirty
     document.title = `${activeDocumentTitle}${activeDocumentDirty ? ' *' : ''} - ${APP_NAME}`
     if (window.desktopAPI) {
@@ -1561,12 +1506,9 @@ export default function App() {
           void run(async () => {
             try {
               const archive = await openCourseProjectArchiveAsync(recoveryProject.bytes)
-              const next = openV9SlideVerticalSliceState(archive, null, {
+              useEditorStore.getState().loadCourseProject(archive, null, {
                 markDirty: true,
               })
-              v9SlideVerticalSliceRef.current = next
-              setV9SlideVerticalSlice(next)
-              setStatus('已恢复未保存的课件，请尽快另存为工程文件')
               await clearRecoveryCopy()
               setRecoveryProject(null)
               setRecoveryDecisionComplete(true)
@@ -1582,8 +1524,7 @@ export default function App() {
             }
             const archive = await openProjectArchiveAsync(recoveryProject.bytes)
             const packages = componentPackagesFromArchive(archive.project, archive.componentFiles)
-            v9SlideVerticalSliceRef.current = null
-            setV9SlideVerticalSlice(null)
+            useEditorStore.getState().clearCourseProjectSession()
             loadProject(archive.project, null, archive.assetFiles, packages)
             useEditorStore.setState({
               dirty: true,

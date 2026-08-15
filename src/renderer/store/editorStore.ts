@@ -105,6 +105,22 @@ import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
 } from '../components/importComponentPackage'
+import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
+import {
+  completeV9SlideVerticalSliceSave,
+  createV9CourseEditorState,
+  createV9SlideVerticalSliceState,
+  isV9SlideVerticalSliceDirty,
+  moveV9SlideVerticalSlice,
+  openV9SlideVerticalSliceState,
+  redoV9SlideVerticalSlice,
+  renameV9SlideVerticalSlice,
+  selectV9SlideVerticalSlice,
+  undoV9SlideVerticalSlice,
+  type V9SlideMoveInput,
+  type V9SlideSelectionInput,
+  type V9SlideVerticalSliceState,
+} from '../course/v9SlideVerticalSlice'
 
 enablePatches()
 
@@ -190,6 +206,8 @@ export interface ImportedAssetBatchItem {
 }
 
 export interface EditorState {
+  /** Canonical Course Project session. `null` means the legacy import backend is active. */
+  courseSession: V9SlideVerticalSliceState | null
   project: ProjectDocument
   activeSceneId: string
   /** `null` edits the canonical base scene. */
@@ -212,6 +230,25 @@ export interface EditorState {
   textEditSession: TextEditSession | null
   statusMessage: string | null
   errorMessage: string | null
+
+  activateV9SlideFixture(): void
+  createNewCourseProject(): void
+  loadCourseProject(
+    archive: CourseProjectArchiveData,
+    path: string | null,
+    options?: { markDirty?: boolean },
+  ): void
+  clearCourseProjectSession(): void
+  selectCourseLayers(input: V9SlideSelectionInput): void
+  moveCourseLayers(input: V9SlideMoveInput): void
+  renameCourseProject(title: string): void
+  undoCourseProject(): void
+  redoCourseProject(): void
+  completeCourseProjectSave(
+    sessionId: string,
+    snapshot: CourseProjectArchiveData,
+    path: string,
+  ): boolean
 
   createNewProject(): void
   loadProject(
@@ -1604,6 +1641,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 
   return {
+    courseSession: null,
     project: initialProject,
     activeSceneId: initialProject.scenes[0].id,
     activePresentationStateId: null,
@@ -1626,9 +1664,110 @@ export const useEditorStore = create<EditorState>((set, get) => {
     statusMessage: '已创建新课件',
     errorMessage: null,
 
+    activateV9SlideFixture() {
+      set({
+        courseSession: createV9SlideVerticalSliceState(),
+        statusMessage: '已启动幻灯片纵切验证',
+        errorMessage: null,
+      })
+    },
+
+    createNewCourseProject() {
+      set({
+        courseSession: createV9CourseEditorState(),
+        statusMessage: '已创建新课件',
+        errorMessage: null,
+      })
+    },
+
+    loadCourseProject(archive, path, options = {}) {
+      set({
+        courseSession: openV9SlideVerticalSliceState(archive, path, options),
+        statusMessage: options.markDirty
+          ? '已恢复未保存的课件，请尽快另存为工程文件'
+          : `已打开“${archive.project.title}”`,
+        errorMessage: null,
+      })
+    },
+
+    clearCourseProjectSession() {
+      set({ courseSession: null })
+    },
+
+    selectCourseLayers(input) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = selectV9SlideVerticalSlice(state.courseSession, input)
+        return courseSession === state.courseSession ? state : { ...state, courseSession }
+      })
+    },
+
+    moveCourseLayers(input) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = moveV9SlideVerticalSlice(state.courseSession, input)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已移动图层' }
+      })
+    },
+
+    renameCourseProject(title) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = renameV9SlideVerticalSlice(state.courseSession, title)
+        return courseSession === state.courseSession ? state : { ...state, courseSession }
+      })
+    },
+
+    undoCourseProject() {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = undoV9SlideVerticalSlice(state.courseSession)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已撤销' }
+      })
+    },
+
+    redoCourseProject() {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = redoV9SlideVerticalSlice(state.courseSession)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已重做' }
+      })
+    },
+
+    completeCourseProjectSave(sessionId, snapshot, path) {
+      let savedCurrentRevision = false
+      set((state) => {
+        if (state.courseSession === null) {
+          throw new Error('当前课件会话已关闭')
+        }
+        const courseSession = completeV9SlideVerticalSliceSave(
+          state.courseSession,
+          snapshot,
+          path,
+          sessionId,
+        )
+        savedCurrentRevision = !isV9SlideVerticalSliceDirty(courseSession)
+        return {
+          ...state,
+          courseSession,
+          statusMessage: savedCurrentRevision
+            ? `已保存到 ${path}`
+            : '已保存启动保存时的版本；之后的修改尚未保存',
+        }
+      })
+      return savedCurrentRevision
+    },
+
     createNewProject() {
       const project = createProject()
       set({
+        courseSession: null,
         project,
         activeSceneId: project.scenes[0].id,
         activePresentationStateId: null,
@@ -1654,6 +1793,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     loadProject(project, path, assetFiles = {}, componentPackages = {}) {
       const copy = normalizeProjectPresentations(cloneProject(project))
       set({
+        courseSession: null,
         project: copy,
         activeSceneId: copy.scenes[0].id,
         activePresentationStateId: null,

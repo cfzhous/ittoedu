@@ -178,7 +178,7 @@ describe('test-only V9 Slide vertical slice', () => {
       saved,
       foreignSnapshot,
       'C:\\courseware\\other.h5lesson',
-    )).toThrow('保存结果不属于当前 V9 Slide 工程')
+    )).toThrow('保存结果不属于当前课件工程')
   })
 
   it('updates the path but stays dirty when an older captured snapshot finishes saving', () => {
