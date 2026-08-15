@@ -187,7 +187,7 @@ export class PublishedCourseApp {
 
     const activation = await this.#player.activateSurface(target.surfaceId)
     if (!activation.ok) {
-      this.#showNotice(`表面“${target.surfaceId}”加载失败，其他表面仍可使用。`)
+      this.#showNotice('课件页面加载失败，其他页面仍可使用。')
       return false
     }
     if (target.kind === 'slide-scene') {
@@ -398,23 +398,29 @@ export class PublishedCourseApp {
 
   /**
    * Interaction rules navigate through the same guarded location pipeline as
-   * presenter and teacher-controller navigation. The engine contract is
-   * synchronous, so the async navigation runs detached; failures surface on
-   * the same console channel as the engine's own rule errors.
+   * presenter and teacher-controller navigation. Every action is genuinely
+   * awaited: a blocked or failed navigation resolves `false` so the engine
+   * stops the rest of the rule chain, and unexpected failures surface a
+   * teacher-understandable notice instead of an internal identifier.
    */
   #interactionHostActions(): Readonly<RuntimeHostActions> {
-    const run = (navigation: Promise<unknown>): boolean => {
-      navigation.catch((error: unknown) => {
+    const run = async (operation: () => Promise<boolean>): Promise<boolean> => {
+      try {
+        return await operation()
+      } catch (error) {
         console.error('互动规则导航失败', error)
-      })
-      return true
+        this.#showNotice('互动跳转失败，请检查课件互动设置后重试。')
+        return false
+      }
     }
     return {
-      goToScene: (sceneId, targetStateId) => run(this.goToScene(sceneId, targetStateId, 'runtime')),
-      nextScene: () => run(this.next('runtime')),
-      previousScene: () => run(this.previous('runtime')),
-      replayScene: () => run(this.replay()),
-      restartCourse: () => run(this.restart()),
+      goToScene: (sceneId, targetStateId) => (
+        run(() => this.goToScene(sceneId, targetStateId, 'runtime'))
+      ),
+      nextScene: () => run(() => this.next('runtime')),
+      previousScene: () => run(() => this.previous('runtime')),
+      replayScene: () => run(async () => { await this.replay(); return true }),
+      restartCourse: () => run(async () => { await this.restart(); return true }),
     }
   }
 

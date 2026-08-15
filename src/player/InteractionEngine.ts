@@ -680,8 +680,26 @@ export class InteractionEngine {
           sceneId: this.currentSceneId(),
         })
         if (this.destroyed || signal.aborted) return 'cancelled'
+        return 'completed'
       }
-      return isTerminalNavigationAction(action) ? 'terminal' : 'completed'
+      if (isTerminalNavigationAction(action)) {
+        if (result === false) {
+          this.onError(
+            new Error('场景跳转未执行，已停止后续动作'),
+            { phase: 'execute', rule, step, action },
+          )
+          return 'cancelled'
+        }
+        return 'terminal'
+      }
+      if (action.type === 'presentation.set' && result === false) {
+        this.onError(
+          new Error('状态切换未执行，已停止后续动作'),
+          { phase: 'execute', rule, step, action },
+        )
+        return 'cancelled'
+      }
+      return 'completed'
     } catch (error) {
       this.onError(error, { phase: 'execute', rule, step, action })
       return 'cancelled'

@@ -10,6 +10,8 @@ export type SurfaceLifecyclePhase =
   | 'reset'
   | 'capture'
   | 'destroy'
+  /** Declarative interaction rule execution (navigation/state/motion failures). */
+  | 'execute'
 
 export type SurfaceStatus =
   | 'idle'

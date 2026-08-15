@@ -8,7 +8,10 @@ import type {
 import {
   InteractionEngine,
   type InteractionBindableRoot,
+  type InteractionEngineErrorContext,
+  type InteractionNodeMotionContext,
 } from '../../InteractionEngine'
+import type { NodeMotionAction } from '../../../shared/interactionTypes'
 import type {
   ComponentLayerItem,
   LayerItem,
@@ -358,6 +361,7 @@ function renderVideo(
   item: NativeLayerItem,
   dom: Document,
   services: SurfacePlayerServices,
+  onMediaEvent?: (eventName: string, seconds?: number) => void,
 ): HTMLElement {
   if (item.content.nativeType !== 'video') throw new TypeError('Expected video item')
   const { data } = item.content
@@ -385,7 +389,58 @@ function renderVideo(
       else video.pause()
     })
   }
+  // Native media publishes its playback events to the interaction session so
+  // video.started/paused/ended/time rules and global runtimes observe the same
+  // protocol the Phaser player already emits.
+  if (onMediaEvent) {
+    video.addEventListener('playing', () => onMediaEvent('video:started'))
+    video.addEventListener('pause', () => onMediaEvent('video:paused'))
+    video.addEventListener('ended', () => onMediaEvent('video:ended'))
+    video.addEventListener('timeupdate', () => onMediaEvent('video:time', video.currentTime))
+  }
   return video
+}
+
+const DOM_MOTION_EASING: Record<NodeMotionAction['easing'], string> = {
+  linear: 'linear',
+  'ease-in': 'ease-in',
+  'ease-out': 'ease-out',
+  'ease-in-out': 'ease-in-out',
+}
+
+/**
+ * Keyframes for one authored node.enter / node.exit on the compositor content
+ * plane. The wrapper keeps rotation and authored opacity; the content element
+ * carries the transient motion so reconcile re-layout cannot fight it.
+ */
+function domMotionKeyframes(
+  action: NodeMotionAction,
+  frame: { width: number; height: number },
+): Keyframe[] | null {
+  const entering = action.type === 'node.enter'
+  const rest = { opacity: 1, transform: 'translate(0px, 0px) scale(1)' }
+  let start: Record<string, string | number>
+  switch (action.effect) {
+    case 'fade':
+      start = { opacity: 0 }
+      break
+    case 'slide': {
+      const horizontal = action.direction === 'left' || action.direction === 'right'
+      const distance = horizontal ? frame.width : frame.height
+      const sign = (action.direction === 'left' || action.direction === 'up') ? -1 : 1
+      const offset = `${sign * distance}px`
+      start = horizontal
+        ? { transform: `translateX(${offset})`, opacity: 1 }
+        : { transform: `translateY(${offset})`, opacity: 1 }
+      break
+    }
+    case 'scale':
+      start = { transform: 'scale(0)', opacity: 1 }
+      break
+    case 'none':
+      return null
+  }
+  return entering ? [start, rest] : [rest, start]
 }
 
 function renderShape(item: NativeLayerItem, dom: Document): HTMLElement {
@@ -547,13 +602,16 @@ class NativeDomItemHost {
   #container: HTMLElement | null = null
   #services: SurfacePlayerServices | null = null
   #onTeacherControllerAction: (action: TeacherControllerAction, item: NativeLayerItem) => void
+  #emitMediaEvent: ((eventName: string, seconds?: number) => void) | null
 
   constructor(
     item: NativeLayerItem,
     onTeacherControllerAction: (action: TeacherControllerAction, item: NativeLayerItem) => void,
+    emitMediaEvent: ((eventName: string, seconds?: number) => void) | null = null,
   ) {
     this.#item = item
     this.#onTeacherControllerAction = onTeacherControllerAction
+    this.#emitMediaEvent = emitMediaEvent
   }
 
   mount(context: { container: HTMLElement; services: SurfacePlayerServices }): void {
@@ -588,7 +646,12 @@ class NativeDomItemHost {
       case 'text': element = renderText(this.#item, dom); break
       case 'formula': element = renderFormula(this.#item, dom); break
       case 'image': element = renderImage(this.#item, dom, this.#services); break
-      case 'video': element = renderVideo(this.#item, dom, this.#services); break
+      case 'video': element = renderVideo(
+        this.#item,
+        dom,
+        this.#services,
+        this.#emitMediaEvent ?? undefined,
+      ); break
       case 'shape': element = renderShape(this.#item, dom); break
       case 'teacher-controller':
         element = renderTeacherController(
@@ -877,11 +940,19 @@ export class SlideSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       const scene = this.#findScene(sceneId)
       if (!scene) throw new Error(`Unknown Slide scene: ${sceneId}`)
+      const previousSceneId = this.#sceneId
+      const previousStateId = this.#stateId
+      const sceneChanged = previousSceneId !== scene.id
+      if (sceneChanged) this.#emitSceneExited(scene.id)
       this.#sceneId = scene.id
-      this.#stateId = this.#validStateId(scene, stateId)
+      const nextStateId = this.#validStateId(scene, stateId)
+      if (!sceneChanged && previousStateId && nextStateId !== previousStateId) {
+        this.#emitPresentationExited(previousStateId)
+      }
+      this.#stateId = nextStateId
       await this.#reconcile()
       this.#syncInteractionEngine()
-      this.#emitSceneEntered()
+      this.#emitSceneEntered(sceneChanged ? null : previousStateId)
     })
   }
 
@@ -890,13 +961,15 @@ export class SlideSurfaceHost implements SurfaceHost {
       const scene = this.#currentScene()
       const previousStateId = this.#stateId
       this.#stateId = this.#validStateId(scene, stateId)
+      const changed = this.#stateId !== previousStateId
+      if (changed && previousStateId) this.#emitPresentationExited(previousStateId)
       await this.#reconcile()
       const session = this.#options.interactions
       if (
         session &&
         this.#interactionEngine &&
         this.#stateId &&
-        this.#stateId !== previousStateId
+        changed
       ) {
         session.events.emit('presentation:change', {
           sceneId: this.#sceneId,
@@ -970,8 +1043,27 @@ export class SlideSurfaceHost implements SurfaceHost {
 
   reset(scope: SurfaceResetScope): Promise<void> {
     return this.#run(async () => {
+      const previousSceneId = this.#sceneId
+      const previousStateId = this.#stateId
       this.#sessionVisibility.clear()
-      if (scope === 'course') this.#sceneId = this.#document.scenes[0]!.id
+      // Resolve the target scene id first: the exit event must report the old
+      // scene while #sceneId still points at it.
+      const targetSceneId = scope === 'course'
+        ? this.#document.scenes[0]!.id
+        : previousSceneId
+      const sceneChanged = previousSceneId !== targetSceneId
+      if (sceneChanged) {
+        this.#emitSceneExited(targetSceneId)
+      } else {
+        const nextStateId = this.#validStateId(
+          this.#currentScene(),
+          undefined,
+        )
+        if (previousStateId && previousStateId !== nextStateId) {
+          this.#emitPresentationExited(previousStateId)
+        }
+      }
+      this.#sceneId = targetSceneId
       const scene = this.#currentScene()
       this.#stateId = this.#validStateId(scene, undefined)
       await this.#reconcile()
@@ -980,6 +1072,10 @@ export class SlideSurfaceHost implements SurfaceHost {
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'reset', () => record.host.reset?.(scope))
       }
+      // Replay and restart re-enter the current scene: announce the fresh entry
+      // so scene.enter and presentation.enter rules run again from the authored
+      // state instead of keeping the stale session frame.
+      this.#emitSceneEntered(sceneChanged ? null : previousStateId)
     })
   }
 
@@ -1083,6 +1179,10 @@ export class SlideSurfaceHost implements SurfaceHost {
   destroy(): Promise<void> {
     return this.#run(async () => {
       if (this.#destroyed) return
+      // The interaction session ends with the surface: announce the scene exit
+      // before tearing down the engine and item hosts so global observers see
+      // the outgoing scene while the course event bus is still alive.
+      this.#emitSceneExited(undefined)
       this.#destroyed = true
       this.#interactionEngine?.destroy()
       this.#interactionEngine = null
@@ -1236,6 +1336,8 @@ export class SlideSurfaceHost implements SurfaceHost {
       events: session.events,
       presentation: this.#presentationApi(),
       hostActions: session.hostActions,
+      executeNodeMotion: (action, context) => this.#executeNodeMotion(action, context),
+      onError: (error, context) => this.#reportInteractionError(error, context),
     })
     this.#bindInteractionHandles()
   }
@@ -1251,18 +1353,131 @@ export class SlideSurfaceHost implements SurfaceHost {
     )
   }
 
-  /** Announces the entered scene so scene.enter / presentation.enter rules fire. */
-  #emitSceneEntered(): void {
+  /**
+   * Announces the entered scene so scene.enter / presentation.enter rules fire.
+   * `previousStateId` supplies the fromStateId for same-scene state changes;
+   * a scene switch has no presentation continuity, so it passes `null`.
+   */
+  #emitSceneEntered(previousStateId?: string | null): void {
     const session = this.#options.interactions
     if (!session || !this.#interactionEngine) return
     if (this.#stateId) {
       session.events.emit('presentation:change', {
         sceneId: this.#sceneId,
-        fromStateId: null,
+        fromStateId: previousStateId ?? null,
         stateId: this.#stateId,
       })
     }
     session.events.emit('scene:enter', { sceneId: this.#sceneId })
+  }
+
+  /** Announces the outgoing scene so global runtimes observe scene exits. */
+  #emitSceneExited(toSceneId?: string): void {
+    const session = this.#options.interactions
+    if (!session) return
+    session.events.emit('scene:exit', {
+      sceneId: this.#sceneId,
+      ...(toSceneId === undefined ? {} : { toSceneId }),
+    })
+  }
+
+  /** Announces the named state being left on a same-scene state switch. */
+  #emitPresentationExited(stateId: string): void {
+    const session = this.#options.interactions
+    if (!session) return
+    session.events.emit('presentation:exit', {
+      sceneId: this.#sceneId,
+      stateId,
+    })
+  }
+
+  /**
+   * Publishes native media playback to the interaction session with the stable
+   * layer item id and the scene active at the moment of the event.
+   */
+  #emitMediaEvent(nodeId: string, eventName: string, seconds?: number): void {
+    const session = this.#options.interactions
+    if (!session || this.#mode !== 'playback') return
+    session.events.emit(eventName, {
+      nodeId,
+      sceneId: this.#sceneId,
+      ...(seconds === undefined ? {} : { seconds }),
+    })
+  }
+
+  /**
+   * Executes an authored node.enter / node.exit on the item's content plane via
+   * the Web Animations API. Environments without WAAPI (jsdom, capture) degrade
+   * to an instant, still-order-correct completion. The promise resolves `false`
+   * when the owning rule run is aborted or the element is recreated mid-motion,
+   * so the engine never publishes a stale animation.completed.
+   */
+  #executeNodeMotion(
+    action: NodeMotionAction,
+    context: InteractionNodeMotionContext,
+  ): boolean | PromiseLike<boolean> {
+    if (this.#destroyed || this.#mode !== 'playback') return false
+    const record = this.#records.get(action.nodeId)
+    if (!record || record.failed) return false
+    const content = record.content
+    const entering = action.type === 'node.enter'
+    const animate = typeof content.animate === 'function'
+      ? content.animate.bind(content)
+      : null
+    if (entering) {
+      this.setItemSessionVisibility(action.nodeId, true)
+    } else if (!animate || record.wrapper.hidden) {
+      this.setItemSessionVisibility(action.nodeId, false)
+      return true
+    }
+    if (!animate) return true
+    const keyframes = domMotionKeyframes(action, record.item.frame)
+    if (!keyframes) {
+      if (!entering) this.setItemSessionVisibility(action.nodeId, false)
+      return true
+    }
+    const duration = Math.max(0, Math.min(60_000, action.durationMs))
+    const animation = animate(keyframes, {
+      duration,
+      easing: DOM_MOTION_EASING[action.easing] ?? 'linear',
+      fill: entering ? 'backwards' : 'forwards',
+    })
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        if (!entering) this.setItemSessionVisibility(action.nodeId, false)
+        resolve(true)
+      }
+      const cancel = (): void => {
+        if (settled) return
+        settled = true
+        resolve(false)
+      }
+      animation.addEventListener('finish', finish, { once: true })
+      animation.addEventListener('cancel', cancel, { once: true })
+      const onAbort = (): void => {
+        animation.cancel()
+        cancel()
+      }
+      context.signal.addEventListener('abort', onAbort, { once: true })
+      if (context.signal.aborted) onAbort()
+      else void animation.finished.catch(cancel)
+    })
+  }
+
+  /** Routes declarative rule failures to diagnostics with teacher-safe text. */
+  #reportInteractionError(error: unknown, context: InteractionEngineErrorContext): void {
+    const cause = error instanceof Error ? error : new Error(String(error))
+    console.error('互动规则执行失败', cause)
+    this.#context?.services.reportDiagnostic?.({
+      surfaceId: this.id,
+      phase: 'execute',
+      severity: 'error',
+      message: context.phase === 'bind' ? '互动规则绑定失败' : cause.message,
+      cause,
+    })
   }
 
   #presentationApi(): RuntimePresentationApi {
@@ -1279,14 +1494,19 @@ export class SlideSurfaceHost implements SurfaceHost {
     }
   }
 
-  #setPresentationFromInteraction(stateId: string): boolean {
+  #setPresentationFromInteraction(stateId: string): boolean | PromiseLike<boolean> {
     if (this.#destroyed || this.#mode !== 'playback') return false
     const scene = this.#currentScene()
     if (!scene.presentation?.states.some((state) => state.id === stateId)) return false
-    void this.setPresentationState(stateId).catch((error: unknown) => {
-      console.error('互动状态切换失败', error)
-    })
-    return true
+    // Genuinely await the applied state so the rule chain continues only after
+    // the switch settles; a failed switch resolves false and stops the chain.
+    return this.setPresentationState(stateId).then(
+      () => true,
+      (error: unknown) => {
+        this.#reportInteractionError(error, { phase: 'execute' })
+        return false
+      },
+    )
   }
 
   async #createRecord(entry: EffectiveLayerEntry): Promise<ItemRecord> {
@@ -1338,9 +1558,15 @@ export class SlideSurfaceHost implements SurfaceHost {
 
   #createHost(item: LayerItem): ItemRecord['host'] {
     if (item.kind === 'native') {
-      return new NativeDomItemHost(item, (action, controller) => {
-        void this.#handleTeacherControllerAction(action, controller)
-      })
+      return new NativeDomItemHost(
+        item,
+        (action, controller) => {
+          void this.#handleTeacherControllerAction(action, controller)
+        },
+        item.content.nativeType === 'video'
+          ? (eventName, seconds) => this.#emitMediaEvent(item.layerItemId, eventName, seconds)
+          : null,
+      )
     }
     if (item.kind === 'component') {
       return this.#options.componentHostFactory?.(item) ?? new StaticFallbackItemHost(item)
@@ -1413,9 +1639,15 @@ export class SlideSurfaceHost implements SurfaceHost {
     record.failed = true
     record.wrapper.dataset.hostStatus = 'failed'
     if (record.item.kind === 'native') {
-      const native = new NativeDomItemHost(record.item, (action, controller) => {
-        void this.#handleTeacherControllerAction(action, controller)
-      })
+      const native = new NativeDomItemHost(
+        record.item,
+        (action, controller) => {
+          void this.#handleTeacherControllerAction(action, controller)
+        },
+        record.item.content.nativeType === 'video'
+          ? (eventName, seconds) => this.#emitMediaEvent(record.item.layerItemId, eventName, seconds)
+          : null,
+      )
       record.host = native
       native.mount({ container: record.content, services: this.#context!.services })
       return
