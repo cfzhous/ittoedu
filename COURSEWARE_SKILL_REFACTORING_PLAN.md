@@ -266,19 +266,26 @@ Git 与工作区：
 | V03 | f00c01b1e870dea4db46a3434cbd99daa89deb82 | Workspace 窄注入边界 |
 | V04 | 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6 | 精确 query 下 V9 单 backend |
 | M1 | ecad7a17a36faab6c42916b0b291ef61ddff69c8 | 原 App 中 V9 text 的 Player、拖动、Undo/Redo、保存、完全重开与继续拖动闭环 |
+| M2-A | 77a7a799a85ba1fd1e3ffc33b1045044e1db6b5d | V9 工程标题、dirty、Undo/Redo、关闭、sidecar 与恢复副本统一读写 |
+| M2-B | 7b8331aa9044b7b39ad2a9e165f8cab8da8aba39 | V9 document/history/archive 所有权收口到原 editorStore |
+| M2-C | 383ae25bc0b9ff37fb5a7a355fdfc5f2ef5cb2ce | 原壳高度、状态栏、缩放控件与编辑态额外控制器回归产品合同 |
+| M2-D | e04d017a6e244329212cae0ec53467d31bcca23f | 原 ScenePanel、SceneStateStrip 与底部状态栏接入 V9 场景/状态事实 |
+| M2-E | b010947d62fdc0fabb6fb08c56d95edc771fe6ed | 原 Elements、Nodes 与 Workspace 接入 V9 场景 Native 增删改、多选与变换 |
+| M2-F | 3e7e12120acb84135a0173dceb3d17bc91ec25d4 | 原 Properties 接入 V9 通用属性、整段文字样式、公式/图形与命名状态覆盖 |
 
 产品 accepted cursor 是 M1。反重写 diff 基线仍固定为 BASE_COMMIT。
 
 ### 4.2 当前 M2 恢复点
 
-M1 已完成并通过：
+M2 当前恢复 cursor 为 `3e7e12120acb84135a0173dceb3d17bc91ec25d4`，已成立：
 
-- 隔离 Player 文字随 move、Undo、Redo 同步，Phaser proxy 与 Player 视觉不分叉。
-- 第一进程真实拖动、Undo/Redo、schemaVersion 9 保存；完全关闭后重开并继续拖动，revision=3 且稳定 ID 不变。
-- typecheck、Renderer build、147 个测试文件/923 个测试、8 个 Agent Kit 测试、反重写门禁与 diff 检查通过。
-- M1 产品提交为 `ecad7a17a36faab6c42916b0b291ef61ddff69c8`。
+- V9 document/history/archive 由原 editorStore 单一持有；顶栏、标题、dirty、关闭、保存、sidecar 与恢复副本不再读写隐藏 V8 工程。
+- 原 ScenePanel、SceneStateStrip、底部状态栏、Elements、Nodes、Properties 与 Workspace 的已接能力共用同一 V9 session；未接能力按面板/操作局部灰化，不回落写 V8。
+- 场景/命名状态 CRUD、Native text/formula/shape 插入、图层操作、多选变换、通用属性与状态稀疏覆盖均为一操作一 history/revision。
+- 真实 Electron 已覆盖拖动/Undo/Redo/恢复副本/保存/完全重开，以及场景/状态/元素/属性/再保存/再重开/继续编辑两条纵切。
+- 当前门禁为 typecheck、164 个 Vitest 文件/1001 项测试、8 项 Agent Kit、两条 Electron E2E、反重写静态门禁与 1280×720 / 1366×768 / 1920×1080 三视口视觉比对全部通过。
 
-当前唯一未覆盖风险：精确 V9 backend 的顶栏生命周期控件、关闭 dirty、archive sidecar 和跨启动恢复已闭合，未接 V9 的工程检查/预览/导出已明确禁用；正式启动与左栏、状态条、右栏等其余原 UI 仍以 V8 Store 为真相源，M2 必须继续切到同一个 V9 document/history/archive，禁止双写或从兼容 View 反建工程。
+M2 尚未完成：默认产品入口尚未原子切换为 V9；显式旧版导入与普通 Open/Recent 的最终边界尚未收口；全局/表面统一层、教师控制器作者对象、当前位置试运行与媒体/Runtime/Component/互动的原 UI 路径仍是诚实门禁。下一步必须继续在原 Workspace/Store/面板内接同一 V9 真相，不得新建 Workspace 或用兼容 View 反建工程。
 
 ---
 
