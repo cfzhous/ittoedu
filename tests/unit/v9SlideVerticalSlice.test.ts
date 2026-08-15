@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { InteractionRule } from '@/shared/interactionTypes'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { LayerItem } from '@/shared/courseProjectTypes'
+import { createShapeNode } from '@/renderer/project/createProject'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import {
   addNativeVisualLayer,
@@ -16,6 +18,7 @@ import {
   addV9SlideComponentLayer,
   addV9SlideComponentPackages,
   addV9SlideInteractionRule,
+  addV9SlidePresentationState,
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
   completeV9SlideVerticalSliceSave,
@@ -35,6 +38,7 @@ import {
   undoV9SlideVerticalSlice,
   updateV9SlideInteractionRule,
   updateV9SlideMotionTargets,
+  updateV9SlideNativeNode,
   updateV9SlideRuntime,
   V9_EDITOR_BACKEND,
   V9_SLIDE_TEST_BACKEND,
@@ -355,6 +359,170 @@ describe('test-only V9 Slide vertical slice', () => {
       .toMatchObject({ x: 443, y: 318 })
     expect(snapshot.document.nodes.find(({ id }) => id === 'v9-test-shape'))
       .toMatchObject({ x: 80, y: 90, locked: true })
+  })
+
+  it('keeps one nudge history entry per key press while zero movement stays a no-op', () => {
+    const initial = createV9SlideVerticalSliceState()
+    expect(nudgeV9SlideSelection(initial, 3, 0, MOVE_NOW)).toBe(initial)
+
+    const selected = selectFixtureText(initial)
+    expect(nudgeV9SlideSelection(selected, 0, 0, MOVE_NOW)).toBe(selected)
+
+    const first = nudgeV9SlideSelection(selected, 3, 0, MOVE_NOW)
+    expect(first.history.present.revision).toBe(selected.history.present.revision + 1)
+    expect(first.history.past).toEqual([selected.history.present])
+    expect(first.history.future).toEqual([])
+
+    const second = nudgeV9SlideSelection(first, 0, 2, MOVE_NOW)
+    expect(second.history.present.revision).toBe(first.history.present.revision + 1)
+    expect(second.history.past.length).toBe(first.history.past.length + 1)
+    expect(buildV9SlideWorkspaceSnapshot(second).document.nodes[0])
+      .toMatchObject({ x: 443, y: 322 })
+
+    const undone = undoV9SlideVerticalSlice(second)
+    expect(buildV9SlideWorkspaceSnapshot(undone).document.nodes[0])
+      .toMatchObject({ x: 443, y: 320 })
+    const redone = redoV9SlideVerticalSlice(undone)
+    expect(buildV9SlideWorkspaceSnapshot(redone).document.nodes[0])
+      .toMatchObject({ x: 443, y: 322 })
+  })
+
+  it('edits global native properties into one history entry and syncs both proxies', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const globalItem = sceneNodeToCourseLayerItem(createShapeNode('ellipse', {
+      id: 'global-ellipse',
+      name: '全局图形',
+      x: 60,
+      y: 70,
+    }), 5)
+    const project = updateCourseProject(initial.history.present, (draft) => {
+      draft.globalLayerItems.push({
+        item: globalItem,
+        visibility: { mode: 'all', locationIds: [] },
+      })
+    }, MOVE_NOW)
+    const state = openV9SlideVerticalSliceState({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    const global = setV9SlideEditingScope(state, 'global')
+    const selected = selectV9SlideVerticalSlice(global, {
+      nodeIds: ['global-ellipse'],
+      additive: false,
+    })
+    const updated = updateV9SlideNativeNode(selected, 'global-ellipse', {
+      x: 260,
+      y: 180,
+      rotation: 22,
+      opacity: 0.4,
+      style: { fillColor: '#7c3aed' },
+    }, MOVE_NOW)
+
+    expect(updated.history.present.revision).toBe(state.history.present.revision + 1)
+    expect(updated.history.past).toEqual([state.history.present])
+    expect(updated.selection.selectionIds).toEqual(['global-ellipse'])
+    const snapshot = buildV9SlideWorkspaceSnapshot(updated)
+    expect(snapshot.document.nodes.find((node) => node.id === 'global-ellipse'))
+      .toMatchObject({
+        id: 'global-ellipse',
+        type: 'shape',
+        x: 260,
+        y: 180,
+        rotation: 22,
+        opacity: 0.4,
+        style: { fillColor: '#7c3aed' },
+      })
+    expect(snapshot.previewDocument.nodes.find((node) => node.id === 'global-ellipse'))
+      .toMatchObject({ x: 260, y: 180, opacity: 0.4 })
+
+    const moved = transformV9SlideVerticalSlice(updated, {
+      nodes: [{
+        nodeId: 'global-ellipse',
+        x: 300,
+        y: 210,
+        width: 120,
+        height: 90,
+        rotation: 22,
+      }],
+    }, MOVE_NOW)
+    expect(moved.history.present.revision).toBe(updated.history.present.revision + 1)
+    expect(buildV9SlideWorkspaceSnapshot(moved).document.nodes
+      .find((node) => node.id === 'global-ellipse'))
+      .toMatchObject({ x: 300, y: 210, width: 120, height: 90 })
+    expect(courseProjectDocumentSchema.safeParse(moved.history.present).success).toBe(true)
+  })
+
+  it('commits a named-state multi-node transform as one history entry with sparse overrides', () => {
+    const named = addV9SlidePresentationState(stateWithShape(), '手势态', MOVE_NOW)
+    const selected = selectV9SlideVerticalSlice(named, {
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID, 'v9-test-shape'],
+      additive: false,
+    })
+    const before = buildV9SlideWorkspaceSnapshot(selected)
+    const textBefore = before.document.nodes.find((node) => node.id === V9_SLIDE_TEST_TEXT_ID)!
+    const shapeBefore = before.document.nodes.find((node) => node.id === 'v9-test-shape')!
+    const transformed = transformV9SlideVerticalSlice(selected, {
+      nodes: [
+        {
+          nodeId: textBefore.id,
+          x: textBefore.x + 8,
+          y: textBefore.y + 6,
+          width: textBefore.width + 24,
+          height: textBefore.height + 16,
+          rotation: textBefore.rotation + 10,
+        },
+        {
+          nodeId: shapeBefore.id,
+          x: shapeBefore.x + 12,
+          y: shapeBefore.y + 4,
+          width: shapeBefore.width + 30,
+          height: shapeBefore.height + 20,
+          rotation: shapeBefore.rotation - 5,
+        },
+      ],
+    }, MOVE_NOW)
+
+    expect(transformed.history.present.revision).toBe(named.history.present.revision + 1)
+    expect(transformed.history.past).toEqual([
+      ...named.history.past,
+      named.history.present,
+    ])
+    expect(transformed.history.future).toEqual([])
+    expect(transformed.selection.selectionIds).toEqual([
+      V9_SLIDE_TEST_TEXT_ID,
+      'v9-test-shape',
+    ])
+    const location = transformed.history.present.locations.find(
+      (candidate) => candidate.id === transformed.selection.locationId,
+    )
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected Slide location')
+    const surface = transformed.history.present.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)!
+    const state = scene.presentation!.states.find(
+      (candidate) => candidate.id === transformed.selection.stateId,
+    )!
+    expect(state.layerItemOverrides[V9_SLIDE_TEST_TEXT_ID]).toMatchObject({
+      frame: { x: textBefore.x + 8, y: textBefore.y + 6, width: textBefore.width + 24, height: textBefore.height + 16 },
+      rotation: textBefore.rotation + 10,
+    })
+    expect(state.layerItemOverrides['v9-test-shape']).toMatchObject({
+      frame: { x: shapeBefore.x + 12, y: shapeBefore.y + 4, width: shapeBefore.width + 30, height: shapeBefore.height + 20 },
+      rotation: shapeBefore.rotation - 5,
+    })
+    expect(scene.layerItems.find((item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID))
+      .toMatchObject({ frame: { x: 440, y: 320 } })
+    expect(scene.layerItems.find((item) => item.layerItemId === 'v9-test-shape'))
+      .toMatchObject({ frame: { x: 80, y: 90 } })
+    const effective = buildV9SlideWorkspaceSnapshot(transformed).document.nodes
+    expect(effective.find((node) => node.id === V9_SLIDE_TEST_TEXT_ID))
+      .toMatchObject({ x: textBefore.x + 8, y: textBefore.y + 6 })
+    expect(effective.find((node) => node.id === 'v9-test-shape'))
+      .toMatchObject({ x: shapeBefore.x + 12, y: shapeBefore.y + 4 })
+    expect(courseProjectDocumentSchema.safeParse(transformed.history.present).success).toBe(true)
   })
 
   it('selects and transforms through V9 history exactly once without writing the V8 Store', () => {

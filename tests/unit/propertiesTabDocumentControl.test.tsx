@@ -337,7 +337,7 @@ describe('PropertiesTab document control', () => {
     expect(storeAccess.getState).not.toHaveBeenCalled()
   })
 
-  it('gates empty, multi-selection and global scope without falling back to V8', () => {
+  it('gates empty and multi-selection without falling back to V8', () => {
     const text = createTextNode({ id: 'selected-text' })
     const shape = createShapeNode('ellipse', { id: 'selected-shape' })
     const { rerender } = render(
@@ -347,12 +347,46 @@ describe('PropertiesTab document control', () => {
 
     rerender(<PropertiesTab documentControl={controlFor([text, shape])} />)
     expect(screen.getByTestId('controlled-properties-multi-gate')).toBeInTheDocument()
+    expect(storeAccess.hook).not.toHaveBeenCalled()
+    expect(storeAccess.getState).not.toHaveBeenCalled()
+  })
 
-    rerender(<PropertiesTab documentControl={{
-      ...controlFor([text]),
+  it('edits a global native through the same controlled fields without scene-state UI', () => {
+    const shape = createShapeNode('rectangle', {
+      id: 'global-shape',
+      name: '全局图形',
+    })
+    const onUpdateNode = vi.fn(() => true)
+    const control = controlFor([shape], onUpdateNode)
+    render(<PropertiesTab documentControl={{
+      ...control,
       editingScope: 'global',
+      target: {
+        ...control.target!,
+        editingScope: 'global',
+      },
+      scopeLabel: '全局层',
+      scopeDescription: '修改会应用到课件内的所有幻灯片。',
+      overrideActive: false,
     }} />)
-    expect(screen.getByTestId('controlled-properties-global-gate')).toBeInTheDocument()
+
+    expect(screen.getByText('全局层')).toBeInTheDocument()
+    expect(screen.getByText('修改会应用到课件内的所有幻灯片。')).toBeInTheDocument()
+    expect(screen.queryByText('此元素当前沿用基础设置。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复基础值' })).not.toBeInTheDocument()
+    const name = screen.getByLabelText('名称')
+    fireEvent.change(name, { target: { value: '所有幻灯片全局图形' } })
+    fireEvent.blur(name)
+    expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
+      editingScope: 'global',
+      layerItemId: shape.id,
+    }), { name: '所有幻灯片全局图形' })
+    fireEvent.change(screen.getByLabelText('旋转角度'), { target: { value: '30' } })
+    fireEvent.blur(screen.getByLabelText('旋转角度'))
+    expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
+      editingScope: 'global',
+      layerItemId: shape.id,
+    }), { rotation: 30 })
     expect(storeAccess.hook).not.toHaveBeenCalled()
     expect(storeAccess.getState).not.toHaveBeenCalled()
   })

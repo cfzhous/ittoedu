@@ -2116,17 +2116,6 @@ function ControlledPropertiesTab({
     onClearOverride,
   } = documentControl
   const [rejectedUpdateKey, setRejectedUpdateKey] = useState(0)
-  if (editingScope === 'global') {
-    return (
-      <div className="properties-scroll" data-testid="properties-tab">
-        <ControlledPropertiesGate
-          title="全局属性"
-          reason="全局元素属性正在完善，当前内容不会改变。"
-          testId="controlled-properties-global-gate"
-        />
-      </div>
-    )
-  }
   if (selectedNodes.length === 0) {
     if (editingScope === 'scene' && documentControl.background) {
       return <ControlledSceneBackgroundEditor background={documentControl.background} />

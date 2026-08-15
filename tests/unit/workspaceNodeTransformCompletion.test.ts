@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createScene, createTextNode } from '@/renderer/project/createProject'
+import { createScene, createImageNode, createShapeNode, createTextNode } from '@/renderer/project/createProject'
 import { completeWorkspaceTransformEvent } from '@/renderer/ui/workspaceSlideAuthoring'
 import { renderTextNodeCanvas } from '@/shared/textLayout'
 
@@ -89,5 +89,66 @@ describe('Workspace transform completion', () => {
       height: expected.height,
     })
     expect(completed?.height).not.toBe(node.height)
+  })
+
+  it('completes one multi-node resize gesture and one rotate gesture with stable dimensions', () => {
+    const shape = createShapeNode('rectangle', {
+      id: 'gesture-shape',
+      x: 40,
+      y: 50,
+      width: 200,
+      height: 120,
+    })
+    const image = createImageNode({
+      id: 'gesture-image',
+      assetId: 'asset-photo',
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+    })
+    const document = { ...createScene({ id: 'scene-a' }), nodes: [shape, image] }
+
+    const resized = completeWorkspaceTransformEvent(document, [
+      { nodeId: shape.id, x: 44, y: 54, width: 220, height: 130 },
+      { nodeId: image.id, x: 20, y: 30, width: 320, height: 210 },
+    ])
+    expect(resized).not.toBeNull()
+    expect(resized!.nodes).toEqual([
+      expect.objectContaining({
+        nodeId: shape.id,
+        x: 44,
+        y: 54,
+        width: 220,
+        height: 130,
+        rotation: 0,
+      }),
+      expect.objectContaining({
+        nodeId: image.id,
+        x: 20,
+        y: 30,
+        width: 320,
+        height: 210,
+        rotation: 0,
+      }),
+    ])
+
+    const rotated = completeWorkspaceTransformEvent(document, [
+      { nodeId: image.id, rotation: 45 },
+    ])
+    expect(rotated?.nodes[0]).toMatchObject({
+      nodeId: image.id,
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+      rotation: 45,
+    })
+
+    // A gesture patch referencing a vanished node rejects the whole completion.
+    expect(completeWorkspaceTransformEvent(document, [
+      { nodeId: shape.id, x: 1 },
+      { nodeId: 'vanished-node', x: 2 },
+    ])).toBeNull()
   })
 })
