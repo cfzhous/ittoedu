@@ -7,6 +7,7 @@ import {
   workspaceCanvasLabel,
   workspaceTransformAllowed,
   workspaceSelectionAllowed,
+  workspaceTextEditTargetNode,
   workspaceSlidePreviewAssetFiles,
   workspaceSlideCarrierScope,
   workspaceSlidePreviewGenerationIdentity,
@@ -18,6 +19,7 @@ import {
 import {
   createProject,
   createScene,
+  createShapeNode,
   createTeacherControllerNode,
   createTextNode,
 } from '@/renderer/project/createProject'
@@ -64,6 +66,7 @@ function input(
     unsupportedActionReason: 'V9 Player 尚未接入',
     onSelectionChange,
     onTransformEnd,
+    onTextEditCommit: vi.fn(() => true),
   })
   return { value, onSelectionChange, onTransformEnd }
 }
@@ -172,7 +175,6 @@ describe('Workspace Slide authoring input boundary', () => {
       v8.history.push(action)
     }
     const unsupported = [
-      'text-edit',
       'formula-edit',
       'drop',
       'runtime-edit',
@@ -186,6 +188,15 @@ describe('Workspace Slide authoring input boundary', () => {
         legacyMutation(action)
       }
     }
+    // Canvas text editing is the one V9-served legacy entry: the gate opens
+    // and the transaction goes through the seam, never the V8 project.
+    expect(workspaceAuthoringActionAllowed(injected.value, 'text-edit')).toBe(true)
+    injected.value.onTextEditCommit({
+      nodeId: 'v9-text',
+      text: 'V9 富文本',
+      runs: [{ start: 0, end: 2, style: { bold: true } }],
+    })
+    expect(v8).toEqual(before)
     expect(workspaceSelectionAllowed(injected.value, {
       nodeIds: ['v9-text', 'another'],
       additive: true,
@@ -271,6 +282,70 @@ describe('Workspace Slide authoring input boundary', () => {
     })).toBe(true)
     fallback.value.onTransformEnd({ nodes: [transform('a', 1, 2)] })
     expect(fallback.onTransformEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens a V9 text session only for a visible unlocked text target', () => {
+    const injected = input('injected', [
+      createTextNode({
+        id: 'v9-text',
+        text: 'V9',
+        x: 20,
+        y: 30,
+      }),
+      createTextNode({
+        id: 'v9-hidden',
+        text: 'hidden',
+        x: 220,
+        y: 30,
+        visible: false,
+      }),
+      createTextNode({
+        id: 'v9-locked',
+        text: 'locked',
+        x: 420,
+        y: 30,
+        locked: true,
+      }),
+    ])
+    const document = injected.value.document
+    const nonText: WorkspaceSlideAuthoringInput = {
+      ...injected.value,
+      document: {
+        ...document,
+        nodes: [
+          ...document.nodes.slice(0, 1),
+          createShapeNode('rectangle', {
+            id: 'shape-a',
+            x: 0,
+            y: 0,
+          }),
+        ],
+      },
+    }
+
+    expect(workspaceTextEditTargetNode(injected.value, 'v9-text')?.id).toBe('v9-text')
+    expect(workspaceTextEditTargetNode(injected.value, 'v9-text')?.type).toBe('text')
+    expect(workspaceTextEditTargetNode(injected.value, 'v9-hidden')).toBeNull()
+    expect(workspaceTextEditTargetNode(injected.value, 'v9-locked')).toBeNull()
+    expect(workspaceTextEditTargetNode(injected.value, 'missing')).toBeNull()
+    expect(workspaceTextEditTargetNode(nonText, 'shape-a')).toBeNull()
+  })
+
+  it('forwards one completed text transaction through the seam callback', () => {
+    const injected = input('injected', [createTextNode({
+      id: 'v9-text',
+      text: '旧文字',
+      x: 20,
+      y: 30,
+    })])
+    const event = {
+      nodeId: 'v9-text',
+      text: '新文字',
+      runs: [{ start: 0, end: 2, style: { bold: true } }],
+    }
+    expect(injected.value.onTextEditCommit(event)).toBe(true)
+    expect(injected.value.onTextEditCommit).toHaveBeenCalledTimes(1)
+    expect(injected.value.onTextEditCommit).toHaveBeenCalledWith(event)
   })
 
   it('keeps preview generation stable for frame/name changes and invalidates real boundaries', () => {

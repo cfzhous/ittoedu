@@ -202,6 +202,73 @@ describe('V9 ownership in the original editor Store', () => {
     expectLegacyTruthUnchanged(legacyBefore)
   })
 
+  it('commits one canvas text transaction into exactly one V9 history entry', () => {
+    const legacyBefore = captureLegacyTruth()
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    const initial = useEditorStore.getState().courseSession!
+
+    const runs = [
+      { start: 0, end: 2, style: { bold: true } },
+      { start: 5, end: 7, style: { color: '#dc2626' } },
+    ]
+    const accepted = store.commitCourseTextEdit(
+      layerTarget(initial, V9_SLIDE_TEST_TEXT_ID),
+      'V9 富文本内容',
+      runs,
+    )
+    const updated = useEditorStore.getState().courseSession!
+
+    expect(accepted).toBe(true)
+    expect(updated.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(updated.history.past).toEqual([initial.history.present])
+    expect(updated.history.future).toEqual([])
+    expect(JSON.stringify(updated.history.present)).toContain('V9 富文本内容')
+    expect(useEditorStore.getState().statusMessage).toBe('文字已更新')
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
+  it('rejects a stale or unchanged canvas text commit without writing history', () => {
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    const initial = useEditorStore.getState().courseSession!
+
+    expect(store.commitCourseTextEdit(
+      {
+        ...layerTarget(initial, V9_SLIDE_TEST_TEXT_ID),
+        sessionId: 'stale-session',
+      },
+      '被拒绝的文字',
+      [],
+    )).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(initial)
+
+    const accepted = store.commitCourseTextEdit(
+      layerTarget(initial, V9_SLIDE_TEST_TEXT_ID),
+      'V9 可移动文字',
+      [],
+    )
+    expect(accepted).toBe(true)
+    expect(useEditorStore.getState().courseSession).toBe(initial)
+    expect(useEditorStore.getState().courseSession!.history).toBe(initial.history)
+  })
+
+  it('fails cleanly when the text target left the current scope', () => {
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    const initial = useEditorStore.getState().courseSession!
+    store.deleteCourseLayer(layerTarget(initial, V9_SLIDE_TEST_TEXT_ID))
+    const afterDelete = useEditorStore.getState().courseSession!
+
+    expect(store.commitCourseTextEdit(
+      layerTarget(afterDelete, V9_SLIDE_TEST_TEXT_ID),
+      '目标已删除',
+      [],
+    )).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(afterDelete)
+    expect(useEditorStore.getState().courseSession!.history).toBe(afterDelete.history)
+  })
+
   it('reports a named-location surface delete as a base deletion, not a state hide', () => {
     const legacyBefore = captureLegacyTruth()
     useEditorStore.getState().activateV9SlideFixture()

@@ -296,6 +296,12 @@ export interface EditorState {
     target: V9SlideNativeNodeTarget,
     patch: V9SlideNativeNodePatch,
   ): boolean
+  /** One atomic text transaction; the whole canvas edit session commits once. */
+  commitCourseTextEdit(
+    target: V9SlideNativeNodeTarget,
+    text: string,
+    runs: TextRun[],
+  ): boolean
   clearCourseNativeNodeOverride(target: V9SlideNativeNodeTarget): boolean
   deleteCourseLayer(target: V9SlideLayerTarget): boolean
   duplicateCourseLayer(target: V9SlideLayerTarget): boolean
@@ -1890,6 +1896,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return courseSession === state.courseSession
           ? state
           : { ...state, courseSession, statusMessage: '属性已更新' }
+      })
+      return accepted
+    },
+
+    commitCourseTextEdit(target, text, runs) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        try {
+          const courseSession = updateV9SlideNativeNode(
+            state.courseSession,
+            target.layerItemId,
+            { text, runs },
+          )
+          accepted = true
+          return courseSession === state.courseSession
+            ? state
+            : { ...state, courseSession, statusMessage: '文字已更新' }
+        } catch {
+          // The target left the current scope (deleted or scope/state switch).
+          // Report the stale session instead of crashing the transaction.
+          accepted = false
+          return state
+        }
       })
       return accepted
     },

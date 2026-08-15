@@ -1,5 +1,5 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
-import type { ProjectDocument, SceneDocument, SceneNode } from '../../shared/projectTypes'
+import type { ProjectDocument, SceneDocument, SceneNode, TextRun } from '../../shared/projectTypes'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import type {
   NodeTransformEndEvent,
@@ -10,6 +10,16 @@ import type {
 export const WORKSPACE_SLIDE_PREVIEW_STATE_ID = 'state_workspace_preview'
 
 export type WorkspaceSlideEditingScope = 'scene' | 'surface' | 'global'
+
+/**
+ * One completed canvas text transaction. The owning backend creates exactly
+ * one revision and one history entry for the whole session, never per key.
+ */
+export interface WorkspaceTextEditCommitEvent {
+  readonly nodeId: string
+  readonly text: string
+  readonly runs: readonly TextRun[]
+}
 
 export interface WorkspaceSlidePreviewResources {
   readonly assets: ProjectDocument['assets']
@@ -43,6 +53,12 @@ export interface WorkspaceSlideAuthoringInput {
   /** `false` rejects a gesture that raced with a lifecycle boundary. */
   readonly onSelectionChange: (event: Readonly<NodeSelectionEvent>) => boolean
   readonly onTransformEnd: (event: Readonly<NodesTransformEndEvent>) => boolean
+  /**
+   * Commits one completed canvas text transaction (including the whole IME
+   * composition and any paste/toolbar formatting of the session). Returning
+   * `false` means the target context became stale and nothing was written.
+   */
+  readonly onTextEditCommit: (event: Readonly<WorkspaceTextEditCommitEvent>) => boolean
 }
 
 function withDirectionAwareTextAutoSize(
@@ -121,13 +137,28 @@ export type UnsupportedWorkspaceAuthoringAction =
 /**
  * Capability gate for events that still belong exclusively to the legacy V8
  * backend. Keeping the decision here makes every caller choose one backend
- * before it can invoke a mutating command.
+ * before it can invoke a mutating command. Canvas text editing is the one
+ * legacy entry the V9 backend now serves through `onTextEditCommit`.
  */
 export function workspaceAuthoringActionAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
-  _action: UnsupportedWorkspaceAuthoringAction,
+  action: UnsupportedWorkspaceAuthoringAction,
 ): boolean {
-  return !injected
+  if (!injected) return true
+  return action === 'text-edit' && injected.onTextEditCommit !== undefined
+}
+
+/**
+ * Resolves the authoring-scope text node a canvas text session is editing.
+ * `null` means the target is stale or not an editable text node, so the
+ * session must not open.
+ */
+export function workspaceTextEditTargetNode(
+  injected: WorkspaceSlideAuthoringInput,
+  nodeId: string,
+): SceneNode | null {
+  const node = injected.document.nodes.find((candidate) => candidate.id === nodeId)
+  return node?.type === 'text' && node.visible && !node.locked ? node : null
 }
 
 /** V9 accepts the complete visible Native selection, including locked items. */
