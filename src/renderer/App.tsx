@@ -686,6 +686,39 @@ export default function App() {
       layer.item.content.nativeType !== 'teacher-controller'
     )).length
     const editingScene = v9SlideVerticalSlice.editingScope === 'scene'
+    const selectedIds = new Set(v9SlideVerticalSlice.selection.selectionIds)
+    const selectedNodes = v9WorkspaceSnapshot.document.nodes.filter(
+      (node) => selectedIds.has(node.id),
+    )
+    const selectedNode = selectedNodes.length === 1 ? selectedNodes[0]! : null
+    const activeState = v9SlideVerticalSlice.selection.stateId === null
+      ? null
+      : v9ActiveSlideContext?.scene.presentation?.states.find(
+          (state) => state.id === v9SlideVerticalSlice.selection.stateId,
+        ) ?? null
+    const propertyTarget = editingScene && selectedNode
+      ? {
+          sessionId: v9SlideVerticalSlice.sessionId,
+          locationId: v9SlideVerticalSlice.selection.locationId,
+          stateId: v9SlideVerticalSlice.selection.stateId,
+          layerItemId: selectedNode.id,
+        }
+      : null
+    const updateProperty = (
+      command: () => boolean,
+      fallback: string,
+    ): boolean => {
+      if (lifecycleOperationInFlightRef.current) return false
+      try {
+        const accepted = command()
+        if (!accepted) useEditorStore.getState().setStatus('所选元素已变化，请重新选择')
+        return accepted
+      } catch (error) {
+        console.error(error)
+        useEditorStore.getState().setError(fallback)
+        return false
+      }
+    }
     return {
       ...(editingScene
         ? {
@@ -750,6 +783,36 @@ export default function App() {
             },
           }
         : {}),
+      properties: {
+        editingScope: v9SlideVerticalSlice.editingScope,
+        editorMode,
+        selectedNodes,
+        target: propertyTarget,
+        scopeLabel: activeState ? `状态：${activeState.name}` : '基础场景',
+        scopeDescription: activeState
+          ? `属性修改只影响“${activeState.name}”状态。`
+          : '修改基础元素会影响继承它的命名状态。',
+        overrideActive: Boolean(
+          activeState &&
+          propertyTarget &&
+          activeState.layerItemOverrides[propertyTarget.layerItemId],
+        ),
+        textContentUnavailableReason:
+          '文字内容暂不能在此编辑；当前可调整整段样式。',
+        richTextUnavailableReason: '局部文字格式暂不能在此编辑。',
+        mediaUnavailableReason:
+          '图片和视频的专属设置暂不可用；上方通用属性仍可修改。',
+        controllerUnavailableReason:
+          '教师控制器的专属设置暂不可用；上方通用属性仍可修改。',
+        onUpdateNode: (target, patch) => updateProperty(
+          () => useEditorStore.getState().updateCourseNativeNode(target, patch),
+          '无法更新元素属性',
+        ),
+        onClearOverride: (target) => updateProperty(
+          () => useEditorStore.getState().clearCourseNativeNodeOverride(target),
+          '无法恢复基础属性',
+        ),
+      },
       unavailableReasons: {
         elements: editingScene
           ? undefined
@@ -758,7 +821,7 @@ export default function App() {
         layers: !editingScene
           ? '当前版本暂不能在此管理全局层；现有全局内容不会改变。'
           : undefined,
-        properties: '当前版本暂不能在此编辑属性；现有内容不会改变。',
+        properties: undefined,
         automation: '当前版本暂不能在此编辑互动与动画；现有内容不会改变。',
         developer: '当前版本暂不能在此编辑动态内容；现有内容不会改变。',
       },

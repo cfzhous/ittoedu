@@ -576,6 +576,31 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expect(editor.page.getByText('已选 1', { exact: true })).toBeVisible()
     await editor.page.keyboard.press('ArrowRight')
 
+    await editor.page.getByRole('tab', { name: '属性' }).click()
+    await expect(editor.page.getByTestId('properties-tab')).toBeVisible()
+    const shapeWidth = editor.page.getByLabel('宽', { exact: true })
+    await shapeWidth.fill('360')
+    await shapeWidth.press('Enter')
+    const shapeFill = editor.page.getByLabel('填充色', { exact: true })
+    const originalFill = await shapeFill.inputValue()
+    await editor.page.getByLabel('填充色选择器').evaluate((input: HTMLInputElement) => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set
+      setValue?.call(input, '#123456')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await editor.page.getByRole('button', { name: '应用填充色' }).click()
+    await expect(shapeFill).toHaveValue('#123456')
+    await editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
+    await expect(shapeFill).toHaveValue(originalFill)
+    await editor.page.getByRole('button', {
+      name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
+    }).click()
+    await expect(shapeFill).toHaveValue('#123456')
+
     await editor.page.getByRole('tab', { name: '元素' }).click()
     await editor.page.getByTestId('add-formula').click()
     await expect(editor.page.getByTestId('nodes-tab')).toBeVisible()
@@ -607,6 +632,37 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expect(editor.page.getByRole('button', {
       name: '从当前状态隐藏“实验框”',
     })).toBeEnabled()
+    await editor.page.getByText('实验框', { exact: true }).click()
+    await editor.page.getByRole('tab', { name: '属性' }).click()
+    await expect(editor.page.getByText('此元素当前沿用基础设置。'))
+      .toBeVisible()
+    const stateFill = editor.page.getByLabel('填充色', { exact: true })
+    await editor.page.getByLabel('填充色选择器').evaluate((input: HTMLInputElement) => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set
+      setValue?.call(input, '#dc2626')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await editor.page.getByRole('button', { name: '应用填充色' }).click()
+    await expect(editor.page.getByTestId('properties-tab').getByText(
+      '此元素已有当前状态设置。',
+    )).toBeVisible()
+    await editor.page.getByRole('button', { name: '恢复基础值' }).click()
+    await expect(stateFill).toHaveValue('#123456')
+    await editor.page.getByLabel('填充色选择器').evaluate((input: HTMLInputElement) => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set
+      setValue?.call(input, '#16a34a')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await editor.page.getByRole('button', { name: '应用填充色' }).click()
+    await expect(stateFill).toHaveValue('#16a34a')
 
     await patchProjectDialogs(editor.app, { save: sceneAuthoringProjectPath })
     await editor.page.keyboard.press('Control+s')
@@ -625,10 +681,16 @@ test('authors V9 scenes and presentation states through the original panels', as
       (item) => item.kind === 'native' && item.label === '实验框',
     )
     expect(authoredShape).toMatchObject({
-      frame: { x: 481 },
+      frame: { x: 481, width: 360 },
       visible: true,
       locked: false,
-      content: { nativeType: 'shape', data: { shapeType: 'rectangle' } },
+      content: {
+        nativeType: 'shape',
+        data: {
+          shapeType: 'rectangle',
+          style: { fillColor: '#123456' },
+        },
+      },
     })
     expect(authoredScene.layerItems.some(
       (item) => item.kind === 'native' && item.content.nativeType === 'formula',
@@ -637,6 +699,8 @@ test('authors V9 scenes and presentation states through the original panels', as
     const feedback = authoredScene.presentation?.states.find((state) => state.name === '反馈态')
     expect(feedback).toBeDefined()
     expect(authoredScene.presentation?.thumbnailStateId).toBe(feedback?.id)
+    expect(authoredShape && feedback?.layerItemOverrides[authoredShape.layerItemId])
+      .toMatchObject({ nativeData: { style: { fillColor: '#16a34a' } } })
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)
@@ -663,9 +727,18 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expect(editor.page.getByText('公式', { exact: true })).toBeVisible()
     await expect(editor.page.getByText('反馈态', { exact: true }).first()).toBeVisible()
     await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
+    await editor.page.locator('.scene-state-card').filter({ hasText: '反馈态' }).click()
+    await editor.page.getByRole('tab', { name: '图层' }).click()
+    await editor.page.getByText('实验框', { exact: true }).click()
+    await editor.page.getByRole('tab', { name: '属性' }).click()
+    await expect(editor.page.getByLabel('宽', { exact: true })).toHaveValue('360')
+    await expect(editor.page.getByLabel('填充色', { exact: true })).toHaveValue('#16a34a')
+    const transparency = editor.page.getByLabel('透明度 %', { exact: true })
+    await transparency.fill('20')
+    await transparency.press('Enter')
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(false)
+    ))).toBe(true)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)

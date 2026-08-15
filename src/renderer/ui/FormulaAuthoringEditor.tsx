@@ -94,7 +94,7 @@ function parseDraft(source: string): ParsedDraft {
       return {
         ast: null,
         accessibleText: '',
-        error: `${path}${issue?.message ?? '公式超出 Project V8 限制'}`,
+        error: `${path}${issue?.message ?? '公式超出当前格式限制'}`,
         hasSlots: false,
       }
     }
@@ -419,7 +419,7 @@ export function FormulaAuthoringEditor({
         <summary>线性输入说明</summary>
         <p>
           支持分式、根式、上下标和括号。例如
-          <code>{'\\sqrt[n]{x}'}</code>、<code>x_i^2</code>。本编辑器只接受当前 Project V8 可稳定保存和导出的子集。
+          <code>{'\\sqrt[n]{x}'}</code>、<code>x_i^2</code>。本编辑器只接受当前课件可稳定保存和导出的公式格式。
         </p>
       </details>
     </div>

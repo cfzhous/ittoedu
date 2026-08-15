@@ -5,8 +5,18 @@ import type {
   LayerItemOverride,
   NativeLayerItem,
 } from '../../shared/courseProjectTypes'
-import type { SceneDocument, ShapeType } from '../../shared/projectTypes'
-import { materializeNativeLayerItem } from '../../shared/courseProjectSchema'
+import type {
+  DeepPartial,
+  SceneDocument,
+  SceneNode,
+  ShapeType,
+} from '../../shared/projectTypes'
+import {
+  materializeNativeLayerItem,
+  mergeCourseNativeData,
+} from '../../shared/courseProjectSchema'
+import { sceneNodeSchema } from '../../shared/projectSchema'
+import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import {
   isNodeMotionAction,
   isVideoInteractionAction,
@@ -83,6 +93,15 @@ export interface V9SlideLayerPatch {
   readonly label?: string
   readonly visible?: boolean
   readonly locked?: boolean
+}
+
+export type V9SlideNativeNodePatch = DeepPartial<SceneNode>
+
+export interface V9SlideNativeNodeTarget {
+  readonly sessionId: string
+  readonly locationId: string
+  readonly stateId: string | null
+  readonly layerItemId: string
 }
 
 export interface V9SlideWorkspaceSnapshot {
@@ -668,17 +687,196 @@ export function updateV9SlideLayer(
   patch: V9SlideLayerPatch,
   now?: string,
 ): V9SlideVerticalSliceState {
-  const layer = activeSceneNativeLayer(state, layerItemId)
   const normalizedLabel = patch.label?.trim().slice(0, 200)
-  const nextPatch: V9SlideLayerPatch = {
-    ...(normalizedLabel ? { label: normalizedLabel } : {}),
+  return updateV9SlideNativeNode(state, layerItemId, {
+    ...(normalizedLabel ? { name: normalizedLabel } : {}),
     ...(patch.visible === undefined ? {} : { visible: patch.visible }),
     ...(patch.locked === undefined ? {} : { locked: patch.locked }),
+  }, now)
+}
+
+function courseValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => courseValuesEqual(value, right[index]))
   }
-  const changed = (nextPatch.label !== undefined && nextPatch.label !== layer.item.label) ||
-    (nextPatch.visible !== undefined && nextPatch.visible !== layer.item.visible) ||
-    (nextPatch.locked !== undefined && nextPatch.locked !== layer.item.locked)
-  if (!changed) return state
+  if (
+    left === null || right === null ||
+    typeof left !== 'object' || typeof right !== 'object'
+  ) return false
+  const leftRecord = left as Record<string, unknown>
+  const rightRecord = right as Record<string, unknown>
+  const leftKeys = Object.keys(leftRecord)
+  const rightKeys = Object.keys(rightRecord)
+  return leftKeys.length === rightKeys.length && leftKeys.every((key) => (
+    Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+    courseValuesEqual(leftRecord[key], rightRecord[key])
+  ))
+}
+
+function sparseCourseRecordDiff(
+  base: Record<string, unknown>,
+  next: Record<string, unknown>,
+  depth = 0,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(next)) {
+    const baseValue = base[key]
+    if (courseValuesEqual(baseValue, value)) continue
+    if (
+      !(depth === 0 && key === 'ast') &&
+      value !== null && baseValue !== null &&
+      typeof value === 'object' && typeof baseValue === 'object' &&
+      !Array.isArray(value) && !Array.isArray(baseValue)
+    ) {
+      const nested = sparseCourseRecordDiff(
+        baseValue as Record<string, unknown>,
+        value as Record<string, unknown>,
+        depth + 1,
+      )
+      if (Object.keys(nested).length > 0) result[key] = nested
+      continue
+    }
+    result[key] = structuredClone(value)
+  }
+  return result
+}
+
+function patchedNativeNode(
+  current: SceneNode,
+  patch: V9SlideNativeNodePatch,
+): SceneNode {
+  if (patch.id !== undefined && patch.id !== current.id) {
+    throw new Error('元素标识不能通过属性面板修改')
+  }
+  if (patch.type !== undefined && patch.type !== current.type) {
+    throw new Error('元素类型不能通过属性面板修改')
+  }
+  const commonKeys = new Set([
+    'name',
+    'x',
+    'y',
+    'width',
+    'height',
+    'rotation',
+    'opacity',
+    'visible',
+    'locked',
+    'playbackInitialVisibility',
+  ])
+  const typeKeys = current.type === 'text'
+    ? new Set(['text', 'runs', 'style'])
+    : current.type === 'formula'
+      ? new Set(['ast', 'accessibleText', 'style'])
+      : current.type === 'shape'
+        ? new Set(['shapeType', 'style'])
+        : new Set<string>()
+  const unsupportedKey = Object.keys(patch).find(
+    (key) => key !== 'id' && key !== 'type' && !commonKeys.has(key) && !typeKeys.has(key),
+  )
+  if (unsupportedKey) throw new Error('当前元素暂不支持修改这项属性')
+  if (
+    current.type === 'text' &&
+    Object.prototype.hasOwnProperty.call(patch, 'text') &&
+    !Object.prototype.hasOwnProperty.call(patch, 'runs')
+  ) {
+    throw new Error('修改文字内容时必须同时保留局部格式')
+  }
+  if (
+    current.type === 'formula' &&
+    Object.prototype.hasOwnProperty.call(patch, 'ast') &&
+    !Object.prototype.hasOwnProperty.call(patch, 'accessibleText')
+  ) {
+    throw new Error('修改公式时必须同时更新无障碍描述')
+  }
+  let normalizedPatch = patch as Record<string, unknown>
+  if (typeof patch.name === 'string') {
+    const name = patch.name.trim()
+    if (!name) throw new Error('元素名称不能为空')
+    if (name.length > 200) throw new Error('元素名称最多 200 个字符')
+    normalizedPatch = { ...normalizedPatch, name }
+  }
+  const candidate = mergeCourseNativeData(
+    current as unknown as Record<string, unknown>,
+    normalizedPatch,
+  )
+  const parsed = sceneNodeSchema.safeParse(candidate)
+  if (
+    !parsed.success ||
+    parsed.data.type === 'teacher-controller' ||
+    parsed.data.type === 'external-component' ||
+    !courseValuesEqual(candidate, parsed.data)
+  ) {
+    throw new Error('属性值无效，请检查输入')
+  }
+  return parsed.data
+}
+
+function replaceNativeItemFromNode(
+  item: NativeLayerItem,
+  node: SceneNode,
+): void {
+  const converted = sceneNodeToCourseLayerItem(node, item.order)
+  if (converted.kind !== 'native') throw new Error('当前元素暂不支持属性编辑')
+  const hitPolicy = item.hitPolicy
+  Object.assign(item, converted)
+  item.hitPolicy = hitPolicy
+}
+
+function synchronizeNativeNodeOverride(
+  override: LayerItemOverride,
+  baseItem: NativeLayerItem,
+  nextNode: SceneNode,
+): void {
+  const baseNode = materializeNativeLayerItem(baseItem)
+  const stableFields = [
+    ['label', 'name'],
+    ['visible', 'visible'],
+    ['locked', 'locked'],
+    ['rotation', 'rotation'],
+    ['opacity', 'opacity'],
+    ['playbackInitialVisibility', 'playbackInitialVisibility'],
+  ] as const
+  for (const [overrideKey, nodeKey] of stableFields) {
+    if (courseValuesEqual(baseNode[nodeKey], nextNode[nodeKey])) {
+      delete override[overrideKey]
+    } else {
+      override[overrideKey] = nextNode[nodeKey] as never
+    }
+  }
+
+  const frame = { ...(override.frame ?? {}) }
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    if (courseValuesEqual(baseNode[key], nextNode[key])) delete frame[key]
+    else frame[key] = nextNode[key]
+  }
+  if (Object.keys(frame).length === 0) delete override.frame
+  else override.frame = frame
+
+  const nextItem = sceneNodeToCourseLayerItem(nextNode, baseItem.order)
+  if (nextItem.kind !== 'native') throw new Error('当前元素暂不支持属性编辑')
+  const nativeData = sparseCourseRecordDiff(
+    baseItem.content.data as Record<string, unknown>,
+    nextItem.content.data as Record<string, unknown>,
+  )
+  if (Object.keys(nativeData).length === 0) delete override.nativeData
+  else override.nativeData = nativeData
+}
+
+export function updateV9SlideNativeNode(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+  patch: V9SlideNativeNodePatch,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = activeSceneNativeLayer(state, layerItemId)
+  const currentNode = materializeNativeLayerItem(
+    structuredClone(layer.item) as NativeLayerItem,
+  )
+  const nextNode = patchedNativeNode(currentNode, patch)
+  if (courseValuesEqual(currentNode, nextNode)) return state
   const { surface, scene } = activeSlideSceneContext(state)
   const project = updateCourseProject(state.history.present, (draft) => {
     const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
@@ -695,20 +893,38 @@ export function updateV9SlideLayer(
       throw new Error('当前命名状态已失效')
     }
     if (!presentationState) {
-      if (nextPatch.label !== undefined) base.label = nextPatch.label
-      if (nextPatch.visible !== undefined) base.visible = nextPatch.visible
-      if (nextPatch.locked !== undefined) base.locked = nextPatch.locked
+      replaceNativeItemFromNode(base, nextNode)
       return
     }
     const override = presentationState.layerItemOverrides[layerItemId] ?? {}
-    for (const key of ['label', 'visible', 'locked'] as const) {
-      const value = nextPatch[key]
-      if (value === undefined) continue
-      if (value === base[key]) delete override[key]
-      else override[key] = value as never
-    }
+    synchronizeNativeNodeOverride(override, base, nextNode)
     presentationState.layerItemOverrides[layerItemId] = override
     deleteEmptyOverride(presentationState.layerItemOverrides, layerItemId)
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+export function clearV9SlideNativeNodeOverride(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  activeSceneNativeLayer(state, layerItemId)
+  if (state.selection.stateId === null) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  const currentState = scene.presentation?.states.find(
+    (candidate) => candidate.id === state.selection.stateId,
+  )
+  if (!currentState?.layerItemOverrides[layerItemId]) return state
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    const presentationState = draftScene?.presentation?.states.find(
+      (candidate) => candidate.id === state.selection.stateId,
+    )
+    if (!presentationState) throw new Error('当前命名状态已失效')
+    delete presentationState.layerItemOverrides[layerItemId]
   }, now)
   return commitV9SlideDocument(state, project)
 }

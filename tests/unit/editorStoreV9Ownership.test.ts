@@ -174,6 +174,43 @@ describe('V9 ownership in the original editor Store', () => {
     expectLegacyTruthUnchanged(legacyBefore)
   })
 
+  it('accepts property commits only for the captured single-selection context', () => {
+    const legacyBefore = captureLegacyTruth()
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    store.selectCourseLayers({
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID],
+      additive: false,
+    })
+    const selected = useEditorStore.getState().courseSession!
+    const target = {
+      sessionId: selected.sessionId,
+      locationId: selected.selection.locationId,
+      stateId: selected.selection.stateId,
+      layerItemId: V9_SLIDE_TEST_TEXT_ID,
+    }
+
+    expect(useEditorStore.getState().updateCourseNativeNode(target, {
+      style: { color: '#2563eb' },
+    })).toBe(true)
+    const updated = useEditorStore.getState().courseSession!
+    expect(updated.history.present.revision).toBe(selected.history.present.revision + 1)
+    expect(updated.history.past.length).toBe(selected.history.past.length + 1)
+
+    expect(useEditorStore.getState().updateCourseNativeNode(target, {
+      style: { color: '#2563eb' },
+    })).toBe(true)
+    expect(useEditorStore.getState().courseSession).toBe(updated)
+
+    useEditorStore.getState().selectCourseLayers({ nodeIds: [], additive: false })
+    const cleared = useEditorStore.getState().courseSession!
+    expect(useEditorStore.getState().updateCourseNativeNode(target, {
+      style: { color: '#dc2626' },
+    })).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(cleared)
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
   it('rejects a save completion from an obsolete V9 session', () => {
     const store = useEditorStore.getState()
     store.activateV9SlideFixture()

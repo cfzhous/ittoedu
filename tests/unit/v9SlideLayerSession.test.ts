@@ -13,6 +13,7 @@ import {
   addV9SlideShapeLayer,
   addV9SlideTextLayer,
   activateV9SlidePresentationState,
+  clearV9SlideNativeNodeOverride,
   deleteV9SlideLayer,
   duplicateV9SlideLayer,
   nudgeV9SlideSelection,
@@ -20,6 +21,7 @@ import {
   reorderV9SlideLayers,
   selectV9SlideVerticalSlice,
   updateV9SlideLayer,
+  updateV9SlideNativeNode,
 } from '@/renderer/course/v9SlideVerticalSlice'
 
 const NOW = '2026-08-15T08:00:00.000Z'
@@ -116,6 +118,191 @@ describe('V9 Slide native layer session commands', () => {
     expect(base).toMatchObject({ visible: false, locked: false })
     expect(override).toMatchObject({ visible: true, label: '状态圆形', locked: true })
     expect(courseProjectDocumentSchema.safeParse(updated.history.present).success).toBe(true)
+  })
+
+  it('updates common and type-specific properties in one base revision', () => {
+    const initial = createLayerSession()
+    const text = updateV9SlideNativeNode(initial, 'layer-text-a', {
+      x: 196,
+      opacity: 0.65,
+      style: { color: '#2563eb', fontSize: 52 },
+    }, NOW)
+    const shape = updateV9SlideNativeNode(text, 'layer-shape-b', {
+      shapeType: 'diamond',
+      style: { fillColor: '#f59e0b', borderWidth: 5 },
+    }, NOW)
+    const view = buildSlideEditorView({
+      project: shape.history.present,
+      locationId: shape.selection.locationId,
+      stateId: null,
+    })
+    const textItem = view.layers.find((layer) => layer.selectionId === 'layer-text-a')?.item
+    const shapeItem = view.layers.find((layer) => layer.selectionId === 'layer-shape-b')?.item
+
+    expect(text.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(text.history.past.length).toBe(initial.history.past.length + 1)
+    expect(textItem).toMatchObject({
+      frame: { x: 196 },
+      opacity: 0.65,
+      content: { data: { style: { color: '#2563eb', fontSize: 52 } } },
+    })
+    expect(shapeItem).toMatchObject({
+      content: {
+        data: {
+          shapeType: 'diamond',
+          style: { fillColor: '#f59e0b', borderWidth: 5 },
+        },
+      },
+    })
+    expect(shape.history.present.revision).toBe(initial.history.present.revision + 2)
+    expect(courseProjectDocumentSchema.safeParse(shape.history.present).success).toBe(true)
+  })
+
+  it('stores named-state property edits as deeply sparse valid overrides', () => {
+    const initial = createLayerSession()
+    const named = addV9SlidePresentationState(initial, '属性态', NOW)
+    const updated = updateV9SlideNativeNode(named, 'layer-text-a', {
+      x: 388,
+      style: { color: '#dc2626', bold: true },
+    }, NOW)
+    const scene = sceneFor(updated)
+    const override = scene.presentation?.states.find(
+      (state) => state.id === updated.selection.stateId,
+    )?.layerItemOverrides['layer-text-a']
+    const view = buildSlideEditorView({
+      project: updated.history.present,
+      locationId: updated.selection.locationId,
+      stateId: updated.selection.stateId,
+    })
+    const effective = view.layers.find(
+      (layer) => layer.selectionId === 'layer-text-a',
+    )?.item
+
+    expect(override).toEqual({
+      frame: { x: 388 },
+      nativeData: { style: { color: '#dc2626', bold: true } },
+    })
+    expect(effective).toMatchObject({
+      frame: { x: 388 },
+      content: {
+        data: {
+          style: {
+            color: '#dc2626',
+            bold: true,
+            fontFamily: expect.any(String),
+          },
+        },
+      },
+    })
+    expect(updated.history.present.revision).toBe(named.history.present.revision + 1)
+    expect(updated.history.past.length).toBe(named.history.past.length + 1)
+    expect(courseProjectDocumentSchema.safeParse(updated.history.present).success).toBe(true)
+
+    const restored = clearV9SlideNativeNodeOverride(updated, 'layer-text-a', NOW)
+    const restoredState = sceneFor(restored).presentation?.states.find(
+      (state) => state.id === restored.selection.stateId,
+    )
+    const restoredView = buildSlideEditorView({
+      project: restored.history.present,
+      locationId: restored.selection.locationId,
+      stateId: restored.selection.stateId,
+    })
+    expect(restoredState?.layerItemOverrides['layer-text-a']).toBeUndefined()
+    expect(restoredView.layers.find(
+      (layer) => layer.selectionId === 'layer-text-a',
+    )?.item).toMatchObject({
+      content: { data: { style: { color: '#1f2937', bold: false } } },
+    })
+    expect(restored.history.present.revision).toBe(updated.history.present.revision + 1)
+    expect(restored.history.past.length).toBe(updated.history.past.length + 1)
+  })
+
+  it('replaces formula ASTs atomically in base and named states', () => {
+    const initial = addV9SlideFormulaLayer(createLayerSession(), 260, 180, NOW)
+    const formulaId = initial.selection.selectionIds[0]!
+    const rootAst = {
+      type: 'root' as const,
+      radicand: {
+        type: 'token' as const,
+        value: 'x',
+      },
+      index: {
+        type: 'token' as const,
+        value: '3',
+      },
+    }
+    const base = updateV9SlideNativeNode(initial, formulaId, {
+      ast: rootAst,
+      accessibleText: 'x 的三次方根',
+    }, NOW)
+    const baseItem = sceneFor(base).layerItems.find(
+      (item) => item.layerItemId === formulaId,
+    )
+
+    expect(baseItem).toMatchObject({
+      content: { data: { ast: rootAst, accessibleText: 'x 的三次方根' } },
+    })
+    if (
+      !baseItem || baseItem.kind !== 'native' ||
+      baseItem.content.nativeType !== 'formula'
+    ) throw new Error('expected formula layer')
+    expect(baseItem.content.data.ast).not.toHaveProperty('children')
+
+    const named = addV9SlidePresentationState(base, '公式态', NOW)
+    const tokenAst = { type: 'token' as const, value: 'y' }
+    const updated = updateV9SlideNativeNode(named, formulaId, {
+      ast: tokenAst,
+      accessibleText: 'y',
+    }, NOW)
+    const override = sceneFor(updated).presentation?.states.find(
+      (state) => state.id === updated.selection.stateId,
+    )?.layerItemOverrides[formulaId]
+    const view = buildSlideEditorView({
+      project: updated.history.present,
+      locationId: updated.selection.locationId,
+      stateId: updated.selection.stateId,
+    })
+    const effective = view.layers.find((layer) => layer.selectionId === formulaId)?.item
+
+    expect(override?.nativeData).toMatchObject({
+      ast: tokenAst,
+      accessibleText: 'y',
+    })
+    expect(override?.nativeData?.ast).not.toHaveProperty('radicand')
+    expect(effective).toMatchObject({
+      content: { data: { ast: tokenAst, accessibleText: 'y' } },
+    })
+    expect(courseProjectDocumentSchema.safeParse(updated.history.present).success).toBe(true)
+  })
+
+  it('rejects stable identifiers, incomplete semantic patches and unknown fields', () => {
+    const initial = addV9SlideFormulaLayer(createLayerSession(), 260, 180, NOW)
+    const formulaId = initial.selection.selectionIds[0]!
+    const historyBefore = initial.history
+
+    expect(() => updateV9SlideNativeNode(initial, formulaId, {
+      formulaId: 'replacement-id',
+    }, NOW)).toThrow('暂不支持修改这项属性')
+    expect(() => updateV9SlideNativeNode(initial, formulaId, {
+      ast: { type: 'token', value: 'z' },
+    }, NOW)).toThrow('必须同时更新无障碍描述')
+    expect(() => updateV9SlideNativeNode(initial, formulaId, {
+      name: 'x'.repeat(201),
+    }, NOW)).toThrow('最多 200 个字符')
+    expect(() => updateV9SlideNativeNode(initial, formulaId, {
+      style: { color: '#2563eb', unknownStyle: true },
+    } as never, NOW)).toThrow('属性值无效')
+    expect(() => updateV9SlideNativeNode(initial, 'layer-text-a', {
+      text: '只改文字但没有局部格式',
+    }, NOW)).toThrow('必须同时保留局部格式')
+    expect(initial.history).toBe(historyBefore)
+
+    const runsOnly = updateV9SlideNativeNode(initial, 'layer-text-a', {
+      runs: [{ start: 0, end: 1, style: { bold: true } }],
+    }, NOW)
+    expect(runsOnly.history.present.revision).toBe(
+      initial.history.present.revision + 1,
+    )
   })
 
   it('duplicates and reorders base layers atomically', () => {

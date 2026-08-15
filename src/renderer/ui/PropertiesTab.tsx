@@ -40,7 +40,14 @@ import {
   Workflow,
 } from 'lucide-react'
 import { nanoid } from 'nanoid'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from 'react'
 import {
   findPresentationState,
   isNodeOverriddenInState,
@@ -126,8 +133,17 @@ function BufferedInput({
   onCommit,
 }: BufferedInputProps) {
   const [draft, setDraft] = useState(String(value))
-  useLayoutEffect(() => setDraft(String(value)), [value])
+  const cancelledRef = useRef(false)
+  useLayoutEffect(() => {
+    setDraft(String(value))
+    cancelledRef.current = false
+  }, [value])
   const commit = () => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false
+      setDraft(String(value))
+      return
+    }
     if (draft === String(value)) return
     if (type === 'number') {
       const parsed = Number(draft)
@@ -156,11 +172,15 @@ function BufferedInput({
         step={step}
         disabled={disabled}
         title={title}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          cancelledRef.current = false
+          setDraft(event.target.value)
+        }}
         onBlur={commit}
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur()
           if (event.key === 'Escape') {
+            cancelledRef.current = true
             setDraft(String(value))
             event.currentTarget.blur()
           }
@@ -242,6 +262,125 @@ function RangeField({
   )
 }
 
+interface PropertyColorInputProps {
+  id: string
+  label: string
+  value: string
+  onChange(value: string): boolean | void
+}
+
+type PropertyColorInputComponent = ComponentType<PropertyColorInputProps>
+
+function LegacyPropertyColorInput({
+  id,
+  label,
+  value,
+  onChange,
+}: PropertyColorInputProps) {
+  return (
+    <ColorInput
+      id={id}
+      label={label}
+      value={value}
+      onChange={(next) => { onChange(next) }}
+    />
+  )
+}
+
+function ControlledPropertyColorInput({
+  id,
+  label,
+  value,
+  onChange,
+}: PropertyColorInputProps) {
+  const [draft, setDraft] = useState(value)
+  const submittedRef = useRef(value.toLowerCase())
+  const cancelledRef = useRef(false)
+  useEffect(() => {
+    setDraft(value)
+    submittedRef.current = value.toLowerCase()
+    cancelledRef.current = false
+  }, [value])
+  const valid = /^#[0-9a-fA-F]{6}$/.test(draft)
+  const normalizedDraft = valid ? draft.toLowerCase() : ''
+  const dirty = valid && normalizedDraft !== value.toLowerCase()
+  const commit = () => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false
+      setDraft(value)
+      return
+    }
+    if (!valid) {
+      setDraft(value)
+      return
+    }
+    if (
+      normalizedDraft === value.toLowerCase() ||
+      normalizedDraft === submittedRef.current
+    ) return
+    const accepted = onChange(normalizedDraft)
+    if (accepted === false) {
+      submittedRef.current = value.toLowerCase()
+      setDraft(value)
+      return
+    }
+    submittedRef.current = normalizedDraft
+    setDraft(normalizedDraft)
+  }
+
+  return (
+    <div className="form-field">
+      <label htmlFor={`${id}-controlled-text`}>{label}</label>
+      <div className="color-control">
+        <input
+          className="color-swatch"
+          id={`${id}-controlled-picker`}
+          type="color"
+          aria-label={`${label}选择器`}
+          value={valid ? normalizedDraft : value}
+          onChange={(event) => {
+            cancelledRef.current = false
+            setDraft(event.target.value)
+          }}
+        />
+        <input
+          className="form-input"
+          id={`${id}-controlled-text`}
+          aria-label={label}
+          value={draft}
+          maxLength={7}
+          onChange={(event) => {
+            cancelledRef.current = false
+            setDraft(event.target.value)
+          }}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commit()
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              cancelledRef.current = true
+              setDraft(value)
+              event.currentTarget.blur()
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="secondary-button"
+          aria-label={`应用${label}`}
+          disabled={!dirty}
+          onClick={commit}
+        >
+          应用
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ToggleRow({ label, checked, disabled = false, onChange }: {
   label: string
   checked: boolean
@@ -265,9 +404,20 @@ function ToggleRow({ label, checked, disabled = false, onChange }: {
   )
 }
 
-function TextContentTextarea({ label, value, onBegin, onChange, onCommit, onCancel }: {
+function TextContentTextarea({
+  label,
+  value,
+  disabled = false,
+  title,
+  onBegin,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
   label: string
   value: string
+  disabled?: boolean
+  title?: string
   onBegin(): void
   onChange(value: string): void
   onCommit(): void
@@ -281,6 +431,8 @@ function TextContentTextarea({ label, value, onBegin, onChange, onCommit, onCanc
         className="form-textarea"
         aria-label={label}
         value={value}
+        disabled={disabled}
+        title={title}
         onFocus={onBegin}
         onChange={(event) => onChange(event.target.value)}
         onCompositionStart={() => { composingRef.current = true }}
@@ -583,11 +735,11 @@ function FontFamilyPicker({ value, onCommit }: {
   )
 }
 
-function CommonNodeProperties({ node, update }: {
+function CommonNodeProperties({ node, editorMode, update }: {
   node: SceneNode
+  editorMode: 'simple' | 'professional'
   update(patch: DeepPartial<SceneNode>): void
 }) {
-  const editorMode = useEditorStore((state) => state.editorMode)
   const autoSizedText = node.type === 'text' &&
     node.style.overflow === 'auto-height'
   const verticalAutoSizedText = autoSizedText &&
@@ -688,66 +840,70 @@ function CommonNodeProperties({ node, update }: {
           })}
         />
         <p className="property-hint">
-          “等待入场”只影响互动 Player；编辑画布、缩略图和 PDF/PPTX 仍显示作者设定的稳定画面。何时出现或退出请在规则的动作步骤中配置。
+          “等待入场”只影响互动播放；编辑画布、缩略图和 PDF/PPTX 仍显示作者设定的稳定画面。何时出现或退出请在规则的动作步骤中配置。
         </p>
       </div>}
     </section>
   )
 }
 
-function TextProperties({ node, update }: {
+function TextPropertiesView({
+  node,
+  update,
+  onBeginTextEdit,
+  onChangeText,
+  onCommitTextEdit,
+  onCancelTextEdit,
+  onOpenRichText,
+  ColorField = LegacyPropertyColorInput,
+  textContentUnavailableReason,
+  richTextUnavailableReason,
+}: {
   node: TextNode
   update(patch: DeepPartial<SceneNode>): void
+  onBeginTextEdit(): void
+  onChangeText(text: string): void
+  onCommitTextEdit(): void
+  onCancelTextEdit(): void
+  onOpenRichText?(): void
+  ColorField?: PropertyColorInputComponent
+  textContentUnavailableReason?: string
+  richTextUnavailableReason?: string
 }) {
   const style = node.style
-  const beginTextEdit = useEditorStore((state) => state.beginTextEdit)
-  const commitTextEdit = useEditorStore((state) => state.commitTextEdit)
-  const cancelTextEdit = useEditorStore((state) => state.cancelTextEdit)
   const toggleStyle = (key: 'bold' | 'italic' | 'underline' | 'strike') =>
     update({ style: { [key]: !style[key] } } as DeepPartial<SceneNode>)
-  const updateTextDraft = (text: string) => {
-    let state = useEditorStore.getState()
-    if (state.textEditSession?.nodeId !== node.id) {
-      state.beginTextEdit(node.id, 'properties')
-      state = useEditorStore.getState()
-    }
-    const current = selectEditingNodes(state).find(
-      (item) => item.id === node.id,
-    )
-    if (current?.type !== 'text') return
-    const runs = remapTextRuns(current.text, text, current.runs)
-    const draftNode = { ...current, text, runs }
-    const rendered = current.style.overflow === 'auto-height'
-      ? renderTextNodeCanvas(draftNode, draftNode.width)
-      : null
-    state.updateTextEditDraft(
-      current.id,
-      text,
-      runs,
-      rendered?.height ?? current.height,
-      rendered?.width ?? current.width,
-    )
-  }
   return (
     <section className="property-section">
       <h3 className="property-title"><Type size={14} />文本</h3>
       <TextContentTextarea
         label="文字内容"
         value={node.text}
-        onBegin={() => beginTextEdit(node.id, 'properties')}
-        onChange={updateTextDraft}
-        onCommit={commitTextEdit}
-        onCancel={cancelTextEdit}
+        disabled={Boolean(textContentUnavailableReason)}
+        title={textContentUnavailableReason}
+        onBegin={onBeginTextEdit}
+        onChange={onChangeText}
+        onCommit={onCommitTextEdit}
+        onCancel={onCancelTextEdit}
       />
+      {textContentUnavailableReason && (
+        <p className="property-hint" role="status">{textContentUnavailableReason}</p>
+      )}
       <button
         type="button"
         className="secondary-button"
         style={{ width: '100%', marginBottom: 10 }}
-        onClick={() => beginTextEdit(node.id, 'canvas')}
+        disabled={!onOpenRichText}
+        title={richTextUnavailableReason}
+        onClick={onOpenRichText}
       >
         <Type size={14} />编辑局部文字格式
       </button>
-      <p className="property-hint">也可以双击画布中的文字，选中部分内容后设置局部格式。</p>
+      {richTextUnavailableReason ? (
+        <p className="property-hint" role="status">{richTextUnavailableReason}</p>
+      ) : (
+        <p className="property-hint">也可以双击画布中的文字，选中部分内容后设置局部格式。</p>
+      )}
       <FontFamilyPicker value={style.fontFamily} onCommit={(fontFamily) => update({ style: { fontFamily } })} />
       <div className="coordinate-grid">
         <BufferedInput label="字号" type="number" min={8} max={400} value={style.fontSize} onCommit={(fontSize) => update({ style: { fontSize: Number(fontSize) } })} />
@@ -755,7 +911,7 @@ function TextProperties({ node, update }: {
         <BufferedInput label="字距" type="number" min={-20} max={100} value={style.letterSpacing} onCommit={(letterSpacing) => update({ style: { letterSpacing: Number(letterSpacing) } })} />
         <BufferedInput label="内边距" type="number" min={0} max={200} value={style.padding} onCommit={(padding) => update({ style: { padding: Number(padding) } })} />
       </div>
-      <ColorInput id="text-color" label="文字颜色" value={style.color} onChange={(color) => update({ style: { color } })} />
+      <ColorField id="text-color" label="文字颜色" value={style.color} onChange={(color) => update({ style: { color } })} />
       <div className="form-field">
         <label>文字样式</label>
         <div className="segmented-control text-style-control">
@@ -774,7 +930,7 @@ function TextProperties({ node, update }: {
           <button type="button" className={`secondary-button${style.highlightColor ? ' secondary-button--active' : ''}`} onClick={() => update({ style: { highlightColor: style.highlightColor ? null : '#fff3a3' } })}>
             <Highlighter size={14} />{style.highlightColor ? '取消高亮' : '启用高亮'}
           </button>
-          {style.highlightColor && <ColorInput id="text-highlight" label="高亮颜色" value={style.highlightColor} onChange={(highlightColor) => update({ style: { highlightColor } })} />}
+          {style.highlightColor && <ColorField id="text-highlight" label="高亮颜色" value={style.highlightColor} onChange={(highlightColor) => update({ style: { highlightColor } })} />}
         </div>
       </div>
       <ToggleRow
@@ -821,7 +977,7 @@ function TextProperties({ node, update }: {
         ]}
         onChange={(overflow) => update({ style: { overflow } })}
       />
-      <ColorInput id="text-background" label="文本框背景" value={style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
+      <ColorField id="text-background" label="文本框背景" value={style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
       <RangeField
         label="背景透明度"
         value={opacityToTransparencyPercent(style.backgroundOpacity)}
@@ -837,9 +993,83 @@ function TextProperties({ node, update }: {
   )
 }
 
-function FormulaProperties({ node, update }: {
+function LegacyTextPropertiesAdapter({ node, update }: {
+  node: TextNode
+  update(patch: DeepPartial<SceneNode>): void
+}) {
+  const beginTextEdit = useEditorStore((state) => state.beginTextEdit)
+  const commitTextEdit = useEditorStore((state) => state.commitTextEdit)
+  const cancelTextEdit = useEditorStore((state) => state.cancelTextEdit)
+  const updateTextDraft = (text: string) => {
+    let state = useEditorStore.getState()
+    if (state.textEditSession?.nodeId !== node.id) {
+      state.beginTextEdit(node.id, 'properties')
+      state = useEditorStore.getState()
+    }
+    const current = selectEditingNodes(state).find(
+      (item) => item.id === node.id,
+    )
+    if (current?.type !== 'text') return
+    const runs = remapTextRuns(current.text, text, current.runs)
+    const draftNode = { ...current, text, runs }
+    const rendered = current.style.overflow === 'auto-height'
+      ? renderTextNodeCanvas(draftNode, draftNode.width)
+      : null
+    state.updateTextEditDraft(
+      current.id,
+      text,
+      runs,
+      rendered?.height ?? current.height,
+      rendered?.width ?? current.width,
+    )
+  }
+  return (
+    <TextPropertiesView
+      node={node}
+      update={update}
+      onBeginTextEdit={() => beginTextEdit(node.id, 'properties')}
+      onChangeText={updateTextDraft}
+      onCommitTextEdit={commitTextEdit}
+      onCancelTextEdit={cancelTextEdit}
+      onOpenRichText={() => beginTextEdit(node.id, 'canvas')}
+    />
+  )
+}
+
+function ControlledTextProperties({
+  node,
+  update,
+  textContentUnavailableReason,
+  richTextUnavailableReason,
+}: {
+  node: TextNode
+  update(patch: DeepPartial<SceneNode>): boolean | void
+  textContentUnavailableReason: string
+  richTextUnavailableReason: string
+}) {
+  return (
+    <TextPropertiesView
+      node={node}
+      update={update}
+      onBeginTextEdit={() => undefined}
+      onChangeText={() => undefined}
+      onCommitTextEdit={() => undefined}
+      onCancelTextEdit={() => undefined}
+      ColorField={ControlledPropertyColorInput}
+      textContentUnavailableReason={textContentUnavailableReason}
+      richTextUnavailableReason={richTextUnavailableReason}
+    />
+  )
+}
+
+function FormulaProperties({
+  node,
+  update,
+  ColorField = LegacyPropertyColorInput,
+}: {
   node: FormulaNode
   update(patch: DeepPartial<SceneNode>): void
+  ColorField?: PropertyColorInputComponent
 }) {
   const generatedAccessibleText = formulaAstToAccessibleText(node.ast)
   const normalizeAccessibleText = (value: string) => value.replace(/\s+/gu, '')
@@ -894,7 +1124,7 @@ function FormulaProperties({ node, update }: {
           style: { fontSize: Number(fontSize) },
         } as DeepPartial<SceneNode>)}
       />
-      <ColorInput
+      <ColorField
         id="formula-color"
         label="公式颜色"
         value={node.style.color}
@@ -922,7 +1152,7 @@ function FormulaProperties({ node, update }: {
         </div>
       </div>
       <p className="property-hint">
-        PPTX 会按当前共享渲染结果静态化，Formula ID 和无障碍描述仍会保留。
+        PPTX 会按当前共享渲染结果静态化，公式内容和无障碍描述仍会保留。
       </p>
     </section>
   )
@@ -1289,7 +1519,15 @@ const SHAPE_LABELS: Record<ShapeType, string> = {
   'bracket-left': '左方括号', 'bracket-right': '右方括号', 'emphasis-dot': '着重圆点', 'emphasis-triangle': '着重三角',
 }
 
-function ShapeProperties({ node, update }: { node: ShapeNode; update(patch: DeepPartial<SceneNode>): void }) {
+function ShapeProperties({
+  node,
+  update,
+  ColorField = LegacyPropertyColorInput,
+}: {
+  node: ShapeNode
+  update(patch: DeepPartial<SceneNode>): void
+  ColorField?: PropertyColorInputComponent
+}) {
   const style = node.style
   const strokeOnly = isStrokeOnlyShapeType(node.shapeType)
   const supportsArrowHeads = node.shapeType === 'line' || node.shapeType === 'elbow-arrow'
@@ -1298,7 +1536,7 @@ function ShapeProperties({ node, update }: { node: ShapeNode; update(patch: Deep
       <h3 className="property-title"><Shapes size={14} />图形</h3>
       <SelectField<ShapeType> label="图形类型" value={node.shapeType} options={SHAPE_TYPES.map((value) => ({ value, label: SHAPE_LABELS[value] }))} onChange={(shapeType) => update({ shapeType })} />
       {!strokeOnly && <>
-        <ColorInput id="shape-fill" label="填充色" value={style.fillColor} onChange={(fillColor) => update({ style: { fillColor } })} />
+        <ColorField id="shape-fill" label="填充色" value={style.fillColor} onChange={(fillColor) => update({ style: { fillColor } })} />
         <RangeField
           label="填充透明度"
           value={opacityToTransparencyPercent(style.fillOpacity)}
@@ -1310,7 +1548,7 @@ function ShapeProperties({ node, update }: { node: ShapeNode; update(patch: Deep
           })}
         />
       </>}
-      <ColorInput id="shape-border" label={strokeOnly ? '线条颜色' : '边框颜色'} value={style.borderColor} onChange={(borderColor) => update({ style: { borderColor } })} />
+      <ColorField id="shape-border" label={strokeOnly ? '线条颜色' : '边框颜色'} value={style.borderColor} onChange={(borderColor) => update({ style: { borderColor } })} />
       <RangeField
         label={strokeOnly ? '线条透明度' : '边框透明度'}
         value={opacityToTransparencyPercent(style.borderOpacity)}
@@ -1667,7 +1905,265 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
   )
 }
 
-export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
+export interface PropertiesTabDocumentControl {
+  readonly editingScope: 'scene' | 'global'
+  readonly editorMode: 'simple' | 'professional'
+  readonly selectedNodes: readonly SceneNode[]
+  readonly target: PropertiesTabDocumentTarget | null
+  /** Optional author-facing context, for example “基础场景” or “状态：讲解态”. */
+  readonly scopeLabel?: string
+  readonly scopeDescription?: string
+  readonly overrideActive: boolean
+  readonly textContentUnavailableReason: string
+  readonly richTextUnavailableReason: string
+  readonly mediaUnavailableReason: string
+  readonly controllerUnavailableReason: string
+  onUpdateNode(
+    target: PropertiesTabDocumentTarget,
+    patch: DeepPartial<SceneNode>,
+  ): boolean
+  onClearOverride(target: PropertiesTabDocumentTarget): boolean
+}
+
+export interface PropertiesTabDocumentTarget {
+  readonly sessionId: string
+  readonly locationId: string
+  readonly stateId: string | null
+  readonly layerItemId: string
+}
+
+interface LegacyPropertiesTabProps {
+  documentControl?: undefined
+  onReplaceImage(): void
+}
+
+interface ControlledPropertiesTabProps {
+  documentControl: PropertiesTabDocumentControl
+  /** A legacy callback may remain on the shell; the controlled path never invokes it. */
+  onReplaceImage?(): void
+}
+
+export type PropertiesTabProps =
+  | LegacyPropertiesTabProps
+  | ControlledPropertiesTabProps
+
+function normalizeNodePatch(
+  node: SceneNode,
+  patch: DeepPartial<SceneNode>,
+): DeepPartial<SceneNode> {
+  if (node.type !== 'text') return patch
+  const textPatch = patch as DeepPartial<TextNode>
+  const nextNode = {
+    ...node,
+    ...textPatch,
+    style: { ...node.style, ...textPatch.style },
+  } as TextNode
+  if (nextNode.style.overflow !== 'auto-height') return patch
+  const rendered = renderTextNodeCanvas(nextNode, nextNode.width)
+  return {
+    ...patch,
+    width: rendered.width,
+    height: rendered.height,
+  } as DeepPartial<SceneNode>
+}
+
+function ControlledPropertiesGate({
+  title,
+  reason,
+  testId,
+}: {
+  title: string
+  reason: string
+  testId: string
+}) {
+  return (
+    <section
+      className="property-section right-sidebar-capability-gate"
+      data-testid={testId}
+      aria-disabled="true"
+    >
+      <h3 className="property-title"><SlidersHorizontal size={14} />{title}</h3>
+      <p className="property-hint" role="status">{reason}</p>
+      <button type="button" className="secondary-button" disabled>
+        {title}暂不可编辑
+      </button>
+    </section>
+  )
+}
+
+function ControlledPropertiesTab({
+  documentControl,
+}: {
+  documentControl: PropertiesTabDocumentControl
+}) {
+  const {
+    editingScope,
+    editorMode,
+    selectedNodes,
+    target,
+    scopeLabel,
+    scopeDescription,
+    overrideActive,
+    textContentUnavailableReason,
+    richTextUnavailableReason,
+    mediaUnavailableReason,
+    controllerUnavailableReason,
+    onUpdateNode,
+    onClearOverride,
+  } = documentControl
+  const [rejectedUpdateKey, setRejectedUpdateKey] = useState(0)
+  if (editingScope !== 'scene') {
+    return (
+      <div className="properties-scroll" data-testid="properties-tab">
+        <ControlledPropertiesGate
+          title="全局属性"
+          reason="全局元素属性正在完善，当前内容不会改变。"
+          testId="controlled-properties-global-gate"
+        />
+      </div>
+    )
+  }
+  if (selectedNodes.length === 0) {
+    return (
+      <div className="properties-scroll" data-testid="properties-tab">
+        <ControlledPropertiesGate
+          title="元素属性"
+          reason="请先在画布或图层面板中选择一个文字、公式或图形元素。"
+          testId="controlled-properties-empty-gate"
+        />
+      </div>
+    )
+  }
+  if (selectedNodes.length > 1) {
+    return (
+      <div className="properties-scroll" data-testid="properties-tab">
+        <ControlledPropertiesGate
+          title="多选属性"
+          reason="暂不支持批量属性编辑；请只选择一个元素。"
+          testId="controlled-properties-multi-gate"
+        />
+      </div>
+    )
+  }
+  const node = selectedNodes[0]!
+  if (!target || target.layerItemId !== node.id) {
+    return (
+      <div className="properties-scroll" data-testid="properties-tab">
+        <ControlledPropertiesGate
+          title="元素属性"
+          reason="所选元素信息已变化，请重新选择后再编辑。"
+          testId="controlled-properties-stale-target-gate"
+        />
+      </div>
+    )
+  }
+  const update = (patch: DeepPartial<SceneNode>) => {
+    const accepted = onUpdateNode(target, normalizeNodePatch(node, patch))
+    if (!accepted) setRejectedUpdateKey((current) => current + 1)
+    return accepted
+  }
+  const clearOverride = () => {
+    const accepted = onClearOverride(target)
+    if (!accepted) setRejectedUpdateKey((current) => current + 1)
+  }
+  const controlledFieldsKey = JSON.stringify([
+    target.sessionId,
+    target.locationId,
+    target.stateId,
+    target.layerItemId,
+    rejectedUpdateKey,
+  ])
+  const unsupported = node.type === 'image' || node.type === 'video'
+    ? (
+      <ControlledPropertiesGate
+        title="媒体属性"
+        reason={mediaUnavailableReason}
+        testId="controlled-properties-media-gate"
+      />
+    )
+    : node.type === 'teacher-controller'
+      ? (
+        <ControlledPropertiesGate
+          title="教师控制器属性"
+          reason={controllerUnavailableReason}
+          testId="controlled-properties-controller-gate"
+        />
+      )
+      : node.type === 'external-component'
+        ? (
+          <ControlledPropertiesGate
+            title="组件属性"
+            reason="组件的专属设置暂不可用；仍可修改上方通用属性。"
+            testId="controlled-properties-component-gate"
+          />
+        )
+        : null
+
+  return (
+    <div className="properties-scroll" data-testid="properties-tab">
+      <section className="state-editing-notice">
+        <Layers3 size={15} />
+        <div>
+          <strong>{scopeLabel ?? '场景元素'}</strong>
+          <span>{scopeDescription ?? '可修改所选元素的布局与外观。'}</span>
+          {target.stateId !== null && (
+            <span>{overrideActive
+              ? '此元素已有当前状态设置。'
+              : '此元素当前沿用基础设置。'}</span>
+          )}
+        </div>
+        {target.stateId !== null && overrideActive && (
+          <button
+            type="button"
+            className="state-editing-notice__clear"
+            onClick={clearOverride}
+          >
+            恢复基础值
+          </button>
+        )}
+      </section>
+      <div key={controlledFieldsKey}>
+        <CommonNodeProperties
+          node={node}
+          editorMode={editorMode}
+          update={update}
+        />
+        {node.type === 'text' && (
+          <ControlledTextProperties
+            node={node}
+            update={update}
+            textContentUnavailableReason={textContentUnavailableReason}
+            richTextUnavailableReason={richTextUnavailableReason}
+          />
+        )}
+        {node.type === 'formula' && (
+          <FormulaProperties
+            node={node}
+            update={update}
+            ColorField={ControlledPropertyColorInput}
+          />
+        )}
+        {node.type === 'shape' && (
+          <ShapeProperties
+            node={node}
+            update={update}
+            ColorField={ControlledPropertyColorInput}
+          />
+        )}
+        {unsupported}
+      </div>
+    </div>
+  )
+}
+
+export function PropertiesTab(props: PropertiesTabProps) {
+  if (props.documentControl) {
+    return <ControlledPropertiesTab documentControl={props.documentControl} />
+  }
+  return <LegacyPropertiesTabAdapter onReplaceImage={props.onReplaceImage} />
+}
+
+function LegacyPropertiesTabAdapter({ onReplaceImage }: { onReplaceImage(): void }) {
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
@@ -1847,24 +2343,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
     )
   }
   const update = (patch: DeepPartial<SceneNode>) => {
-    if (node.type === 'text') {
-      const textPatch = patch as DeepPartial<TextNode>
-      const nextNode = {
-        ...node,
-        ...textPatch,
-        style: { ...node.style, ...textPatch.style },
-      } as TextNode
-      if (nextNode.style.overflow === 'auto-height') {
-        const rendered = renderTextNodeCanvas(nextNode, nextNode.width)
-        updateNode(node.id, {
-          ...patch,
-          width: rendered.width,
-          height: rendered.height,
-        } as DeepPartial<SceneNode>)
-        return
-      }
-    }
-    updateNode(node.id, patch)
+    updateNode(node.id, normalizeNodePatch(node, patch))
   }
   return (
     <div className="properties-scroll" data-testid="properties-tab">
@@ -1894,7 +2373,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           )}
         </section>
       )}
-      <CommonNodeProperties node={node} update={update} />
+      <CommonNodeProperties node={node} editorMode={editorMode} update={update} />
       {editingScope === 'scene' && editorMode === 'simple' && (
         <SimpleEntranceAnimationEditor
           scene={scene}
@@ -1905,7 +2384,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
       {editingScope === 'global' && (
         <GlobalLayerSettings nodeId={node.id} />
       )}
-      {node.type === 'text' && <TextProperties node={node} update={update} />}
+      {node.type === 'text' && <LegacyTextPropertiesAdapter node={node} update={update} />}
       {node.type === 'formula' && (
         <FormulaProperties
           node={node}

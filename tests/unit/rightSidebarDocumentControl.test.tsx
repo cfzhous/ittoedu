@@ -84,4 +84,61 @@ describe('RightSidebar document control', () => {
     expect(screen.getByLabelText('编辑面板')).toHaveAttribute('aria-disabled', 'true')
     expect(useEditorStore.getState().project).toBe(projectBefore)
   })
+
+  it('mounts the controlled properties panel without invoking legacy document actions', () => {
+    useEditorStore.setState({ activeTab: 'properties' })
+    const projectBefore = useEditorStore.getState().project
+    const historyBefore = useEditorStore.getState().history
+    const node = createTextNode({
+      id: 'property-text',
+      name: '属性标题',
+      style: { overflow: 'fixed' },
+    })
+    const onUpdateNode = vi.fn(() => true)
+    const legacyReplaceImage = vi.fn()
+    const target = {
+      sessionId: 'session-properties',
+      locationId: 'location-properties',
+      stateId: null,
+      layerItemId: node.id,
+    }
+    const documentControl: RightSidebarDocumentControl = {
+      properties: {
+        editingScope: 'scene',
+        editorMode: 'simple',
+        selectedNodes: [node],
+        target,
+        scopeLabel: '基础场景',
+        scopeDescription: '修改基础元素会影响继承它的命名状态。',
+        overrideActive: false,
+        textContentUnavailableReason: '文字内容暂不可编辑。',
+        richTextUnavailableReason: '局部文字格式暂不可编辑。',
+        mediaUnavailableReason: '媒体专属设置暂不可编辑。',
+        controllerUnavailableReason: '教师控制器专属设置暂不可编辑。',
+        onUpdateNode,
+        onClearOverride: vi.fn(() => true),
+      },
+    }
+
+    render(
+      <RightSidebar
+        documentControl={documentControl}
+        onAddImage={vi.fn()}
+        onReplaceImage={legacyReplaceImage}
+        onAddVideo={vi.fn()}
+        onImportAudio={vi.fn()}
+        onImportVideo={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('properties-tab')).toBeInTheDocument()
+    expect(screen.getByLabelText('编辑面板')).not.toHaveAttribute('aria-disabled')
+    const name = screen.getByLabelText('名称')
+    fireEvent.change(name, { target: { value: '更新后的标题' } })
+    fireEvent.blur(name)
+    expect(onUpdateNode).toHaveBeenCalledWith(target, { name: '更新后的标题' })
+    expect(legacyReplaceImage).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().project).toBe(projectBefore)
+    expect(useEditorStore.getState().history).toBe(historyBefore)
+  })
 })

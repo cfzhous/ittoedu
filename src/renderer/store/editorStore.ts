@@ -114,6 +114,7 @@ import {
   addV9SlideScene,
   addV9SlideShapeLayer,
   addV9SlideTextLayer,
+  clearV9SlideNativeNodeOverride,
   clearV9SlidePresentationStateOverrides,
   completeV9SlideVerticalSliceSave,
   createV9CourseEditorState,
@@ -140,7 +141,10 @@ import {
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
   updateV9SlideLayer,
+  updateV9SlideNativeNode,
   type V9SlideLayerPatch,
+  type V9SlideNativeNodePatch,
+  type V9SlideNativeNodeTarget,
   type V9SlideTransformInput,
   type V9SlideSelectionInput,
   type V9SlideVerticalSliceState,
@@ -270,6 +274,11 @@ export interface EditorState {
   addCourseFormulaLayer(x?: number, y?: number): void
   addCourseShapeLayer(shapeType: ShapeType, x?: number, y?: number): void
   updateCourseLayer(layerItemId: string, patch: V9SlideLayerPatch): void
+  updateCourseNativeNode(
+    target: V9SlideNativeNodeTarget,
+    patch: V9SlideNativeNodePatch,
+  ): boolean
+  clearCourseNativeNodeOverride(target: V9SlideNativeNodeTarget): boolean
   deleteCourseLayer(layerItemId: string): void
   duplicateCourseLayer(layerItemId: string): void
   reorderCourseLayers(layerItemIds: readonly string[]): void
@@ -1833,6 +1842,53 @@ export const useEditorStore = create<EditorState>((set, get) => {
           ? state
           : { ...state, courseSession, statusMessage: '元素已更新' }
       })
+    },
+
+    updateCourseNativeNode(target, patch) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          state.courseSession.sessionId !== target.sessionId ||
+          state.courseSession.selection.locationId !== target.locationId ||
+          state.courseSession.selection.stateId !== target.stateId ||
+          state.courseSession.selection.selectionIds.length !== 1 ||
+          state.courseSession.selection.selectionIds[0] !== target.layerItemId
+        ) return state
+        accepted = true
+        const courseSession = updateV9SlideNativeNode(
+          state.courseSession,
+          target.layerItemId,
+          patch,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '属性已更新' }
+      })
+      return accepted
+    },
+
+    clearCourseNativeNodeOverride(target) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          state.courseSession.sessionId !== target.sessionId ||
+          state.courseSession.selection.locationId !== target.locationId ||
+          state.courseSession.selection.stateId !== target.stateId ||
+          state.courseSession.selection.selectionIds.length !== 1 ||
+          state.courseSession.selection.selectionIds[0] !== target.layerItemId
+        ) return state
+        accepted = true
+        const courseSession = clearV9SlideNativeNodeOverride(
+          state.courseSession,
+          target.layerItemId,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已恢复基础属性' }
+      })
+      return accepted
     },
 
     deleteCourseLayer(layerItemId) {

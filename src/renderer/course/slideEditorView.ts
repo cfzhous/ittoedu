@@ -1,4 +1,5 @@
 import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
+import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -54,6 +55,25 @@ export interface SlideEditorView {
   readonly layers: readonly SlideEditorLayerView[]
 }
 
+function deepMergeComponentProps(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = structuredClone(base)
+  for (const [key, value] of Object.entries(patch)) {
+    const previous = result[key]
+    result[key] = value !== null && previous !== null &&
+      typeof value === 'object' && typeof previous === 'object' &&
+      !Array.isArray(value) && !Array.isArray(previous)
+      ? deepMergeComponentProps(
+          previous as Record<string, unknown>,
+          value as Record<string, unknown>,
+        )
+      : structuredClone(value)
+  }
+  return result
+}
+
 export interface BuildSlideEditorViewInput {
   readonly project: CourseProjectDocument
   readonly locationId: string
@@ -70,24 +90,6 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
     Object.freeze(value)
   }
   return value as DeepReadonly<T>
-}
-
-function deepMergeRecord(
-  base: Record<string, unknown>,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = structuredClone(base)
-  for (const [key, value] of Object.entries(patch)) {
-    const previous = result[key]
-    result[key] = value && typeof value === 'object' && !Array.isArray(value) &&
-      previous && typeof previous === 'object' && !Array.isArray(previous)
-      ? deepMergeRecord(
-          previous as Record<string, unknown>,
-          value as Record<string, unknown>,
-        )
-      : structuredClone(value)
-  }
-  return result
 }
 
 function materializeSceneItem(
@@ -109,13 +111,13 @@ function materializeSceneItem(
     item.playbackInitialVisibility = override.playbackInitialVisibility
   }
   if (item.kind === 'native' && override.nativeData) {
-    item.content.data = deepMergeRecord(
+    item.content.data = mergeCourseNativeData(
       item.content.data as Record<string, unknown>,
       override.nativeData,
     ) as typeof item.content.data
   }
   if (item.kind === 'component' && override.componentProps) {
-    item.props = deepMergeRecord(item.props, override.componentProps)
+    item.props = deepMergeComponentProps(item.props, override.componentProps)
   }
   return item
 }

@@ -38,6 +38,28 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * Applies a sparse Native content override without replacing nested records.
+ * Authoring views and schema validation must share this exact merge contract.
+ */
+export function mergeCourseNativeData(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  depth = 0,
+): Record<string, unknown> {
+  const result = structuredClone(base)
+  for (const [key, value] of Object.entries(patch)) {
+    const previous = result[key]
+    // Formula AST nodes are discriminated recursive values. Replacing a row
+    // with a root/token must not retain fields from the former node shape.
+    result[key] = !(depth === 0 && key === 'ast') &&
+      isPlainRecord(value) && isPlainRecord(previous)
+      ? mergeCourseNativeData(previous, value, depth + 1)
+      : structuredClone(value)
+  }
+  return result
+}
+
 /** Finds fields silently stripped by an older permissive schema. */
 function findUnknownInputPath(
   input: unknown,
@@ -518,15 +540,18 @@ export const slideSceneSchema = z.object({
           })
         } else {
           const baseNode = materializeNativeLayerItem(item)
-          const candidate = { ...baseNode, ...override.nativeData }
+          const candidate = mergeCourseNativeData(
+            baseNode as unknown as Record<string, unknown>,
+            override.nativeData,
+          )
           const parsed = sceneNodeSchema.safeParse(candidate)
           const unknownPath = parsed.success
             ? findUnknownInputPath(candidate, parsed.data)
             : undefined
           if (
             !parsed.success ||
-            unsupportedNativeTypes.has(candidate.type) ||
-            candidate.type !== baseNode.type ||
+            unsupportedNativeTypes.has(parsed.data.type) ||
+            parsed.data.type !== baseNode.type ||
             unknownPath
           ) {
             context.addIssue({

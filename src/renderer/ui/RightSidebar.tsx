@@ -1,6 +1,9 @@
 import { ElementsTab, type ElementsTabDocumentControl } from './ElementsTab'
 import { NodesTab, type NodesTabDocumentControl } from './NodesTab'
-import { PropertiesTab } from './PropertiesTab'
+import {
+  PropertiesTab,
+  type PropertiesTabDocumentControl,
+} from './PropertiesTab'
 import { AutomationTab } from './AutomationTab'
 import { DeveloperTab } from './DeveloperTab'
 import { ComponentsTab } from './ComponentsTab'
@@ -13,6 +16,7 @@ import type {
 export interface RightSidebarDocumentControl {
   readonly elements?: ElementsTabDocumentControl
   readonly layers?: NodesTabDocumentControl
+  readonly properties?: PropertiesTabDocumentControl
   /** A missing controlled tab stays visible but mounts no legacy document editor. */
   readonly unavailableReasons?: Partial<Record<SidebarTab, string>>
 }
@@ -81,7 +85,9 @@ export function RightSidebar({
       ? Boolean(documentControl.elements)
       : activeTab === 'layers'
         ? Boolean(documentControl.layers)
-        : false
+        : activeTab === 'properties'
+          ? Boolean(documentControl.properties)
+          : false
     : false
   const activeUnavailableReason = documentControl
     ? controlledTabAvailable
@@ -150,7 +156,11 @@ export function RightSidebar({
         ) : activeTab === 'layers' ? (
           <NodesTab documentControl={documentControl?.layers} />
         ) : activeTab === 'properties' ? (
-          <PropertiesTab onReplaceImage={onReplaceImage} />
+          documentControl?.properties ? (
+            <PropertiesTab documentControl={documentControl.properties} />
+          ) : (
+            <PropertiesTab onReplaceImage={onReplaceImage} />
+          )
         ) : activeTab === 'automation' && editorMode === 'professional' ? (
           <AutomationTab />
         ) : activeTab === 'developer' && editorMode === 'professional' ? (
