@@ -33,6 +33,21 @@ import type {
   SurfaceResetScope,
 } from '../SurfaceHost'
 import { DomPlaybackFreeze } from '../domPlaybackFreeze'
+import {
+  teacherControllerHitBounds,
+  type TeacherControllerRuntimeNode,
+  type TeacherControllerSessionOffset,
+} from '../../teacherControllerRuntimeSession'
+import {
+  TeacherControllerDom,
+  teacherControllerDomNode,
+  type TeacherControllerDomContext,
+  type TeacherControllerDomSession,
+} from '../../teacherControllerDom'
+import type {
+  TeacherControllerSceneInfo,
+  TeacherControllerViewStatus,
+} from '../../../shared/teacherControllerLayout'
 
 export type SlideInspectionMode = 'playback' | 'inspect'
 
@@ -119,6 +134,19 @@ export interface SlideSurfaceHostOptions {
   ): boolean | Promise<boolean>
   onLayerHit?(hit: SlideLayerHit): void
   onTeacherControllerAction?(action: TeacherControllerAction, item: NativeLayerItem): void
+  /**
+   * Course-level single executor for teacher-controller actions. When present
+   * the host delegates every action (no local navigation, no guard hook) so the
+   * course location pipeline owns navigation exactly once.
+   */
+  executeTeacherControllerAction?(
+    action: TeacherControllerAction,
+    item: NativeLayerItem,
+  ): boolean | void | Promise<boolean | void>
+  /** Authorable canvas controls toggle (`project.playback.controls`). */
+  playbackControls?: 'canvas' | 'none'
+  /** Course session mute seed (`project.media.audio.defaultMuted`). */
+  initialMuted?: boolean
 }
 
 type EffectiveLayerEntry = {
@@ -362,6 +390,7 @@ function renderVideo(
   dom: Document,
   services: SurfacePlayerServices,
   onMediaEvent?: (eventName: string, seconds?: number) => void,
+  sessionMuted?: boolean,
 ): HTMLElement {
   if (item.content.nativeType !== 'video') throw new TypeError('Expected video item')
   const { data } = item.content
@@ -373,7 +402,9 @@ function renderVideo(
   video.controls = data.showControls
   video.autoplay = data.autoplay
   video.loop = data.loop
-  video.muted = data.muted
+  // Course session mute is an additive override: it can only mute, never
+  // unmute an authored-muted element. New scenes respect the live toggle.
+  video.muted = data.muted || sessionMuted === true
   video.volume = clamp(data.volume, 0, 1)
   video.playbackRate = data.playbackRate
   video.style.display = 'block'
@@ -603,15 +634,22 @@ class NativeDomItemHost {
   #services: SurfacePlayerServices | null = null
   #onTeacherControllerAction: (action: TeacherControllerAction, item: NativeLayerItem) => void
   #emitMediaEvent: ((eventName: string, seconds?: number) => void) | null
+  #teacherControllerContext: TeacherControllerDomContext | null
+  #teacherControllerDom: TeacherControllerDom | null = null
+  #getSessionMuted: () => boolean
 
   constructor(
     item: NativeLayerItem,
     onTeacherControllerAction: (action: TeacherControllerAction, item: NativeLayerItem) => void,
     emitMediaEvent: ((eventName: string, seconds?: number) => void) | null = null,
+    teacherControllerContext: TeacherControllerDomContext | null = null,
+    getSessionMuted: () => boolean = () => false,
   ) {
     this.#item = item
     this.#onTeacherControllerAction = onTeacherControllerAction
     this.#emitMediaEvent = emitMediaEvent
+    this.#teacherControllerContext = teacherControllerContext
+    this.#getSessionMuted = getSessionMuted
   }
 
   mount(context: { container: HTMLElement; services: SurfacePlayerServices }): void {
@@ -632,7 +670,13 @@ class NativeDomItemHost {
   setInspectionMode(_mode: SlideInspectionMode): void {}
   capture(_request: SurfaceCaptureRequest): void {}
 
+  refreshTeacherControllerStatus(): void {
+    this.#teacherControllerDom?.refreshStatus()
+  }
+
   destroy(): void {
+    this.#teacherControllerDom?.destroy()
+    this.#teacherControllerDom = null
     this.#container?.replaceChildren()
     this.#container = null
     this.#services = null
@@ -651,18 +695,53 @@ class NativeDomItemHost {
         dom,
         this.#services,
         this.#emitMediaEvent ?? undefined,
+        this.#getSessionMuted(),
       ); break
       case 'shape': element = renderShape(this.#item, dom); break
       case 'teacher-controller':
-        element = renderTeacherController(
-          this.#item,
-          dom,
-          this.#onTeacherControllerAction,
-        )
+        element = this.#teacherControllerContext
+          ? this.#renderControllerDom()
+          : renderTeacherController(
+              this.#item,
+              dom,
+              this.#onTeacherControllerAction,
+            )
         break
     }
     element.dataset.nativeType = this.#item.content.nativeType
     this.#container.replaceChildren(element)
+  }
+
+  #renderControllerDom(): HTMLElement {
+    const context = this.#teacherControllerContext!
+    const content = this.#item.content
+    if (content.nativeType !== 'teacher-controller') {
+      throw new TypeError('Expected teacher controller item')
+    }
+    const node = teacherControllerDomNode(
+      this.#item.frame,
+      this.#item.rotation,
+      content.data,
+    )
+    if (!this.#teacherControllerDom) {
+      this.#teacherControllerDom = new TeacherControllerDom({
+        node,
+        container: this.#container!,
+        canvas: context.canvas,
+        scenes: context.scenes,
+        getCurrentSceneId: context.getCurrentSceneId,
+        getStateLabel: context.getStateLabel,
+        getStatus: context.getStatus,
+        getSession: () => context.getSession(this.#item.layerItemId),
+        onSessionChange: (next) => context.onSessionChange(this.#item.layerItemId, next),
+        onAction: (action) => this.#onTeacherControllerAction(action, this.#item),
+        getInteractive: context.getInteractive,
+      })
+      this.#container!.replaceChildren(this.#teacherControllerDom.rootElement)
+    } else {
+      this.#teacherControllerDom.update(node)
+    }
+    return this.#teacherControllerDom.rootElement
   }
 }
 
@@ -740,11 +819,19 @@ function applyWrapperLayout(
   record: ItemRecord,
   _mode: SlideInspectionMode,
   sessionVisibility: boolean | undefined,
+  controlsEnabled = true,
+  sessionOffset?: TeacherControllerSessionOffset,
 ): void {
   const { item, wrapper } = record
   const { frame } = item
-  wrapper.style.left = `${frame.x}px`
-  wrapper.style.top = `${frame.y}px`
+  const isTeacherController = item.kind === 'native' &&
+    item.content.nativeType === 'teacher-controller'
+  if (isTeacherController && !controlsEnabled) {
+    wrapper.hidden = true
+    return
+  }
+  wrapper.style.left = `${frame.x + (sessionOffset?.dx ?? 0)}px`
+  wrapper.style.top = `${frame.y + (sessionOffset?.dy ?? 0)}px`
   wrapper.style.width = `${frame.width}px`
   wrapper.style.height = `${frame.height}px`
   wrapper.style.opacity = String(clamp(item.opacity, 0, 1))
@@ -851,6 +938,9 @@ export class SlideSurfaceHost implements SurfaceHost {
   #active = false
   #destroyed = false
   #sessionVisibility = new Map<string, boolean>()
+  #teacherControllerSession = new Map<string, TeacherControllerDomSession>()
+  #controllerMuted: boolean
+  #audioChangeDisposer: (() => void) | null = null
   #surfaceAbortController: AbortController | null = null
   #queue: Promise<void> = Promise.resolve()
   #domPlayback = new DomPlaybackFreeze()
@@ -861,6 +951,7 @@ export class SlideSurfaceHost implements SurfaceHost {
     this.id = surface.id
     this.#document = cloneSurface(surface)
     this.#options = options
+    this.#controllerMuted = options.initialMuted ?? false
     const initial = surface.scenes.find((scene) => scene.id === options.initialSceneId) ?? surface.scenes[0]!
     this.#sceneId = initial.id
     this.#stateId = this.#validStateId(initial, options.initialStateId)
@@ -901,6 +992,17 @@ export class SlideSurfaceHost implements SurfaceHost {
       else context.signal.addEventListener('abort', () => {
         this.#surfaceAbortController?.abort(context.signal.reason)
       }, { once: true })
+      const interactions = this.#options.interactions
+      if (interactions) {
+        this.#audioChangeDisposer = interactions.events.on<{ muted?: boolean }>(
+          'audio:change',
+          (event) => {
+            if (typeof event?.muted !== 'boolean') return
+            this.#controllerMuted = event.muted
+            this.#refreshControllerStatuses()
+          },
+        )
+      }
       await this.#reconcile()
       // Mount stays quiet: the Published boot always follows with navigate →
       // setScene, which owns the scene-enter announcement.
@@ -1002,7 +1104,16 @@ export class SlideSurfaceHost implements SurfaceHost {
     if (visible === undefined) this.#sessionVisibility.delete(layerItemId)
     else this.#sessionVisibility.set(layerItemId, visible)
     const record = this.#records.get(layerItemId)
-    if (record) applyWrapperLayout(record, this.#mode, visible)
+    if (record) {
+      const session = this.#controllerSession(record.item)
+      applyWrapperLayout(
+        record,
+        this.#mode,
+        visible,
+        this.#controlsEnabled(),
+        session?.offset,
+      )
+    }
   }
 
   activate(): Promise<void> {
@@ -1046,6 +1157,12 @@ export class SlideSurfaceHost implements SurfaceHost {
       const previousSceneId = this.#sceneId
       const previousStateId = this.#stateId
       this.#sessionVisibility.clear()
+      if (scope === 'course') {
+        // Course restart restores the project defaults for controller session
+        // state (offset + collapse) and the session mute override.
+        this.#teacherControllerSession.clear()
+        this.#controllerMuted = this.#options.initialMuted ?? false
+      }
       // Resolve the target scene id first: the exit event must report the old
       // scene while #sceneId still points at it.
       const targetSceneId = scope === 'course'
@@ -1170,7 +1287,22 @@ export class SlideSurfaceHost implements SurfaceHost {
     for (let index = this.#orderedRecords.length - 1; index >= 0; index -= 1) {
       const record = this.#orderedRecords[index]!
       if (record.wrapper.hidden || record.item.hitPolicy === 'pass-through') continue
-      if (!pointInsideItem(record.item, x, y)) continue
+      if (
+        record.item.kind === 'native' &&
+        record.item.content.nativeType === 'teacher-controller'
+      ) {
+        const session = this.#controllerSession(record.item)
+        if (!session) continue
+        const bounds = teacherControllerHitBounds(
+          teacherControllerDomNode(record.item.frame, record.item.rotation, record.item.content.data),
+          session.offset,
+          session.collapsed,
+        )
+        // A collapsed controller's real hit area is the pill, not the panel.
+        if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) continue
+      } else if (!pointInsideItem(record.item, x, y)) {
+        continue
+      }
       result.push(this.#hitForRecord(record, index))
     }
     return result
@@ -1186,6 +1318,9 @@ export class SlideSurfaceHost implements SurfaceHost {
       this.#destroyed = true
       this.#interactionEngine?.destroy()
       this.#interactionEngine = null
+      this.#audioChangeDisposer?.()
+      this.#audioChangeDisposer = null
+      this.#teacherControllerSession.clear()
       this.#surfaceAbortController?.abort('slide-surface-destroyed')
       for (const record of [...this.#orderedRecords].reverse()) {
         await this.#destroyRecord(record)
@@ -1290,7 +1425,14 @@ export class SlideSurfaceHost implements SurfaceHost {
         record.scopedVisible = entry.scopedVisible
         await this.#updateRecord(record)
       }
-      applyWrapperLayout(record, this.#mode, this.#sessionVisibility.get(record.item.layerItemId))
+      const session = this.#controllerSession(record.item)
+      applyWrapperLayout(
+        record,
+        this.#mode,
+        this.#sessionVisibility.get(record.item.layerItemId),
+        this.#controlsEnabled(),
+        session?.offset,
+      )
       // appendChild moves an existing child without remounting its backend.
       this.#root.appendChild(record.wrapper)
       nextRecords.push(record)
@@ -1566,6 +1708,8 @@ export class SlideSurfaceHost implements SurfaceHost {
         item.content.nativeType === 'video'
           ? (eventName, seconds) => this.#emitMediaEvent(item.layerItemId, eventName, seconds)
           : null,
+        this.#teacherControllerContext(),
+        () => this.#controllerMuted,
       )
     }
     if (item.kind === 'component') {
@@ -1647,6 +1791,8 @@ export class SlideSurfaceHost implements SurfaceHost {
         record.item.content.nativeType === 'video'
           ? (eventName, seconds) => this.#emitMediaEvent(record.item.layerItemId, eventName, seconds)
           : null,
+        this.#teacherControllerContext(),
+        () => this.#controllerMuted,
       )
       record.host = native
       native.mount({ container: record.content, services: this.#context!.services })
@@ -1727,27 +1873,113 @@ export class SlideSurfaceHost implements SurfaceHost {
     action: TeacherControllerAction,
     item: NativeLayerItem,
   ): Promise<void> {
-    if (
-      this.#options.beforeTeacherControllerAction &&
-      await this.#options.beforeTeacherControllerAction(action, item) === false
-    ) return
-    const currentIndex = this.#document.scenes.findIndex((scene) => scene.id === this.#sceneId)
-    if (action.type === 'scene.previous' && currentIndex > 0) {
-      await this.setScene(this.#document.scenes[currentIndex - 1]!.id)
-    } else if (action.type === 'scene.next' && currentIndex < this.#document.scenes.length - 1) {
-      await this.setScene(this.#document.scenes[currentIndex + 1]!.id)
-    } else if (action.type === 'scene.go') {
-      await this.setScene(action.sceneId, action.targetStateId)
-    } else if (action.type === 'scene.replay') {
-      await this.reset('surface')
-    } else if (action.type === 'course.restart') {
-      await this.reset('course')
+    if (this.#options.executeTeacherControllerAction) {
+      // Single course-level owner: the published app navigates through the
+      // guarded course location pipeline and handles mute/fullscreen/picker.
+      await this.#options.executeTeacherControllerAction(action, item)
+    } else {
+      if (
+        this.#options.beforeTeacherControllerAction &&
+        await this.#options.beforeTeacherControllerAction(action, item) === false
+      ) return
+      const currentIndex = this.#document.scenes.findIndex((scene) => scene.id === this.#sceneId)
+      if (action.type === 'scene.previous' && currentIndex > 0) {
+        await this.setScene(this.#document.scenes[currentIndex - 1]!.id)
+      } else if (action.type === 'scene.next' && currentIndex < this.#document.scenes.length - 1) {
+        await this.setScene(this.#document.scenes[currentIndex + 1]!.id)
+      } else if (action.type === 'scene.go') {
+        await this.setScene(action.sceneId, action.targetStateId)
+      } else if (action.type === 'scene.replay') {
+        await this.reset('surface')
+      } else if (action.type === 'course.restart') {
+        await this.reset('course')
+      }
+      this.#options.onTeacherControllerAction?.(action, item)
     }
-    this.#options.onTeacherControllerAction?.(action, item)
     const CustomEventConstructor = this.#root?.ownerDocument.defaultView?.CustomEvent
     const event = CustomEventConstructor
       ? new CustomEventConstructor('courseware:teacher-controller-action', { detail: action })
       : null
     if (event) this.#root?.dispatchEvent(event)
+  }
+
+  /** Session bundle the DOM controller reads and reports back through. */
+  #teacherControllerContext(): TeacherControllerDomContext {
+    return {
+      canvas: this.#document.canvas,
+      scenes: this.#document.scenes.map((scene) => ({ id: scene.id, name: scene.name })),
+      getCurrentSceneId: () => this.#sceneId,
+      getStateLabel: () => {
+        const scene = this.#currentScene()
+        const state = this.#stateId
+          ? scene.presentation?.states.find((candidate) => candidate.id === this.#stateId)
+          : undefined
+        return state?.name ?? null
+      },
+      getStatus: () => ({
+        muted: this.#controllerMuted,
+        fullscreen: Boolean(this.#root?.ownerDocument.fullscreenElement),
+      }),
+      getSession: (layerItemId) => {
+        const item = this.#records.get(layerItemId)?.item
+        return this.#controllerSession(item) ?? {
+          offset: { dx: 0, dy: 0 },
+          collapsed: false,
+        }
+      },
+      onSessionChange: (layerItemId, next) => this.#applyTeacherControllerSession(layerItemId, next),
+      getInteractive: () => this.#controllerInteractive(),
+    }
+  }
+
+  /** Canonical session for a controller item; seeds the project defaults. */
+  #controllerSession(item: LayerItem | undefined): TeacherControllerDomSession | undefined {
+    if (
+      !item ||
+      item.kind !== 'native' ||
+      item.content.nativeType !== 'teacher-controller'
+    ) return undefined
+    const existing = this.#teacherControllerSession.get(item.layerItemId)
+    if (existing) return existing
+    const session: TeacherControllerDomSession = {
+      offset: { dx: 0, dy: 0 },
+      collapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+    }
+    this.#teacherControllerSession.set(item.layerItemId, session)
+    return session
+  }
+
+  /** Persists a controller session change and moves the compositor wrapper. */
+  #applyTeacherControllerSession(layerItemId: string, next: TeacherControllerDomSession): void {
+    this.#teacherControllerSession.set(layerItemId, {
+      offset: { ...next.offset },
+      collapsed: next.collapsed,
+    })
+    const record = this.#records.get(layerItemId)
+    if (record) {
+      applyWrapperLayout(
+        record,
+        this.#mode,
+        this.#sessionVisibility.get(layerItemId),
+        this.#controlsEnabled(),
+        next.offset,
+      )
+    }
+  }
+
+  #controlsEnabled(): boolean {
+    return (this.#options.playbackControls ?? 'canvas') === 'canvas'
+  }
+
+  #controllerInteractive(): boolean {
+    return this.#mode === 'playback' && this.#controlsEnabled()
+  }
+
+  #refreshControllerStatuses(): void {
+    for (const record of this.#orderedRecords) {
+      if (record.host instanceof NativeDomItemHost) {
+        record.host.refreshTeacherControllerStatus()
+      }
+    }
   }
 }
