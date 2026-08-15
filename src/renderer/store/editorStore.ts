@@ -43,6 +43,11 @@ import type {
   TextRun,
   VideoNode,
 } from '../../shared/projectTypes'
+import type {
+  CourseProjectDocument,
+  FlowBlock,
+  SpatialSurfaceDocument,
+} from '../../shared/courseProjectTypes'
 import {
   createDefaultScenePresentation,
   deriveSceneNodeOverride,
@@ -107,6 +112,63 @@ import {
 } from '../components/importComponentPackage'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import {
+  addCourseSurface,
+  commitCourseHistory,
+  updateCourseProject,
+  updateLayerItem,
+} from '../course/courseStudioModel'
+import {
+  deleteFlowEditorBlock,
+  duplicateFlowEditorBlock,
+  insertFlowEditorBlock,
+  moveFlowEditorBlock,
+  reorderFlowEditorBlock,
+  updateFlowEditorBlock,
+  type FlowEditorBlockInput,
+  type MoveFlowEditorBlockDestination,
+} from '../course/flowEditorCommands'
+import type { FlowEditorBlockTarget } from '../course/flowEditorSlice'
+import {
+  addSpatialWorldComponentLayer,
+  addSpatialWorldFormulaLayer,
+  addSpatialWorldImageLayer,
+  addSpatialWorldShapeLayer,
+  addSpatialWorldTextLayer,
+  transformSpatialWorldLayers,
+  type AddSpatialWorldComponentLayerInput,
+  type SpatialEditorTransformInput,
+  type SpatialEditorWorldImageLayerOptions,
+  type SpatialEditorWorldLayerOptions,
+  type SpatialEditorWorldShapeLayerOptions,
+} from '../course/spatialEditorCommands'
+import {
+  addSpatialEditorCameraFrame,
+  addSpatialEditorSemanticZoomRule,
+  deleteSpatialCameraFrame,
+  deleteSpatialEditorSemanticZoomRule,
+  renameSpatialCameraFrame,
+  setSpatialCameraHome,
+  updateSpatialEditorSemanticZoomRule,
+  type AddSpatialEditorCameraFrameOptions,
+  type AddSpatialEditorSemanticZoomRuleInput,
+  type SpatialCameraPoseInput,
+  type SpatialEditorSemanticZoomRuleUpdate,
+} from '../course/spatialCameraCommands'
+import {
+  addSpatialPath,
+  addSpatialRelation,
+  deleteSpatialPath,
+  deleteSpatialRelation,
+  updateSpatialPath,
+  updateSpatialRelation,
+  type AddSpatialPathInput,
+  type AddSpatialRelationInput,
+  type SpatialPathUpdate,
+  type SpatialRelationUpdate,
+} from '../course/spatialPathCommands'
+import type { FlowBlockPatch } from '../ui/FlowPropertiesTab'
+import type { SpatialLayerInspectorLayer } from '../ui/SpatialLayerInspector'
+import {
   activateV9SlidePresentationState,
   activateV9SlideScene,
   addV9SlideComponentLayer,
@@ -139,6 +201,7 @@ import {
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
+  replaceV9CourseHistory,
   renameV9SlidePresentationState,
   renameV9SlideScene,
   renameV9SlideVerticalSlice,
@@ -147,6 +210,9 @@ import {
   reorderV9SlideLayers,
   resolveV9SlideRuntimeLayerItemId,
   resolveV9SlideRuntimeTextValue,
+  selectV9CourseFlowBlock,
+  selectV9CourseLocation,
+  selectV9CourseSpatialLayers,
   selectV9SlideVerticalSlice,
   setInitialV9SlidePresentationState,
   setThumbnailV9SlidePresentationState,
@@ -163,6 +229,7 @@ import {
   updateV9SlideRuntime,
   updateV9SlideRuntimeAsset,
   updateV9SlideRuntimeContent,
+  type V9CourseSelection,
   type V9SlideLayerPatch,
   type V9SlideEditingScope,
   type V9SlideLayerOrderTarget,
@@ -187,6 +254,67 @@ const PROJECT_AUDIO_CHANNELS = [
 
 function clampAudioVolume(value: number, fallback: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback
+}
+
+/**
+ * Pure Flow block patch application. The keys mirror the union emitted by
+ * FlowPropertiesTab, so the Store never has to depend on UI event shapes.
+ */
+function applyFlowBlockPatch(block: FlowBlock, patch: FlowBlockPatch): FlowBlock {
+  const next = structuredClone(block)
+  if (next.type === 'heading') {
+    if ('level' in patch && patch.level !== undefined) next.level = patch.level
+  }
+  if (
+    (next.type === 'heading' || next.type === 'paragraph' || next.type === 'quote') &&
+    'text' in patch && patch.text !== undefined
+  ) {
+    next.text = patch.text
+  }
+  if (next.type === 'list' && 'ordered' in patch && patch.ordered !== undefined) {
+    next.ordered = patch.ordered
+  }
+  if (next.type === 'quote' && 'citation' in patch && patch.citation !== undefined) {
+    next.citation = patch.citation
+  }
+  if (next.type === 'media') {
+    if ('assetId' in patch && patch.assetId !== undefined) next.assetId = patch.assetId
+    if ('mediaKind' in patch && patch.mediaKind !== undefined) next.mediaKind = patch.mediaKind
+    if ('altText' in patch && patch.altText !== undefined) next.altText = patch.altText
+    if ('caption' in patch && patch.caption !== undefined) next.caption = patch.caption
+    if ('layout' in patch && patch.layout !== undefined) next.layout = patch.layout
+  }
+  if (next.type === 'table') {
+    if ('caption' in patch && patch.caption !== undefined) next.caption = patch.caption
+    if ('columns' in patch && patch.columns !== undefined) next.columns = patch.columns
+    if ('rows' in patch && patch.rows !== undefined) next.rows = patch.rows
+  }
+  if (next.type === 'formula' && 'accessibleText' in patch && patch.accessibleText !== undefined) {
+    next.accessibleText = patch.accessibleText
+  }
+  if (next.type === 'code') {
+    if ('language' in patch && patch.language !== undefined) next.language = patch.language
+    if ('code' in patch && patch.code !== undefined) next.code = patch.code
+  }
+  if (next.type === 'callout') {
+    if ('tone' in patch && patch.tone !== undefined) next.tone = patch.tone
+    if ('title' in patch && patch.title !== undefined) next.title = patch.title
+    if ('body' in patch && patch.body !== undefined) next.body = patch.body
+  }
+  if (next.type === 'section') {
+    if ('title' in patch && patch.title !== undefined) next.title = patch.title
+    if ('collapsedByDefault' in patch && patch.collapsedByDefault !== undefined) {
+      next.collapsedByDefault = patch.collapsedByDefault
+    }
+  }
+  if (next.type === 'component') {
+    if ('component' in patch && patch.component !== undefined) next.component = patch.component
+    if ('props' in patch && patch.props !== undefined) next.props = patch.props
+    if ('staticFallbackAssetId' in patch && patch.staticFallbackAssetId !== undefined) {
+      next.staticFallbackAssetId = patch.staticFallbackAssetId
+    }
+  }
+  return next
 }
 
 export type SidebarTab =
@@ -215,6 +343,26 @@ function matchesCourseLayerContext(
     session.selection.locationId === target.locationId &&
     session.selection.stateId === target.stateId &&
     session.editingScope === target.editingScope
+}
+
+export type CourseSpatialLayerPatch = Partial<
+  Omit<SpatialLayerInspectorLayer, 'layerItemId'>
+> & {
+  readonly layerItemId: string
+}
+
+export interface InsertCourseFlowBlockOptions {
+  readonly parentId?: string | null
+  readonly index?: number
+  readonly now?: string
+}
+
+export type CourseSpatialTextLayerOptions = SpatialEditorWorldLayerOptions & {
+  readonly text?: string
+}
+
+export type CourseSpatialImageLayerOptions = SpatialEditorWorldImageLayerOptions & {
+  readonly assetId: string
 }
 
 export interface SimpleEntranceAnimationConfig {
@@ -400,6 +548,55 @@ export interface EditorState {
   ): boolean
   importCourseComponentPackages(packageData: ComponentPackageData[]): boolean
   deleteCourseComponentPackage(packageId: string): boolean
+
+  addCourseSurface(type: 'flow' | 'spatial-2d', title?: string): void
+  selectCourseLocation(locationId: string): void
+  selectCourseFlowBlock(blockId: string): void
+  insertCourseFlowBlock(
+    request: FlowEditorBlockInput,
+    options?: InsertCourseFlowBlockOptions,
+  ): void
+  updateCourseFlowBlock(blockId: string, patch: FlowBlockPatch): void
+  deleteCourseFlowBlock(blockId: string): void
+  duplicateCourseFlowBlock(blockId: string): void
+  moveCourseFlowBlock(
+    blockId: string,
+    destination: MoveFlowEditorBlockDestination,
+  ): void
+  reorderCourseFlowBlock(blockId: string, toIndex: number): void
+  selectCourseSpatialLayers(ids: readonly string[]): void
+  transformCourseSpatialLayers(input: SpatialEditorTransformInput): void
+  updateCourseSpatialLayer(patch: CourseSpatialLayerPatch): void
+  addCourseSpatialTextLayer(options?: CourseSpatialTextLayerOptions): void
+  addCourseSpatialShapeLayer(options?: SpatialEditorWorldShapeLayerOptions): void
+  addCourseSpatialFormulaLayer(options?: SpatialEditorWorldLayerOptions): void
+  addCourseSpatialImageLayer(options: CourseSpatialImageLayerOptions): void
+  addCourseSpatialComponentLayer(input: AddSpatialWorldComponentLayerInput): void
+  addCourseSpatialCameraFrame(
+    pose: SpatialCameraPoseInput,
+    options?: AddSpatialEditorCameraFrameOptions,
+  ): void
+  renameCourseSpatialCameraFrame(frameId: string, name: string): void
+  reorderCourseSpatialCameraFrames(frameIds: readonly string[]): void
+  deleteCourseSpatialCameraFrame(frameId: string): void
+  setCourseSpatialCameraHome(pose: SpatialCameraPoseInput): void
+  addCourseSpatialSemanticZoomRule(
+    input: AddSpatialEditorSemanticZoomRuleInput,
+  ): void
+  updateCourseSpatialSemanticZoomRule(
+    ruleId: string,
+    update: SpatialEditorSemanticZoomRuleUpdate,
+  ): void
+  deleteCourseSpatialSemanticZoomRule(ruleId: string): void
+  addCourseSpatialPath(input: AddSpatialPathInput): void
+  updateCourseSpatialPath(pathId: string, update: SpatialPathUpdate): void
+  deleteCourseSpatialPath(pathId: string): void
+  addCourseSpatialRelation(input: AddSpatialRelationInput): void
+  updateCourseSpatialRelation(
+    relationId: string,
+    update: SpatialRelationUpdate,
+  ): void
+  deleteCourseSpatialRelation(relationId: string): void
 
   createNewProject(): void
   loadProject(
@@ -1791,6 +1988,203 @@ export const useEditorStore = create<EditorState>((set, get) => {
     )
   }
 
+  function courseErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message.trim() !== '') {
+      return error.message
+    }
+    return '操作失败，请稍后重试'
+  }
+
+  function applyCourseCommand(
+    recipe: (session: V9SlideVerticalSliceState) => V9SlideVerticalSliceState | null,
+    statusMessage: string,
+  ): void {
+    if (get().courseSession === null) {
+      set({ errorMessage: '当前课件会话已关闭', statusMessage: null })
+      return
+    }
+    try {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const next = recipe(state.courseSession)
+        if (next === null || next === state.courseSession) return state
+        return {
+          ...state,
+          courseSession: next,
+          statusMessage,
+          errorMessage: null,
+        }
+      })
+    } catch (error) {
+      set({ errorMessage: courseErrorMessage(error), statusMessage: null })
+    }
+  }
+
+  function findFlowBlockParent(
+    blocks: readonly FlowBlock[],
+    blockId: string,
+    parentId: string | null = null,
+  ): { parentId: string | null } | null {
+    for (const block of blocks) {
+      if (block.id === blockId) return { parentId }
+      if (block.type === 'section') {
+        const nested = findFlowBlockParent(block.blocks, blockId, block.id)
+        if (nested) return nested
+      }
+    }
+    return null
+  }
+
+  function flowBlockTarget(
+    project: CourseProjectDocument,
+    selection: V9CourseSelection,
+    blockId: string,
+  ): FlowEditorBlockTarget {
+    if (typeof blockId !== 'string' || blockId.trim() === '') {
+      throw new Error('所选 Flow 内容块不能为空')
+    }
+    const location = project.locations.find(
+      (candidate) => candidate.id === selection.locationId,
+    )
+    if (!location || location.kind !== 'flow-block') {
+      throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
+    }
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'flow') {
+      throw new Error('当前 Flow 表面已失效，请重新选择')
+    }
+    const found = findFlowBlockParent(surface.blocks, blockId)
+    if (!found) throw new Error('找不到 Flow 内容块，请刷新后重试')
+    return { surfaceId: surface.id, blockId, parentId: found.parentId }
+  }
+
+  function flowSurfaceIdAt(
+    project: CourseProjectDocument,
+    selection: V9CourseSelection,
+  ): string | undefined {
+    const location = project.locations.find(
+      (candidate) => candidate.id === selection.locationId,
+    )
+    return location?.kind === 'flow-block' ? location.surfaceId : undefined
+  }
+
+  function flowSelectionValid(
+    project: CourseProjectDocument,
+    selection: V9CourseSelection,
+  ): boolean {
+    const location = project.locations.find(
+      (candidate) => candidate.id === selection.locationId,
+    )
+    if (!location || location.kind !== 'flow-block') return false
+    if (selection.flowBlockId !== location.blockId) return false
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'flow') return false
+    return findFlowBlockParent(surface.blocks, location.blockId) !== null
+  }
+
+  function flowFallbackLocationId(
+    project: CourseProjectDocument,
+    surfaceId: string | undefined,
+  ): string {
+    const surfaceLocations = surfaceId
+      ? project.locations.filter((candidate) =>
+          candidate.kind === 'flow-block' && candidate.surfaceId === surfaceId,
+        )
+      : []
+    return surfaceLocations[0]?.id ??
+      project.locations.find((candidate) => candidate.kind === 'flow-block')?.id ??
+      project.startLocationId
+  }
+
+  function repairedFlowSession(
+    session: V9SlideVerticalSliceState,
+    history: V9SlideVerticalSliceState['history'],
+  ): V9SlideVerticalSliceState {
+    if (flowSelectionValid(history.present, session.selection)) {
+      return replaceV9CourseHistory(session, history)
+    }
+    const surfaceId = flowSurfaceIdAt(session.history.present, session.selection)
+    const fallback = flowFallbackLocationId(history.present, surfaceId)
+    return selectV9CourseLocation({ ...session, history }, fallback)
+  }
+
+  function spatialSurfaceContext(
+    project: CourseProjectDocument,
+    selection: V9CourseSelection,
+  ): { surface: SpatialSurfaceDocument; locationId: string } {
+    const location = project.locations.find(
+      (candidate) => candidate.id === selection.locationId,
+    )
+    if (!location || location.kind !== 'spatial-camera') {
+      throw new Error('当前课程位置不是空间镜头，请重新选择')
+    }
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') {
+      throw new Error('当前空间表面已失效，请重新选择')
+    }
+    return { surface, locationId: location.id }
+  }
+
+  function spatialSelectionValid(
+    project: CourseProjectDocument,
+    selection: V9CourseSelection,
+  ): boolean {
+    const location = project.locations.find(
+      (candidate) => candidate.id === selection.locationId,
+    )
+    if (!location || location.kind !== 'spatial-camera') return false
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') return false
+    const selectedIds = selection.spatialLayerItemIds ?? []
+    if (selectedIds.length === 0) return true
+    const worldIds = new Set(surface.world.layerItems.map((item) => item.layerItemId))
+    return selectedIds.every((layerItemId) => worldIds.has(layerItemId))
+  }
+
+  function spatialSurfaceIdAt(
+    project: CourseProjectDocument,
+    selection: V9CourseSelection,
+  ): string | undefined {
+    const location = project.locations.find(
+      (candidate) => candidate.id === selection.locationId,
+    )
+    return location?.kind === 'spatial-camera' ? location.surfaceId : undefined
+  }
+
+  function spatialFallbackLocationId(
+    project: CourseProjectDocument,
+    surfaceId: string | undefined,
+  ): string {
+    const surfaceLocations = surfaceId
+      ? project.locations.filter((candidate) =>
+          candidate.kind === 'spatial-camera' && candidate.surfaceId === surfaceId,
+        )
+      : []
+    return surfaceLocations[0]?.id ??
+      project.locations.find((candidate) => candidate.kind === 'spatial-camera')?.id ??
+      project.startLocationId
+  }
+
+  function repairedSpatialSession(
+    session: V9SlideVerticalSliceState,
+    history: V9SlideVerticalSliceState['history'],
+  ): V9SlideVerticalSliceState {
+    if (spatialSelectionValid(history.present, session.selection)) {
+      return replaceV9CourseHistory(session, history)
+    }
+    const surfaceId = spatialSurfaceIdAt(session.history.present, session.selection)
+    const fallback = spatialFallbackLocationId(history.present, surfaceId)
+    return selectV9CourseLocation({ ...session, history }, fallback)
+  }
+
   return {
     courseSession: null,
     project: initialProject,
@@ -2673,6 +3067,577 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
       return accepted
     },
+
+    addCourseSurface(type, title) {
+      applyCourseCommand((session) => {
+        const project = addCourseSurface(session.history.present, type, { title })
+        const history = commitCourseHistory(session.history, project)
+        const addedLocation = project.locations[project.locations.length - 1]
+        if (!addedLocation) throw new Error('新建内容表面失败，请重试')
+        return selectV9CourseLocation({ ...session, history }, addedLocation.id)
+      }, type === 'flow' ? '已新建流式讲义表面' : '已新建空间探索表面')
+    },
+
+    selectCourseLocation(locationId) {
+      applyCourseCommand((session) => {
+        if (session.selection.locationId === locationId) return null
+        return selectV9CourseLocation(session, locationId)
+      }, '已切换课程位置')
+    },
+
+    selectCourseFlowBlock(blockId) {
+      applyCourseCommand((session) => {
+        if (
+          session.selection.surfaceKind === 'flow' &&
+          session.selection.flowBlockId === blockId
+        ) {
+          return null
+        }
+        return selectV9CourseFlowBlock(session, blockId)
+      }, '已选择 Flow 内容块')
+    },
+
+    insertCourseFlowBlock(request, options) {
+      applyCourseCommand((session) => {
+        const location = session.history.present.locations.find(
+          (candidate) => candidate.id === session.selection.locationId,
+        )
+        if (!location || location.kind !== 'flow-block') {
+          throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
+        }
+        const surface = session.history.present.surfaces.find(
+          (candidate) => candidate.id === location.surfaceId,
+        )
+        if (!surface || surface.type !== 'flow') {
+          throw new Error('当前 Flow 表面已失效，请重新选择')
+        }
+        const history = insertFlowEditorBlock(session.history, {
+          surfaceId: surface.id,
+          parentId: options?.parentId ?? null,
+          index: options?.index ?? surface.blocks.length,
+          block: request,
+          now: options?.now,
+        })
+        const previousLocationIds = new Set(
+          session.history.present.locations.map((candidate) => candidate.id),
+        )
+        const insertedLocation = history.present.locations.find((candidate) =>
+          !previousLocationIds.has(candidate.id) &&
+          candidate.kind === 'flow-block' &&
+          candidate.surfaceId === surface.id,
+        )
+        if (!insertedLocation) throw new Error('新建 Flow 内容块失败，请重试')
+        return selectV9CourseLocation({ ...session, history }, insertedLocation.id)
+      }, '已插入 Flow 内容块')
+    },
+
+    updateCourseFlowBlock(blockId, patch) {
+      applyCourseCommand((session) => {
+        const target = flowBlockTarget(
+          session.history.present,
+          session.selection,
+          blockId,
+        )
+        const history = updateFlowEditorBlock(
+          session.history,
+          target,
+          (block) => {
+            Object.assign(block, applyFlowBlockPatch(block, patch))
+          },
+        )
+        return replaceV9CourseHistory(session, history)
+      }, 'Flow 内容块已更新')
+    },
+
+    deleteCourseFlowBlock(blockId) {
+      applyCourseCommand((session) => {
+        const target = flowBlockTarget(
+          session.history.present,
+          session.selection,
+          blockId,
+        )
+        const history = deleteFlowEditorBlock(session.history, target)
+        return repairedFlowSession(session, history)
+      }, 'Flow 内容块已删除')
+    },
+
+    duplicateCourseFlowBlock(blockId) {
+      applyCourseCommand((session) => {
+        const target = flowBlockTarget(
+          session.history.present,
+          session.selection,
+          blockId,
+        )
+        const history = duplicateFlowEditorBlock(session.history, target)
+        const previousLocationIds = new Set(
+          session.history.present.locations.map((candidate) => candidate.id),
+        )
+        const duplicateLocation = history.present.locations.find((candidate) =>
+          !previousLocationIds.has(candidate.id) &&
+          candidate.kind === 'flow-block' &&
+          candidate.surfaceId === target.surfaceId,
+        )
+        if (duplicateLocation) {
+          return selectV9CourseLocation(
+            { ...session, history },
+            duplicateLocation.id,
+          )
+        }
+        return repairedFlowSession(session, history)
+      }, 'Flow 内容块已复制')
+    },
+
+    moveCourseFlowBlock(blockId, destination) {
+      applyCourseCommand((session) => {
+        const target = flowBlockTarget(
+          session.history.present,
+          session.selection,
+          blockId,
+        )
+        const history = moveFlowEditorBlock(session.history, target, destination)
+        return repairedFlowSession(session, history)
+      }, 'Flow 内容块已移动')
+    },
+
+    reorderCourseFlowBlock(blockId, toIndex) {
+      applyCourseCommand((session) => {
+        const target = flowBlockTarget(
+          session.history.present,
+          session.selection,
+          blockId,
+        )
+        const history = reorderFlowEditorBlock(
+          session.history,
+          target,
+          toIndex,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, 'Flow 内容块顺序已更新')
+    },
+
+
+    selectCourseSpatialLayers(ids) {
+      applyCourseCommand(
+        (session) => selectV9CourseSpatialLayers(session, ids),
+        '空间图层选择已更新',
+      )
+    },
+
+    transformCourseSpatialLayers(input) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = transformSpatialWorldLayers(
+          session.history,
+          {
+            locationId: session.selection.locationId,
+            surfaceId: context.surface.id,
+            selectedLayerItemIds: session.selection.spatialLayerItemIds ?? [],
+          },
+          input,
+        )
+        if (history === session.history) return null
+        return replaceV9CourseHistory(session, history)
+      }, '空间图层已变换')
+    },
+
+    updateCourseSpatialLayer(patch) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const worldIds = new Set(
+          context.surface.world.layerItems.map((item) => item.layerItemId),
+        )
+        if (!worldIds.has(patch.layerItemId)) {
+          throw new Error('所选空间图层已失效，请重新选择')
+        }
+        const project = updateLayerItem(
+          session.history.present,
+          {
+            surfaceId: context.surface.id,
+            layerItemId: patch.layerItemId,
+            source: 'world',
+          },
+          (item) => {
+            if (patch.label !== undefined) {
+              item.label = patch.label.trim().slice(0, 120) || item.label
+            }
+            if (patch.visible !== undefined) item.visible = patch.visible
+            if (patch.locked !== undefined) item.locked = patch.locked
+            if (patch.x !== undefined) {
+              if (!Number.isFinite(patch.x)) throw new Error('元素位置必须是有效数字')
+              item.frame.x = patch.x
+            }
+            if (patch.y !== undefined) {
+              if (!Number.isFinite(patch.y)) throw new Error('元素位置必须是有效数字')
+              item.frame.y = patch.y
+            }
+            if (patch.width !== undefined) {
+              if (!Number.isFinite(patch.width) || patch.width <= 0) {
+                throw new Error('元素宽高必须大于零')
+              }
+              item.frame.width = patch.width
+            }
+            if (patch.height !== undefined) {
+              if (!Number.isFinite(patch.height) || patch.height <= 0) {
+                throw new Error('元素宽高必须大于零')
+              }
+              item.frame.height = patch.height
+            }
+            if (patch.rotation !== undefined) {
+              if (
+                !Number.isFinite(patch.rotation) ||
+                patch.rotation < -36_000 ||
+                patch.rotation > 36_000
+              ) {
+                throw new Error('元素旋转角度超出允许范围')
+              }
+              item.rotation = patch.rotation
+            }
+            if (patch.opacity !== undefined) {
+              if (!Number.isFinite(patch.opacity)) {
+                throw new Error('元素不透明度必须是有效数字')
+              }
+              item.opacity = Math.min(1, Math.max(0, patch.opacity))
+            }
+          },
+        )
+        const history = commitCourseHistory(session.history, project)
+        return replaceV9CourseHistory(session, history)
+      }, '空间图层已更新')
+    },
+
+    addCourseSpatialTextLayer(options) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = addSpatialWorldTextLayer(
+          session.history,
+          context.surface.id,
+          options?.text ?? '双击编辑文字',
+          options,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '已添加空间文字')
+    },
+
+    addCourseSpatialShapeLayer(options) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = addSpatialWorldShapeLayer(
+          session.history,
+          context.surface.id,
+          options ?? {},
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '已添加空间图形')
+    },
+
+    addCourseSpatialFormulaLayer(options) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = addSpatialWorldFormulaLayer(
+          session.history,
+          context.surface.id,
+          options ?? {},
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '已添加空间公式')
+    },
+
+    addCourseSpatialImageLayer(options) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = addSpatialWorldImageLayer(
+          session.history,
+          context.surface.id,
+          options.assetId,
+          options,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '已添加空间图片')
+    },
+
+    addCourseSpatialComponentLayer(input) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        if (input.surfaceId !== context.surface.id) {
+          throw new Error('组件必须添加到当前空间表面，请重新选择')
+        }
+        const history = addSpatialWorldComponentLayer(session.history, input)
+        return replaceV9CourseHistory(session, history)
+      }, '已添加空间组件')
+    },
+
+
+    addCourseSpatialCameraFrame(pose, options) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = addSpatialEditorCameraFrame(
+          session.history,
+          context.surface.id,
+          pose,
+          options,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '空间镜头画面已添加')
+    },
+
+    renameCourseSpatialCameraFrame(frameId, name) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = renameSpatialCameraFrame(
+          session.history,
+          context.surface.id,
+          frameId,
+          name,
+        )
+        if (history === session.history) return null
+        return replaceV9CourseHistory(session, history)
+      }, '空间镜头画面已重命名')
+    },
+
+    reorderCourseSpatialCameraFrames(frameIds) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const currentIds = context.surface.camera.frames.map((frame) => frame.id)
+        const nextIds = [...frameIds]
+        const currentSet = new Set(currentIds)
+        if (
+          nextIds.length !== currentIds.length ||
+          new Set(nextIds).size !== nextIds.length ||
+          nextIds.some((frameId) => !currentSet.has(frameId))
+        ) {
+          throw new Error('镜头画面列表已变化，请刷新后重试')
+        }
+        if (currentIds.every((frameId, index) => frameId === nextIds[index])) {
+          return null
+        }
+        const project = updateCourseProject(session.history.present, (draft) => {
+          const draftLocation = draft.locations.find(
+            (candidate) => candidate.id === session.selection.locationId,
+          )
+          if (!draftLocation || draftLocation.kind !== 'spatial-camera') {
+            throw new Error('当前空间镜头位置已失效')
+          }
+          const draftSurface = draft.surfaces.find(
+            (candidate) => candidate.id === draftLocation.surfaceId,
+          )
+          if (!draftSurface || draftSurface.type !== 'spatial-2d') {
+            throw new Error('当前空间表面已失效')
+          }
+          const byId = new Map(
+            draftSurface.camera.frames.map((frame) => [frame.id, frame]),
+          )
+          draftSurface.camera.frames = nextIds.map((frameId) => {
+            const frame = byId.get(frameId)
+            if (!frame) throw new Error('镜头画面列表已变化，请刷新后重试')
+            return frame
+          })
+        })
+        const history = commitCourseHistory(session.history, project)
+        return replaceV9CourseHistory(session, history)
+      }, '空间镜头顺序已更新')
+    },
+
+    deleteCourseSpatialCameraFrame(frameId) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = deleteSpatialCameraFrame(
+          session.history,
+          context.surface.id,
+          frameId,
+        )
+        return repairedSpatialSession(session, history)
+      }, '空间镜头画面已删除')
+    },
+
+    setCourseSpatialCameraHome(pose) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = setSpatialCameraHome(
+          session.history,
+          context.surface.id,
+          pose,
+        )
+        if (history === session.history) return null
+        return replaceV9CourseHistory(session, history)
+      }, '空间默认镜头已更新')
+    },
+
+
+    addCourseSpatialSemanticZoomRule(input) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = addSpatialEditorSemanticZoomRule(
+          session.history,
+          context.surface.id,
+          input,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '语义缩放规则已添加')
+    },
+
+    updateCourseSpatialSemanticZoomRule(ruleId, update) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = updateSpatialEditorSemanticZoomRule(
+          session.history,
+          context.surface.id,
+          ruleId,
+          update,
+        )
+        if (history === session.history) return null
+        return replaceV9CourseHistory(session, history)
+      }, '语义缩放规则已更新')
+    },
+
+    deleteCourseSpatialSemanticZoomRule(ruleId) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = deleteSpatialEditorSemanticZoomRule(
+          session.history,
+          context.surface.id,
+          ruleId,
+        )
+        return repairedSpatialSession(session, history)
+      }, '语义缩放规则已删除')
+    },
+
+    addCourseSpatialPath(input) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        if (input.surfaceId !== context.surface.id) {
+          throw new Error('路径必须添加到当前空间表面，请重新选择')
+        }
+        const history = addSpatialPath(session.history, input)
+        return replaceV9CourseHistory(session, history)
+      }, '空间路径已添加')
+    },
+
+    updateCourseSpatialPath(pathId, update) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = updateSpatialPath(
+          session.history,
+          context.surface.id,
+          pathId,
+          update,
+        )
+        if (history === session.history) return null
+        return replaceV9CourseHistory(session, history)
+      }, '空间路径已更新')
+    },
+
+    deleteCourseSpatialPath(pathId) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = deleteSpatialPath(
+          session.history,
+          context.surface.id,
+          pathId,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '空间路径已删除')
+    },
+
+    addCourseSpatialRelation(input) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        if (input.surfaceId !== context.surface.id) {
+          throw new Error('关系连线必须添加到当前空间表面，请重新选择')
+        }
+        const history = addSpatialRelation(session.history, input)
+        return replaceV9CourseHistory(session, history)
+      }, '空间关系连线已添加')
+    },
+
+    updateCourseSpatialRelation(relationId, update) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = updateSpatialRelation(
+          session.history,
+          context.surface.id,
+          relationId,
+          update,
+        )
+        if (history === session.history) return null
+        return replaceV9CourseHistory(session, history)
+      }, '空间关系连线已更新')
+    },
+
+    deleteCourseSpatialRelation(relationId) {
+      applyCourseCommand((session) => {
+        const context = spatialSurfaceContext(
+          session.history.present,
+          session.selection,
+        )
+        const history = deleteSpatialRelation(
+          session.history,
+          context.surface.id,
+          relationId,
+        )
+        return replaceV9CourseHistory(session, history)
+      }, '空间关系连线已删除')
+    },
+
 
     createNewProject() {
       const project = createProject()

@@ -86,6 +86,8 @@ import {
   type SlideEditorSelection,
   type SlideEditorTransformInput,
 } from './slideEditorCommands'
+import { selectFlowEditorBlock } from './flowEditorSlice'
+import { selectSpatialEditorLayers } from './spatialEditorCommands'
 import {
   buildSlideEditorView,
   type DeepReadonly,
@@ -160,7 +162,7 @@ export type EditorStartupBackend =
 export interface V9SlideVerticalSliceState {
   readonly sessionId: string
   readonly history: CourseHistoryState
-  readonly selection: SlideEditorSelection
+  readonly selection: V9CourseSelection
   readonly editingScope: V9SlideEditingScope
   readonly savedSnapshot: CourseProjectArchiveData | null
   readonly projectPath: string | null
@@ -170,6 +172,20 @@ export interface V9SlideVerticalSliceState {
 }
 
 export type V9SlideEditingScope = SlideEditorLayerScope
+
+export type V9CourseSurfaceKind = 'slide' | 'flow' | 'spatial-2d'
+
+/**
+ * V9 editor selection shared by Slide, Flow and Spatial surfaces. The extra
+ * fields are optional so legacy Slide callers can keep passing a bare
+ * `SlideEditorSelection`; `selectCourseEditorLocation` always derives them
+ * for the active course location.
+ */
+export interface V9CourseSelection extends SlideEditorSelection {
+  readonly surfaceKind?: V9CourseSurfaceKind
+  readonly flowBlockId?: string | null
+  readonly spatialLayerItemIds?: readonly string[]
+}
 
 export interface V9SlideSelectionInput {
   readonly nodeIds: readonly string[]
@@ -318,7 +334,7 @@ function createFixtureProject() {
 function freezeState(
   sessionId: string,
   history: CourseHistoryState,
-  selection: SlideEditorSelection,
+  selection: V9CourseSelection,
   editingScope: V9SlideEditingScope,
   savedSnapshot: CourseProjectArchiveData | null,
   projectPath: string | null,
@@ -362,20 +378,151 @@ function selectCourseEditorLocation(
   locationId: string,
   stateId: string | null,
   selectionIds: readonly string[],
-): SlideEditorSelection {
+): V9CourseSelection {
   const location = project.locations.find((candidate) => candidate.id === locationId)
   if (!location) throw new Error('当前课程位置已失效')
   if (location.kind === 'slide-scene') {
-    return selectSlideEditorLayers({ project, locationId, stateId, selectionIds })
+    return Object.freeze({
+      ...selectSlideEditorLayers({ project, locationId, stateId, selectionIds }),
+      surfaceKind: 'slide' as const,
+      flowBlockId: null,
+    })
   }
   if (selectionIds.length > 0) {
     throw new Error('当前内容类型暂不支持画布选择')
+  }
+  if (location.kind === 'flow-block') {
+    return Object.freeze({
+      locationId,
+      stateId: null,
+      selectionIds: Object.freeze([]),
+      surfaceKind: 'flow' as const,
+      flowBlockId: location.blockId,
+    })
   }
   return Object.freeze({
     locationId,
     stateId: null,
     selectionIds: Object.freeze([]),
+    surfaceKind: 'spatial-2d' as const,
+    spatialLayerItemIds: Object.freeze([]),
   })
+}
+
+export function selectV9CourseFlowBlock(
+  state: V9SlideVerticalSliceState,
+  blockId: string,
+): V9SlideVerticalSliceState {
+  const project = state.history.present
+  const currentLocation = project.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (!currentLocation || currentLocation.kind !== 'flow-block') {
+    throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
+  }
+  const location = project.locations.find((candidate) =>
+    candidate.kind === 'flow-block' &&
+    candidate.surfaceId === currentLocation.surfaceId &&
+    candidate.blockId === blockId,
+  )
+  if (!location) {
+    throw new Error('找不到对应的 Flow 内容块，请刷新后重试')
+  }
+  selectFlowEditorBlock(project, location.id, blockId)
+  return freezeState(
+    state.sessionId,
+    state.history,
+    Object.freeze({
+      locationId: location.id,
+      stateId: null,
+      selectionIds: Object.freeze([]),
+      surfaceKind: 'flow' as const,
+      flowBlockId: blockId,
+    }),
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
+}
+
+export function selectV9CourseSpatialLayers(
+  state: V9SlideVerticalSliceState,
+  ids: readonly string[],
+): V9SlideVerticalSliceState {
+  const project = state.history.present
+  const location = project.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (!location || location.kind !== 'spatial-camera') {
+    throw new Error('当前课程位置不是空间镜头，请重新选择')
+  }
+  const spatialSelection = selectSpatialEditorLayers({
+    project,
+    locationId: location.id,
+    selectedLayerItemIds: ids,
+  })
+  return freezeState(
+    state.sessionId,
+    state.history,
+    Object.freeze({
+      locationId: spatialSelection.locationId,
+      stateId: null,
+      selectionIds: Object.freeze([...spatialSelection.selectedLayerItemIds]),
+      surfaceKind: 'spatial-2d' as const,
+      spatialLayerItemIds: spatialSelection.selectedLayerItemIds,
+    }),
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
+}
+
+export function selectV9CourseLocation(
+  state: V9SlideVerticalSliceState,
+  locationId: string,
+): V9SlideVerticalSliceState {
+  const selection = selectCourseEditorLocation(
+    state.history.present,
+    locationId,
+    null,
+    [],
+  )
+  return freezeState(
+    state.sessionId,
+    state.history,
+    selection,
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
+}
+
+export function replaceV9CourseHistory(
+  state: V9SlideVerticalSliceState,
+  history: CourseHistoryState,
+  selection: V9CourseSelection = state.selection,
+  editingScope: V9SlideEditingScope = state.editingScope,
+): V9SlideVerticalSliceState {
+  return freezeState(
+    state.sessionId,
+    history,
+    selection,
+    editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
 }
 
 export function openV9SlideVerticalSliceState(
@@ -783,12 +930,22 @@ export function selectV9SlideVerticalSlice(
     nextSelectionIds = [...input.nodeIds]
   }
   if (sameSelection(nextSelectionIds, state.selection.selectionIds)) return state
-  return freezeState(state.sessionId, state.history, selectSlideEditorLayers({
-    project: state.history.present,
-    locationId: state.selection.locationId,
-    stateId: state.selection.stateId,
-    selectionIds: nextSelectionIds,
-  }), state.editingScope, state.savedSnapshot, state.projectPath, state.assetFiles, state.componentFiles, state.componentPackages)
+  return freezeState(
+    state.sessionId,
+    state.history,
+    selectCourseEditorLocation(
+      state.history.present,
+      state.selection.locationId,
+      state.selection.stateId,
+      nextSelectionIds,
+    ),
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
 }
 
 export function transformV9SlideVerticalSlice(
@@ -901,13 +1058,13 @@ function selectionAfterLayerCommand(
   state: V9SlideVerticalSliceState,
   project: V9SlideVerticalSliceState['history']['present'],
   selectionIds: readonly string[],
-): SlideEditorSelection {
-  return selectSlideEditorLayers({
+): V9CourseSelection {
+  return selectCourseEditorLocation(
     project,
-    locationId: state.selection.locationId,
-    stateId: state.selection.stateId,
+    state.selection.locationId,
+    state.selection.stateId,
     selectionIds,
-  })
+  )
 }
 
 function activeScopedAuthoringLayer(
@@ -2486,7 +2643,7 @@ function activeSlideSurface(state: V9SlideVerticalSliceState) {
 function baseSelectionForScene(
   project: V9SlideVerticalSliceState['history']['present'],
   sceneId: string,
-): SlideEditorSelection {
+): V9CourseSelection {
   const surface = slideSurfaceForScene(project, sceneId)
   const location = project.locations.find((candidate) =>
     candidate.kind === 'slide-scene' &&
@@ -2499,18 +2656,18 @@ function baseSelectionForScene(
     candidate.sceneId === sceneId,
   )
   if (!location) throw new Error('当前幻灯片缺少课程位置')
-  return selectSlideEditorLayers({
+  return selectCourseEditorLocation(
     project,
-    locationId: location.id,
-    stateId: null,
-    selectionIds: [],
-  })
+    location.id,
+    null,
+    [],
+  )
 }
 
 function commitV9SlideDocument(
   state: V9SlideVerticalSliceState,
   project: V9SlideVerticalSliceState['history']['present'],
-  selection: SlideEditorSelection = state.selection,
+  selection: V9CourseSelection = state.selection,
   editingScope: V9SlideEditingScope = state.editingScope,
   assetFiles: V9SlideVerticalSliceState['assetFiles'] = state.assetFiles,
 ): V9SlideVerticalSliceState {
@@ -2532,12 +2689,12 @@ export function setV9SlideEditingScope(
   editingScope: V9SlideEditingScope,
 ): V9SlideVerticalSliceState {
   if (state.editingScope === editingScope && state.selection.selectionIds.length === 0) return state
-  const selection = selectSlideEditorLayers({
-    project: state.history.present,
-    locationId: state.selection.locationId,
-    stateId: state.selection.stateId,
-    selectionIds: [],
-  })
+  const selection = selectCourseEditorLocation(
+    state.history.present,
+    state.selection.locationId,
+    state.selection.stateId,
+    [],
+  )
   return freezeState(
     state.sessionId,
     state.history,
@@ -2653,21 +2810,21 @@ export function deleteV9SlideScene(
   if (deletingActiveScene) {
     return commitV9SlideDocument(state, project, baseSelectionForScene(project, fallback.id), 'scene')
   }
-  let selection: SlideEditorSelection
+  let selection: V9CourseSelection
   try {
-    selection = selectSlideEditorLayers({
+    selection = selectCourseEditorLocation(
       project,
-      locationId: state.selection.locationId,
-      stateId: state.selection.stateId,
-      selectionIds: state.selection.selectionIds,
-    })
+      state.selection.locationId,
+      state.selection.stateId,
+      state.selection.selectionIds,
+    )
   } catch {
-    selection = selectSlideEditorLayers({
+    selection = selectCourseEditorLocation(
       project,
-      locationId: state.selection.locationId,
-      stateId: state.selection.stateId,
-      selectionIds: [],
-    })
+      state.selection.locationId,
+      state.selection.stateId,
+      [],
+    )
   }
   return commitV9SlideDocument(state, project, selection, state.editingScope)
 }
@@ -2692,13 +2849,13 @@ function presentationSelection(
   state: V9SlideVerticalSliceState,
   project: V9SlideVerticalSliceState['history']['present'],
   stateId: string | null,
-): SlideEditorSelection {
-  return selectSlideEditorLayers({
+): V9CourseSelection {
+  return selectCourseEditorLocation(
     project,
-    locationId: state.selection.locationId,
+    state.selection.locationId,
     stateId,
-    selectionIds: [],
-  })
+    [],
+  )
 }
 
 export function activateV9SlidePresentationState(
@@ -2873,12 +3030,12 @@ export function deleteV9SlidePresentationState(
   if (!nextScene?.presentation) throw new Error('删除后当前幻灯片状态已失效')
   const selection = state.selection.stateId === stateId
     ? presentationSelection(state, project, nextScene.presentation.initialStateId)
-    : selectSlideEditorLayers({
+    : selectCourseEditorLocation(
         project,
-        locationId: state.selection.locationId,
-        stateId: state.selection.stateId,
-        selectionIds: state.selection.selectionIds,
-      })
+        state.selection.locationId,
+        state.selection.stateId,
+        state.selection.selectionIds,
+      )
   return commitV9SlideDocument(
     state,
     project,
@@ -2890,7 +3047,7 @@ export function deleteV9SlidePresentationState(
 function selectionForHistory(
   state: V9SlideVerticalSliceState,
   history: CourseHistoryState,
-): SlideEditorSelection {
+): V9CourseSelection {
   try {
     return selectCourseEditorLocation(
       history.present,
@@ -3330,12 +3487,12 @@ export function addV9SlideComponentLayer(
     y,
     now,
   })
-  const selection = selectSlideEditorLayers({
+  const selection = selectCourseEditorLocation(
     project,
-    locationId: state.selection.locationId,
-    stateId: state.selection.stateId,
-    selectionIds: [],
-  })
+    state.selection.locationId,
+    state.selection.stateId,
+    [],
+  )
   return commitV9SlideDocument(state, project, selection)
 }
 
