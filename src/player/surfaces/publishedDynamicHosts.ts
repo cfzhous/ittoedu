@@ -733,6 +733,7 @@ export class PublishedDynamicHostRegistry {
       definition = this.#components.executeRuntime(
         component.id,
         decodePublishedCourseCode(component.code, `Component ${key}`),
+        { expectedVersion: component.version },
       )
       this.#componentDefinitions.set(key, definition)
     }

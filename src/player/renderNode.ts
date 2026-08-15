@@ -344,14 +344,24 @@ function resolveComponentPackage(
   payload: ExportPayload,
   node: ExternalComponentNode,
 ): ExportPayload['components'][string] | undefined {
-  return (
-    payload.components[`${node.component.packageId}@${node.component.version}`] ??
-    payload.components[node.component.packageId] ??
-    Object.values(payload.components).find(
-      ({ manifest }) =>
-        manifest.id === node.component.packageId &&
-        manifest.version === node.component.version,
-    )
+  const exact =
+    payload.components[`${node.component.packageId}@${node.component.version}`]
+  if (exact) return exact
+  // Legacy payloads may key a package by its plain id. Only accept that entry
+  // when its manifest matches the requested id AND version exactly; otherwise
+  // the instance would silently run a different version of the same package.
+  const plain = payload.components[node.component.packageId]
+  if (
+    plain &&
+    plain.manifest.id === node.component.packageId &&
+    plain.manifest.version === node.component.version
+  ) {
+    return plain
+  }
+  return Object.values(payload.components).find(
+    ({ manifest }) =>
+      manifest.id === node.component.packageId &&
+      manifest.version === node.component.version,
   )
 }
 
@@ -395,8 +405,19 @@ function renderExternalComponent(
     componentPackage.manifest.id,
   )
   const definition = context.registry.get(componentPackage.manifest.id)
-  if (!definition || registrationError) {
-    const error = registrationError ?? new Error('组件没有完成注册')
+  const installedVersion = context.registry.getInstalledVersion(
+    componentPackage.manifest.id,
+  )
+  const versionConflict =
+    installedVersion !== undefined &&
+    installedVersion !== componentPackage.manifest.version
+  if (!definition || registrationError || versionConflict) {
+    const error = registrationError ??
+      (versionConflict
+        ? new Error(
+            `组件“${componentPackage.manifest.id}”版本冲突：Player 已装载 ${installedVersion}，实例请求 ${componentPackage.manifest.version}；同一 package 不允许并存多个版本`,
+          )
+        : new Error('组件没有完成注册'))
     return renderErrorPlaceholder(
       scene,
       node,

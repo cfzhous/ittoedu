@@ -9,6 +9,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export interface ComponentRuntimeLoadOptions {
+  /** Version expected for the string overload; lets hosts lock exact bytes. */
+  expectedVersion?: string
+  /**
+   * Explicitly retires a previously installed version before loading the new
+   * one. Only the editor's package-replacement path may set this; players
+   * keep strict multi-version rejection.
+   */
+  replace?: boolean
+}
+
 function isComponentDefinition(value: unknown): value is ComponentDefinitionV4 {
   if (typeof value !== 'object' || value === null) {
     return false
@@ -26,6 +37,7 @@ function isComponentDefinition(value: unknown): value is ComponentDefinitionV4 {
 
 export class ComponentRegistry {
   private readonly definitions = new Map<string, ComponentDefinitionV4>()
+  private readonly installedVersions = new Map<string, string>()
   private readonly loadErrors = new Map<string, Error>()
   private readonly globalApi = {
     define: (definition: ComponentDefinitionV4): void => {
@@ -49,19 +61,56 @@ export class ComponentRegistry {
     this.installed = true
   }
 
-  executeRuntime(manifest: ComponentManifest, runtimeSource: string): ComponentDefinitionV4
-  executeRuntime(componentId: string, runtimeSource: string): ComponentDefinitionV4
+  executeRuntime(
+    manifest: ComponentManifest,
+    runtimeSource: string,
+    options?: ComponentRuntimeLoadOptions,
+  ): ComponentDefinitionV4
+  executeRuntime(
+    componentId: string,
+    runtimeSource: string,
+    options?: ComponentRuntimeLoadOptions,
+  ): ComponentDefinitionV4
   executeRuntime(
     manifestOrId: ComponentManifest | string,
     runtimeSource: string,
+    options: ComponentRuntimeLoadOptions = {},
   ): ComponentDefinitionV4 {
     const componentId = typeof manifestOrId === 'string'
       ? manifestOrId
       : manifestOrId.id
+    const requestedVersion = typeof manifestOrId === 'string'
+      ? options.expectedVersion
+      : manifestOrId.version
     if (!runtimeSource.trim()) {
       const error = new Error(`组件“${componentId}”的 runtime.js 为空`)
       this.loadErrors.set(componentId, error)
       throw error
+    }
+
+    // Component API 4 explicitly rejects a second version of the same package.
+    // The first loaded version stays installed; every later request for a
+    // different version fails loudly instead of silently overwriting it.
+    // Only an explicit replacement (the editor's package-swap path) may retire
+    // the installed version first; players never pass `replace`.
+    const installedVersion = this.installedVersions.get(componentId)
+    if (installedVersion !== undefined && requestedVersion === undefined) {
+      throw new Error(
+        `组件“${componentId}”已装载 ${installedVersion}；再次装载必须显式声明 expectedVersion，不能暗选版本`,
+      )
+    }
+    if (
+      requestedVersion !== undefined &&
+      installedVersion !== undefined &&
+      installedVersion !== requestedVersion
+    ) {
+      if (options.replace !== true) {
+        throw new Error(
+          `组件“${componentId}”版本冲突：Player 已装载 ${installedVersion}，不能同时装载 ${requestedVersion}；同一 package 不允许并存多个版本`,
+        )
+      }
+      this.definitions.delete(componentId)
+      this.installedVersions.delete(componentId)
     }
 
     this.install()
@@ -95,6 +144,9 @@ export class ComponentRegistry {
         )
       }
       this.definitions.set(componentId, definition)
+      if (requestedVersion !== undefined) {
+        this.installedVersions.set(componentId, requestedVersion)
+      }
       this.loadErrors.delete(componentId)
       return definition
     } catch (cause) {
@@ -124,6 +176,15 @@ export class ComponentRegistry {
     return this.definitions.get(componentId)
   }
 
+  /**
+   * Version of the definition currently installed for a component id. When it
+   * differs from an instance's requested manifest version, the host must reject
+   * the instance explicitly instead of rendering it with a different version.
+   */
+  getInstalledVersion(componentId: string): string | undefined {
+    return this.installedVersions.get(componentId)
+  }
+
   getLoadError(componentId: string): Error | undefined {
     return this.loadErrors.get(componentId)
   }
@@ -142,6 +203,7 @@ export class ComponentRegistry {
     this.expectedRuntimeApiVersion = null
     this.definitionDuringLoad = null
     this.definitions.clear()
+    this.installedVersions.clear()
     this.loadErrors.clear()
   }
 

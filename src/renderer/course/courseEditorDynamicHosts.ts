@@ -848,7 +848,13 @@ export class CourseEditorDynamicHostRegistry {
     if (!pkg) throw new Error(`工程缺少组件包 ${key}`)
     let definition = this.#componentDefinitions.get(key)
     if (!definition || this.#componentSources.get(key) !== pkg.runtimeSource) {
-      definition = this.#components.executeRuntime(pkg.manifest, pkg.runtimeSource)
+      const installedVersion = this.#components.getInstalledVersion(pkg.manifest.id)
+      definition = this.#components.executeRuntime(pkg.manifest, pkg.runtimeSource, {
+        // A project keeps one version per package id; a different version here
+        // is the explicit package-replacement transition, not a coexistence
+        // conflict, so the previous version is retired before loading.
+        replace: installedVersion !== undefined && installedVersion !== pkg.manifest.version,
+      })
       this.#componentDefinitions.set(key, definition)
       this.#componentSources.set(key, pkg.runtimeSource)
     }
