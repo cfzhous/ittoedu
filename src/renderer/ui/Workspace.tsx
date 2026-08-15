@@ -71,6 +71,7 @@ import {
   workspaceSelectionAllowed,
   workspaceTransformAllowed,
   workspaceSlidePreviewAssetFiles,
+  workspaceSlideCarrierScope,
   workspaceSlidePreviewGenerationIdentity,
   workspaceSlidePreviewSceneId,
   workspaceSlidePreviewStateId,
@@ -380,6 +381,7 @@ function WorkspaceEditor({
   const activePreviewResourcesRef =
     useRef<ActiveRuntimePreviewResources | null>(null)
   const previousSceneRef = useRef<SceneDocument | null>(null)
+  const previousPreviewDocumentRef = useRef<SceneDocument | null>(null)
   const previousComponentPackagesRef = useRef<
     Record<string, ComponentPackageData> | null
   >(null)
@@ -527,7 +529,7 @@ function WorkspaceEditor({
       : null,
     [
       slideAuthoring?.componentPackages,
-      slideAuthoring?.document,
+      slideAuthoring?.previewDocument,
       slideAuthoring?.previewResources,
       slideAuthoring?.sessionId,
     ],
@@ -948,9 +950,13 @@ function WorkspaceEditor({
     scope: 'scene' | 'global',
     node: SceneNode,
   ) => {
+    const carrierScope = workspaceSlideCarrierScope(
+      slideAuthoringInputRef.current,
+      scope,
+    )
     pendingAuthoringNodesRef.current.set(
-      `${scope}:${node.id}`,
-      { scope, node: structuredClone(node) },
+      `${carrierScope}:${node.id}`,
+      { scope: carrierScope, node: structuredClone(node) },
     )
     if (authoringFrameRef.current !== null) return
     authoringFrameRef.current = window.requestAnimationFrame(
@@ -962,7 +968,7 @@ function WorkspaceEditor({
     const editorState = useEditorStore.getState()
     const currentScene = selectActiveScene(editorState)
     const injectedSlideAuthoring = slideAuthoringInputRef.current
-    const materialized = injectedSlideAuthoring?.document ?? materializeScene(
+    const materialized = injectedSlideAuthoring?.previewDocument ?? materializeScene(
       currentScene,
       editorState.activePresentationStateId,
     )
@@ -1049,7 +1055,12 @@ function WorkspaceEditor({
         initialScene.id,
         injectedSlideAuthoring,
       )
-      const hostMode: PlayerHostMode = 'playback'
+      // Injected V9 always uses the Player's inert authoring host: actions are
+      // frozen and the legacy escape controls never mount. Legacy V8 keeps its
+      // established playback + inspection path.
+      const hostMode: PlayerHostMode = injectedSlideAuthoring
+        ? 'authoring'
+        : 'playback'
       const initialStateId = workspaceSlidePreviewStateId(
         injectedSlideAuthoring,
         editorState.activePresentationStateId ??
@@ -1078,7 +1089,9 @@ function WorkspaceEditor({
         playerBundle,
         initialSceneId,
         initialStateId,
-        editingScope: injectedSlideAuthoring?.editingScope ?? editorState.editingScope,
+        // V9 Native scopes are flattened into the carrier scene. Persistence
+        // still resolves the real source through the injected callbacks.
+        editingScope: injectedSlideAuthoring ? 'scene' : editorState.editingScope,
         hostMode,
         bootstrapSent: false,
       }
@@ -1165,7 +1178,7 @@ function WorkspaceEditor({
       setPreviewFeedback(null)
       setPlayerInspectionMode(false)
       syncRuntimePreview()
-    } else {
+    } else if (previewInitRef.current?.hostMode !== 'authoring') {
       setPlayerInspectionMode(true)
     }
   }, [canvasMode, setPlayerInspectionMode, syncRuntimePreview])
@@ -1261,7 +1274,7 @@ function WorkspaceEditor({
           setPreviewFeedback(null)
           setPlayerInspectionMode(false)
           syncRuntimePreview()
-        } else {
+        } else if (previewInitRef.current?.hostMode !== 'authoring') {
           setPlayerInspectionMode(true)
         }
         return
@@ -1328,13 +1341,29 @@ function WorkspaceEditor({
           return
         }
         authoringReadyRef.current = true
-        authoringSnapshotBarrierRef.current = null
-        setAcknowledgedPreviewGeneration(previewGeneration)
+        setAcknowledgedPreviewGeneration(null)
+        setPreviewFeedback({
+          kind: 'loading',
+          title: '正在同步编辑画布',
+          message: '正在应用当前工程中的最新画面…',
+        })
         clearRuntimePreviewStartupTimer()
-        setPreviewFeedback(null)
-        useEditorStore.getState().setStatus(
-          '已冻结当前位置，可直接点选并修改当前交互画面',
-        )
+        previewStartupTimerRef.current = window.setTimeout(() => {
+          failRuntimePreview(
+            init.token,
+            '编辑画布没有完成最新画面同步。请重新载入画布。',
+          )
+        }, RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS)
+        const lastCommand = syncCompleteAuthoringSnapshot()
+        if (!lastCommand) {
+          failRuntimePreview(
+            init.token,
+            '编辑画布无法同步当前工程中的最新画面。请重新载入画布。',
+          )
+          return
+        }
+        authoringSnapshotBarrierRef.current =
+          playerAuthoringSnapshotBarrierForCommand(lastCommand)
         return
       }
       if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack) {
@@ -1352,6 +1381,9 @@ function WorkspaceEditor({
         clearRuntimePreviewStartupTimer()
         setAcknowledgedPreviewGeneration(previewGeneration)
         setPreviewFeedback(null)
+        useEditorStore.getState().setStatus(
+          '已冻结当前位置，可直接点选并修改当前交互画面',
+        )
         return
       }
       if (
@@ -1508,6 +1540,7 @@ function WorkspaceEditor({
   const fallbackSlideAuthoring = useMemo<WorkspaceSlideAuthoringInput>(() => ({
     sessionId: `legacy-${project.id}`,
     document: fallbackDocument,
+    previewDocument: fallbackDocument,
     componentPackages,
     previewResources: {
       assets: project.assets,
@@ -1565,6 +1598,7 @@ function WorkspaceEditor({
   const activeSlideAuthoringRef = useRef(activeSlideAuthoring)
   activeSlideAuthoringRef.current = activeSlideAuthoring
   const document = activeSlideAuthoring.document
+  const previewDocument = activeSlideAuthoring.previewDocument
   const authoringComponentPackages = activeSlideAuthoring.componentPackages
   const authoringSelectedNodeIds = activeSlideAuthoring.selectedNodeIds
   const authoringEditingScope = activeSlideAuthoring.editingScope
@@ -2496,47 +2530,86 @@ function WorkspaceEditor({
       }
     }
     if (canvasMode === 'edit' && authoringReadyRef.current) {
-      const previousById = new Map(
-        previous?.nodes.map((node) => [node.id, node]) ?? [],
-      )
-      for (const node of document.nodes) {
-        const before = previousById.get(node.id)
-        if (!before || !nodesEqual(before, node)) {
-          queueAuthoringNodePatch(authoringEditingScope, node)
+      if (hasInjectedSlideAuthoring) {
+        const previousPreview = previousPreviewDocumentRef.current
+        const previousById = new Map(
+          previousPreview?.nodes.map((node) => [node.id, node]) ?? [],
+        )
+        for (const node of previewDocument.nodes) {
+          const before = previousById.get(node.id)
+          if (!before || !nodesEqual(before, node)) {
+            queueAuthoringNodePatch('scene', node)
+          }
         }
-      }
-      if (authoringEditingScope === 'scene') {
         if (
-          !previous ||
-          previous.backgroundColor !== document.backgroundColor ||
-          previous.backgroundAssetId !== document.backgroundAssetId
+          !previousPreview ||
+          previousPreview.backgroundColor !== previewDocument.backgroundColor ||
+          previousPreview.backgroundAssetId !== previewDocument.backgroundAssetId
         ) {
           postAuthoringPatch({
             kind: 'scene-background',
             target: { kind: 'scene-background', scope: 'scene' },
-            backgroundColor: document.backgroundColor,
-            backgroundAssetId: document.backgroundAssetId ?? null,
+            backgroundColor: previewDocument.backgroundColor,
+            backgroundAssetId: previewDocument.backgroundAssetId ?? null,
           })
         }
-        const previousOrder = previous?.nodes.map((node) => node.id).join('|')
-        const nextOrder = document.nodes.map((node) => node.id).join('|')
+        const previousOrder = previousPreview?.nodes.map((node) => node.id).join('|')
+        const nextOrder = previewDocument.nodes.map((node) => node.id).join('|')
         if (previousOrder !== nextOrder) {
           postAuthoringPatch({
             kind: 'scene-order',
             target: { kind: 'scene-order', scope: 'scene' },
-            nodeIds: document.nodes.map((node) => node.id),
+            nodeIds: previewDocument.nodes.map((node) => node.id),
           })
+        }
+      } else {
+        const previousById = new Map(
+          previous?.nodes.map((node) => [node.id, node]) ?? [],
+        )
+        for (const node of document.nodes) {
+          const before = previousById.get(node.id)
+          if (!before || !nodesEqual(before, node)) {
+            queueAuthoringNodePatch(authoringEditingScope, node)
+          }
+        }
+        if (authoringEditingScope === 'scene') {
+          if (
+            !previous ||
+            previous.backgroundColor !== document.backgroundColor ||
+            previous.backgroundAssetId !== document.backgroundAssetId
+          ) {
+            postAuthoringPatch({
+              kind: 'scene-background',
+              target: { kind: 'scene-background', scope: 'scene' },
+              backgroundColor: document.backgroundColor,
+              backgroundAssetId: document.backgroundAssetId ?? null,
+            })
+          }
+          const previousOrder = previous?.nodes.map((node) => node.id).join('|')
+          const nextOrder = document.nodes.map((node) => node.id).join('|')
+          if (previousOrder !== nextOrder) {
+            postAuthoringPatch({
+              kind: 'scene-order',
+              target: { kind: 'scene-order', scope: 'scene' },
+              nodeIds: document.nodes.map((node) => node.id),
+            })
+          }
         }
       }
     }
     previousSceneRef.current = structuredClone(document)
+    previousPreviewDocumentRef.current = hasInjectedSlideAuthoring
+      ? structuredClone(previewDocument)
+      : null
     previousComponentPackagesRef.current = authoringComponentPackages
   }, [
     authoringComponentPackages,
     authoringEditingScope,
     canvasMode,
     document,
+    hasInjectedSlideAuthoring,
     postAuthoringPatch,
+    previewDocument,
     queueAuthoringNodePatch,
   ])
 
@@ -2557,8 +2630,8 @@ function WorkspaceEditor({
       slideAuthoring.componentPackages,
     )
     if (authoringReadyRef.current) {
-      for (const node of slideAuthoring.document.nodes) {
-        queueAuthoringNodePatch(slideAuthoring.editingScope, node)
+      for (const node of slideAuthoring.previewDocument.nodes) {
+        queueAuthoringNodePatch('scene', node)
       }
     }
     bridge?.selectNodes([...slideAuthoring.selectedNodeIds])

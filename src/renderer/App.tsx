@@ -49,6 +49,10 @@ import {
   isV9SlideVerticalSliceDirty,
   type V9SlideVerticalSliceState,
 } from './course/v9SlideVerticalSlice'
+import {
+  checkCourseProjectHealth,
+  type CourseProjectHealthCheckResult,
+} from './course/courseProjectHealthCheck'
 import { buildSlideEditorView } from './course/slideEditorView'
 import {
   componentPackageSha256,
@@ -243,6 +247,13 @@ interface V9RecoverySnapshot {
   projectPath: string | null
 }
 
+interface V9HealthCheckSnapshot {
+  readonly sessionId: string
+  readonly archive: CourseProjectArchiveData
+  readonly componentPackages: Record<string, ComponentPackageData>
+  readonly result: CourseProjectHealthCheckResult
+}
+
 function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
   V9RecoverySnapshot,
   Uint8Array
@@ -302,6 +313,7 @@ export default function App() {
   const [recoveryDecisionComplete, setRecoveryDecisionComplete] = useState(false)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
+  const [v9HealthCheck, setV9HealthCheck] = useState<V9HealthCheckSnapshot | null>(null)
   const [exportPreflightReport, setExportPreflightReport] =
     useState<ExportPreflightReport | null>(null)
   const saveInFlightRef = useRef(false)
@@ -355,9 +367,25 @@ export default function App() {
     () => summarizeProjectHealth(projectHealthDiagnostics),
     [projectHealthDiagnostics],
   )
+  const activeV9HealthCheck = v9SlideVerticalSlice !== null &&
+    v9HealthCheck?.sessionId === v9SlideVerticalSlice.sessionId &&
+    v9HealthCheck.archive.project === v9SlideVerticalSlice.history.present &&
+    v9HealthCheck.archive.assetFiles === v9SlideVerticalSlice.assetFiles &&
+    v9HealthCheck.archive.componentFiles === v9SlideVerticalSlice.componentFiles &&
+    v9HealthCheck.componentPackages === v9SlideVerticalSlice.componentPackages
+    ? v9HealthCheck
+    : null
   const activeProjectHealthSummary = v9SlideVerticalSlice === null
     ? projectHealthSummary
-    : { error: 0, warning: 0, info: 0, total: 0, canExport: true }
+    : activeV9HealthCheck === null
+      ? { error: 0, warning: 0, info: 0, total: 0, canExport: true }
+      : {
+          ...activeV9HealthCheck.result.summary,
+          total:
+            activeV9HealthCheck.result.summary.error +
+            activeV9HealthCheck.result.summary.warning +
+            activeV9HealthCheck.result.summary.info,
+        }
   const v9CourseProject = v9SlideVerticalSlice?.history.present ?? null
   const v9SelectionLocationId = v9SlideVerticalSlice?.selection.locationId ?? null
   const v9ActiveLocation = useMemo(() => {
@@ -604,9 +632,7 @@ export default function App() {
         v9SlideVerticalSlice.history.present.globalLayerItems.some(
           (entry) => entry.item.kind === 'runtime',
         ),
-      globalEditingDisabled: true,
-      globalEditingUnavailableReason:
-        '当前版本暂不能编辑全局层；现有控制器和全局元素不会改变。',
+      globalEditingDisabled: false,
       scenes: sceneRows,
       onAddScene: () => run(() => {
         if (v9ScenePanelBase === null) throw new Error('当前位置不是幻灯片')
@@ -618,9 +644,7 @@ export default function App() {
         useEditorStore.getState().activateCourseScene(sceneId)
       }, '无法切换场景'),
       onActivateGlobal: () => run(() => {
-        useEditorStore.getState().setStatus(
-          '当前版本暂不能编辑全局层；现有控制器和全局元素不会改变。',
-        )
+        useEditorStore.getState().setCourseEditingScope('global')
       }, '无法切换到全局层'),
       onRenameScene: (sceneId, name) => run(() => {
         useEditorStore.getState().renameCourseScene(sceneId, name)
@@ -1024,6 +1048,44 @@ export default function App() {
     },
     [setError],
   )
+
+  const handleOpenHealth = useCallback(() => {
+    if (!v9BackendActive) {
+      setProjectHealthOpen(true)
+      return
+    }
+    void run(async () => {
+      const current = useEditorStore.getState().courseSession
+      if (current === null) throw new Error('当前课件不可用')
+      const archive = captureV9SlideVerticalSliceArchive(current)
+      const packages = current.componentPackages
+      const result = await checkCourseProjectHealth(archive, packages)
+      const latest = useEditorStore.getState().courseSession
+      if (
+        latest === null ||
+        latest.sessionId !== current.sessionId ||
+        latest.history.present !== archive.project ||
+        latest.assetFiles !== archive.assetFiles ||
+        latest.componentFiles !== archive.componentFiles ||
+        latest.componentPackages !== packages
+      ) {
+        return
+      }
+      setV9HealthCheck({
+        sessionId: current.sessionId,
+        archive,
+        componentPackages: packages,
+        result,
+      })
+      setProjectHealthOpen(true)
+    }, '无法完成工程检查')
+  }, [run, v9BackendActive])
+
+  useEffect(() => {
+    if (v9BackendActive && projectHealthOpen && activeV9HealthCheck === null) {
+      setProjectHealthOpen(false)
+    }
+  }, [activeV9HealthCheck, projectHealthOpen, v9BackendActive])
 
   const reportBatchOutcome = useCallback((input: {
     label: string
@@ -1958,6 +2020,10 @@ export default function App() {
             state.setStatus('当前位置暂不支持复制元素')
             return
           }
+          if (state.courseSession.editingScope === 'global') {
+            state.setStatus('全局元素暂不能复制；现有内容不会改变')
+            return
+          }
           const [layerItemId] = state.courseSession.selection.selectionIds
           if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
             state.duplicateCourseLayer(layerItemId)
@@ -1973,6 +2039,11 @@ export default function App() {
           if (!isActiveSlideEditorLocation(state.courseSession)) {
             event.preventDefault()
             state.setStatus('当前位置暂不支持删除元素')
+            return
+          }
+          if (state.courseSession.editingScope === 'global') {
+            event.preventDefault()
+            state.setStatus('全局元素暂不能删除；现有内容不会改变')
             return
           }
           const [layerItemId] = state.courseSession.selection.selectionIds
@@ -2041,7 +2112,9 @@ export default function App() {
             ? useEditorStore.getState().history.future.length > 0
             : v9SlideVerticalSlice.history.future.length > 0,
           locationLabel: activeDocumentLocationLabel,
-          canInspectHealth: !v9BackendActive,
+          editorMode,
+          healthChecked: !v9BackendActive || activeV9HealthCheck !== null,
+          canInspectHealth: true,
           canPreview: true,
           canExport: true,
           unavailableExports: v9BackendActive
@@ -2050,6 +2123,7 @@ export default function App() {
           onRename: renameActiveDocument,
           onUndo: undoActiveDocument,
           onRedo: redoActiveDocument,
+          onSetEditorMode: (mode) => useEditorStore.getState().setEditorMode(mode),
         }}
         onNew={handleNew}
         onOpen={handleOpen}
@@ -2058,7 +2132,7 @@ export default function App() {
         onOpenRecent={handleOpenRecent}
         onSave={(saveAs) => void handleSave(saveAs)}
         healthSummary={activeProjectHealthSummary}
-        onOpenHealth={() => setProjectHealthOpen(true)}
+        onOpenHealth={handleOpenHealth}
         onPreview={handlePreview}
         onExport={handleExport}
       />
@@ -2179,11 +2253,21 @@ export default function App() {
           void performCatalogPackageOperation(request.entries, request.mode)
         }}
       />
-      <ProjectHealthPanel
-        open={projectHealthOpen}
-        onClose={() => setProjectHealthOpen(false)}
-        onExportDiagnostics={handleExportDiagnostics}
-      />
+      {v9BackendActive ? (
+        activeV9HealthCheck && (
+          <ProjectHealthPanel
+            open={projectHealthOpen}
+            onClose={() => setProjectHealthOpen(false)}
+            documentControl={activeV9HealthCheck.result}
+          />
+        )
+      ) : (
+        <ProjectHealthPanel
+          open={projectHealthOpen}
+          onClose={() => setProjectHealthOpen(false)}
+          onExportDiagnostics={handleExportDiagnostics}
+        />
+      )}
       <CopyableSummaryDialog
         open={batchOperationSummary !== null}
         title={batchOperationSummary?.title ?? '批次结果'}

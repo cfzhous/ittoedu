@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { useEditorStore } from '@/renderer/store/editorStore'
-import { addNativeVisualLayer } from '@/renderer/course/courseStudioModel'
+import {
+  addNativeVisualLayer,
+  updateCourseProject,
+} from '@/renderer/course/courseStudioModel'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
@@ -18,6 +21,7 @@ import {
   renameV9SlideVerticalSlice,
   resolveEditorStartupBackend,
   selectV9SlideVerticalSlice,
+  setV9SlideEditingScope,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
   V9_EDITOR_BACKEND,
@@ -112,6 +116,161 @@ describe('test-only V9 Slide vertical slice', () => {
       height: 80,
       text: 'V9 可移动文字',
     })
+    expect(snapshot.previewDocument.nodes.map((node) => node.type)).toEqual([
+      'teacher-controller',
+      'text',
+    ])
+  })
+
+  it('authors the global teacher controller in one history entry and preserves its frame on reopen', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const controller = initial.history.present.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' &&
+        entry.item.content.nativeType === 'teacher-controller',
+    )?.item
+    if (!controller || controller.kind !== 'native') throw new Error('expected controller')
+
+    const global = setV9SlideEditingScope(initial, 'global')
+    const globalSnapshot = buildV9SlideWorkspaceSnapshot(global)
+    const selected = selectV9SlideVerticalSlice(global, {
+      nodeIds: [controller.layerItemId],
+      additive: false,
+    })
+    const moved = transformV9SlideVerticalSlice(selected, {
+      nodes: [{
+        nodeId: controller.layerItemId,
+        x: controller.frame.x + 37,
+        y: controller.frame.y - 18,
+        width: controller.frame.width,
+        height: controller.frame.height,
+        rotation: controller.rotation,
+      }],
+    }, MOVE_NOW)
+
+    expect(globalSnapshot.document.nodes).toEqual([
+      expect.objectContaining({
+        id: controller.layerItemId,
+        type: 'teacher-controller',
+      }),
+    ])
+    expect(globalSnapshot.previewDocument.nodes.map((node) => node.id)).toEqual([
+      controller.layerItemId,
+      V9_SLIDE_TEST_TEXT_ID,
+    ])
+    expect(moved.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(moved.history.past).toEqual([initial.history.present])
+    expect(moved.selection.selectionIds).toEqual([controller.layerItemId])
+    expect(moved.history.present.globalLayerItems[0]!.item.frame).toMatchObject({
+      x: controller.frame.x + 37,
+      y: controller.frame.y - 18,
+    })
+    expect(undoV9SlideVerticalSlice(moved).history.present.globalLayerItems[0]!.item.frame)
+      .toEqual(controller.frame)
+
+    const bytes = createCourseProjectArchive(
+      captureV9SlideVerticalSliceArchive(moved),
+      { mtime: '2026-08-15T02:10:00.000Z' },
+    )
+    const reopened = setV9SlideEditingScope(openV9SlideVerticalSliceState(
+      openCourseProjectArchive(bytes),
+      'C:\\courseware\\global-controller.h5lesson',
+    ), 'global')
+    const reopenedController = buildV9SlideWorkspaceSnapshot(reopened).document.nodes[0]
+    expect(reopenedController).toMatchObject({
+      id: controller.layerItemId,
+      type: 'teacher-controller',
+      x: controller.frame.x + 37,
+      y: controller.frame.y - 18,
+    })
+    expect(isV9SlideVerticalSliceDirty(reopened)).toBe(false)
+  })
+
+  it('flattens global, surface, and scene Native layers by unified order while proxies stay scope-local', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const project = updateCourseProject(initial.history.present, (draft) => {
+      const location = draft.locations.find((candidate) => candidate.id === draft.startLocationId)
+      if (!location || location.kind !== 'slide-scene') throw new Error('expected location')
+      const surface = draft.surfaces.find((candidate) => candidate.id === location.surfaceId)
+      if (!surface || surface.type !== 'slide') throw new Error('expected surface')
+      const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+      const sceneText = scene?.layerItems.find(
+        (item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID,
+      )
+      if (!scene || !sceneText || sceneText.kind !== 'native') throw new Error('expected text')
+      const globalText = structuredClone(sceneText)
+      globalText.layerItemId = 'global-native-text'
+      globalText.label = '全局文字'
+      globalText.order = 10
+      const surfaceText = structuredClone(sceneText)
+      surfaceText.layerItemId = 'surface-native-text'
+      surfaceText.label = '表面文字'
+      surfaceText.order = 20
+      sceneText.order = 30
+      const controller = draft.globalLayerItems[0]!.item
+      controller.order = 40
+      draft.globalLayerItems.push({
+        item: globalText,
+        visibility: { mode: 'all', locationIds: [] },
+      })
+      draft.globalLayerItems.sort((left, right) => left.item.order - right.item.order)
+      surface.surfaceLayerItems.push({
+        item: surfaceText,
+        visibility: { mode: 'all', locationIds: [] },
+      })
+      scene.layerItems.push({
+        layerItemId: 'scene-runtime-gate',
+        label: '暂不可编辑的动态内容',
+        frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+        order: 25,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        kind: 'runtime',
+        runtime: {
+          protocol: 'surface-v1',
+          runtimeApiVersion: 3,
+          enabled: true,
+          renderMode: 'dom',
+          source: 'CoursewareSurfaceRuntime.define({ create() { return { destroy() {} } } })',
+          content: { values: {} },
+          assets: {},
+        },
+      })
+      scene.layerItems.sort((left, right) => left.order - right.order)
+    }, MOVE_NOW)
+    const sceneState = openV9SlideVerticalSliceState({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    const sceneSnapshot = buildV9SlideWorkspaceSnapshot(sceneState)
+    const globalSnapshot = buildV9SlideWorkspaceSnapshot(
+      setV9SlideEditingScope(sceneState, 'global'),
+    )
+    const controllerId = project.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' &&
+        entry.item.content.nativeType === 'teacher-controller',
+    )!.item.layerItemId
+
+    expect(sceneSnapshot.document.nodes.map((node) => node.id)).toEqual([
+      V9_SLIDE_TEST_TEXT_ID,
+    ])
+    expect(globalSnapshot.document.nodes.map((node) => node.id)).toEqual([
+      'global-native-text',
+      controllerId,
+    ])
+    expect(sceneSnapshot.previewDocument.nodes.map((node) => node.id)).toEqual([
+      'global-native-text',
+      'surface-native-text',
+      V9_SLIDE_TEST_TEXT_ID,
+      controllerId,
+    ])
+    expect(sceneSnapshot.previewDocument.nodes).not.toContainEqual(
+      expect.objectContaining({ id: 'scene-runtime-gate' }),
+    )
   })
 
   it('projects non-text scene Native layers and commits a multi-transform atomically', () => {

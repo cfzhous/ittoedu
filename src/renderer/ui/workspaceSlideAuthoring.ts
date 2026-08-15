@@ -25,7 +25,10 @@ export interface WorkspaceSlidePreviewResources {
 export interface WorkspaceSlideAuthoringInput {
   /** Changes whenever a V9 document is opened/reopened, even if IDs repeat. */
   readonly sessionId: string
+  /** Scope-local geometry proxies; this is the only mutable authoring scope. */
   readonly document: SceneDocument
+  /** Unified read-only Native composition rendered by the isolated Player. */
+  readonly previewDocument: SceneDocument
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly previewResources: WorkspaceSlidePreviewResources
   readonly selectedNodeIds: readonly string[]
@@ -171,8 +174,8 @@ export function workspaceSlidePreviewStructuralKey(
   input: WorkspaceSlideAuthoringInput,
 ): string {
   return JSON.stringify({
-    sceneId: input.document.id,
-    nodes: input.document.nodes.map((node) => ({
+    sceneId: input.previewDocument.id,
+    nodes: input.previewDocument.nodes.map((node) => ({
       id: node.id,
       type: node.type,
       ...(node.type === 'external-component'
@@ -182,7 +185,7 @@ export function workspaceSlidePreviewStructuralKey(
           }
         : {}),
     })),
-    interactions: input.document.interactions,
+    interactions: input.previewDocument.interactions,
   })
 }
 
@@ -229,7 +232,7 @@ export function workspaceSlidePreviewSceneId(
   injected: WorkspaceSlideAuthoringInput | undefined,
   legacySceneId: string,
 ): string {
-  return injected?.document.id ?? legacySceneId
+  return injected?.previewDocument.id ?? legacySceneId
 }
 
 export function workspaceSlidePreviewAssetFiles(
@@ -237,6 +240,14 @@ export function workspaceSlidePreviewAssetFiles(
   legacyAssetFiles: Readonly<Record<string, Uint8Array>>,
 ): Readonly<Record<string, Uint8Array>> {
   return injected?.previewResources.assetFiles ?? legacyAssetFiles
+}
+
+/** V9 is flattened into one isolated carrier scene; V8 keeps real scopes. */
+export function workspaceSlideCarrierScope(
+  injected: WorkspaceSlideAuthoringInput | undefined,
+  editingScope: 'scene' | 'global',
+): 'scene' | 'global' {
+  return injected ? 'scene' : editingScope
 }
 
 /** Selects exactly one backend. Inputs are never combined or copied. */
@@ -257,7 +268,7 @@ export function createWorkspaceSlidePreviewProject(
   injected: WorkspaceSlideAuthoringInput | undefined,
 ): ProjectDocument {
   if (!injected) return project
-  const projected = injected.document
+  const projected = injected.previewDocument
   return {
     schemaVersion: 8,
     id: `workspace-preview-${injected.sessionId}`,

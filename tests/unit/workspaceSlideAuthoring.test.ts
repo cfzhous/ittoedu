@@ -8,6 +8,7 @@ import {
   workspaceTransformAllowed,
   workspaceSelectionAllowed,
   workspaceSlidePreviewAssetFiles,
+  workspaceSlideCarrierScope,
   workspaceSlidePreviewGenerationIdentity,
   workspaceSlidePreviewSceneId,
   workspaceSlidePreviewStateId,
@@ -16,6 +17,7 @@ import {
 import {
   createProject,
   createScene,
+  createTeacherControllerNode,
   createTextNode,
 } from '@/renderer/project/createProject'
 import type { SceneDocument } from '@/shared/projectTypes'
@@ -45,6 +47,7 @@ function input(
   const value = Object.freeze({
     sessionId: `session-${name}`,
     document,
+    previewDocument: document,
     componentPackages: {},
     previewResources: {
       assets: {},
@@ -131,6 +134,9 @@ describe('Workspace Slide authoring input boundary', () => {
       undefined,
       'run-current-location',
     )).toBe(true)
+    expect(workspaceSlideCarrierScope(sceneInput, 'scene')).toBe('scene')
+    expect(workspaceSlideCarrierScope(globalInput, 'global')).toBe('scene')
+    expect(workspaceSlideCarrierScope(undefined, 'global')).toBe('global')
   })
 
   it('keeps unsupported injected events away from V8 project/history', () => {
@@ -290,12 +296,23 @@ describe('Workspace Slide authoring input boundary', () => {
     })
     expect(reopened.sessionId).not.toBe(initial.sessionId)
 
-    const structurallyChanged = workspaceSlidePreviewGenerationIdentity({
+    const proxyChanged = workspaceSlidePreviewGenerationIdentity({
       ...injected.value,
       document: {
         ...injected.value.document,
         nodes: [
           ...injected.value.document.nodes,
+          createTextNode({ id: 'v9-text-2', text: 'new' }),
+        ],
+      },
+    })
+    expect(proxyChanged.structuralKey).toBe(initial.structuralKey)
+    const structurallyChanged = workspaceSlidePreviewGenerationIdentity({
+      ...injected.value,
+      previewDocument: {
+        ...injected.value.previewDocument,
+        nodes: [
+          ...injected.value.previewDocument.nodes,
           createTextNode({ id: 'v9-text-2', text: 'new' }),
         ],
       },
@@ -475,5 +492,48 @@ describe('Workspace Slide authoring input boundary', () => {
     expect(projectDocumentSchema.parse(preview)).toEqual(preview)
     expect(project).toEqual(before)
     expect(createWorkspaceSlidePreviewProject(project, sceneId, undefined)).toBe(project)
+  })
+
+  it('keeps scope proxies separate from the ordered read-only Player composition', () => {
+    const sceneText = createTextNode({ id: 'scene-text', text: '场景文字', x: 80, y: 90 })
+    const controller = createTeacherControllerNode({
+      id: 'global-controller',
+      x: 190,
+      y: 638,
+    })
+    const base = input('split-carrier', [sceneText])
+    const injected: WorkspaceSlideAuthoringInput = {
+      ...base.value,
+      editingScope: 'global',
+      document: {
+        ...base.value.document,
+        nodes: [controller],
+      },
+      previewDocument: {
+        ...base.value.previewDocument,
+        nodes: [sceneText, controller],
+      },
+      selectedNodeIds: [controller.id],
+    }
+    const legacy = createProject({ includeDefaultController: false, controls: 'none' })
+    const preview = createWorkspaceSlidePreviewProject(
+      legacy,
+      legacy.scenes[0]!.id,
+      injected,
+    )
+
+    expect(workspaceSelectionAllowed(injected, {
+      nodeIds: [controller.id],
+      additive: false,
+    })).toBe(true)
+    expect(workspaceSelectionAllowed(injected, {
+      nodeIds: [sceneText.id],
+      additive: false,
+    })).toBe(false)
+    expect(preview.scenes[0]!.nodes.map((node) => node.id)).toEqual([
+      sceneText.id,
+      controller.id,
+    ])
+    expect(preview.globalLayer).toEqual([])
   })
 })

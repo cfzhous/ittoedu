@@ -21,24 +21,10 @@ import { useEffect, useState } from 'react'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { ProjectHealthSummary } from '../../shared/projectHealth'
 import { APP_NAME } from '../../shared/constants'
-import { useEditorStore } from '../store/editorStore'
+import { useEditorStore, type EditorMode } from '../store/editorStore'
 
-interface TopToolbarProps {
+interface TopToolbarBaseProps {
   busy: boolean
-  documentControl?: {
-    title: string
-    dirty: boolean
-    canUndo: boolean
-    canRedo: boolean
-    locationLabel: string
-    canInspectHealth: boolean
-    canPreview: boolean
-    canExport: boolean
-    unavailableExports?: Partial<Record<ExportFormat, string>>
-    onRename(title: string): void
-    onUndo(): void
-    onRedo(): void
-  }
   onNew(): void
   onOpen(): void
   onImportLegacy(): void
@@ -50,6 +36,29 @@ interface TopToolbarProps {
   onPreview(): void
   onExport(format: ExportFormat): void
 }
+
+export interface TopToolbarDocumentControl {
+  title: string
+  dirty: boolean
+  canUndo: boolean
+  canRedo: boolean
+  locationLabel: string
+  editorMode: EditorMode
+  healthChecked: boolean
+  canInspectHealth: boolean
+  canPreview: boolean
+  canExport: boolean
+  unavailableExports?: Partial<Record<ExportFormat, string>>
+  onRename(title: string): void
+  onUndo(): void
+  onRedo(): void
+  onSetEditorMode(mode: EditorMode): void
+}
+
+type TopToolbarProps = TopToolbarBaseProps & (
+  | { documentControl: TopToolbarDocumentControl }
+  | { documentControl?: undefined }
+)
 
 export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf'
 
@@ -85,7 +94,11 @@ function ToolButton({
   )
 }
 
-export function TopToolbar({
+interface TopToolbarViewProps extends TopToolbarBaseProps {
+  documentControl: TopToolbarDocumentControl
+}
+
+function TopToolbarView({
   busy,
   documentControl,
   onNew,
@@ -98,42 +111,38 @@ export function TopToolbar({
   onOpenHealth,
   onPreview,
   onExport,
-}: TopToolbarProps) {
-  const project = useEditorStore((state) => state.project)
-  const dirty = useEditorStore((state) => state.dirty)
-  const history = useEditorStore((state) => state.history)
-  const activeSceneId = useEditorStore((state) => state.activeSceneId)
-  const editorMode = useEditorStore((state) => state.editorMode)
-  const undo = useEditorStore((state) => state.undo)
-  const redo = useEditorStore((state) => state.redo)
-  const setEditorMode = useEditorStore((state) => state.setEditorMode)
-  const renameProject = useEditorStore((state) => state.renameProject)
-  const sceneIndex = project.scenes.findIndex(
-    (scene) => scene.id === activeSceneId,
-  )
-  const projectTitle = documentControl?.title ?? project.title
-  const projectDirty = documentControl?.dirty ?? dirty
-  const canUndo = documentControl?.canUndo ?? history.past.length > 0
-  const canRedo = documentControl?.canRedo ?? history.future.length > 0
-  const handleRename = documentControl?.onRename ?? renameProject
-  const handleUndo = documentControl?.onUndo ?? undo
-  const handleRedo = documentControl?.onRedo ?? redo
-  const locationLabel = documentControl?.locationLabel ??
-    `场景 ${sceneIndex + 1} / ${project.scenes.length}`
-  const canInspectHealth = documentControl?.canInspectHealth ?? true
-  const canPreview = documentControl?.canPreview ?? true
-  const canExport = documentControl?.canExport ?? true
-  const unavailableExports = documentControl?.unavailableExports
+}: TopToolbarViewProps) {
+  const {
+    title: projectTitle,
+    dirty: projectDirty,
+    canUndo,
+    canRedo,
+    locationLabel,
+    editorMode,
+    healthChecked,
+    canInspectHealth,
+    canPreview,
+    canExport,
+    unavailableExports,
+    onRename: handleRename,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    onSetEditorMode: setEditorMode,
+  } = documentControl
   const healthLabel = !canInspectHealth
     ? '工程检查暂不可用'
-    : healthSummary.total === 0
-      ? '工程检查：未发现问题'
-      : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`
+    : !healthChecked
+      ? '工程检查'
+      : healthSummary.total === 0
+        ? '工程检查：未发现问题'
+        : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`
   const healthDetail = !canInspectHealth
     ? '当前课件暂不能执行检查'
-    : healthSummary.total === 0
-      ? '未发现问题'
-      : `${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`
+    : !healthChecked
+      ? '点击检查'
+      : healthSummary.total === 0
+        ? '未发现问题'
+        : `${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(projectTitle)
   useEffect(() => setTitleDraft(projectTitle), [projectTitle])
@@ -363,7 +372,7 @@ export function TopToolbar({
       >
         <span className="tool-button__badge-anchor">
           <ShieldCheck size={18} />
-          {healthSummary.total > 0 && (
+          {healthChecked && healthSummary.total > 0 && (
             <small className={healthSummary.error > 0 ? 'is-error' : 'is-warning'}>
               {healthSummary.total > 99 ? '99+' : healthSummary.total}
             </small>
@@ -463,4 +472,54 @@ export function TopToolbar({
       </details>
     </header>
   )
+}
+
+function LegacyTopToolbar(props: TopToolbarBaseProps) {
+  const project = useEditorStore((state) => state.project)
+  const dirty = useEditorStore((state) => state.dirty)
+  const history = useEditorStore((state) => state.history)
+  const activeSceneId = useEditorStore((state) => state.activeSceneId)
+  const editorMode = useEditorStore((state) => state.editorMode)
+  const undo = useEditorStore((state) => state.undo)
+  const redo = useEditorStore((state) => state.redo)
+  const setEditorMode = useEditorStore((state) => state.setEditorMode)
+  const renameProject = useEditorStore((state) => state.renameProject)
+  const sceneIndex = project.scenes.findIndex(
+    (scene) => scene.id === activeSceneId,
+  )
+
+  return (
+    <TopToolbarView
+      {...props}
+      documentControl={{
+        title: project.title,
+        dirty,
+        canUndo: history.past.length > 0,
+        canRedo: history.future.length > 0,
+        locationLabel: `场景 ${sceneIndex + 1} / ${project.scenes.length}`,
+        editorMode,
+        healthChecked: true,
+        canInspectHealth: true,
+        canPreview: true,
+        canExport: true,
+        onRename: renameProject,
+        onUndo: undo,
+        onRedo: redo,
+        onSetEditorMode: setEditorMode,
+      }}
+    />
+  )
+}
+
+export function TopToolbar(props: TopToolbarProps) {
+  if (props.documentControl) {
+    const { documentControl, ...viewProps } = props
+    return (
+      <TopToolbarView
+        {...viewProps}
+        documentControl={documentControl}
+      />
+    )
+  }
+  return <LegacyTopToolbar {...props} />
 }

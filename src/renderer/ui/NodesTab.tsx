@@ -243,7 +243,7 @@ function SortableNode({
         disabled={alreadyHiddenInState}
         onClick={onDelete}
       >
-        {deletionMode === 'hide-in-state' ? <EyeOff size={14} /> : <Trash2 size={14} />}
+        <Trash2 size={14} />
       </button>
     </div>
   )

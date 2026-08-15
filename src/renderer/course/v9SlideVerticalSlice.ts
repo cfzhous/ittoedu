@@ -109,7 +109,10 @@ export interface V9SlideNativeNodeTarget {
 }
 
 export interface V9SlideWorkspaceSnapshot {
+  /** Scope-local authoring proxy consumed by the existing Phaser overlay. */
   readonly document: SceneDocument
+  /** Read-only, unified Native composition consumed only by the Player carrier. */
+  readonly previewDocument: SceneDocument
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly selectedNodeIds: readonly string[]
 }
@@ -350,10 +353,15 @@ type ReadonlyNativeLayer = Omit<SlideEditorLayerView, 'item'> & {
   readonly item: DeepReadonly<NativeLayerItem>
 }
 
-function nativeNodeFromLayer(layer: ReadonlyNativeLayer) {
-  return materializeNativeLayerItem(
+function nativeNodeFromLayer(layer: ReadonlyNativeLayer): SceneNode {
+  const node = materializeNativeLayerItem(
     structuredClone(layer.item) as NativeLayerItem,
   )
+  // Scoped visibility belongs to the V9 view. The compatibility carrier has
+  // no V9 visibility model, so project it into the transient node only.
+  return node.visible === layer.effectiveVisible
+    ? node
+    : { ...node, visible: layer.effectiveVisible }
 }
 
 function activeSlideView(state: V9SlideVerticalSliceState) {
@@ -367,15 +375,15 @@ function activeSlideView(state: V9SlideVerticalSliceState) {
 function selectableNativeLayers(
   state: V9SlideVerticalSliceState,
 ): Map<string, ReadonlyNativeLayer> {
-  if (state.editingScope !== 'scene') return new Map()
   const location = state.history.present.locations.find(
     (candidate) => candidate.id === state.selection.locationId,
   )
   if (location?.kind !== 'slide-scene') return new Map()
+  const source = state.editingScope
   return new Map(activeSlideView(state).layers.flatMap((layer) => (
-    layer.source === 'scene' &&
+    layer.source === source &&
     layer.item.kind === 'native' &&
-    layer.item.content.nativeType !== 'teacher-controller'
+    (source === 'global' || layer.item.content.nativeType !== 'teacher-controller')
       ? [[layer.selectionId, layer as ReadonlyNativeLayer] as const]
       : []
   )))
@@ -396,29 +404,34 @@ export function buildV9SlideWorkspaceSnapshot(
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
   })
-  const nodes = state.editingScope === 'global' ? [] : view.layers.flatMap((layer) => {
-    if (
-      layer.source !== 'scene' ||
-      layer.item.kind !== 'native' ||
-      layer.item.content.nativeType === 'teacher-controller'
-    ) {
-      return []
-    }
-    return [nativeNodeFromLayer(layer as ReadonlyNativeLayer)]
-  })
+  const nativeLayers = view.layers.filter(
+    (layer): layer is ReadonlyNativeLayer => layer.item.kind === 'native',
+  )
+  const nodes = nativeLayers
+    .filter((layer) =>
+      layer.source === state.editingScope &&
+      (
+        state.editingScope === 'global' ||
+        layer.item.content.nativeType !== 'teacher-controller'
+      ),
+    )
+    .map(nativeNodeFromLayer)
+  const previewNodes = nativeLayers.map(nativeNodeFromLayer)
   const nodeIds = new Set(nodes.map((node) => node.id))
   const selectedNodeIds = state.selection.selectionIds.filter((id) => nodeIds.has(id))
+  const sceneDocument = (documentNodes: SceneNode[]): SceneDocument => ({
+    id: view.sceneId,
+    name: view.sceneName,
+    backgroundColor: view.backgroundColor,
+    ...(view.backgroundAssetId === undefined
+      ? {}
+      : { backgroundAssetId: view.backgroundAssetId }),
+    nodes: documentNodes,
+    interactions: [],
+  })
   return {
-    document: {
-      id: view.sceneId,
-      name: view.sceneName,
-      backgroundColor: view.backgroundColor,
-      ...(view.backgroundAssetId === undefined
-        ? {}
-        : { backgroundAssetId: view.backgroundAssetId }),
-      nodes,
-      interactions: [],
-    },
+    document: sceneDocument(nodes),
+    previewDocument: sceneDocument(previewNodes),
     componentPackages: state.componentPackages,
     selectedNodeIds,
   }
@@ -477,7 +490,37 @@ export function transformV9SlideVerticalSlice(
     )
   })
   if (!valid) return state
-  const history = transformSelectedSlideNativeLayers(state.history, state.selection, input, now)
+  const changed = input.nodes.some((node) => {
+    const item = selectable.get(node.nodeId)!.item
+    return item.frame.x !== node.x ||
+      item.frame.y !== node.y ||
+      item.frame.width !== node.width ||
+      item.frame.height !== node.height ||
+      item.rotation !== node.rotation
+  })
+  if (!changed) return state
+  const history = state.editingScope === 'scene'
+    ? transformSelectedSlideNativeLayers(state.history, state.selection, input, now)
+    : commitCourseHistory(state.history, updateCourseProject(
+        state.history.present,
+        (draft) => {
+          const byId = new Map(
+            draft.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item]),
+          )
+          for (const transform of input.nodes) {
+            const item = byId.get(transform.nodeId)
+            if (!item || item.kind !== 'native') {
+              throw new Error('所选全局元素已失效，请重新选择')
+            }
+            item.frame.x = transform.x
+            item.frame.y = transform.y
+            item.frame.width = transform.width
+            item.frame.height = transform.height
+            item.rotation = transform.rotation
+          }
+        },
+        now,
+      ))
   if (history === state.history) return state
   return freezeState(
     state.sessionId,

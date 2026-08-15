@@ -20,6 +20,7 @@ import {
   openV9SlideVerticalSliceState,
   reorderV9SlideLayers,
   selectV9SlideVerticalSlice,
+  transformV9SlideVerticalSlice,
   updateV9SlideLayer,
   updateV9SlideNativeNode,
 } from '@/renderer/course/v9SlideVerticalSlice'
@@ -63,6 +64,33 @@ function sceneFor(state: ReturnType<typeof createLayerSession>) {
 }
 
 describe('V9 Slide native layer session commands', () => {
+  it('keeps an exact named-state transform as the same state with zero history', () => {
+    const named = addV9SlidePresentationState(createLayerSession(), '反馈态', NOW)
+    const selected = selectV9SlideVerticalSlice(named, {
+      nodeIds: ['layer-text-a'],
+      additive: false,
+    })
+    const layer = buildSlideEditorView({
+      project: selected.history.present,
+      locationId: selected.selection.locationId,
+      stateId: selected.selection.stateId,
+    }).layers.find((candidate) => candidate.selectionId === 'layer-text-a')!
+    const result = transformV9SlideVerticalSlice(selected, {
+      nodes: [{
+        nodeId: layer.selectionId,
+        x: layer.item.frame.x,
+        y: layer.item.frame.y,
+        width: layer.item.frame.width,
+        height: layer.item.frame.height,
+        rotation: layer.item.rotation,
+      }],
+    }, NOW)
+
+    expect(result).toBe(selected)
+    expect(result.history).toBe(selected.history)
+    expect(result.history.past).toBe(selected.history.past)
+  })
+
   it('adds text, formula and the requested shape with one history entry each', () => {
     const initial = createLayerSession()
     const text = addV9SlideTextLayer(initial, 180, 160, NOW)

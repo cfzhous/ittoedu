@@ -71,12 +71,15 @@ describe('unified export menu', () => {
         canUndo: false,
         canRedo: true,
         locationLabel: '场景 2 / 4',
+        editorMode: 'simple',
+        healthChecked: false,
         canInspectHealth: false,
         canPreview: false,
         canExport: false,
         onRename,
         onUndo,
         onRedo,
+        onSetEditorMode: vi.fn(),
       },
     })
 
@@ -199,6 +202,8 @@ describe('unified export menu', () => {
         canUndo: false,
         canRedo: false,
         locationLabel: '幻灯片 1 / 1',
+        editorMode: 'simple',
+        healthChecked: false,
         canInspectHealth: false,
         canPreview: true,
         canExport: true,
@@ -206,6 +211,7 @@ describe('unified export menu', () => {
         onRename: vi.fn(),
         onUndo: vi.fn(),
         onRedo: vi.fn(),
+        onSetEditorMode: vi.fn(),
       },
     })
 

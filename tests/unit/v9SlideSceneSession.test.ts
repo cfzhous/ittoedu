@@ -49,10 +49,17 @@ describe('V9 Slide scene session commands', () => {
     expect(global.history).toBe(initial.history)
     expect(global.editingScope).toBe('global')
     expect(global.selection.selectionIds).toEqual([])
-    expect(buildV9SlideWorkspaceSnapshot(global).document.nodes).toEqual([])
+    const globalSnapshot = buildV9SlideWorkspaceSnapshot(global)
+    const controller = globalSnapshot.document.nodes.find(
+      (node) => node.type === 'teacher-controller',
+    )
+    expect(controller).toBeDefined()
     expect(selectV9SlideVerticalSlice(global, {
       nodeIds: [V9_SLIDE_TEST_TEXT_ID], additive: false,
     })).toBe(global)
+    expect(selectV9SlideVerticalSlice(global, {
+      nodeIds: [controller!.id], additive: false,
+    }).selection.selectionIds).toEqual([controller!.id])
     expect(activated.history).toBe(initial.history)
     expect(activated.editingScope).toBe('scene')
     expect(activated.selection).toMatchObject({ stateId: null, selectionIds: [] })

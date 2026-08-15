@@ -485,7 +485,7 @@ describe('V9 Slide layer regressions', () => {
     expect(courseProjectDocumentSchema.safeParse(state.history.present).success).toBe(true)
   })
 
-  it('excludes a scene-authored teacher controller from the workspace snapshot', () => {
+  it('renders a scene-authored teacher controller without exposing unsupported scene commands', () => {
     let project = createCourseProject({ id: 'scene-controller-snapshot', now: NOW })
     const surface = slideSurface(project)
     project = addSlideTextLayer(project, surface.id, surface.scenes[0]!.id, '可编辑正文', {
@@ -506,10 +506,20 @@ describe('V9 Slide layer regressions', () => {
       slideSurface(draft).scenes[0]!.layerItems.push(localController)
     }, NOW)
 
-    const snapshot = buildV9SlideWorkspaceSnapshot(open(project))
+    const state = open(project)
+    const snapshot = buildV9SlideWorkspaceSnapshot(state)
 
     expect(snapshot.document.nodes.map((node) => node.id)).toEqual(['visible-text'])
     expect(snapshot.document.nodes.some((node) => node.type === 'teacher-controller')).toBe(false)
+    expect(snapshot.previewDocument.nodes.find(
+      (node) => node.id === 'scene-teacher-controller',
+    )).toMatchObject({ type: 'teacher-controller', name: '场景教师控制器' })
+    expect(snapshot.previewDocument.nodes.filter((node) => node.type === 'teacher-controller'))
+      .toHaveLength(2)
+    expect(selectV9SlideVerticalSlice(state, {
+      nodeIds: ['scene-teacher-controller'],
+      additive: false,
+    })).toBe(state)
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
   })
 })
