@@ -273,12 +273,13 @@ Git 与工作区：
 | M2-E | b010947d62fdc0fabb6fb08c56d95edc771fe6ed | 原 Elements、Nodes 与 Workspace 接入 V9 场景 Native 增删改、多选与变换 |
 | M2-F | 3e7e12120acb84135a0173dceb3d17bc91ec25d4 | 原 Properties 接入 V9 通用属性、整段文字样式、公式/图形与命名状态覆盖 |
 | M2-G | 996ebd2af45418eb915dd0a36abd156c2cca855f | 默认 V9 文件生命周期、显式旧版导入、非 Slide 安全门禁与 Published 预览/HTML/网页包/PPTX |
+| M2-H | cc8c6c4e318e676457444809c7d622b8b6b660e0 | 原全局层与 Workspace 接入可选择、缩放下移动、Undo/Redo、保存重开的教师控制器作者对象；原工程检查改为真实 V9 archive 与 Published producer 校验 |
 
 产品 accepted cursor 是 M1。反重写 diff 基线仍固定为 BASE_COMMIT。
 
 ### 4.2 当前 M2 恢复点
 
-M2 当前恢复 cursor 为 `996ebd2af45418eb915dd0a36abd156c2cca855f`，已成立：
+M2 当前恢复 cursor 为 `cc8c6c4e318e676457444809c7d622b8b6b660e0`，已成立：
 
 - V9 document/history/archive 由原 editorStore 单一持有；顶栏、标题、dirty、关闭、保存、sidecar 与恢复副本不再读写隐藏 V8 工程。
 - 原 ScenePanel、SceneStateStrip、底部状态栏、Elements、Nodes、Properties 与 Workspace 的已接能力共用同一 V9 session；未接能力按面板/操作局部灰化，不回落写 V8。
@@ -287,9 +288,11 @@ M2 当前恢复 cursor 为 `996ebd2af45418eb915dd0a36abd156c2cca855f`，已成�
 - 保存、dirty、恢复副本、关闭丢弃与最近工程确认均以当前 V9 session 为真相；关闭准备回执带 requestId，不会被迟到响应串线。
 - Flow/Spatial 位置在尚未接入作者能力时显示原壳内只读门禁，快捷键不会写隐藏 V8；默认 V9 新文本恢复原名称与居中位置。
 - 原顶栏已真实接通 V9 Published 整课预览、单 HTML、网页包和基础 PPTX；PDF 仍按能力局部禁用；Published V2 不再注入废弃的外层上一页/下一页底栏。
-- 当前绿色证据为 typecheck、166 个 Vitest 文件/1013 项测试、8 项 Agent Kit、5 项真实 Electron E2E、Player/Renderer/Electron build 与反重写静态门禁。
+- 原全局层已显示真实 V9 global Native；教师控制器在原 Workspace 中可选择、缩放下移动，一次手势一次 history/revision，Undo/Redo、保存、完全关闭重开及继续移动均保持稳定 ID 与 frame；编辑态按钮不会执行导航，也不挂载额外播放控制器。
+- 原工程检查只有在当前 V9 archive 与 Published producer 均通过后才显示通过，document 或 sidecar 变化会立即回到未检查状态，不再读取隐藏 V8 工程或伪报零问题。
+- 当前绿色证据为 typecheck、169 个 Vitest 文件/1026 项测试、8 项 Agent Kit、默认入口全局控制器/工程检查 Electron 纵切与 2 项既有 V9 Electron 回归、Player/Renderer/Electron build、反重写静态门禁，以及 1280×720、1366×768、1920×1080 三档冻结视觉比对。
 
-M2 尚未完成：全局/表面统一层、教师控制器作者对象、当前位置试运行、V9 工程检查、PDF 捕获与媒体/Runtime/Component/互动的原 UI 路径仍是诚实门禁。冻结视觉比对当前为 `0.008730 > 0.0015`，主要剩余差异来自这些未接原壳能力；不得修改 golden、mask、阈值或增加 V8 启动旁路。下一步必须继续在原 Workspace/Store/面板内接同一 V9 真相，优先闭合全局层与教师控制器作者对象，不得新建 Workspace 或从兼容 View 反建工程。
+M2 尚未完成：surface（“当前内容共用”）scope 作者闭环与 global/surface/scene 完整统一层语义、当前位置试运行，以及教师控制器的 PresenterSettings 属性、收展、前后导航、目录、重播、静音、全屏等运行语义仍未接通；PDF 捕获、媒体、Runtime、Component 与 `scene.interactions` 的 Native 互动执行仍是诚实门禁。冻结视觉比对已在不修改 golden、mask、阈值且不增加 V8 启动旁路的前提下恢复通过；三档 mismatch ratio 分别为 `0.001123`、`0.000752`、`0.000682`。下一步继续在原 Workspace/Store/面板内接同一 V9 真相，优先闭合当前位置试运行，再推进 surface scope 与控制器运行纵切，不得新建 Workspace 或从兼容 View 反建工程。
 
 ---
 
