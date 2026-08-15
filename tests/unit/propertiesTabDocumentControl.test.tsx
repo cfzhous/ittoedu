@@ -356,4 +356,59 @@ describe('PropertiesTab document control', () => {
     expect(storeAccess.hook).not.toHaveBeenCalled()
     expect(storeAccess.getState).not.toHaveBeenCalled()
   })
+
+  it('edits the scene background color and asset through the optional background control', () => {
+    const onSetColor = vi.fn(() => true)
+    const onSetAsset = vi.fn(() => true)
+    const onClearOverride = vi.fn(() => true)
+    const onPickImageFile = vi.fn(() => undefined)
+    render(<PropertiesTab documentControl={{
+      ...controlFor([]),
+      background: {
+        editingScope: 'scene',
+        inNamedState: true,
+        backgroundColor: '#ffffff',
+        backgroundAssetId: 'asset_bg',
+        backgroundAssetOptions: [
+          { id: 'asset_bg', label: 'bg.png' },
+          { id: 'asset_other', label: 'other.png' },
+        ],
+        overrideActive: true,
+        onSetColor,
+        onSetAsset,
+        onPickImageFile,
+        onClearOverride,
+      },
+    }} />)
+
+    // The empty-selection gate is replaced by the background editor.
+    expect(screen.queryByTestId('controlled-properties-empty-gate')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('背景色')).toBeInTheDocument()
+    const picker = screen.getByLabelText('背景色选择器')
+    fireEvent.change(picker, { target: { value: '#123456' } })
+    fireEvent.blur(screen.getByLabelText('背景色'))
+    expect(onSetColor).toHaveBeenCalledWith('#123456')
+
+    const assetSelect = screen.getByLabelText('背景素材')
+    fireEvent.change(assetSelect, { target: { value: 'asset_other' } })
+    expect(onSetAsset).toHaveBeenCalledWith('asset_other')
+    fireEvent.change(assetSelect, { target: { value: '' } })
+    expect(onSetAsset).toHaveBeenCalledWith(null)
+
+    fireEvent.click(screen.getByRole('button', { name: /选择图片作为背景/ }))
+    expect(onPickImageFile).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复基础背景' }))
+    expect(onClearOverride).toHaveBeenCalled()
+
+    expect(storeAccess.hook).not.toHaveBeenCalled()
+    expect(storeAccess.getState).not.toHaveBeenCalled()
+  })
+
+  it('keeps the empty gate when no background control is supplied', () => {
+    render(<PropertiesTab documentControl={controlFor([])} />)
+    expect(screen.getByTestId('controlled-properties-empty-gate')).toBeInTheDocument()
+    expect(storeAccess.hook).not.toHaveBeenCalled()
+    expect(storeAccess.getState).not.toHaveBeenCalled()
+  })
 })

@@ -125,6 +125,9 @@ import {
   duplicateV9SlidePresentationState,
   duplicateV9SlideScene,
   duplicateV9SlideLayer,
+  addV9SlideMediaLayers,
+  clearV9SlideSceneBackgroundOverride,
+  importV9SlideAssets,
   isV9SlideVerticalSliceDirty,
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
@@ -138,6 +141,8 @@ import {
   setInitialV9SlidePresentationState,
   setThumbnailV9SlidePresentationState,
   setV9SlideEditingScope,
+  setV9SlideSceneBackgroundAsset,
+  setV9SlideSceneBackgroundColor,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
   updateV9SlideLayer,
@@ -291,6 +296,18 @@ export interface EditorState {
   addCourseTextLayer(x?: number, y?: number): void
   addCourseFormulaLayer(x?: number, y?: number): void
   addCourseShapeLayer(shapeType: ShapeType, x?: number, y?: number): void
+  addCourseMediaLayers(
+    nativeType: 'image' | 'video',
+    items: ImportedAssetBatchItem[],
+    x?: number,
+    y?: number,
+  ): string[]
+  importCourseAssets(items: ImportedAssetBatchItem[]): void
+  setCourseSceneBackground(
+    patch: { backgroundColor?: string; backgroundAssetId?: string | null },
+  ): boolean
+  setCourseSceneBackgroundWithAsset(meta: AssetMeta, bytes: Uint8Array): boolean
+  clearCourseSceneBackgroundOverride(): boolean
   updateCourseLayer(target: V9SlideLayerTarget, patch: V9SlideLayerPatch): boolean
   updateCourseNativeNode(
     target: V9SlideNativeNodeTarget,
@@ -1856,6 +1873,113 @@ export const useEditorStore = create<EditorState>((set, get) => {
           statusMessage: '已添加图形',
         }
       })
+    },
+
+    addCourseMediaLayers(nativeType, items, x, y) {
+      if (items.length === 0 || get().courseSession === null) return []
+      const itemsCopy = items.map((item) => ({
+        meta: structuredClone(item.meta),
+        bytes: item.bytes.slice(),
+      }))
+      if (itemsCopy.length > MAX_BATCH_CANVAS_ITEMS) {
+        set({
+          errorMessage: `一次最多在画布排放 ${MAX_BATCH_CANVAS_ITEMS} 个${nativeType === 'image' ? '图片' : '视频'}。请先批量加入媒体库，再按需放置。`,
+          statusMessage: null,
+        })
+        return []
+      }
+      let accepted = false
+      let addedIds: string[] = []
+      set((current) => {
+        if (current.courseSession === null) return current
+        accepted = true
+        const courseSession = addV9SlideMediaLayers(
+          current.courseSession,
+          nativeType,
+          itemsCopy,
+          x,
+          y,
+        )
+        if (courseSession === current.courseSession) return current
+        addedIds = [...courseSession.selection.selectionIds]
+        return {
+          ...current,
+          courseSession,
+          activeTab: 'layers',
+          statusMessage: `已添加 ${itemsCopy.length} 个${nativeType === 'image' ? '图片' : '视频'}`,
+        }
+      })
+      return accepted ? addedIds : []
+    },
+
+    importCourseAssets(items) {
+      if (items.length === 0) return
+      const itemsCopy = items.map((item) => ({
+        meta: structuredClone(item.meta),
+        bytes: item.bytes.slice(),
+      }))
+      set((current) => {
+        if (current.courseSession === null) return current
+        const courseSession = importV9SlideAssets(current.courseSession, itemsCopy)
+        return courseSession === current.courseSession
+          ? current
+          : { ...current, courseSession, statusMessage: `已导入 ${itemsCopy.length} 个媒体素材` }
+      })
+    },
+
+    setCourseSceneBackground(patch) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        let courseSession = state.courseSession
+        if (patch.backgroundColor !== undefined) {
+          courseSession = setV9SlideSceneBackgroundColor(
+            courseSession,
+            patch.backgroundColor,
+          )
+        }
+        if (patch.backgroundAssetId !== undefined) {
+          courseSession = setV9SlideSceneBackgroundAsset(courseSession, {
+            assetId: patch.backgroundAssetId,
+          })
+        }
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '背景已更新' }
+      })
+      return accepted
+    },
+
+    setCourseSceneBackgroundWithAsset(meta, bytes) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = setV9SlideSceneBackgroundAsset(
+          state.courseSession,
+          { meta: structuredClone(meta), bytes: bytes.slice() },
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '背景素材已更新' }
+      })
+      return accepted
+    },
+
+    clearCourseSceneBackgroundOverride() {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = clearV9SlideSceneBackgroundOverride(
+          state.courseSession,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '背景已恢复基础值' }
+      })
+      return accepted
     },
 
     updateCourseLayer(target, patch) {
