@@ -1024,7 +1024,12 @@ export default function App() {
       editingScope,
     } as const
     const layerContextKey = v9SlideLayerContextKey(layerContext)
-    const propertyTarget = editingNativeLayerList && selectedNode
+    // Global layers enter the same controlled property editor as scene/surface
+    // natives. Runtime layers are never projected into the authoring document,
+    // and teacher controllers keep their own type-level capability gate.
+    const propertyTarget = selectedNode && (
+      editingNativeLayerList || editingScope === 'global'
+    )
       ? {
           ...layerContext,
           layerItemId: selectedNode.id,
@@ -1164,13 +1169,17 @@ export default function App() {
         editorMode,
         selectedNodes,
         target: propertyTarget,
-        scopeLabel: editingSurface
-          ? '当前内容共用'
+        scopeLabel: editingScope === 'global'
+          ? '全局层'
+          : editingSurface
+            ? '当前内容共用'
           : activeState
             ? `状态：${activeState.name}`
             : '基础场景',
-        scopeDescription: editingSurface
-          ? '修改会应用到当前内容内的所有场景。'
+        scopeDescription: editingScope === 'global'
+          ? '修改会应用到课件内的所有幻灯片。'
+          : editingSurface
+            ? '修改会应用到当前内容内的所有场景。'
           : activeState
             ? `属性修改只影响“${activeState.name}”状态。`
             : '修改基础元素会影响继承它的命名状态。',

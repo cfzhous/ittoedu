@@ -216,6 +216,50 @@ describe('V9 media authoring session (image/video/background)', () => {
     expect(selectionAfter.selection.selectionIds).toEqual([layerItemId])
   })
 
+  it('keeps one video rotate/resize gesture as one history entry with the visual sync intact', () => {
+    const initial = createV9CourseEditorState()
+    const state = addV9SlideMediaLayers(initial, 'video', [videoItem('asset_clip')], undefined, undefined, NOW)
+    const layerItemId = state.selection.selectionIds[0]!
+    const before = buildV9SlideWorkspaceSnapshot(state).document.nodes[0]!
+    const rotated = transformV9SlideVerticalSlice(state, {
+      nodes: [{
+        nodeId: layerItemId,
+        x: before.x,
+        y: before.y,
+        width: before.width,
+        height: before.height,
+        rotation: 18,
+      }],
+    }, NOW)
+    expect(rotated.history.present.revision).toBe(state.history.present.revision + 1)
+    expect(rotated.history.past).toEqual([
+      ...state.history.past,
+      state.history.present,
+    ])
+
+    const resized = transformV9SlideVerticalSlice(rotated, {
+      nodes: [{
+        nodeId: layerItemId,
+        x: before.x + 25,
+        y: before.y + 10,
+        width: before.width * 0.8,
+        height: before.height * 0.8,
+        rotation: 18,
+      }],
+    }, NOW)
+    expect(resized.history.present.revision).toBe(rotated.history.present.revision + 1)
+    const node = buildV9SlideWorkspaceSnapshot(resized).document.nodes[0]!
+    expect(node).toMatchObject({
+      type: 'video',
+      x: before.x + 25,
+      y: before.y + 10,
+      rotation: 18,
+    })
+    if (node.type !== 'video') throw new Error('expected video node')
+    expect(node.assetId).toBe('asset_clip')
+    expect(courseProjectDocumentSchema.safeParse(resized.history.present).success).toBe(true)
+  })
+
   it('survives save/reopen with the asset bytes and the stable layer id', () => {
     const initial = createV9CourseEditorState()
     const state = addV9SlideMediaLayers(initial, 'image', [imageItem('asset_photo')], undefined, undefined, NOW)
