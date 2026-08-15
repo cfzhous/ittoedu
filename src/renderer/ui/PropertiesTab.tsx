@@ -1905,6 +1905,19 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
   )
 }
 
+export interface PropertiesTabBackgroundControl {
+  readonly editingScope: 'scene'
+  readonly inNamedState: boolean
+  readonly backgroundColor: string
+  readonly backgroundAssetId: string | null | undefined
+  readonly backgroundAssetOptions: ReadonlyArray<{ id: string; label: string }>
+  readonly overrideActive: boolean
+  onSetColor(color: string): boolean
+  onSetAsset(assetId: string | null): boolean
+  onPickImageFile(): void
+  onClearOverride(): boolean
+}
+
 export interface PropertiesTabDocumentControl {
   readonly editingScope: 'scene' | 'surface' | 'global'
   readonly editorMode: 'simple' | 'professional'
@@ -1918,6 +1931,8 @@ export interface PropertiesTabDocumentControl {
   readonly richTextUnavailableReason: string
   readonly mediaUnavailableReason: string
   readonly controllerUnavailableReason: string
+  /** Present only when the owner can edit the scene background from this tab. */
+  readonly background?: PropertiesTabBackgroundControl
   onUpdateNode(
     target: PropertiesTabDocumentTarget,
     patch: DeepPartial<SceneNode>,
@@ -1992,6 +2007,72 @@ function ControlledPropertiesGate({
   )
 }
 
+function ControlledSceneBackgroundEditor({
+  background,
+}: {
+  background: PropertiesTabBackgroundControl
+}) {
+  return (
+    <div className="properties-scroll" data-testid="properties-tab">
+      <section className="state-editing-notice">
+        <Palette size={15} />
+        <div>
+          <strong>{background.inNamedState ? '状态背景' : '基础场景背景'}</strong>
+          <span>{background.inNamedState
+            ? '背景修改只保存在当前命名状态；基础场景背景不会被改写。'
+            : '这里的背景会被所有命名状态继承。'}</span>
+        </div>
+        {background.inNamedState && background.overrideActive && (
+          <button
+            type="button"
+            className="state-editing-notice__clear"
+            onClick={() => { background.onClearOverride() }}
+          >
+            恢复基础背景
+          </button>
+        )}
+      </section>
+      <section className="property-section">
+        <h3 className="property-title"><Palette size={14} />场景背景</h3>
+        <ControlledPropertyColorInput
+          id="scene-background"
+          label="背景色"
+          value={background.backgroundColor}
+          onChange={(color) => background.onSetColor(color)}
+        />
+        <div className="form-field">
+          <label>背景素材</label>
+          <SelectField<string>
+            label="背景素材"
+            value={background.backgroundAssetId ?? ''}
+            options={[
+              { value: '', label: '无背景图' },
+              ...background.backgroundAssetOptions.map((option) => ({
+                value: option.id,
+                label: option.label,
+              })),
+            ]}
+            onChange={(assetId) => {
+              background.onSetAsset(assetId === '' ? null : assetId)
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          style={{ width: '100%' }}
+          onClick={() => background.onPickImageFile()}
+        >
+          <ImageIcon size={14} />选择图片作为背景…
+        </button>
+        <p className="property-hint">
+          背景图铺满整张幻灯片；图片和视频仍可作为普通元素添加到画布。
+        </p>
+      </section>
+    </div>
+  )
+}
+
 function ControlledPropertiesTab({
   documentControl,
 }: {
@@ -2025,6 +2106,9 @@ function ControlledPropertiesTab({
     )
   }
   if (selectedNodes.length === 0) {
+    if (editingScope === 'scene' && documentControl.background) {
+      return <ControlledSceneBackgroundEditor background={documentControl.background} />
+    }
     return (
       <div className="properties-scroll" data-testid="properties-tab">
         <ControlledPropertiesGate

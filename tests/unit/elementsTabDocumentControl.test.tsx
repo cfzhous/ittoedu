@@ -90,4 +90,41 @@ describe('ElementsTab document control', () => {
     expect(screen.getByText('控制器编辑尚未开放')).toBeInTheDocument()
     expect(screen.getByTestId('global-elements-notice')).toBeInTheDocument()
   })
+
+  it('enables image and video quick-add when the owner wires V9 media insertion', () => {
+    const onAddImage = vi.fn()
+    const onAddVideo = vi.fn()
+    render(
+      <ElementsTab
+        documentControl={{
+          editingScope: 'scene',
+          editorMode: 'simple',
+          mediaUnavailableReason: '声音与媒体素材库暂不能从此面板管理；图片和视频可直接添加。',
+          controllerUnavailableReason: '控制器编辑尚未开放',
+          onAddText: vi.fn(),
+          onAddFormula: vi.fn(),
+          onAddShape: vi.fn(),
+          onAddImage,
+          onAddVideo,
+        }}
+      />,
+    )
+
+    const imageButton = screen.getByTestId('add-image')
+    const videoButton = screen.getByTestId('add-video')
+    expect(imageButton).not.toBeDisabled()
+    expect(videoButton).not.toBeDisabled()
+    fireEvent.click(imageButton)
+    fireEvent.click(videoButton)
+    expect(onAddImage).toHaveBeenCalledTimes(1)
+    expect(onAddVideo).toHaveBeenCalledTimes(1)
+    // The disabled audio button still carries the honest reason, now worded so
+    // it no longer claims image/video quick-add is blocked.
+    expect(screen.getByText('声音与媒体素材库暂不能从此面板管理；图片和视频可直接添加。'))
+      .toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '媒体' }))
+    expect(screen.getByText('声音与媒体素材库暂不能从此面板管理；图片和视频可直接添加。'))
+      .toBeInTheDocument()
+  })
 })

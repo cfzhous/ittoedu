@@ -1,15 +1,19 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { nanoid } from 'nanoid'
 import type {
+  CourseProjectDocument,
   LayerItem,
   LayerItemOverride,
   NativeLayerItem,
+  SlidePresentationState,
+  SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
 import type {
   DeepPartial,
   SceneDocument,
   SceneNode,
   ShapeType,
+  AssetMeta,
 } from '../../shared/projectTypes'
 import {
   materializeNativeLayerItem,
@@ -24,9 +28,10 @@ import {
 } from '../../shared/interactionTypes'
 import {
   addNativeVisualLayer,
-  addSlideTextLayer,
   addSlidePresentationState,
   addSlideScene,
+  addSlideTextLayer,
+  appendSlideLayerForPresentation,
   clearSlidePresentationStateOverrides,
   commitCourseHistory,
   createCourseHistory,
@@ -42,13 +47,18 @@ import {
   reserveTopAuthoringOrder,
   setInitialSlidePresentationState,
   setThumbnailSlidePresentationState,
+  sortAllLayerLists,
   type CourseHistoryState,
   undoCourseHistory,
   updateCourseProject,
 } from './courseStudioModel'
 import { componentPackagesFromArchive } from '../components/componentPackageStore'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
-import { createTextNode } from '../project/createProject'
+import {
+  createImageNode,
+  createTextNode,
+  createVideoNode,
+} from '../project/createProject'
 import {
   selectSlideEditorLayers,
   transformSelectedSlideNativeLayers,
@@ -66,6 +76,58 @@ export const V9_EDITOR_BACKEND = 'v9' as const
 export const V9_SLIDE_TEST_BACKEND = 'v9-slide-test' as const
 export const V9_SLIDE_TEST_QUERY = '?editor-backend=v9-slide-test' as const
 export const V9_SLIDE_TEST_TEXT_ID = 'v9-test-text' as const
+
+/** Matches the legacy canvas insertion cap; oversized batches degrade to library-only import. */
+export const V9_MEDIA_BATCH_LIMIT = 12 as const
+
+export interface V9SlideMediaInsertItem {
+  readonly meta: AssetMeta
+  readonly bytes: Uint8Array
+}
+
+function sameV9SlideAssetBytes(
+  left: Uint8Array,
+  right: Uint8Array,
+): boolean {
+  return left === right || (
+    left.byteLength === right.byteLength &&
+    left.every((value, index) => value === right[index])
+  )
+}
+
+/**
+ * Assets are a project library; `assetFiles` may keep bytes whose meta was
+ * removed by undo. Save and dirty tracking only ever see the registered view,
+ * while the raw session bytes stay available so redo can restore them.
+ */
+export function registeredV9SlideAssetFiles(
+  project: CourseProjectDocument,
+  assetFiles: Readonly<Record<string, Uint8Array>>,
+): Record<string, Uint8Array> {
+  return Object.fromEntries(
+    Object.entries(assetFiles).filter(([id]) => project.assets[id] !== undefined),
+  )
+}
+
+function sameV9SlideAssetFiles(
+  left: Readonly<Record<string, Uint8Array>>,
+  right: Readonly<Record<string, Uint8Array>>,
+): boolean {
+  const leftIds = Object.keys(left)
+  const rightIds = Object.keys(right)
+  if (leftIds.length !== rightIds.length) return false
+  return leftIds.every((id) => (
+    right[id] !== undefined && sameV9SlideAssetBytes(left[id]!, right[id]!)
+  ))
+}
+
+/** Content-level comparison used where a health snapshot replaces object identity. */
+export function courseV9AssetFilesEqual(
+  left: Readonly<Record<string, Uint8Array>>,
+  right: Readonly<Record<string, Uint8Array>>,
+): boolean {
+  return sameV9SlideAssetFiles(left, right)
+}
 
 const FIXTURE_NOW = '2026-08-15T02:00:00.000Z'
 
@@ -312,16 +374,25 @@ export function isV9SlideVerticalSliceDirty(
 ): boolean {
   return state.savedSnapshot === null ||
     state.history.present !== state.savedSnapshot.project ||
-    state.assetFiles !== state.savedSnapshot.assetFiles ||
+    !sameV9SlideAssetFiles(
+      registeredV9SlideAssetFiles(state.history.present, state.assetFiles),
+      state.savedSnapshot.assetFiles,
+    ) ||
     state.componentFiles !== state.savedSnapshot.componentFiles
 }
 
 export function captureV9SlideVerticalSliceArchive(
   state: V9SlideVerticalSliceState,
 ): CourseProjectArchiveData {
+  const project = state.history.present
+  const hasStaleBytes = Object.keys(state.assetFiles).some(
+    (id) => project.assets[id] === undefined,
+  )
   return {
-    project: state.history.present,
-    assetFiles: state.assetFiles,
+    project,
+    assetFiles: hasStaleBytes
+      ? registeredV9SlideAssetFiles(project, state.assetFiles)
+      : state.assetFiles,
     componentFiles: state.componentFiles,
   }
 }
@@ -911,6 +982,294 @@ export function addV9SlideShapeLayer(
   now?: string,
 ): V9SlideVerticalSliceState {
   return addV9SlideNativeLayer(state, { nativeType: 'shape', shapeType, x, y }, now)
+}
+
+const SLIDE_CANVAS_WIDTH = 1280
+const SLIDE_CANVAS_HEIGHT = 720
+const MIN_VISIBLE_NODE_EDGE = 16
+
+function clampMediaNodePosition(node: SceneNode): SceneNode {
+  const maxX = SLIDE_CANVAS_WIDTH - MIN_VISIBLE_NODE_EDGE
+  const maxY = SLIDE_CANVAS_HEIGHT - MIN_VISIBLE_NODE_EDGE
+  return {
+    ...node,
+    x: Math.min(maxX, Math.max(MIN_VISIBLE_NODE_EDGE - node.width, node.x)),
+    y: Math.min(maxY, Math.max(MIN_VISIBLE_NODE_EDGE - node.height, node.y)),
+  }
+}
+
+/**
+ * Deterministic non-overlapping grid for a small import batch, fully inside the
+ * fixed 1280×720 Slide canvas. Mirrors the legacy batch layout without coupling
+ * the slice to the V8 Store.
+ */
+function layoutV9MediaBatch(nodes: SceneNode[]): SceneNode[] {
+  if (nodes.length <= 1) return nodes.map(clampMediaNodePosition)
+  const margin = 24
+  const gap = 20
+  const columns = Math.min(
+    4,
+    Math.max(1, Math.ceil(Math.sqrt(nodes.length * (SLIDE_CANVAS_WIDTH / SLIDE_CANVAS_HEIGHT)))),
+  )
+  const rows = Math.ceil(nodes.length / columns)
+  const availableWidth = SLIDE_CANVAS_WIDTH - margin * 2 - gap * (columns - 1)
+  const availableHeight = SLIDE_CANVAS_HEIGHT - margin * 2 - gap * (rows - 1)
+  const cellWidth = availableWidth / columns
+  const cellHeight = availableHeight / rows
+  return nodes.map((node, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const scale = Math.min(1, cellWidth / node.width, cellHeight / node.height)
+    const width = Math.max(16, node.width * scale)
+    const height = Math.max(16, node.height * scale)
+    return {
+      ...node,
+      x: margin + column * (cellWidth + gap) + (cellWidth - width) / 2,
+      y: margin + row * (cellHeight + gap) + (cellHeight - height) / 2,
+      width,
+      height,
+    }
+  })
+}
+
+function createV9MediaNode(
+  nativeType: 'image' | 'video',
+  item: V9SlideMediaInsertItem,
+  x: number | undefined,
+  y: number | undefined,
+): SceneNode {
+  if (nativeType === 'image') {
+    const sourceWidth = item.meta.width
+    const sourceHeight = item.meta.height
+    const validSourceSize =
+      sourceWidth !== undefined && sourceHeight !== undefined &&
+      Number.isFinite(sourceWidth) && Number.isFinite(sourceHeight) &&
+      sourceWidth > 0 && sourceHeight > 0
+    const scale = validSourceSize
+      ? Math.min(1, 640 / sourceWidth!, 480 / sourceHeight!)
+      : 1
+    return createImageNode({
+      id: `image-${nanoid(10)}`,
+      name: '图片',
+      assetId: item.meta.id,
+      width: validSourceSize ? sourceWidth! * scale : 320,
+      height: validSourceSize ? sourceHeight! * scale : 180,
+      x,
+      y,
+    })
+  }
+  return createVideoNode({
+    id: `video-${nanoid(10)}`,
+    name: '视频',
+    assetId: item.meta.id,
+    width: item.meta.width ?? 640,
+    height: item.meta.height ?? 360,
+    x,
+    y,
+  })
+}
+
+function importAssetsIntoProject(
+  project: CourseProjectDocument,
+  items: readonly V9SlideMediaInsertItem[],
+): void {
+  for (const item of items) {
+    const existing = project.assets[item.meta.id]
+    if (existing) {
+      if (
+        existing.filename !== item.meta.filename ||
+        existing.byteLength !== item.meta.byteLength ||
+        existing.mimeType !== item.meta.mimeType
+      ) {
+        throw new Error('素材 ID 冲突：所选文件与工程中的既有素材不一致')
+      }
+      continue
+    }
+    project.assets[item.meta.id] = structuredClone(item.meta)
+  }
+}
+
+/**
+ * Imports the supplied assets and appends one V9 Native layer per item in a
+ * single history entry. `state.assetFiles` keeps the raw session bytes so a
+ * later redo can restore them; save and dirty always use the registered view.
+ */
+export function addV9SlideMediaLayers(
+  state: V9SlideVerticalSliceState,
+  nativeType: 'image' | 'video',
+  items: readonly V9SlideMediaInsertItem[],
+  x?: number,
+  y?: number,
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (state.editingScope !== 'scene') throw new Error('请先切换到场景层')
+  if (items.length === 0) return state
+  if (items.length > V9_MEDIA_BATCH_LIMIT) {
+    throw new Error(`一次最多添加 ${V9_MEDIA_BATCH_LIMIT} 个媒体元素`)
+  }
+  const single = items.length === 1
+  const nodes = layoutV9MediaBatch(items.map((item) =>
+    createV9MediaNode(nativeType, item, single ? x : undefined, single ? y : undefined),
+  ))
+  const assetFiles = { ...state.assetFiles }
+  for (const item of items) assetFiles[item.meta.id] = item.bytes.slice()
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    importAssetsIntoProject(draft, items)
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    if (!draftScene) throw new Error('当前场景已失效')
+    nodes.forEach((node) => {
+      const item = sceneNodeToCourseLayerItem(node)
+      item.order = reserveTopAuthoringOrder(draft, draftSurface.id, draftScene.id)
+      appendSlideLayerForPresentation(draftScene, item, state.selection.stateId)
+    })
+    sortAllLayerLists(draft)
+  }, now)
+  const layerItemIds = nodes.map((node) => node.id)
+  return commitV9SlideDocument(
+    state,
+    project,
+    selectionAfterLayerCommand(state, project, layerItemIds),
+    'scene',
+    assetFiles,
+  )
+}
+
+/** Library-only import; one history entry. Used by the batch overflow fallback. */
+export function importV9SlideAssets(
+  state: V9SlideVerticalSliceState,
+  items: readonly V9SlideMediaInsertItem[],
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (items.length === 0) return state
+  const assetFiles = { ...state.assetFiles }
+  for (const item of items) assetFiles[item.meta.id] = item.bytes.slice()
+  const project = updateCourseProject(state.history.present, (draft) => {
+    importAssetsIntoProject(draft, items)
+  }, now)
+  return commitV9SlideDocument(state, project, state.selection, state.editingScope, assetFiles)
+}
+
+function activeSlideSceneForBackground(
+  state: V9SlideVerticalSliceState,
+) {
+  const { surface, scene } = activeSlideSceneContext(state)
+  return { surface, scene }
+}
+
+function currentPresentationState(
+  scene: SlideSceneDocument,
+  stateId: string | null,
+): SlidePresentationState | null {
+  if (stateId === null) return null
+  const presentationState = scene.presentation?.states.find(
+    (candidate) => candidate.id === stateId,
+  )
+  if (!presentationState) throw new Error('当前命名状态已失效')
+  return presentationState
+}
+
+const SLIDE_BACKGROUND_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
+
+export function setV9SlideSceneBackgroundColor(
+  state: V9SlideVerticalSliceState,
+  color: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (!SLIDE_BACKGROUND_COLOR_PATTERN.test(color)) {
+    throw new Error('背景颜色必须是 #RRGGBB 格式')
+  }
+  const { surface, scene } = activeSlideSceneForBackground(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    if (!draftScene) throw new Error('当前场景已失效')
+    const presentationState = currentPresentationState(
+      draftScene,
+      state.selection.stateId,
+    )
+    if (!presentationState) {
+      if (draftScene.backgroundColor === color) return
+      draftScene.backgroundColor = color
+      return
+    }
+    if (presentationState.backgroundColor === color) return
+    if (color === draftScene.backgroundColor) delete presentationState.backgroundColor
+    else presentationState.backgroundColor = color
+  }, now)
+  return project === state.history.present ? state : commitV9SlideDocument(state, project)
+}
+
+export type V9SlideBackgroundAssetInput =
+  | { assetId: string | null }
+  | { meta: AssetMeta; bytes: Uint8Array }
+
+export function setV9SlideSceneBackgroundAsset(
+  state: V9SlideVerticalSliceState,
+  input: V9SlideBackgroundAssetInput,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const assetId = 'assetId' in input ? input.assetId : input.meta.id
+  const { surface, scene } = activeSlideSceneForBackground(state)
+  const assetFiles = assetId !== null && 'bytes' in input
+    ? { ...state.assetFiles, [assetId]: input.bytes.slice() }
+    : state.assetFiles
+  const project = updateCourseProject(state.history.present, (draft) => {
+    if (assetId !== null && !draft.assets[assetId]) {
+      if (!('bytes' in input)) throw new Error(`找不到素材：${assetId}`)
+      draft.assets[assetId] = structuredClone(input.meta)
+    }
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    if (!draftScene) throw new Error('当前场景已失效')
+    const presentationState = currentPresentationState(
+      draftScene,
+      state.selection.stateId,
+    )
+    if (!presentationState) {
+      if (draftScene.backgroundAssetId === assetId) return
+      draftScene.backgroundAssetId = assetId
+      return
+    }
+    if (presentationState.backgroundAssetId === assetId) return
+    if (draftScene.backgroundAssetId === assetId) delete presentationState.backgroundAssetId
+    else presentationState.backgroundAssetId = assetId
+  }, now)
+  return project === state.history.present
+    ? state
+    : commitV9SlideDocument(state, project, state.selection, state.editingScope, assetFiles)
+}
+
+export function clearV9SlideSceneBackgroundOverride(
+  state: V9SlideVerticalSliceState,
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (state.selection.stateId === null) return state
+  const { surface, scene } = activeSlideSceneForBackground(state)
+  const currentState = currentPresentationState(scene, state.selection.stateId)
+  if (!currentState) return state
+  if (
+    currentState.backgroundColor === undefined &&
+    currentState.backgroundAssetId === undefined
+  ) {
+    return state
+  }
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    const presentationState = draftScene?.presentation?.states.find(
+      (candidate) => candidate.id === state.selection.stateId,
+    )
+    if (!presentationState) throw new Error('当前命名状态已失效')
+    delete presentationState.backgroundColor
+    delete presentationState.backgroundAssetId
+  }, now)
+  return commitV9SlideDocument(state, project)
 }
 
 export function updateV9SlideLayer(
@@ -1548,6 +1907,7 @@ function commitV9SlideDocument(
   project: V9SlideVerticalSliceState['history']['present'],
   selection: SlideEditorSelection = state.selection,
   editingScope: V9SlideEditingScope = state.editingScope,
+  assetFiles: V9SlideVerticalSliceState['assetFiles'] = state.assetFiles,
 ): V9SlideVerticalSliceState {
   return freezeState(
     state.sessionId,
@@ -1556,7 +1916,7 @@ function commitV9SlideDocument(
     editingScope,
     state.savedSnapshot,
     state.projectPath,
-    state.assetFiles,
+    assetFiles,
     state.componentFiles,
     state.componentPackages,
   )

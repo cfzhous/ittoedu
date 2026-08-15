@@ -36,6 +36,8 @@ export interface ElementsTabDocumentControl {
   onAddText(x?: number, y?: number): void
   onAddFormula(x?: number, y?: number): void
   onAddShape(shapeType: ShapeType, x?: number, y?: number): void
+  onAddImage?(x?: number, y?: number): void
+  onAddVideo?(x?: number, y?: number): void
 }
 
 interface ControlledElementsTabProps {
@@ -125,6 +127,8 @@ export function ElementsTab(props: ElementsTabProps) {
         onAddText={control.onAddText}
         onAddFormula={control.onAddFormula}
         onAddShape={control.onAddShape}
+        onAddImage={control.onAddImage}
+        onAddVideo={control.onAddVideo}
       />
     )
   }
@@ -351,11 +355,11 @@ function ElementsTabView({
               type="button"
               aria-label="图片"
               className="element-card element-card--primary"
-              draggable={Boolean(onAddImage)}
+              draggable={dragEnabled && Boolean(onAddImage)}
               disabled={!onAddImage}
               title={!onAddImage ? mediaUnavailableReason : undefined}
               data-testid="add-image"
-              onDragStart={onAddImage
+              onDragStart={onAddImage && dragEnabled
                 ? (event) => setDragData(event, 'image', '图片')
                 : undefined}
               onClick={() => onAddImage?.()}
@@ -372,10 +376,10 @@ function ElementsTabView({
               aria-label="视频"
               className="element-card element-card--primary"
               data-testid="add-video"
-              draggable={Boolean(onAddVideo)}
+              draggable={dragEnabled && Boolean(onAddVideo)}
               disabled={!onAddVideo}
               title={!onAddVideo ? mediaUnavailableReason : undefined}
-              onDragStart={onAddVideo
+              onDragStart={onAddVideo && dragEnabled
                 ? (event) => setDragData(event, 'video', '视频')
                 : undefined}
               onClick={() => onAddVideo?.()}
@@ -413,7 +417,11 @@ function ElementsTabView({
               </button>
             )}
           </div>
-          {mediaUnavailableReason && (showImage || showVideo || showAudio) && (
+          {mediaUnavailableReason && (
+            (showImage && !onAddImage) ||
+            (showVideo && !onAddVideo) ||
+            (showAudio && !onAddAudio)
+          ) && (
             <div className="empty-state add-category-empty" role="status">
               {mediaUnavailableReason}
             </div>

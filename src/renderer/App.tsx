@@ -19,7 +19,7 @@ import type {
   SelectedImageBatchFile,
   SelectedMediaBatchFile,
 } from '../shared/ipcTypes'
-import type { AssetKind } from '../shared/projectTypes'
+import type { AssetKind, AssetMeta } from '../shared/projectTypes'
 import type { CourseProjectDocument } from '../shared/courseProjectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
@@ -46,7 +46,9 @@ import { renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
 import {
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
+  courseV9AssetFilesEqual,
   isV9SlideVerticalSliceDirty,
+  registeredV9SlideAssetFiles,
   v9SlideLayerContextKey,
   type V9SlideVerticalSliceState,
 } from './course/v9SlideVerticalSlice'
@@ -173,12 +175,20 @@ async function prepareAssetBatch<T extends {
   files: T[],
   kind: AssetKind,
   build: (file: T) => Promise<ImportedAssetBatchItem>,
+  scope?: {
+    assets: Readonly<Record<string, AssetMeta>>
+    assetFiles: Readonly<Record<string, Uint8Array>>
+  },
 ): Promise<PreparedAssetBatch> {
   const state = useEditorStore.getState()
+  const assetRegistry = scope ?? {
+    assets: state.project.assets,
+    assetFiles: state.assetFiles,
+  }
   const hashes = await buildAssetContentHashIndex(
     kind,
-    state.project.assets,
-    state.assetFiles,
+    assetRegistry.assets,
+    assetRegistry.assetFiles,
   )
   const placements: ImportedAssetBatchItem[] = []
   const additions: ImportedAssetBatchItem[] = []
@@ -371,7 +381,13 @@ export default function App() {
   const activeV9HealthCheck = v9SlideVerticalSlice !== null &&
     v9HealthCheck?.sessionId === v9SlideVerticalSlice.sessionId &&
     v9HealthCheck.archive.project === v9SlideVerticalSlice.history.present &&
-    v9HealthCheck.archive.assetFiles === v9SlideVerticalSlice.assetFiles &&
+    courseV9AssetFilesEqual(
+      registeredV9SlideAssetFiles(
+        v9SlideVerticalSlice.history.present,
+        v9SlideVerticalSlice.assetFiles,
+      ),
+      v9HealthCheck.archive.assetFiles,
+    ) &&
     v9HealthCheck.archive.componentFiles === v9SlideVerticalSlice.componentFiles &&
     v9HealthCheck.componentPackages === v9SlideVerticalSlice.componentPackages
     ? v9HealthCheck
@@ -797,6 +813,149 @@ export default function App() {
       : buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice),
     [v9ActiveSlideContext, v9SlideVerticalSlice],
   )
+  const setError = useEditorStore((state) => state.setError)
+  const setStatus = useEditorStore((state) => state.setStatus)
+
+  const run = useCallback(
+    async <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
+      if (lifecycleOperationInFlightRef.current) return undefined
+      lifecycleOperationInFlightRef.current = true
+      setBusy(true)
+      setError(null)
+      try {
+        return await operation()
+      } catch (error) {
+        setError(readableError(error, fallback))
+        return undefined
+      } finally {
+        lifecycleOperationInFlightRef.current = false
+        setBusy(false)
+      }
+    },
+    [setError],
+  )
+
+  const reportBatchOutcome = useCallback((input: {
+    label: string
+    completedCount: number
+    duplicateCount: number
+    issues: BatchImportIssue[]
+    libraryFallback?: MediaBatchLibraryFallback
+  }) => {
+    const details = [
+      `已完成 ${input.completedCount} 项`,
+      input.duplicateCount > 0 ? `内容重复 ${input.duplicateCount} 项（已复用素材）` : '',
+      input.issues.length > 0 ? `失败 ${input.issues.length} 项` : '',
+      input.libraryFallback === 'batch-size'
+        ? '数量过多，已只加入媒体库'
+        : '',
+      input.libraryFallback === 'scene-capacity'
+        ? '当前层容量不足，已改为只加入媒体库'
+        : '',
+    ].filter(Boolean)
+    setStatus(`${input.label}：${details.join('；')}`)
+    if (input.issues.length > 0) {
+      setError(`${input.label}部分文件未完成：\n${formatBatchIssueSummary(input.issues)}`)
+      setBatchOperationSummary({
+        title: `${input.label}结果`,
+        summary: [
+          ...details,
+          '',
+          '未完成：',
+          ...input.issues.map((issue) => `- ${issue.name}：${issue.message}`),
+        ].join('\n'),
+      })
+    }
+  }, [setError, setStatus])
+
+  const currentCourseAssetScope = useCallback(() => {
+    const session = useEditorStore.getState().courseSession
+    if (session === null) return null
+    return {
+      assets: session.history.present.assets,
+      assetFiles: session.assetFiles,
+    }
+  }, [])
+
+  const selectAndAddCourseMedia = useCallback(async (
+    kind: 'image' | 'video',
+    mode: 'add' | 'library',
+    position?: { x?: number; y?: number },
+  ) => {
+    await run(async () => {
+      const batch = kind === 'image'
+        ? await desktopApi().selectImages()
+        : await desktopApi().selectVideos()
+      if (!batch) return
+      const scope = currentCourseAssetScope()
+      if (scope === null) return
+      const prepared = kind === 'image'
+        ? await prepareAssetBatch<SelectedImageBatchFile>(
+            batch.accepted,
+            'image',
+            async (file) => {
+              const dimensions = await readImageDimensions(file.bytes, file.mimeType)
+              const imported = createImageAssetImport(file, { dimensions })
+              return { meta: imported.meta, bytes: imported.bytes }
+            },
+            scope,
+          )
+        : await prepareAssetBatch<SelectedMediaBatchFile>(
+            batch.accepted,
+            'video',
+            async (file) => {
+              const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
+              const imported = createMediaAssetImport(file, 'video', metadata)
+              return { meta: imported.meta, bytes: imported.bytes }
+            },
+            scope,
+          )
+      const importPlan = planMediaBatchImport(
+        mode,
+        prepared.placements.length,
+        MAX_BATCH_CANVAS_ITEMS,
+      )
+      const commitResult = commitMediaBatchImport({
+        plan: importPlan,
+        placements: prepared.placements,
+        additions: prepared.additions,
+        placeOnCanvas: (items) => useEditorStore.getState().addCourseMediaLayers(
+          kind,
+          items,
+          position?.x,
+          position?.y,
+        ),
+        importIntoLibrary: (items) => useEditorStore.getState().importCourseAssets(items),
+      })
+      reportBatchOutcome({
+        label: kind === 'image'
+          ? (mode === 'add' ? '图片添加' : '图片批量入库')
+          : (mode === 'add' ? '视频添加' : '视频批量入库'),
+        completedCount: commitResult.completedCount,
+        duplicateCount: prepared.duplicateCount,
+        issues: [...desktopRejections(batch.rejected), ...prepared.issues],
+        libraryFallback: commitResult.libraryFallback,
+      })
+    }, kind === 'image'
+      ? '图片读取失败。请重新选择受支持的图片。'
+      : '视频读取失败。请重新选择 MP4 或 WebM 文件。')
+  }, [currentCourseAssetScope, reportBatchOutcome, run])
+
+  const pickCourseBackgroundImage = useCallback(async () => {
+    await run(async () => {
+      const scope = currentCourseAssetScope()
+      if (scope === null) return
+      const file = await desktopApi().selectImage()
+      if (!file) return
+      const dimensions = await readImageDimensions(file.bytes, file.mimeType)
+      const imported = createImageAssetImport(file, { dimensions })
+      useEditorStore.getState().setCourseSceneBackgroundWithAsset(
+        imported.meta,
+        imported.bytes,
+      )
+    }, '图片读取失败。请重新选择受支持的图片。')
+  }, [currentCourseAssetScope, run])
+
   const v9RightSidebarDocumentControl = useMemo<
     RightSidebarDocumentControl | undefined
   >(() => {
@@ -884,7 +1043,7 @@ export default function App() {
             elements: {
               editingScope: 'scene' as const,
               editorMode,
-              mediaUnavailableReason: '当前版本暂不能从此面板添加图片、视频或声音。',
+              mediaUnavailableReason: '声音与媒体素材库暂不能从此面板管理；图片和视频可直接添加。',
               controllerUnavailableReason: '当前版本暂不能从此面板编辑教师控制器。',
               onAddText: (x, y) => run(() => {
                 useEditorStore.getState().addCourseTextLayer(x, y)
@@ -895,6 +1054,12 @@ export default function App() {
               onAddShape: (shapeType, x, y) => run(() => {
                 useEditorStore.getState().addCourseShapeLayer(shapeType, x, y)
               }, '无法添加图形'),
+              onAddImage: (x, y) => {
+                void selectAndAddCourseMedia('image', 'add', { x, y })
+              },
+              onAddVideo: (x, y) => {
+                void selectAndAddCourseMedia('video', 'add', { x, y })
+              },
             },
           }
         : {}),
@@ -1001,6 +1166,47 @@ export default function App() {
           '图片和视频的专属设置暂不可用；上方通用属性仍可修改。',
         controllerUnavailableReason:
           '教师控制器的专属设置暂不可用；上方通用属性仍可修改。',
+        ...(editingScene
+          ? {
+              background: {
+                editingScope: 'scene' as const,
+                inNamedState: v9SlideVerticalSlice.selection.stateId !== null,
+                backgroundColor: view.backgroundColor,
+                backgroundAssetId: view.backgroundAssetId,
+                backgroundAssetOptions: Object.values(
+                  v9SlideVerticalSlice.history.present.assets,
+                )
+                  .filter((asset) => asset.kind === 'image')
+                  .map((asset) => ({ id: asset.id, label: asset.filename })),
+                overrideActive: Boolean(
+                  activeState &&
+                  (
+                    activeState.backgroundColor !== undefined ||
+                    activeState.backgroundAssetId !== undefined
+                  ),
+                ),
+                onSetColor: (color) => updateProperty(
+                  () => useEditorStore.getState().setCourseSceneBackground({
+                    backgroundColor: color,
+                  }),
+                  '无法更新背景颜色',
+                ),
+                onSetAsset: (assetId) => updateProperty(
+                  () => useEditorStore.getState().setCourseSceneBackground({
+                    backgroundAssetId: assetId,
+                  }),
+                  '无法更新背景素材',
+                ),
+                onPickImageFile: () => {
+                  void pickCourseBackgroundImage()
+                },
+                onClearOverride: () => updateProperty(
+                  () => useEditorStore.getState().clearCourseSceneBackgroundOverride(),
+                  '无法恢复基础背景',
+                ),
+              },
+            }
+          : {}),
         onUpdateNode: (target, patch) => updateProperty(
           () => useEditorStore.getState().updateCourseNativeNode(target, patch),
           '无法更新元素属性',
@@ -1027,6 +1233,8 @@ export default function App() {
     }
   }, [
     editorMode,
+    pickCourseBackgroundImage,
+    selectAndAddCourseMedia,
     v9ActiveSlideContext?.scene.name,
     v9CourseLocationUnavailableReason,
     v9SlideVerticalSlice,
@@ -1070,8 +1278,6 @@ export default function App() {
     }
   }, [v9ActiveSlideContext?.scene, v9SlideVerticalSlice, v9WorkspaceSnapshot])
 
-  const setError = useEditorStore((state) => state.setError)
-  const setStatus = useEditorStore((state) => state.setStatus)
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
   )
@@ -1113,25 +1319,6 @@ export default function App() {
     useEditorStore.getState().renameCourseProject(title)
   }, [v9BackendActive])
 
-  const run = useCallback(
-    async <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
-      if (lifecycleOperationInFlightRef.current) return undefined
-      lifecycleOperationInFlightRef.current = true
-      setBusy(true)
-      setError(null)
-      try {
-        return await operation()
-      } catch (error) {
-        setError(readableError(error, fallback))
-        return undefined
-      } finally {
-        lifecycleOperationInFlightRef.current = false
-        setBusy(false)
-      }
-    },
-    [setError],
-  )
-
   const handleOpenHealth = useCallback(() => {
     if (!v9BackendActive) {
       setProjectHealthOpen(true)
@@ -1148,7 +1335,10 @@ export default function App() {
         latest === null ||
         latest.sessionId !== current.sessionId ||
         latest.history.present !== archive.project ||
-        latest.assetFiles !== archive.assetFiles ||
+        !courseV9AssetFilesEqual(
+          registeredV9SlideAssetFiles(latest.history.present, latest.assetFiles),
+          archive.assetFiles,
+        ) ||
         latest.componentFiles !== archive.componentFiles ||
         latest.componentPackages !== packages
       ) {
@@ -1169,39 +1359,6 @@ export default function App() {
       setProjectHealthOpen(false)
     }
   }, [activeV9HealthCheck, projectHealthOpen, v9BackendActive])
-
-  const reportBatchOutcome = useCallback((input: {
-    label: string
-    completedCount: number
-    duplicateCount: number
-    issues: BatchImportIssue[]
-    libraryFallback?: MediaBatchLibraryFallback
-  }) => {
-    const details = [
-      `已完成 ${input.completedCount} 项`,
-      input.duplicateCount > 0 ? `内容重复 ${input.duplicateCount} 项（已复用素材）` : '',
-      input.issues.length > 0 ? `失败 ${input.issues.length} 项` : '',
-      input.libraryFallback === 'batch-size'
-        ? '数量过多，已只加入媒体库'
-        : '',
-      input.libraryFallback === 'scene-capacity'
-        ? '当前层容量不足，已改为只加入媒体库'
-        : '',
-    ].filter(Boolean)
-    setStatus(`${input.label}：${details.join('；')}`)
-    if (input.issues.length > 0) {
-      setError(`${input.label}部分文件未完成：\n${formatBatchIssueSummary(input.issues)}`)
-      setBatchOperationSummary({
-        title: `${input.label}结果`,
-        summary: [
-          ...details,
-          '',
-          '未完成：',
-          ...input.issues.map((issue) => `- ${issue.name}：${issue.message}`),
-        ].join('\n'),
-      })
-    }
-  }, [setError, setStatus])
 
   const refreshRecentProjects = useCallback(async () => {
     if (!window.desktopAPI) return
@@ -2247,10 +2404,10 @@ export default function App() {
             courseLocationUnavailableReason={v9CourseLocationUnavailableReason}
             interactionDisabled={busy}
             onAddImage={v9BackendActive
-              ? () => setStatus('图片添加暂不可用')
+              ? (x, y) => void selectAndAddCourseMedia('image', 'add', { x, y })
               : (x, y) => void selectAndImportImage('add', { x, y })}
             onAddVideo={v9BackendActive
-              ? () => setStatus('视频添加暂不可用')
+              ? (x, y) => void selectAndAddCourseMedia('video', 'add', { x, y })
               : (x, y) => void selectAndImportVideo('add', { x, y })}
             onSelectImageAsset={v9BackendActive
               ? async () => {

@@ -638,7 +638,7 @@ function createNativeTextLayer(
   }))
 }
 
-function appendSlideLayerForPresentation(
+export function appendSlideLayerForPresentation(
   scene: SlideSceneDocument,
   item: LayerItem,
   stateId: string | null | undefined,
@@ -2000,7 +2000,7 @@ function shiftProjectLayerOrders(
   })
 }
 
-function sortAllLayerLists(project: CourseProjectDocument): void {
+export function sortAllLayerLists(project: CourseProjectDocument): void {
   const sort = <T extends LayerItem>(items: T[]) => items.sort((left, right) =>
     left.order - right.order || left.layerItemId.localeCompare(right.layerItemId),
   )
