@@ -909,4 +909,113 @@ describe('InteractionEngine', () => {
     )
     engine.destroy()
   })
+
+  it('truly awaits an asynchronous presentation.set before running the next step', async () => {
+    const events = new CourseEventBus()
+    let currentState = 'question'
+    let applyState: ((ok: boolean) => void) | undefined
+    const api: RuntimePresentationApi = {
+      current: () => currentState,
+      states: () => [
+        { id: 'question', name: '题目' },
+        { id: 'feedback', name: '反馈' },
+      ],
+      setState: (stateId) => new Promise<boolean>((resolve) => {
+        applyState = (ok) => {
+          if (ok) currentState = stateId
+          resolve(ok)
+        }
+      }),
+      transitionTo: () => new Promise<boolean>(() => undefined),
+    }
+    const audio = vi.fn()
+    const engine = new InteractionEngine({
+      sceneId: 'scene_one',
+      rules: [clickRule('deferred-state', [
+        { type: 'presentation.set', stateId: 'feedback' },
+        { type: 'audio.play', soundId: 'after' },
+      ])],
+      events,
+      presentation: api,
+      hostActions: hostActions(),
+      executeAudioAction: audio,
+    })
+    const root = new FakeRoot()
+    engine.bindNodeHandles([{ id: 'button', root }])
+
+    root.emit('pointerup')
+    // The follow-up step must wait for the state switch to settle.
+    expect(audio).not.toHaveBeenCalled()
+    applyState?.(true)
+    await vi.waitFor(() => {
+      expect(audio).toHaveBeenCalledWith({ type: 'audio.play', soundId: 'after' })
+    })
+    expect(currentState).toBe('feedback')
+    engine.destroy()
+  })
+
+  it('stops the chain and reports a teacher error when a state switch fails', async () => {
+    const events = new CourseEventBus()
+    const presentation = presentationHarness(events, 'question')
+    const audio = vi.fn()
+    const errors = vi.fn()
+    const engine = new InteractionEngine({
+      sceneId: 'scene_one',
+      rules: [clickRule('failing-state', [
+        // The requested state is already current, so the switch rejects with false.
+        { type: 'presentation.set', stateId: 'question' },
+        { type: 'audio.play', soundId: 'never' },
+      ])],
+      events,
+      presentation: presentation.api,
+      hostActions: hostActions(),
+      executeAudioAction: audio,
+      onError: errors,
+    })
+    const root = new FakeRoot()
+    engine.bindNodeHandles([{ id: 'button', root }])
+
+    root.emit('pointerup')
+    await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(1))
+    expect(errors).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('状态切换未执行') }),
+      expect.objectContaining({ phase: 'execute' }),
+    )
+    expect(audio).not.toHaveBeenCalled()
+    engine.destroy()
+  })
+
+  it('stops the chain and reports a teacher error when host navigation is blocked', async () => {
+    const events = new CourseEventBus()
+    const presentation = presentationHarness(events)
+    const audio = vi.fn()
+    const errors = vi.fn()
+    const actions: Readonly<RuntimeHostActions> = {
+      ...hostActions(),
+      nextScene: vi.fn(async () => false),
+    }
+    const engine = new InteractionEngine({
+      sceneId: 'scene_one',
+      rules: [clickRule('blocked-nav', [
+        { type: 'scene.next' },
+        { type: 'audio.play', soundId: 'never' },
+      ])],
+      events,
+      presentation: presentation.api,
+      hostActions: actions,
+      executeAudioAction: audio,
+      onError: errors,
+    })
+    const root = new FakeRoot()
+    engine.bindNodeHandles([{ id: 'button', root }])
+
+    root.emit('pointerup')
+    await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(1))
+    expect(errors).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('场景跳转未执行') }),
+      expect.objectContaining({ phase: 'execute' }),
+    )
+    expect(audio).not.toHaveBeenCalled()
+    engine.destroy()
+  })
 })

@@ -87,12 +87,19 @@ export interface CourseEventBus {
   dispose(): void
 }
 
+/**
+ * Course-level host actions offered to runtimes, components and the
+ * declarative interaction engine. Runtime-facing ports keep the synchronous
+ * contract (a `boolean` is always a valid result); the interaction engine may
+ * await a real promise so a blocked or failed navigation stops the rule chain
+ * instead of pretending the action already succeeded.
+ */
 export interface RuntimeHostActions {
-  goToScene(sceneId: string, targetStateId?: string): boolean
-  nextScene(): boolean
-  previousScene(): boolean
-  replayScene(): boolean
-  restartCourse(): boolean
+  goToScene(sceneId: string, targetStateId?: string): boolean | PromiseLike<boolean>
+  nextScene(): boolean | PromiseLike<boolean>
+  previousScene(): boolean | PromiseLike<boolean>
+  replayScene(): boolean | PromiseLike<boolean>
+  restartCourse(): boolean | PromiseLike<boolean>
 }
 
 export interface RuntimeNodeHandle {
@@ -118,11 +125,12 @@ export interface RuntimePresentationTransition {
 export interface RuntimePresentationApi {
   current(): string | null
   states(): ReadonlyArray<Readonly<RuntimePresentationStateInfo>>
-  setState(stateId: string): boolean
+  /** Sync runtime ports may return `boolean`; the interaction engine can await a promise. */
+  setState(stateId: string): boolean | PromiseLike<boolean>
   transitionTo(
     stateId: string,
     transition?: RuntimePresentationTransition,
-  ): boolean
+  ): boolean | PromiseLike<boolean>
 }
 
 export interface RuntimePhaserRoots {

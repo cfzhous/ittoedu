@@ -473,4 +473,120 @@ describe('Published Course V2 product pipeline', () => {
     root.remove()
     history.replaceState(null, '', '#')
   })
+
+  it('stops the interaction chain with a teacher error when navigation is blocked', async () => {
+    const sources = fixture()
+    sources.project.surfaces = [sources.project.surfaces[0]!]
+    sources.project.locations = [sources.project.locations[0]!]
+    sources.project.startLocationId = sources.project.locations[0]!.id
+    delete sources.project.mixedPrintPlan
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const textItemId = slide.scenes[0]!.layerItems.find((item) => item.kind === 'native')!.layerItemId
+    slide.scenes[0]!.interactions = [{
+      id: 'reveal-then-next',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: textItemId },
+      conditions: [],
+      actions: [
+        {
+          id: 'reveal-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'presentation.set', stateId: 'slide-state-cover' },
+        },
+        {
+          id: 'next-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        },
+      ],
+    }]
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    const target = root.querySelector<HTMLElement>(`[data-layer-item-id="${textItemId}"]`)!
+    target.dispatchEvent(new Event('pointerup', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(root.querySelector('.slide-surface')).toHaveAttribute('data-state-id', 'slide-state-cover')
+    })
+    // The single-location course cannot advance: the chain stops and the
+    // failure is a teacher-understandable diagnostic, not an internal id.
+    await vi.waitFor(() => {
+      expect(app.diagnostics.length).toBeGreaterThan(0)
+    })
+    expect(app.currentLocationId).toBe('location-slide')
+    expect(app.diagnostics.some((entry) => (
+      entry.phase === 'execute' && entry.message.includes('已停止后续动作')
+    ))).toBe(true)
+    expect(app.diagnostics.some((entry) => (
+      entry.message.includes('location') || entry.message.includes('slide')
+    ))).toBe(false)
+    await app.destroy()
+    root.remove()
+  })
+
+  it('stops the chain when a presentation switch fails instead of navigating on', async () => {
+    const sources = fixture()
+    sources.project.surfaces = [sources.project.surfaces[0]!]
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const sceneTwo = structuredClone(slide.scenes[0]!)
+    sceneTwo.id = 'slide-scene-2'
+    sceneTwo.name = 'Slide 2'
+    sceneTwo.interactions = []
+    slide.scenes.push(sceneTwo)
+    sources.project.locations = [
+      sources.project.locations[0]!,
+      {
+        id: 'location-slide-2',
+        label: 'Slide 2',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: sceneTwo.id,
+      },
+    ]
+    sources.project.startLocationId = sources.project.locations[0]!.id
+    delete sources.project.mixedPrintPlan
+    const textItemId = slide.scenes[0]!.layerItems.find((item) => item.kind === 'native')!.layerItemId
+    slide.scenes[0]!.interactions = [{
+      id: 'bad-state-then-next',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: textItemId },
+      conditions: [],
+      actions: [
+        {
+          id: 'bad-state-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'presentation.set', stateId: 'missing-state' },
+        },
+        {
+          id: 'next-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.next' },
+        },
+      ],
+    }]
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    const target = root.querySelector<HTMLElement>(`[data-layer-item-id="${textItemId}"]`)!
+    target.dispatchEvent(new Event('pointerup', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(app.diagnostics.length).toBeGreaterThan(0)
+    })
+    // The state switch failed, so the dependent navigation must not run.
+    expect(app.currentLocationId).toBe('location-slide')
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-state-id', 'slide-base')
+    expect(app.diagnostics.some((entry) => (
+      entry.phase === 'execute' && entry.message.includes('状态切换未执行')
+    ))).toBe(true)
+    await app.destroy()
+    root.remove()
+  })
 })

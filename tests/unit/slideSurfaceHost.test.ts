@@ -936,4 +936,205 @@ describe('SlideSurfaceHost scene interactions', () => {
 
     await host.destroy()
   })
+
+  function motionDocument(): SlideSurfaceDocument {
+    const document = slide([textItem('card', 0)])
+    const scene = document.scenes[0]!
+    scene.presentation = {
+      initialStateId: 'visible',
+      states: [
+        { id: 'visible', name: '可见', layerItemOverrides: {} },
+        { id: 'hidden', name: '隐藏', layerItemOverrides: {} },
+      ],
+    }
+    scene.interactions = [
+      {
+        id: 'hide-card',
+        enabled: true,
+        trigger: { type: 'node.click', nodeId: 'card' },
+        conditions: [],
+        actions: [{
+          id: 'hide-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'node.exit',
+            nodeId: 'card',
+            effect: 'fade',
+            durationMs: 200,
+            easing: 'ease-out',
+          },
+        }],
+      },
+      {
+        id: 'after-hidden',
+        enabled: true,
+        trigger: { type: 'animation.completed', actionId: 'hide-step' },
+        conditions: [],
+        actions: [{
+          id: 'mark-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'presentation.set', stateId: 'hidden' },
+        }],
+      },
+    ]
+    return document
+  }
+
+  function installFakeAnimate(
+    element: HTMLElement,
+  ): { finish: () => void; animate: ReturnType<typeof vi.fn> } {
+    const finishListeners = new Set<() => void>()
+    const animation = {
+      addEventListener: (name: string, listener: () => void) => {
+        if (name === 'finish') finishListeners.add(listener)
+      },
+      cancel: vi.fn(),
+      finished: new Promise<Animation>(() => undefined),
+    } as unknown as Animation
+    const animate = vi.fn(() => animation)
+    Object.defineProperty(element, 'animate', { configurable: true, value: animate })
+    return {
+      finish: () => { for (const listener of [...finishListeners]) listener() },
+      animate,
+    }
+  }
+
+  it('publishes scene exit, presentation exit and session-end exit per lifecycle', async () => {
+    const document = interactiveDocument()
+    document.scenes.push({
+      id: 'scene-2',
+      name: '场景二',
+      backgroundColor: '#ffffff',
+      layerItems: [textItem('scene-2-text', 0)],
+      interactions: [],
+    })
+    const events = new CourseEventBus()
+    const seen: string[] = []
+    events.on<{ sceneId: string; toSceneId?: string }>('scene:exit', (detail) => {
+      seen.push(`exit:${detail.sceneId}:${detail.toSceneId ?? ''}`)
+    })
+    events.on<{ sceneId: string; stateId: string }>('presentation:exit', (detail) => {
+      seen.push(`pexit:${detail.sceneId}:${detail.stateId}`)
+    })
+    const host = new SlideSurfaceHost(document, {
+      interactions: { events, hostActions: interactionHostActions() },
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    await host.setPresentationState('revealed')
+    expect(seen).toEqual(['pexit:scene-1:base'])
+
+    await host.setScene('scene-2')
+    expect(seen).toEqual(['pexit:scene-1:base', 'exit:scene-1:scene-2'])
+
+    await host.destroy()
+    expect(seen).toEqual([
+      'pexit:scene-1:base',
+      'exit:scene-1:scene-2',
+      'exit:scene-2:',
+    ])
+  })
+
+  it('publishes native video playback events with the stable layer item id', async () => {
+    const document = slide([videoItem('video', 0)])
+    const events = new CourseEventBus()
+    const started: unknown[] = []
+    const paused: unknown[] = []
+    const ended: unknown[] = []
+    events.on('video:started', (detail) => { started.push(detail) })
+    events.on('video:paused', (detail) => { paused.push(detail) })
+    events.on('video:ended', (detail) => { ended.push(detail) })
+    const host = new SlideSurfaceHost(document, {
+      interactions: { events, hostActions: interactionHostActions() },
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const video = host.rootElement!.querySelector<HTMLVideoElement>('.slide-native-video')!
+    expect(video).not.toBeNull()
+    video.dispatchEvent(new Event('playing'))
+    video.dispatchEvent(new Event('pause'))
+    video.dispatchEvent(new Event('ended'))
+    expect(started).toEqual([{ nodeId: 'video', sceneId: 'scene-1' }])
+    expect(paused).toEqual([{ nodeId: 'video', sceneId: 'scene-1' }])
+    expect(ended).toEqual([{ nodeId: 'video', sceneId: 'scene-1' }])
+
+    await host.destroy()
+    expect(started).toHaveLength(1)
+  })
+
+  it('executes node.exit and publishes animation completion in order', async () => {
+    const events = new CourseEventBus()
+    const host = new SlideSurfaceHost(motionDocument(), {
+      interactions: { events, hostActions: interactionHostActions() },
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const wrapper = wrapperOf(host, 'card')
+    pointerUp(wrapper)
+    await vi.waitFor(() => expect(host.stateId).toBe('hidden'))
+    expect(wrapper.hidden).toBe(true)
+    await host.destroy()
+  })
+
+  it('truly awaits DOM motion completion before continuing the chain', async () => {
+    const document = motionDocument()
+    // Replace the completion-triggered rule with a same-rule follow-up step so
+    // the ordering assertion observes the motion boundary directly.
+    document.scenes[0]!.interactions = [{
+      id: 'hide-then-mark',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: 'card' },
+      conditions: [],
+      actions: [
+        {
+          id: 'hide-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: {
+            type: 'node.exit',
+            nodeId: 'card',
+            effect: 'fade',
+            durationMs: 200,
+            easing: 'ease-out',
+          },
+        },
+        {
+          id: 'mark-step',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'presentation.set', stateId: 'hidden' },
+        },
+      ],
+    }]
+    const events = new CourseEventBus()
+    const host = new SlideSurfaceHost(document, {
+      interactions: { events, hostActions: interactionHostActions() },
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const wrapper = wrapperOf(host, 'card')
+    const content = wrapper.querySelector<HTMLElement>('.slide-layer-content')!
+    const fake = installFakeAnimate(content)
+    pointerUp(wrapper)
+    await new Promise((resolve) => { setTimeout(resolve, 10) })
+    expect(fake.animate).toHaveBeenCalledTimes(1)
+    // The follow-up step must wait for the motion to finish.
+    expect(host.stateId).toBe('visible')
+    expect(wrapper.hidden).toBe(false)
+
+    fake.finish()
+    await vi.waitFor(() => expect(host.stateId).toBe('hidden'))
+    expect(wrapper.hidden).toBe(true)
+    await host.destroy()
+  })
 })
