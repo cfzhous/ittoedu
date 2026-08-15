@@ -52,7 +52,9 @@ const nodeIcon = {
 } as const
 
 export interface NodesTabDocumentControl {
-  readonly editingScope: 'scene' | 'global'
+  readonly editingScope: 'scene' | 'surface' | 'global'
+  /** Remounts transient row/DnD state whenever the owning document context changes. */
+  readonly contextKey: string
   readonly scopeLabel: string
   readonly nodes: readonly SceneNode[]
   readonly selectedNodeIds: readonly string[]
@@ -258,6 +260,9 @@ function LegacyNodesTabAdapter() {
   const scene = useEditorStore(selectActiveScene)
   const nodes = useEditorStore(selectEditingNodes)
   const editingScope = useEditorStore((state) => state.editingScope)
+  const activePresentationStateId = useEditorStore(
+    (state) => state.activePresentationStateId,
+  )
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectNode = useEditorStore((state) => state.selectNode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
@@ -269,6 +274,12 @@ function LegacyNodesTabAdapter() {
   return (
     <NodesTabView
       editingScope={editingScope}
+      contextKey={JSON.stringify([
+        'legacy',
+        scene.id,
+        activePresentationStateId,
+        editingScope,
+      ])}
       scopeLabel={editingScope === 'global' ? '全局元素' : scene.name}
       nodes={nodes}
       selectedNodeIds={selectedNodeIds}
@@ -290,6 +301,7 @@ function LegacyNodesTabAdapter() {
 
 function NodesTabView({
   editingScope,
+  contextKey,
   scopeLabel,
   nodes,
   selectedNodeIds,
@@ -304,12 +316,13 @@ function NodesTabView({
   onSetNodeLocked,
   onReorderNodes,
 }: NodesTabViewProps) {
+  const dragContextRef = useRef<string | null>(null)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
+  const commitDragEnd = ({ active, over }: DragEndEvent) => {
     if (reorderUnavailableReason) return
     if (!over || active.id === over.id) return
     const visualNodes = [...nodes].reverse()
@@ -344,16 +357,28 @@ function NodesTabView({
             ? '当前幻灯片没有可在此编辑的元素'
             : editingScope === 'global'
               ? '全局层还没有组件'
+              : editingScope === 'surface'
+                ? '当前内容还没有场景间共用元素'
               : '当前场景还没有节点'}
           <br />
-          从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
+          {editingScope === 'surface'
+            ? '可在支持的导入或移动操作中加入共用内容'
+            : `从“元素”面板加入${editingScope === 'global' ? '全局内容' : '内容'}`}
         </div>
       ) : (
         <>
           <DndContext
+            key={contextKey}
             sensors={sensors}
             collisionDetection={closestCenter}
-            onDragEnd={onDragEnd}
+            onDragStart={() => { dragContextRef.current = contextKey }}
+            onDragCancel={() => { dragContextRef.current = null }}
+            onDragEnd={(event) => {
+              const startedContext = dragContextRef.current
+              dragContextRef.current = null
+              if (startedContext !== contextKey) return
+              commitDragEnd(event)
+            }}
           >
             <SortableContext
               items={visualNodes.map((node) => node.id)}
@@ -382,6 +407,8 @@ function NodesTabView({
           <div className="tree-order-note">
             {reorderUnavailableReason ?? (editingScope === 'global'
               ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
+              : editingScope === 'surface'
+                ? '列表最上方就是共用内容的画面最上层；拖动条目可改变层级。'
               : '列表最上方就是画面最上层；拖动条目可改变层级。')}
           </div>
         </>

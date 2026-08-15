@@ -104,7 +104,6 @@ export function RightSidebar({
           : ''
       }`}
       aria-label="编辑面板"
-      aria-disabled={activeUnavailableReason ? true : undefined}
     >
       <div
         className="sidebar-tabs"
@@ -128,7 +127,11 @@ export function RightSidebar({
       </div>
       <div className="sidebar-content">
         {activeUnavailableReason ? (
-          <div className="right-sidebar-capability-gate" role="status">
+          <div
+            className="right-sidebar-capability-gate"
+            role="status"
+            aria-disabled="true"
+          >
             <strong>{tabs.find((tab) => tab.id === activeTab)?.label ?? '编辑'}面板暂不可用</strong>
             <p>{activeUnavailableReason}</p>
           </div>

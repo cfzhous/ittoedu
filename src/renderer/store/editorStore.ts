@@ -143,6 +143,9 @@ import {
   updateV9SlideLayer,
   updateV9SlideNativeNode,
   type V9SlideLayerPatch,
+  type V9SlideEditingScope,
+  type V9SlideLayerOrderTarget,
+  type V9SlideLayerTarget,
   type V9SlideNativeNodePatch,
   type V9SlideNativeNodeTarget,
   type V9SlideTransformInput,
@@ -176,6 +179,21 @@ export type EditingScope = 'scene' | 'global'
 export type CanvasMode = 'edit' | 'run'
 export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
 export type TextEditSource = 'canvas' | 'properties'
+
+type V9SlideLayerContextTarget = Pick<
+  V9SlideLayerTarget,
+  'sessionId' | 'locationId' | 'stateId' | 'editingScope'
+>
+
+function matchesCourseLayerContext(
+  session: V9SlideVerticalSliceState,
+  target: V9SlideLayerContextTarget,
+): boolean {
+  return session.sessionId === target.sessionId &&
+    session.selection.locationId === target.locationId &&
+    session.selection.stateId === target.stateId &&
+    session.editingScope === target.editingScope
+}
 
 export interface SimpleEntranceAnimationConfig {
   effect: Exclude<MotionEffect, 'none'>
@@ -273,16 +291,16 @@ export interface EditorState {
   addCourseTextLayer(x?: number, y?: number): void
   addCourseFormulaLayer(x?: number, y?: number): void
   addCourseShapeLayer(shapeType: ShapeType, x?: number, y?: number): void
-  updateCourseLayer(layerItemId: string, patch: V9SlideLayerPatch): void
+  updateCourseLayer(target: V9SlideLayerTarget, patch: V9SlideLayerPatch): boolean
   updateCourseNativeNode(
     target: V9SlideNativeNodeTarget,
     patch: V9SlideNativeNodePatch,
   ): boolean
   clearCourseNativeNodeOverride(target: V9SlideNativeNodeTarget): boolean
-  deleteCourseLayer(layerItemId: string): void
-  duplicateCourseLayer(layerItemId: string): void
-  reorderCourseLayers(layerItemIds: readonly string[]): void
-  setCourseEditingScope(scope: EditingScope): void
+  deleteCourseLayer(target: V9SlideLayerTarget): boolean
+  duplicateCourseLayer(target: V9SlideLayerTarget): boolean
+  reorderCourseLayers(target: V9SlideLayerOrderTarget): boolean
+  setCourseEditingScope(scope: V9SlideEditingScope): void
   activateCourseScene(sceneId: string): void
   addCourseScene(): void
   renameCourseScene(sceneId: string, name: string): void
@@ -1834,14 +1852,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     },
 
-    updateCourseLayer(layerItemId, patch) {
+    updateCourseLayer(target, patch) {
+      let accepted = false
       set((state) => {
-        if (state.courseSession === null) return state
-        const courseSession = updateV9SlideLayer(state.courseSession, layerItemId, patch)
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = updateV9SlideLayer(
+          state.courseSession,
+          target.layerItemId,
+          patch,
+        )
         return courseSession === state.courseSession
           ? state
           : { ...state, courseSession, statusMessage: '元素已更新' }
       })
+      return accepted
     },
 
     updateCourseNativeNode(target, patch) {
@@ -1849,9 +1877,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set((state) => {
         if (
           state.courseSession === null ||
-          state.courseSession.sessionId !== target.sessionId ||
-          state.courseSession.selection.locationId !== target.locationId ||
-          state.courseSession.selection.stateId !== target.stateId ||
+          !matchesCourseLayerContext(state.courseSession, target) ||
           state.courseSession.selection.selectionIds.length !== 1 ||
           state.courseSession.selection.selectionIds[0] !== target.layerItemId
         ) return state
@@ -1873,9 +1899,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       set((state) => {
         if (
           state.courseSession === null ||
-          state.courseSession.sessionId !== target.sessionId ||
-          state.courseSession.selection.locationId !== target.locationId ||
-          state.courseSession.selection.stateId !== target.stateId ||
+          !matchesCourseLayerContext(state.courseSession, target) ||
           state.courseSession.selection.selectionIds.length !== 1 ||
           state.courseSession.selection.selectionIds[0] !== target.layerItemId
         ) return state
@@ -1891,11 +1915,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return accepted
     },
 
-    deleteCourseLayer(layerItemId) {
+    deleteCourseLayer(target) {
+      let accepted = false
       set((state) => {
-        if (state.courseSession === null) return state
-        const deletingFromNamedState = state.courseSession.selection.stateId !== null
-        const courseSession = deleteV9SlideLayer(state.courseSession, layerItemId)
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const deletingFromNamedState = state.courseSession.editingScope === 'scene' &&
+          state.courseSession.selection.stateId !== null
+        const courseSession = deleteV9SlideLayer(
+          state.courseSession,
+          target.layerItemId,
+        )
         return courseSession === state.courseSession
           ? state
           : {
@@ -1906,12 +1939,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
                 : '元素已删除',
             }
       })
+      return accepted
     },
 
-    duplicateCourseLayer(layerItemId) {
+    duplicateCourseLayer(target) {
+      let accepted = false
       set((state) => {
-        if (state.courseSession === null) return state
-        const courseSession = duplicateV9SlideLayer(state.courseSession, layerItemId)
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = duplicateV9SlideLayer(
+          state.courseSession,
+          target.layerItemId,
+        )
         return {
           ...state,
           courseSession,
@@ -1919,16 +1961,26 @@ export const useEditorStore = create<EditorState>((set, get) => {
           statusMessage: '元素已复制',
         }
       })
+      return accepted
     },
 
-    reorderCourseLayers(layerItemIds) {
+    reorderCourseLayers(target) {
+      let accepted = false
       set((state) => {
-        if (state.courseSession === null) return state
-        const courseSession = reorderV9SlideLayers(state.courseSession, layerItemIds)
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = reorderV9SlideLayers(
+          state.courseSession,
+          target.layerItemIds,
+        )
         return courseSession === state.courseSession
           ? state
           : { ...state, courseSession, statusMessage: '图层顺序已更新' }
       })
+      return accepted
     },
 
     setCourseEditingScope(scope) {
@@ -1942,7 +1994,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
               courseSession,
               statusMessage: scope === 'global'
                 ? '正在编辑全局层'
-                : '正在编辑当前场景',
+                : scope === 'surface'
+                  ? '正在编辑当前内容共用层'
+                  : '正在编辑当前场景',
             }
       })
     },

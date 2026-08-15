@@ -1906,7 +1906,7 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
 }
 
 export interface PropertiesTabDocumentControl {
-  readonly editingScope: 'scene' | 'global'
+  readonly editingScope: 'scene' | 'surface' | 'global'
   readonly editorMode: 'simple' | 'professional'
   readonly selectedNodes: readonly SceneNode[]
   readonly target: PropertiesTabDocumentTarget | null
@@ -1929,6 +1929,7 @@ export interface PropertiesTabDocumentTarget {
   readonly sessionId: string
   readonly locationId: string
   readonly stateId: string | null
+  readonly editingScope: 'scene' | 'surface' | 'global'
   readonly layerItemId: string
 }
 
@@ -2012,7 +2013,7 @@ function ControlledPropertiesTab({
     onClearOverride,
   } = documentControl
   const [rejectedUpdateKey, setRejectedUpdateKey] = useState(0)
-  if (editingScope !== 'scene') {
+  if (editingScope === 'global') {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
         <ControlledPropertiesGate
@@ -2046,7 +2047,11 @@ function ControlledPropertiesTab({
     )
   }
   const node = selectedNodes[0]!
-  if (!target || target.layerItemId !== node.id) {
+  if (
+    !target ||
+    target.editingScope !== editingScope ||
+    target.layerItemId !== node.id
+  ) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
         <ControlledPropertiesGate
@@ -2070,6 +2075,7 @@ function ControlledPropertiesTab({
     target.sessionId,
     target.locationId,
     target.stateId,
+    target.editingScope,
     target.layerItemId,
     rejectedUpdateKey,
   ])
@@ -2106,13 +2112,13 @@ function ControlledPropertiesTab({
         <div>
           <strong>{scopeLabel ?? '场景元素'}</strong>
           <span>{scopeDescription ?? '可修改所选元素的布局与外观。'}</span>
-          {target.stateId !== null && (
+          {editingScope === 'scene' && target.stateId !== null && (
             <span>{overrideActive
               ? '此元素已有当前状态设置。'
               : '此元素当前沿用基础设置。'}</span>
           )}
         </div>
-        {target.stateId !== null && overrideActive && (
+        {editingScope === 'scene' && target.stateId !== null && overrideActive && (
           <button
             type="button"
             className="state-editing-notice__clear"

@@ -43,12 +43,20 @@ export interface ScenePanelSceneRow {
 export interface ScenePanelDocumentControl {
   /** Explains why the current course location has no scene-authoring surface. */
   unavailableReason?: string
-  editingScope: 'scene' | 'global'
+  editingScope: 'scene' | 'surface' | 'global'
   globalElementCount: number
   globalHasRuntime: boolean
   /** Keeps the original entry visible while a backend lacks a truthful global authoring surface. */
   globalEditingDisabled?: boolean
   globalEditingUnavailableReason?: string
+  /** Optional V9-only sibling scope shared by every scene in the current content. */
+  surfaceLayer?: {
+    readonly elementCount: number
+    readonly hasDynamicContent: boolean
+    readonly editingDisabled?: boolean
+    readonly editingUnavailableReason?: string
+    onActivate(): void
+  }
   scenes: readonly ScenePanelSceneRow[]
   onAddScene(): void
   onActivateScene(sceneId: string): void
@@ -265,6 +273,28 @@ function ScenePanelContent({
           </span>
           <Layers3 size={16} />
         </button>
+        {documentControl.surfaceLayer && (
+          <button
+            type="button"
+            className={`global-layer-entry global-layer-entry--surface${documentControl.editingScope === 'surface' ? ' global-layer-entry--active' : ''}`}
+            aria-pressed={documentControl.editingScope === 'surface'}
+            data-testid="surface-layer-entry"
+            disabled={documentControl.surfaceLayer.editingDisabled}
+            title={documentControl.surfaceLayer.editingUnavailableReason}
+            onClick={documentControl.surfaceLayer.onActivate}
+          >
+            <span className="global-layer-entry__icon"><Layers3 size={19} /></span>
+            <span className="global-layer-entry__content">
+              <strong>当前内容共用</strong>
+              <small>
+                {documentControl.surfaceLayer.elementCount} 个元素 · 场景间共享
+                {documentControl.surfaceLayer.hasDynamicContent ? ' · 含动态内容' : ''}
+                {documentControl.surfaceLayer.editingDisabled ? ' · 暂不可编辑' : ''}
+              </small>
+            </span>
+            <Layers3 size={16} />
+          </button>
+        )}
       </div>
       <DndContext
         sensors={sensors}

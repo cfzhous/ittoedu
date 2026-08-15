@@ -47,6 +47,7 @@ import {
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
   isV9SlideVerticalSliceDirty,
+  v9SlideLayerContextKey,
   type V9SlideVerticalSliceState,
 } from './course/v9SlideVerticalSlice'
 import {
@@ -462,10 +463,22 @@ export default function App() {
     const selectedIds = new Set(v9SlideVerticalSlice.selection.selectionIds)
     const selectedLayers = view.layers.filter((layer) => selectedIds.has(layer.selectionId))
     const editingGlobal = v9SlideVerticalSlice.editingScope === 'global'
+    const editingSurface = v9SlideVerticalSlice.editingScope === 'surface'
+    const scopeLayerCount = editingGlobal
+      ? courseProject.globalLayerItems.length
+      : editingSurface
+        ? v9ActiveSlideContext.surface.surfaceLayerItems.length
+        : sceneLayerCount
     return {
-      locationName: editingGlobal ? '全局层' : view.sceneName,
+      locationName: editingGlobal
+        ? '全局层'
+        : editingSurface
+          ? '当前内容共用'
+          : view.sceneName,
       itemCountLabel: editingGlobal
         ? `${courseProject.globalLayerItems.length} 个全局元素`
+        : editingSurface
+          ? `${scopeLayerCount} 个共用元素`
         : `${sceneLayerCount} 个节点`,
       selectionLabel: selectedLayers.length > 1
         ? `已选 ${selectedLayers.length} 个图层`
@@ -473,10 +486,11 @@ export default function App() {
           ? `已选：${selectedLayers[0].item.label}`
           : editingGlobal
             ? '未选择全局元素'
-            : '未选择节点',
+            : editingSurface
+              ? '未选择共用元素'
+              : '未选择节点',
       largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
-        (editingGlobal ? courseProject.globalLayerItems.length : sceneLayerCount) >
-          RECOMMENDED_SCENE_NODES,
+        scopeLayerCount > RECOMMENDED_SCENE_NODES,
     }
   }, [v9ActiveLocation, v9ActiveSlideContext, v9SlideVerticalSlice])
   const activeStatusBarView = v9StatusBarView ?? {
@@ -577,6 +591,10 @@ export default function App() {
       globalHasRuntime: v9CourseProject.globalLayerItems.some(
         (entry) => entry.item.kind === 'runtime',
       ),
+      surfaceElementCount: surface.surfaceLayerItems.length,
+      surfaceHasDynamicContent: surface.surfaceLayerItems.some(
+        (entry) => entry.item.kind !== 'native',
+      ),
       scenes,
     }
   }, [
@@ -633,6 +651,18 @@ export default function App() {
           (entry) => entry.item.kind === 'runtime',
         ),
       globalEditingDisabled: false,
+      ...((v9ScenePanelBase?.surfaceElementCount ?? 0) > 0
+        ? {
+            surfaceLayer: {
+              elementCount: v9ScenePanelBase!.surfaceElementCount,
+              hasDynamicContent: v9ScenePanelBase!.surfaceHasDynamicContent,
+              onActivate: () => run(() => {
+                if (v9ScenePanelBase === null) throw new Error('当前位置不是幻灯片')
+                useEditorStore.getState().setCourseEditingScope('surface')
+              }, '无法切换到当前内容共用层'),
+            },
+          }
+        : {}),
       scenes: sceneRows,
       onAddScene: () => run(() => {
         if (v9ScenePanelBase === null) throw new Error('当前位置不是幻灯片')
@@ -798,12 +828,18 @@ export default function App() {
       locationId: v9SlideVerticalSlice.selection.locationId,
       stateId: v9SlideVerticalSlice.selection.stateId,
     })
-    const sceneLayers = view.layers.filter((layer) => layer.source === 'scene')
-    const unsupportedSceneLayerCount = sceneLayers.filter((layer) => !(
+    const editingScope = v9SlideVerticalSlice.editingScope
+    const scopedLayers = view.layers.filter((layer) => layer.source === editingScope)
+    const unsupportedScopedLayerCount = scopedLayers.filter((layer) => !(
       layer.item.kind === 'native' &&
-      layer.item.content.nativeType !== 'teacher-controller'
+      (
+        editingScope === 'global' ||
+        layer.item.content.nativeType !== 'teacher-controller'
+      )
     )).length
-    const editingScene = v9SlideVerticalSlice.editingScope === 'scene'
+    const editingScene = editingScope === 'scene'
+    const editingSurface = editingScope === 'surface'
+    const editingNativeLayerList = editingScene || editingSurface
     const selectedIds = new Set(v9SlideVerticalSlice.selection.selectionIds)
     const selectedNodes = v9WorkspaceSnapshot.document.nodes.filter(
       (node) => selectedIds.has(node.id),
@@ -814,11 +850,16 @@ export default function App() {
       : v9ActiveSlideContext?.scene.presentation?.states.find(
           (state) => state.id === v9SlideVerticalSlice.selection.stateId,
         ) ?? null
-    const propertyTarget = editingScene && selectedNode
+    const layerContext = {
+      sessionId: v9SlideVerticalSlice.sessionId,
+      locationId: v9SlideVerticalSlice.selection.locationId,
+      stateId: v9SlideVerticalSlice.selection.stateId,
+      editingScope,
+    } as const
+    const layerContextKey = v9SlideLayerContextKey(layerContext)
+    const propertyTarget = editingNativeLayerList && selectedNode
       ? {
-          sessionId: v9SlideVerticalSlice.sessionId,
-          locationId: v9SlideVerticalSlice.selection.locationId,
-          stateId: v9SlideVerticalSlice.selection.stateId,
+          ...layerContext,
           layerItemId: selectedNode.id,
         }
       : null
@@ -841,7 +882,7 @@ export default function App() {
       ...(editingScene
         ? {
             elements: {
-              editingScope: v9SlideVerticalSlice.editingScope,
+              editingScope: 'scene' as const,
               editorMode,
               mediaUnavailableReason: '当前版本暂不能从此面板添加图片、视频或声音。',
               controllerUnavailableReason: '当前版本暂不能从此面板编辑教师控制器。',
@@ -857,21 +898,28 @@ export default function App() {
             },
           }
         : {}),
-      ...(editingScene
+      ...(editingNativeLayerList
         ? {
             layers: {
               editingScope: v9SlideVerticalSlice.editingScope,
-              scopeLabel: v9ActiveSlideContext?.scene.name ?? view.sceneName,
+              contextKey: layerContextKey,
+              scopeLabel: editingSurface
+                ? '当前内容共用'
+                : v9ActiveSlideContext?.scene.name ?? view.sceneName,
               nodes: v9WorkspaceSnapshot.document.nodes,
               selectedNodeIds: v9WorkspaceSnapshot.selectedNodeIds,
-              deletionMode: v9SlideVerticalSlice.selection.stateId === null
-                ? 'delete'
-                : 'hide-in-state',
-              omittedItemsReason: unsupportedSceneLayerCount > 0
-                ? `当前幻灯片还有 ${unsupportedSceneLayerCount} 个动态元素或控制器暂不在列表中；已显示的元素仍可编辑。`
+              deletionMode: editingScene && v9SlideVerticalSlice.selection.stateId !== null
+                ? 'hide-in-state'
+                : 'delete',
+              omittedItemsReason: unsupportedScopedLayerCount > 0
+                ? editingSurface
+                  ? `当前内容共用层还有 ${unsupportedScopedLayerCount} 个动态内容或复用内容暂不能编辑；已显示的元素仍可编辑。`
+                  : `当前幻灯片还有 ${unsupportedScopedLayerCount} 个动态元素或控制器暂不在列表中；已显示的元素仍可编辑。`
                 : undefined,
-              reorderUnavailableReason: unsupportedSceneLayerCount > 0
-                ? '当前列表未包含幻灯片中的全部元素，暂不能调整整体层级。'
+              reorderUnavailableReason: unsupportedScopedLayerCount > 0
+                ? editingSurface
+                  ? '当前列表未包含共用层中的全部元素，暂不能调整整体层级。'
+                  : '当前列表未包含幻灯片中的全部元素，暂不能调整整体层级。'
                 : undefined,
               onSelectNode: (nodeId, additive) => run(() => {
                 const accepted = useEditorStore.getState().selectCourseLayers({
@@ -881,22 +929,46 @@ export default function App() {
                 if (!accepted) throw new Error('当前元素无法选择')
               }, '无法选择元素'),
               onDeleteNode: (nodeId) => run(() => {
-                useEditorStore.getState().deleteCourseLayer(nodeId)
+                const accepted = useEditorStore.getState().deleteCourseLayer({
+                  ...layerContext,
+                  layerItemId: nodeId,
+                })
+                if (!accepted) throw new Error('当前元素已变化')
               }, '无法删除元素'),
               onDuplicateNode: (nodeId) => run(() => {
-                useEditorStore.getState().duplicateCourseLayer(nodeId)
+                const accepted = useEditorStore.getState().duplicateCourseLayer({
+                  ...layerContext,
+                  layerItemId: nodeId,
+                })
+                if (!accepted) throw new Error('当前元素已变化')
               }, '无法复制元素'),
               onRenameNode: (nodeId, name) => run(() => {
-                useEditorStore.getState().updateCourseLayer(nodeId, { label: name })
+                const accepted = useEditorStore.getState().updateCourseLayer({
+                  ...layerContext,
+                  layerItemId: nodeId,
+                }, { label: name })
+                if (!accepted) throw new Error('当前元素已变化')
               }, '无法重命名元素'),
               onSetNodeVisible: (nodeId, visible) => run(() => {
-                useEditorStore.getState().updateCourseLayer(nodeId, { visible })
+                const accepted = useEditorStore.getState().updateCourseLayer({
+                  ...layerContext,
+                  layerItemId: nodeId,
+                }, { visible })
+                if (!accepted) throw new Error('当前元素已变化')
               }, '无法更改元素可见性'),
               onSetNodeLocked: (nodeId, locked) => run(() => {
-                useEditorStore.getState().updateCourseLayer(nodeId, { locked })
+                const accepted = useEditorStore.getState().updateCourseLayer({
+                  ...layerContext,
+                  layerItemId: nodeId,
+                }, { locked })
+                if (!accepted) throw new Error('当前元素已变化')
               }, '无法更改元素锁定状态'),
               onReorderNodes: (nodeIds) => run(() => {
-                useEditorStore.getState().reorderCourseLayers(nodeIds)
+                const accepted = useEditorStore.getState().reorderCourseLayers({
+                  ...layerContext,
+                  layerItemIds: nodeIds,
+                })
+                if (!accepted) throw new Error('当前图层上下文已变化')
               }, '无法调整图层顺序'),
             },
           }
@@ -906,11 +978,18 @@ export default function App() {
         editorMode,
         selectedNodes,
         target: propertyTarget,
-        scopeLabel: activeState ? `状态：${activeState.name}` : '基础场景',
-        scopeDescription: activeState
-          ? `属性修改只影响“${activeState.name}”状态。`
-          : '修改基础元素会影响继承它的命名状态。',
+        scopeLabel: editingSurface
+          ? '当前内容共用'
+          : activeState
+            ? `状态：${activeState.name}`
+            : '基础场景',
+        scopeDescription: editingSurface
+          ? '修改会应用到当前内容内的所有场景。'
+          : activeState
+            ? `属性修改只影响“${activeState.name}”状态。`
+            : '修改基础元素会影响继承它的命名状态。',
         overrideActive: Boolean(
+          editingScene &&
           activeState &&
           propertyTarget &&
           activeState.layerItemOverrides[propertyTarget.layerItemId],
@@ -937,7 +1016,9 @@ export default function App() {
           : '请先回到场景，再添加文字、公式或图形。',
         components: '当前版本暂不能在此编辑复用组件；现有内容不会改变。',
         layers: !editingScene
-          ? '当前版本暂不能在此管理全局层；现有全局内容不会改变。'
+          ? editingSurface
+            ? undefined
+            : '当前版本暂不能在此管理全局层；现有全局内容不会改变。'
           : undefined,
         properties: undefined,
         automation: '当前版本暂不能在此编辑互动与动画；现有内容不会改变。',
@@ -956,6 +1037,8 @@ export default function App() {
     const snapshot = v9WorkspaceSnapshot
     const stateName = v9SlideVerticalSlice.editingScope === 'global'
       ? '全局层'
+      : v9SlideVerticalSlice.editingScope === 'surface'
+        ? '当前内容共用'
       : v9SlideVerticalSlice.selection.stateId === null
         ? '基础'
         : v9ActiveSlideContext?.scene.presentation?.states.find(
@@ -2026,7 +2109,13 @@ export default function App() {
           }
           const [layerItemId] = state.courseSession.selection.selectionIds
           if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
-            state.duplicateCourseLayer(layerItemId)
+            state.duplicateCourseLayer({
+              sessionId: state.courseSession.sessionId,
+              locationId: state.courseSession.selection.locationId,
+              stateId: state.courseSession.selection.stateId,
+              editingScope: state.courseSession.editingScope,
+              layerItemId,
+            })
           } else if (state.courseSession.selection.selectionIds.length > 1) {
             state.setStatus('请一次选择一个元素后复制')
           }
@@ -2049,7 +2138,13 @@ export default function App() {
           const [layerItemId] = state.courseSession.selection.selectionIds
           if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
             event.preventDefault()
-            state.deleteCourseLayer(layerItemId)
+            state.deleteCourseLayer({
+              sessionId: state.courseSession.sessionId,
+              locationId: state.courseSession.selection.locationId,
+              stateId: state.courseSession.selection.stateId,
+              editingScope: state.courseSession.editingScope,
+              layerItemId,
+            })
           } else if (state.courseSession.selection.selectionIds.length > 1) {
             event.preventDefault()
             state.setStatus('请一次选择一个元素后删除或隐藏')

@@ -659,6 +659,29 @@ button:disabled {
   box-shadow: inset 3px 0 0 #9b7cff;
 }
 
+.global-layer-entry--surface {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.1), transparent 72%),
+    var(--panel-bg-elevated);
+}
+
+.global-layer-entry--surface:hover,
+.global-layer-entry--surface.global-layer-entry--active {
+  border-color: rgba(96, 165, 250, 0.58);
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.18), transparent 76%),
+    var(--panel-bg-hover);
+}
+
+.global-layer-entry--surface.global-layer-entry--active {
+  box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.global-layer-entry--surface .global-layer-entry__icon {
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.16);
+}
+
 .global-layer-entry__icon {
   display: grid;
   width: 34px;

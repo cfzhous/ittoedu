@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createShapeNode, createTextNode } from '@/renderer/project/createProject'
+import { v9SlideLayerContextKey } from '@/renderer/course/v9SlideVerticalSlice'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import {
   NodesTab,
@@ -18,6 +19,78 @@ afterEach(() => {
 })
 
 describe('NodesTab document control', () => {
+  it('remounts row drafts when the controlled authoring context changes', () => {
+    const text = createTextNode({ id: 'same-id', name: '同名共用项' })
+    const firstContextKey = v9SlideLayerContextKey({
+      sessionId: 'session|location',
+      locationId: 'current',
+      stateId: null,
+      editingScope: 'surface',
+    })
+    const secondContextKey = v9SlideLayerContextKey({
+      sessionId: 'session',
+      locationId: 'location|current',
+      stateId: null,
+      editingScope: 'surface',
+    })
+    expect(firstContextKey).not.toBe(secondContextKey)
+    const base: NodesTabDocumentControl = {
+      editingScope: 'surface',
+      contextKey: firstContextKey,
+      scopeLabel: '当前内容共用',
+      nodes: [text],
+      selectedNodeIds: [],
+      onSelectNode: vi.fn(),
+      onDeleteNode: vi.fn(),
+      onDuplicateNode: vi.fn(),
+      onRenameNode: vi.fn(),
+      onSetNodeVisible: vi.fn(),
+      onSetNodeLocked: vi.fn(),
+      onReorderNodes: vi.fn(),
+    }
+    const { rerender } = render(<NodesTab documentControl={base} />)
+    fireEvent.doubleClick(screen.getByText('同名共用项'))
+    const draft = screen.getByRole('textbox', { name: '重命名“同名共用项”' })
+    fireEvent.change(draft, { target: { value: '未提交旧内容' } })
+
+    rerender(<NodesTab documentControl={{
+      ...base,
+      contextKey: secondContextKey,
+    }} />)
+
+    expect(screen.queryByRole('textbox', { name: '重命名“同名共用项”' }))
+      .not.toBeInTheDocument()
+    expect(screen.getByText('同名共用项')).toBeInTheDocument()
+    expect(base.onRenameNode).not.toHaveBeenCalled()
+  })
+
+  it('keeps shared Native rows editable while gating omitted dynamic content', () => {
+    const text = createTextNode({ id: 'surface-native', name: '共用提示' })
+    const onSetNodeVisible = vi.fn()
+    render(<NodesTab documentControl={{
+      editingScope: 'surface',
+      contextKey: 'surface-context',
+      scopeLabel: '当前内容共用',
+      nodes: [text],
+      selectedNodeIds: [],
+      omittedItemsReason: '当前内容共用层还有 2 个动态内容或复用内容暂不能编辑；已显示的元素仍可编辑。',
+      reorderUnavailableReason: '当前列表未包含共用层中的全部元素，暂不能调整整体层级。',
+      onSelectNode: vi.fn(),
+      onDeleteNode: vi.fn(),
+      onDuplicateNode: vi.fn(),
+      onRenameNode: vi.fn(),
+      onSetNodeVisible,
+      onSetNodeLocked: vi.fn(),
+      onReorderNodes: vi.fn(),
+    }} />)
+
+    expect(screen.getByText('当前内容共用')).toBeInTheDocument()
+    expect(screen.getByText(/还有 2 个动态内容或复用内容暂不能编辑/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '调整“共用提示”层级' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '隐藏“共用提示”' }))
+    expect(onSetNodeVisible).toHaveBeenCalledWith(text.id, false)
+  })
+
   it('routes selection and layer actions only through the injected owner', () => {
     const projectBefore = useEditorStore.getState().project
     const historyBefore = useEditorStore.getState().history
@@ -30,6 +103,7 @@ describe('NodesTab document control', () => {
     }
     const control: NodesTabDocumentControl = {
       editingScope: 'scene',
+      contextKey: 'scene-context',
       scopeLabel: '导入场景',
       nodes: [text, shape],
       selectedNodeIds: [text.id],
@@ -81,6 +155,7 @@ describe('NodesTab document control', () => {
 
     render(<NodesTab documentControl={{
       editingScope: 'scene',
+      contextKey: 'named-state-context',
       scopeLabel: '讲解态',
       nodes: [visible, hidden],
       selectedNodeIds: [],
@@ -111,6 +186,7 @@ describe('NodesTab document control', () => {
 
     render(<NodesTab documentControl={{
       editingScope: 'scene',
+      contextKey: 'mixed-scene-context',
       scopeLabel: '混合幻灯片',
       nodes: [text],
       selectedNodeIds: [],

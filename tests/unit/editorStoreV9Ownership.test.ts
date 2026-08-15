@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { ComponentManifest } from '@/shared/componentTypes'
 import { importComponentPackage } from '@/renderer/components/importComponentPackage'
 import {
+  createCourseProject,
+  reserveTopAuthoringOrder,
+  updateCourseProject,
+} from '@/renderer/course/courseStudioModel'
+import { createTextNode } from '@/renderer/project/createProject'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import {
   captureV9SlideVerticalSliceArchive,
   isV9SlideVerticalSliceDirty,
   V9_SLIDE_TEST_TEXT_ID,
@@ -29,6 +36,19 @@ function expectLegacyTruthUnchanged(before: ReturnType<typeof captureLegacyTruth
   expect(state.componentPackages).toBe(before.componentPackages)
   expect(state.projectPath).toBe(before.projectPath)
   expect(state.dirty).toBe(before.dirty)
+}
+
+function layerTarget(
+  session: NonNullable<ReturnType<typeof useEditorStore.getState>['courseSession']>,
+  layerItemId: string,
+) {
+  return {
+    sessionId: session.sessionId,
+    locationId: session.selection.locationId,
+    stateId: session.selection.stateId,
+    editingScope: session.editingScope,
+    layerItemId,
+  }
 }
 
 function makeComponentPackage() {
@@ -155,22 +175,78 @@ describe('V9 ownership in the original editor Store', () => {
     store.addCourseShapeLayer('diamond', 260, 180)
     const added = useEditorStore.getState().courseSession!
     const layerItemId = added.selection.selectionIds[0]!
-    store.updateCourseLayer(layerItemId, { label: '菱形提示', locked: true })
-    store.duplicateCourseLayer(layerItemId)
+    store.updateCourseLayer(layerTarget(added, layerItemId), {
+      label: '菱形提示',
+      locked: true,
+    })
+    const updated = useEditorStore.getState().courseSession!
+    store.duplicateCourseLayer(layerTarget(updated, layerItemId))
     const duplicated = useEditorStore.getState().courseSession!
     const duplicateId = duplicated.selection.selectionIds[0]!
     const scene = duplicated.history.present.surfaces[0]
     if (!scene || scene.type !== 'slide') throw new Error('expected slide')
-    store.reorderCourseLayers(
-      [...scene.scenes[0]!.layerItems.map((item) => item.layerItemId)].reverse(),
-    )
-    store.deleteCourseLayer(duplicateId)
+    store.reorderCourseLayers({
+      ...layerTarget(duplicated, duplicateId),
+      layerItemIds: [
+        ...scene.scenes[0]!.layerItems.map((item) => item.layerItemId),
+      ].reverse(),
+    })
+    const reordered = useEditorStore.getState().courseSession!
+    store.deleteCourseLayer(layerTarget(reordered, duplicateId))
     const current = useEditorStore.getState().courseSession!
 
     expect(current.history.present.revision - initial.history.present.revision).toBe(5)
     expect(current.history.past.length - initial.history.past.length).toBe(5)
     expect(JSON.stringify(current.history.present)).toContain('菱形提示')
     expect(current.selection.selectionIds).toEqual([])
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
+  it('reports a named-location surface delete as a base deletion, not a state hide', () => {
+    const legacyBefore = captureLegacyTruth()
+    useEditorStore.getState().activateV9SlideFixture()
+    const fixture = useEditorStore.getState().courseSession!
+    const project = updateCourseProject(fixture.history.present, (draft) => {
+      const surface = draft.surfaces[0]
+      if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+      const source = surface.scenes[0]!.layerItems.find(
+        (item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID,
+      )
+      if (!source || source.kind !== 'native') throw new Error('expected text')
+      const shared = structuredClone(source)
+      shared.layerItemId = 'store-surface-text'
+      shared.label = '共用文字'
+      shared.order = reserveTopAuthoringOrder(
+        draft,
+        surface.id,
+        surface.scenes[0]!.id,
+      )
+      surface.surfaceLayerItems.push({
+        item: shared,
+        visibility: { mode: 'all', locationIds: [] },
+      })
+    })
+    useEditorStore.getState().loadCourseProject({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    useEditorStore.getState().addCoursePresentationState('讲解态')
+    useEditorStore.getState().setCourseEditingScope('surface')
+    useEditorStore.getState().selectCourseLayers({
+      nodeIds: ['store-surface-text'],
+      additive: false,
+    })
+    const selected = useEditorStore.getState().courseSession!
+    useEditorStore.getState().deleteCourseLayer(
+      layerTarget(selected, 'store-surface-text'),
+    )
+    const current = useEditorStore.getState()
+    const surface = current.courseSession!.history.present.surfaces[0]
+
+    expect(current.statusMessage).toBe('元素已删除')
+    expect(current.courseSession!.editingScope).toBe('scene')
+    expect(surface.surfaceLayerItems).toEqual([])
     expectLegacyTruthUnchanged(legacyBefore)
   })
 
@@ -187,6 +263,7 @@ describe('V9 ownership in the original editor Store', () => {
       sessionId: selected.sessionId,
       locationId: selected.selection.locationId,
       stateId: selected.selection.stateId,
+      editingScope: selected.editingScope,
       layerItemId: V9_SLIDE_TEST_TEXT_ID,
     }
 
@@ -208,6 +285,96 @@ describe('V9 ownership in the original editor Store', () => {
       style: { color: '#dc2626' },
     })).toBe(false)
     expect(useEditorStore.getState().courseSession).toBe(cleared)
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
+  it('rejects stale layer commands after switching between surfaces that reuse an id', () => {
+    const legacyBefore = captureLegacyTruth()
+    const first = createCourseProject({ id: 'stale-target-first' })
+    const second = createCourseProject({ id: 'stale-target-second' })
+    const sharedId = 'same-surface-layer-id'
+    const project = updateCourseProject(first, (draft) => {
+      const firstSlide = draft.surfaces[0]
+      const secondSlide = structuredClone(second.surfaces[0])
+      if (!firstSlide || firstSlide.type !== 'slide' || secondSlide.type !== 'slide') {
+        throw new Error('expected slide surfaces')
+      }
+      const makeSharedItem = () => sceneNodeToCourseLayerItem(createTextNode({
+        id: sharedId,
+        name: '同名共用项',
+        text: '同一内容',
+      }), 10)
+      firstSlide.surfaceLayerItems.push({
+        item: makeSharedItem(),
+        visibility: { mode: 'all', locationIds: [] },
+      })
+      secondSlide.surfaceLayerItems.push({
+        item: makeSharedItem(),
+        visibility: { mode: 'all', locationIds: [] },
+      })
+      draft.surfaces.push(secondSlide)
+      draft.locations.push(...structuredClone(second.locations))
+      draft.mixedPrintPlan = {
+        pageSize: 'surface-native',
+        orientation: 'auto',
+        entries: [firstSlide, secondSlide].map((slide) => ({
+          id: `print:${slide.id}`,
+          kind: 'slide-scenes' as const,
+          surfaceId: slide.id,
+          sceneIds: slide.scenes.map((scene) => scene.id),
+        })),
+      }
+    })
+    useEditorStore.getState().loadCourseProject({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    useEditorStore.getState().setCourseEditingScope('surface')
+    useEditorStore.getState().selectCourseLayers({
+      nodeIds: [sharedId],
+      additive: false,
+    })
+    const firstContext = useEditorStore.getState().courseSession!
+    const staleTarget = layerTarget(firstContext, sharedId)
+    const secondSceneId = second.surfaces[0]!.type === 'slide'
+      ? second.surfaces[0]!.scenes[0]!.id
+      : ''
+
+    useEditorStore.getState().activateCourseScene(secondSceneId)
+    useEditorStore.getState().setCourseEditingScope('surface')
+    useEditorStore.getState().selectCourseLayers({
+      nodeIds: [sharedId],
+      additive: false,
+    })
+    const current = useEditorStore.getState().courseSession!
+
+    expect(useEditorStore.getState().updateCourseLayer(staleTarget, {
+      label: '陈旧更名',
+    })).toBe(false)
+    expect(useEditorStore.getState().deleteCourseLayer(staleTarget)).toBe(false)
+    expect(useEditorStore.getState().duplicateCourseLayer(staleTarget)).toBe(false)
+    expect(useEditorStore.getState().reorderCourseLayers({
+      ...staleTarget,
+      layerItemIds: [sharedId],
+    })).toBe(false)
+    expect(useEditorStore.getState().updateCourseNativeNode(staleTarget, {
+      name: '陈旧属性更名',
+    })).toBe(false)
+    expect(useEditorStore.getState().clearCourseNativeNodeOverride(staleTarget)).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(current)
+
+    const slides = current.history.present.surfaces.filter(
+      (surface) => surface.type === 'slide',
+    )
+    expect(slides).toHaveLength(2)
+    slides.forEach((slide) => {
+      expect(slide.surfaceLayerItems).toHaveLength(1)
+      expect(slide.surfaceLayerItems[0]!.item).toMatchObject({
+        layerItemId: sharedId,
+        label: '同名共用项',
+      })
+    })
     expectLegacyTruthUnchanged(legacyBefore)
   })
 

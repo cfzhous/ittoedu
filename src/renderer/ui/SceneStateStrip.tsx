@@ -15,7 +15,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 
 type PendingAction = 'delete' | 'reset' | null
 
-export type SceneStateStripEditingScope = 'scene' | 'global'
+export type SceneStateStripEditingScope = 'scene' | 'surface' | 'global'
 export type SceneStateStripEditorMode = 'simple' | 'professional'
 
 export interface SceneStateStripStateRow {
@@ -209,12 +209,14 @@ function SceneStateStripView({
     setEditingStateId(null)
   }
 
-  if (editingScope === 'global') {
+  if (editingScope !== 'scene') {
     return (
       <section className="scene-state-strip scene-state-strip--global" aria-label="场景状态">
         <div className="scene-state-strip__empty">
           <strong>场景状态</strong>
-          <span>全局层跨场景常驻，不参与单个场景的状态切换。</span>
+          <span>{editingScope === 'global'
+            ? '全局层跨场景常驻，不参与单个场景的状态切换。'
+            : '当前内容共用元素由所有场景共享，不参与单个场景的状态切换。'}</span>
         </div>
       </section>
     )

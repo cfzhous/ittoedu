@@ -54,6 +54,7 @@ function controlFor(
       sessionId: 'session-current',
       locationId: 'location-scene-a',
       stateId: 'state-explain',
+      editingScope: 'scene',
       layerItemId: selected.id,
     } : null,
     scopeLabel: '状态：讲解态',
@@ -69,6 +70,40 @@ function controlFor(
 }
 
 describe('PropertiesTab document control', () => {
+  it('edits a shared Native through the same controlled fields without scene-state UI', () => {
+    const text = createTextNode({
+      id: 'surface-text',
+      name: '共用标题',
+      style: { overflow: 'fixed' },
+    })
+    const onUpdateNode = vi.fn(() => true)
+    const control = controlFor([text], onUpdateNode)
+    render(<PropertiesTab documentControl={{
+      ...control,
+      editingScope: 'surface',
+      target: {
+        ...control.target!,
+        editingScope: 'surface',
+      },
+      scopeLabel: '当前内容共用',
+      scopeDescription: '修改会应用到当前内容内的所有场景。',
+      overrideActive: false,
+    }} />)
+
+    expect(screen.getByText('当前内容共用')).toBeInTheDocument()
+    expect(screen.getByText('修改会应用到当前内容内的所有场景。')).toBeInTheDocument()
+    expect(screen.queryByText('此元素当前沿用基础设置。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复基础值' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('名称'), {
+      target: { value: '所有场景共用标题' },
+    })
+    fireEvent.blur(screen.getByLabelText('名称'))
+    expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
+      layerItemId: text.id,
+    }), { name: '所有场景共用标题' })
+    expect(storeAccess.hook).not.toHaveBeenCalled()
+  })
+
   it('edits text common and whole-node style fields only through the injected owner', () => {
     const text = createTextNode({
       id: 'controlled-text',
@@ -186,6 +221,23 @@ describe('PropertiesTab document control', () => {
     }} />)
 
     expect(screen.getByLabelText('名称')).toHaveValue(text.name)
+    expect(onUpdateNode).not.toHaveBeenCalled()
+    expect(storeAccess.hook).not.toHaveBeenCalled()
+    expect(storeAccess.getState).not.toHaveBeenCalled()
+  })
+
+  it('gates a target captured for another editing scope without calling its owner', () => {
+    const text = createTextNode({ id: 'same-layer-id', name: '当前标题' })
+    const onUpdateNode = vi.fn(() => true)
+    const sceneControl = controlFor([text], onUpdateNode)
+
+    render(<PropertiesTab documentControl={{
+      ...sceneControl,
+      editingScope: 'surface',
+    }} />)
+
+    expect(screen.getByTestId('controlled-properties-stale-target-gate')).toBeInTheDocument()
+    expect(screen.queryByLabelText('名称')).not.toBeInTheDocument()
     expect(onUpdateNode).not.toHaveBeenCalled()
     expect(storeAccess.hook).not.toHaveBeenCalled()
     expect(storeAccess.getState).not.toHaveBeenCalled()

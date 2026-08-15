@@ -9,6 +9,8 @@ import type {
 
 export const WORKSPACE_SLIDE_PREVIEW_STATE_ID = 'state_workspace_preview'
 
+export type WorkspaceSlideEditingScope = 'scene' | 'surface' | 'global'
+
 export interface WorkspaceSlidePreviewResources {
   readonly assets: ProjectDocument['assets']
   readonly assetFiles: Readonly<Record<string, Uint8Array>>
@@ -35,7 +37,7 @@ export interface WorkspaceSlideAuthoringInput {
   /** Labels owned by the injected document backend, never by the V8 shell. */
   readonly sceneName: string
   readonly stateName: string
-  readonly editingScope: 'scene' | 'global'
+  readonly editingScope: WorkspaceSlideEditingScope
   /** Explains why legacy-only authoring commands are unavailable. */
   readonly unsupportedActionReason: string
   /** `false` rejects a gesture that raced with a lifecycle boundary. */
@@ -91,6 +93,19 @@ export function completeWorkspaceTransformEvent(
   return nodes.every((node): node is NodeTransformEndEvent => node !== null)
     ? { nodes }
     : null
+}
+
+/**
+ * Builds a Player patch from the effective preview node while applying only
+ * authoring geometry. Scope-local visibility must never leak into playback.
+ */
+export function workspacePreviewNodeWithTransform(
+  input: WorkspaceSlideAuthoringInput,
+  nodeId: string,
+  patch: Partial<Pick<SceneNode, 'x' | 'y' | 'width' | 'height' | 'rotation'>> = {},
+): SceneNode | null {
+  const previewNode = input.previewDocument.nodes.find((node) => node.id === nodeId)
+  return previewNode ? { ...previewNode, ...patch } as SceneNode : null
 }
 
 export type UnsupportedWorkspaceAuthoringAction =
@@ -162,6 +177,8 @@ export function workspaceCanvasLabel(
 ): string {
   return input.editingScope === 'global'
     ? `全局层 · ${input.document.nodes.length} 个元素`
+    : input.editingScope === 'surface'
+      ? `当前内容共用 · ${input.document.nodes.length} 个元素`
     : `${input.sceneName} · ${input.stateName}`
 }
 
@@ -245,9 +262,9 @@ export function workspaceSlidePreviewAssetFiles(
 /** V9 is flattened into one isolated carrier scene; V8 keeps real scopes. */
 export function workspaceSlideCarrierScope(
   injected: WorkspaceSlideAuthoringInput | undefined,
-  editingScope: 'scene' | 'global',
+  editingScope: WorkspaceSlideEditingScope,
 ): 'scene' | 'global' {
-  return injected ? 'scene' : editingScope
+  return injected || editingScope === 'surface' ? 'scene' : editingScope
 }
 
 /** Selects exactly one backend. Inputs are never combined or copied. */

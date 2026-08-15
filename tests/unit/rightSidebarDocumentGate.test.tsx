@@ -32,7 +32,8 @@ describe('right sidebar document capability gate', () => {
       />,
     )
 
-    expect(screen.getByLabelText('编辑面板')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByLabelText('编辑面板')).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByText('元素面板暂不可用')).toBeInTheDocument()
     expect(screen.getByText('当前工程的编辑命令尚未接入')).toBeInTheDocument()
     expect(screen.queryByTestId('add-text')).not.toBeInTheDocument()

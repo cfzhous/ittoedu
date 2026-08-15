@@ -281,6 +281,43 @@ describe('ScenePanel document control port', () => {
     expect(onActivateGlobal).not.toHaveBeenCalled()
   })
 
+  it('shows current-content shared authoring only when the controlled owner supplies it', () => {
+    const onActivateSurface = vi.fn()
+    const base: ScenePanelDocumentControl = {
+      editingScope: 'scene',
+      globalElementCount: 1,
+      globalHasRuntime: false,
+      scenes: [],
+      onAddScene: vi.fn(),
+      onActivateScene: vi.fn(),
+      onActivateGlobal: vi.fn(),
+      onRenameScene: vi.fn(),
+      onDeleteScene: vi.fn(),
+      onDuplicateScene: vi.fn(),
+      onReorderScenes: vi.fn(),
+    }
+    const { rerender } = render(<ScenePanel documentControl={base} />)
+
+    expect(screen.queryByTestId('surface-layer-entry')).not.toBeInTheDocument()
+    rerender(<ScenePanel documentControl={{
+      ...base,
+      editingScope: 'surface',
+      surfaceLayer: {
+        elementCount: 3,
+        hasDynamicContent: true,
+        onActivate: onActivateSurface,
+      },
+    }} />)
+
+    const entry = screen.getByTestId('surface-layer-entry')
+    expect(entry).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('当前内容共用')).toBeInTheDocument()
+    expect(screen.getByText('3 个元素 · 场景间共享 · 含动态内容')).toBeInTheDocument()
+    fireEvent.click(entry)
+    expect(onActivateSurface).toHaveBeenCalledOnce()
+    expect(legacyV8Sentinels.useStore).not.toHaveBeenCalled()
+  })
+
   it('builds one ordered V9 composition with visibility and fallback semantics intact', () => {
     const componentFallback = componentItem('component-fallback', 10, 'asset-component')
     const runtimeFallback = runtimeItem('runtime-fallback', 15, 'asset-runtime')

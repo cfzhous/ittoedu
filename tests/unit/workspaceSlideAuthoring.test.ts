@@ -12,6 +12,7 @@ import {
   workspaceSlidePreviewGenerationIdentity,
   workspaceSlidePreviewSceneId,
   workspaceSlidePreviewStateId,
+  workspacePreviewNodeWithTransform,
   type WorkspaceSlideAuthoringInput,
 } from '@/renderer/ui/workspaceSlideAuthoring'
 import {
@@ -123,9 +124,15 @@ describe('Workspace Slide authoring input boundary', () => {
       editingScope: 'global',
       document: { ...sceneInput.document, nodes: [] },
     }
+    const surfaceInput: WorkspaceSlideAuthoringInput = {
+      ...sceneInput,
+      editingScope: 'surface',
+      document: { ...sceneInput.document, nodes: [] },
+    }
 
     expect(workspaceCanvasLabel(sceneInput)).toBe('V9 真实场景 · 反馈态')
     expect(workspaceCanvasLabel(globalInput)).toBe('全局层 · 0 个元素')
+    expect(workspaceCanvasLabel(surfaceInput)).toBe('当前内容共用 · 0 个元素')
     expect(workspaceAuthoringActionAllowed(
       sceneInput,
       'run-current-location',
@@ -136,6 +143,7 @@ describe('Workspace Slide authoring input boundary', () => {
     )).toBe(true)
     expect(workspaceSlideCarrierScope(sceneInput, 'scene')).toBe('scene')
     expect(workspaceSlideCarrierScope(globalInput, 'global')).toBe('scene')
+    expect(workspaceSlideCarrierScope(surfaceInput, 'surface')).toBe('scene')
     expect(workspaceSlideCarrierScope(undefined, 'global')).toBe('global')
   })
 
@@ -535,5 +543,44 @@ describe('Workspace Slide authoring input boundary', () => {
       controller.id,
     ])
     expect(preview.globalLayer).toEqual([])
+  })
+
+  it('uses preview visibility for Player transform and restore patches', () => {
+    const authorNode = createTextNode({
+      id: 'scoped-out-text',
+      text: '作者可见',
+      x: 80,
+      y: 90,
+      visible: true,
+    })
+    const previewNode = { ...authorNode, visible: false }
+    const base = input('scoped-out-preview', [authorNode])
+    const injected: WorkspaceSlideAuthoringInput = {
+      ...base.value,
+      editingScope: 'surface',
+      previewDocument: {
+        ...base.value.previewDocument,
+        nodes: [previewNode],
+      },
+    }
+
+    expect(workspacePreviewNodeWithTransform(injected, authorNode.id)).toEqual(previewNode)
+    expect(workspacePreviewNodeWithTransform(injected, authorNode.id, {
+      x: 240,
+      y: 180,
+      width: 320,
+      height: 120,
+      rotation: 8,
+    })).toMatchObject({
+      id: authorNode.id,
+      visible: false,
+      x: 240,
+      y: 180,
+      width: 320,
+      height: 120,
+      rotation: 8,
+    })
+    expect(workspacePreviewNodeWithTransform(injected, 'missing-node')).toBeNull()
+    expect(authorNode.visible).toBe(true)
   })
 })

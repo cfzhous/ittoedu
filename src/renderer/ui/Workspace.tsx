@@ -75,7 +75,9 @@ import {
   workspaceSlidePreviewGenerationIdentity,
   workspaceSlidePreviewSceneId,
   workspaceSlidePreviewStateId,
+  workspacePreviewNodeWithTransform,
   type WorkspaceSlideAuthoringInput,
+  type WorkspaceSlideEditingScope,
 } from './workspaceSlideAuthoring'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
@@ -947,7 +949,7 @@ function WorkspaceEditor({
   }, [postAuthoringPatch])
 
   const queueAuthoringNodePatch = useCallback((
-    scope: 'scene' | 'global',
+    scope: WorkspaceSlideEditingScope,
     node: SceneNode,
   ) => {
     const carrierScope = workspaceSlideCarrierScope(
@@ -2329,11 +2331,12 @@ function WorkspaceEditor({
       const injected = slideAuthoringInputRef.current
       if (!injected) return
       for (const nodeId of nodeIds) {
-        const node = injected.document.nodes.find((item) => item.id === nodeId)
-        if (!node) continue
-        handle.bridge.applyNode(node)
+        const authoringNode = injected.document.nodes.find((item) => item.id === nodeId)
+        if (!authoringNode) continue
+        handle.bridge.applyNode(authoringNode)
         if (authoringReadyRef.current) {
-          queueAuthoringNodePatch(injected.editingScope, node)
+          const previewNode = workspacePreviewNodeWithTransform(injected, nodeId)
+          if (previewNode) queueAuthoringNodePatch(injected.editingScope, previewNode)
         }
       }
       handle.bridge.selectNodes([...injected.selectedNodeIds])
@@ -2383,13 +2386,12 @@ function WorkspaceEditor({
           restoreInjectedNodes(nodes.map((node) => node.nodeId))
           return
         }
-        const currentById = new Map(active.document.nodes.map((node) => [node.id, node]))
         for (const { nodeId, ...patch } of event.nodes) {
-          const current = currentById.get(nodeId)
-          if (!current) continue
+          const previewNode = workspacePreviewNodeWithTransform(active, nodeId, patch)
+          if (!previewNode) continue
           queueAuthoringNodePatch(
             active.editingScope,
-            { ...current, ...patch } as SceneNode,
+            previewNode,
           )
         }
       }),

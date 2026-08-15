@@ -39,6 +39,7 @@ describe('RightSidebar document control', () => {
       },
       layers: {
         editingScope: 'scene',
+        contextKey: 'sidebar-scene-context',
         scopeLabel: '场景一',
         nodes: [node],
         selectedNodeIds: [],
@@ -81,8 +82,53 @@ describe('RightSidebar document control', () => {
     fireEvent.click(screen.getByRole('tab', { name: '属性' }))
     expect(screen.getByText('属性面板暂不可用')).toBeInTheDocument()
     expect(screen.getByText('属性编辑尚未接入')).toBeInTheDocument()
-    expect(screen.getByLabelText('编辑面板')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByLabelText('编辑面板')).not.toHaveAttribute('aria-disabled')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-disabled', 'true')
     expect(useEditorStore.getState().project).toBe(projectBefore)
+  })
+
+  it('keeps available tabs operable while the active tab shows a capability gate', () => {
+    const documentControl: RightSidebarDocumentControl = {
+      properties: {
+        editingScope: 'scene',
+        editorMode: 'simple',
+        selectedNodes: [],
+        target: null,
+        scopeLabel: '基础场景',
+        scopeDescription: '修改基础元素会影响继承它的命名状态。',
+        overrideActive: false,
+        textContentUnavailableReason: '文字内容暂不可编辑。',
+        richTextUnavailableReason: '局部文字格式暂不可编辑。',
+        mediaUnavailableReason: '媒体专属设置暂不可编辑。',
+        controllerUnavailableReason: '教师控制器设置暂不可编辑。',
+        onUpdateNode: vi.fn(() => true),
+        onClearOverride: vi.fn(() => true),
+      },
+      unavailableReasons: {
+        elements: '元素面板暂未接入',
+      },
+    }
+    render(
+      <RightSidebar
+        documentControl={documentControl}
+        onAddImage={vi.fn()}
+        onReplaceImage={vi.fn()}
+        onAddVideo={vi.fn()}
+        onImportAudio={vi.fn()}
+        onImportVideo={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('元素面板暂不可用')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveAttribute('aria-disabled', 'true')
+    const propertiesTab = screen.getByRole('tab', { name: '属性' })
+    expect(propertiesTab).toBeEnabled()
+
+    fireEvent.click(propertiesTab)
+
+    expect(useEditorStore.getState().activeTab).toBe('properties')
+    expect(screen.getByTestId('properties-tab')).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toHaveAttribute('aria-disabled', 'true')
   })
 
   it('mounts the controlled properties panel without invoking legacy document actions', () => {
@@ -100,6 +146,7 @@ describe('RightSidebar document control', () => {
       sessionId: 'session-properties',
       locationId: 'location-properties',
       stateId: null,
+      editingScope: 'scene' as const,
       layerItemId: node.id,
     }
     const documentControl: RightSidebarDocumentControl = {
