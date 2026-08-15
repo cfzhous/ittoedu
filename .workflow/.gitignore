@@ -1,0 +1,4 @@
+logs/
+state/
+runner.lock
+runner.pause

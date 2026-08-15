@@ -1,0 +1,43 @@
+{
+  "project_dir": ".",
+  "session": {
+    "idle_timeout_s": 900,
+    "wall_timeout_s": 2700
+  },
+  "executors": {
+    "default": "cursor",
+    "adapters": {
+      "claude": {
+        "binary": "claude"
+      },
+      "cursor": {
+        "binary": "cursor-agent"
+      },
+      "codex": {
+        "binary": "codex"
+      },
+      "opencode": {
+        "binary": "opencode",
+        "default_model": "go-deepseek-v4-flash",
+        "models": {
+          "free-deepseek-v4-flash": "opencode/deepseek-v4-flash-free",
+          "free-mimo-v2-5": "opencode/mimo-v2.5-free",
+          "free-nemotron-3-ultra": "opencode/nemotron-3-ultra-free",
+          "free-north-mini-code": "opencode/north-mini-code-free",
+          "go-deepseek-v4-flash": "opencode-go/deepseek-v4-flash"
+        },
+        "api": {
+          "deepseek": {
+            "api_key": "${env:DEEPSEEK_API_KEY}"
+          },
+          "opencode-go": {
+            "api_key": "${env:OPENCODE_API_KEY}"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "agent_tool": "c:\\Users\\74755\\.vscode\\extensions\\alepha-inc.phlow-0.3.2\\dist\\bundled\\agent-tool"
+  }
+}
