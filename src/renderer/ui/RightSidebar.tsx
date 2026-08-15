@@ -17,6 +17,10 @@ export interface RightSidebarDocumentControl {
   readonly elements?: ElementsTabDocumentControl
   readonly layers?: NodesTabDocumentControl
   readonly properties?: PropertiesTabDocumentControl
+  /** Professional tabs stay mounted only while the V9 backend can serve them. */
+  readonly components?: boolean
+  readonly automation?: boolean
+  readonly developer?: boolean
   /** A missing controlled tab stays visible but mounts no legacy document editor. */
   readonly unavailableReasons?: Partial<Record<SidebarTab, string>>
 }
@@ -87,7 +91,13 @@ export function RightSidebar({
         ? Boolean(documentControl.layers)
         : activeTab === 'properties'
           ? Boolean(documentControl.properties)
-          : false
+          : activeTab === 'components'
+            ? Boolean(documentControl.components)
+            : activeTab === 'automation'
+              ? Boolean(documentControl.automation)
+              : activeTab === 'developer'
+                ? Boolean(documentControl.developer)
+                : false
     : false
   const activeUnavailableReason = documentControl
     ? controlledTabAvailable

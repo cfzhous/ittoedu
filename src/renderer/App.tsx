@@ -56,6 +56,11 @@ import {
 } from './course/courseProjectHealthCheck'
 import { buildSlideEditorView } from './course/slideEditorView'
 import {
+  v9InteractionSceneDocument,
+  v9InteractionSounds,
+  v9SlideScenes,
+} from './course/slideInteractionView'
+import {
   componentPackageSha256,
   importComponentPackageAsync,
 } from './components/importComponentPackage'
@@ -863,6 +868,19 @@ export default function App() {
           layerItemId: selectedNode.id,
         }
       : null
+    const interactionScenes = v9SlideScenes(v9SlideVerticalSlice.history.present)
+    const interactionSounds = v9InteractionSounds(v9SlideVerticalSlice.history.present)
+    const activeSceneId = v9ActiveSlideContext?.scene.id ?? view.sceneId
+    const interactionRules = editingScope === 'global'
+      ? v9SlideVerticalSlice.history.present.globalInteractions
+      : v9ActiveSlideContext?.scene.interactions ?? []
+    const interactionSceneDocument = v9InteractionSceneDocument(
+      activeSceneId,
+      v9ActiveSlideContext?.scene.name ?? view.sceneName,
+      v9WorkspaceSnapshot.document.nodes,
+      interactionRules,
+      interactionScenes.find((candidate) => candidate.id === activeSceneId)?.presentation,
+    )
     const updateProperty = (
       command: () => boolean,
       fallback: string,
@@ -1009,20 +1027,38 @@ export default function App() {
           () => useEditorStore.getState().clearCourseNativeNodeOverride(target),
           '无法恢复基础属性',
         ),
+        interaction: (editingScene || editingScope === 'global') ? {
+          scene: interactionSceneDocument,
+          sourceScope: editingScope === 'global' ? 'global' : 'scene',
+          sourceNodes: v9WorkspaceSnapshot.document.nodes,
+          sourceRules: interactionRules,
+          activeStateId: v9SlideVerticalSlice.selection.stateId,
+          scenes: interactionScenes,
+          sounds: interactionSounds,
+          onAddRule: (rule) => run(() => {
+            useEditorStore.getState().addCourseInteractionRule(rule)
+          }, '无法添加互动规则'),
+          onUpdateRule: (ruleId, patch) => run(() => {
+            useEditorStore.getState().updateCourseInteractionRule(ruleId, patch)
+          }, '无法更新互动规则'),
+          onDeleteRule: (ruleId) => run(() => {
+            useEditorStore.getState().deleteCourseInteractionRule(ruleId)
+          }, '无法删除互动规则'),
+        } : undefined,
       },
+      components: editingNativeLayerList || editingScope === 'global',
+      automation: true,
+      developer: true,
       unavailableReasons: {
         elements: editingScene
           ? undefined
           : '请先回到场景，再添加文字、公式或图形。',
-        components: '当前版本暂不能在此编辑复用组件；现有内容不会改变。',
         layers: !editingScene
           ? editingSurface
             ? undefined
             : '当前版本暂不能在此管理全局层；现有全局内容不会改变。'
           : undefined,
         properties: undefined,
-        automation: '当前版本暂不能在此编辑互动与动画；现有内容不会改变。',
-        developer: '当前版本暂不能在此编辑动态内容；现有内容不会改变。',
       },
     }
   }, [
@@ -1535,7 +1571,11 @@ export default function App() {
         }
         return
       }
-      importPackagesIntoStore(packages)
+      if (useEditorStore.getState().courseSession !== null) {
+        useEditorStore.getState().importCourseComponentPackages(packages)
+      } else {
+        importPackagesIntoStore(packages)
+      }
       useEditorStore.getState().setStatus(
         issues.length > 0
           ? `已加入 ${packages.length} 个外部组件，${issues.length} 项未加入`
@@ -1552,6 +1592,10 @@ export default function App() {
 
   const handleReplaceComponent = useCallback((packageId: string) => {
     void run(async () => {
+      if (useEditorStore.getState().courseSession !== null) {
+        setStatus('组件替换将在组件宿主（M4-COMP）集成后提供；当前 V9 工程请勿替换组件包。')
+        return
+      }
       const file = await desktopApi().selectComponentPackage()
       if (!file) return
       const sha256 = await componentPackageSha256(file.bytes)
@@ -1661,7 +1705,11 @@ export default function App() {
           )
         }
       }
-      importPackagesIntoStore(importedPackages)
+      if (latestState.courseSession !== null) {
+        latestState.importCourseComponentPackages(importedPackages)
+      } else {
+        importPackagesIntoStore(importedPackages)
+      }
       useEditorStore.getState().setStatus(`已加入 ${importedPackages.length} 个组件`)
       return true
     }, mode === 'update'
@@ -1686,6 +1734,10 @@ export default function App() {
   const requestCatalogPackageUpdate = useCallback((
     entry: AvailableComponentCatalogPackage,
   ) => {
+    if (useEditorStore.getState().courseSession !== null) {
+      setStatus('组件更新将在组件宿主（M4-COMP）集成后提供；当前 V9 工程不会迁移实例版本。')
+      return
+    }
     setCatalogPackageRequest({ entries: [entry], mode: 'update' })
   }, [])
 

@@ -13,7 +13,7 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import type {
   AvailableComponentCatalogPackage,
   ComponentCatalogSnapshot,
@@ -21,6 +21,7 @@ import type {
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { collectComponentPackageUsage } from '../../shared/componentPackageLifecycle'
 import type { ComponentPackageData } from '../../shared/componentTypes'
+import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
 import {
   collectComponentLibrarySubjects,
@@ -90,10 +91,105 @@ function closeContainingMenu(target: HTMLElement) {
   target.closest('details')?.removeAttribute('open')
 }
 
+interface V9ComponentReference {
+  readonly scope: 'scene' | 'surface' | 'global'
+  readonly sceneId?: string
+  readonly nodeId: string
+  readonly nodeName: string
+}
+
+interface V9ComponentUsage extends PackageUsageSummary {
+  readonly references: V9ComponentReference[]
+}
+
+/** Component instance counts shown by the project-component tab. */
+interface PackageUsageSummary {
+  readonly sceneInstanceCount: number
+  readonly surfaceInstanceCount: number
+  readonly globalInstanceCount: number
+  readonly totalInstanceCount: number
+}
+
+function summarizeLegacyUsage(
+  usage: ReturnType<typeof collectComponentPackageUsage>,
+): PackageUsageSummary {
+  return {
+    sceneInstanceCount: usage.sceneInstanceCount,
+    surfaceInstanceCount: 0,
+    globalInstanceCount: usage.globalInstanceCount,
+    totalInstanceCount: usage.totalInstanceCount,
+  }
+}
+
+/** V9 Course Project usage collector for the project-component tab. */
+function collectV9ComponentUsage(
+  project: CourseProjectDocument,
+  packageId: string,
+): V9ComponentUsage {
+  const references: V9ComponentReference[] = []
+  for (const entry of project.globalLayerItems) {
+    if (entry.item.kind === 'component' && entry.item.component.packageId === packageId) {
+      references.push({
+        scope: 'global',
+        nodeId: entry.item.layerItemId,
+        nodeName: entry.item.label,
+      })
+    }
+  }
+  for (const surface of project.surfaces) {
+    if (surface.type === 'slide') {
+      for (const entry of surface.surfaceLayerItems) {
+        if (entry.item.kind === 'component' && entry.item.component.packageId === packageId) {
+          references.push({
+            scope: 'surface',
+            nodeId: entry.item.layerItemId,
+            nodeName: entry.item.label,
+          })
+        }
+      }
+      for (const scene of surface.scenes) {
+        for (const item of scene.layerItems) {
+          if (item.kind === 'component' && item.component.packageId === packageId) {
+            references.push({
+              scope: 'scene',
+              sceneId: scene.id,
+              nodeId: item.layerItemId,
+              nodeName: item.label,
+            })
+          }
+        }
+      }
+    } else if (surface.type === 'spatial-2d') {
+      for (const item of surface.world.layerItems) {
+        if (item.kind === 'component' && item.component.packageId === packageId) {
+          references.push({ scope: 'scene', nodeId: item.layerItemId, nodeName: item.label })
+        }
+      }
+    } else {
+      for (const block of surface.blocks) {
+        if (block.type === 'component' && block.component.packageId === packageId) {
+          references.push({
+            scope: 'scene',
+            nodeId: block.id,
+            nodeName: `组件·${block.component.packageId}`,
+          })
+        }
+      }
+    }
+  }
+  return {
+    sceneInstanceCount: references.filter((reference) => reference.scope === 'scene').length,
+    surfaceInstanceCount: references.filter((reference) => reference.scope === 'surface').length,
+    globalInstanceCount: references.filter((reference) => reference.scope === 'global').length,
+    totalInstanceCount: references.length,
+    references,
+  }
+}
+
 interface ComponentDetailsDialogProps {
   data?: ComponentPackageData
   entry?: AvailableComponentCatalogPackage
-  usage?: ReturnType<typeof collectComponentPackageUsage>
+  usage?: PackageUsageSummary
   onClose(): void
 }
 
@@ -133,7 +229,7 @@ function ComponentDetailsDialog({ data, entry, usage, onClose }: ComponentDetail
           <div><dt>渲染方式</dt><dd>{renderMode ?? '未知'}</dd></div>
           <div><dt>可用层</dt><dd>{scopes.map((scope) => scope === 'scene' ? '场景' : '全局').join('、')}</dd></div>
           {entry && <div><dt>质量状态</dt><dd>{qualityLabels[entry.quality]}</dd></div>}
-          {usage && <div><dt>工程实例</dt><dd>场景 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}</dd></div>}
+          {usage && <div><dt>工程实例</dt><dd>场景 {usage.sceneInstanceCount} · 共用 {usage.surfaceInstanceCount} · 全局 {usage.globalInstanceCount}</dd></div>}
           {entry?.license && (
             <div><dt>许可证</dt><dd>{entry.license.status === 'declared' ? entry.license.expression : '尚未确认'}</dd></div>
           )}
@@ -399,11 +495,22 @@ export function ComponentsTab({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [detailsPackageId, setDetailsPackageId] = useState<string | null>(null)
-  const components = useEditorStore((state) => state.componentPackages)
-  const project = useEditorStore((state) => state.project)
+  const courseSession = useEditorStore((state) => state.courseSession)
+  const legacyComponents = useEditorStore((state) => state.componentPackages)
+  const legacyProject = useEditorStore((state) => state.project)
+  const v9Mode = courseSession !== null
+  const components = v9Mode ? courseSession.componentPackages : legacyComponents
   const editingScope = useEditorStore((state) => state.editingScope)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
   const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)
+  const addCourseComponentLayer = useEditorStore((state) => state.addCourseComponentLayer)
+  const deleteCourseComponentPackage = useEditorStore((state) => state.deleteCourseComponentPackage)
+  const usageLookup = useCallback((packageId: string): PackageUsageSummary => {
+    if (courseSession !== null) {
+      return collectV9ComponentUsage(courseSession.history.present, packageId)
+    }
+    return summarizeLegacyUsage(collectComponentPackageUsage(legacyProject, packageId))
+  }, [courseSession, legacyProject])
   const packages = useMemo(() => Object.values(components).sort((left, right) =>
     left.manifest.name.localeCompare(right.manifest.name, 'zh-CN'),
   ), [components])
@@ -424,14 +531,31 @@ export function ComponentsTab({
     ? currentCatalogEntries.find((entry) => entry.packageId === detailsPackageId)
     : undefined
   const detailsUsage = detailsPackageId
-    ? collectComponentPackageUsage(project, detailsPackageId)
+    ? usageLookup(detailsPackageId)
     : undefined
 
   const locateFirstUsage = (packageId: string) => {
+    const state = useEditorStore.getState()
+    if (state.courseSession !== null) {
+      const usage = collectV9ComponentUsage(
+        state.courseSession.history.present,
+        packageId,
+      )
+      const reference = usage.references[0]
+      if (!reference) return
+      if (reference.scope === 'global') {
+        state.setCourseEditingScope('global')
+      } else if (reference.scope === 'scene' && reference.sceneId) {
+        state.activateCourseScene(reference.sceneId)
+      } else {
+        state.setCourseEditingScope('surface')
+      }
+      state.setStatus(`已定位“${reference.nodeName}”；动态元素选择将在统一图层接入后提供`)
+      return
+    }
     const usage = collectComponentPackageUsage(useEditorStore.getState().project, packageId)
     const reference = usage.references[0]
     if (!reference) return
-    const state = useEditorStore.getState()
     if (reference.scope === 'global') {
       state.setEditingScope('global')
     } else if (reference.sceneId) {
@@ -440,6 +564,23 @@ export function ComponentsTab({
     useEditorStore.getState().selectNode(reference.nodeId)
     useEditorStore.getState().setStatus(`已定位“${reference.nodeName}”`)
   }
+
+  const insertComponent = (packageId: string, presetId?: string) => {
+    if (v9Mode) {
+      addCourseComponentLayer(packageId, undefined, undefined, presetId)
+      return
+    }
+    addExternalComponentNode(packageId, undefined, undefined, presetId)
+  }
+
+  const removePackage = (packageId: string): boolean => {
+    if (v9Mode) return deleteCourseComponentPackage(packageId)
+    return deleteComponentPackage(packageId)
+  }
+
+  const v9MutationUnavailableReason = v9Mode
+    ? '组件包替换与目录更新将在组件宿主（M4-COMP）集成后提供；实例版本不会在本版本中迁移。'
+    : undefined
 
   return (
     <div className="components-tab" data-testid="components-tab">
@@ -477,13 +618,13 @@ export function ComponentsTab({
         <div className="project-component-list">
           {visiblePackages.map((data) => {
             const packageId = data.manifest.id
-            const usage = collectComponentPackageUsage(project, packageId)
+            const usage = usageLookup(packageId)
             const scopeSupported = componentSupportsScope(data.manifest, editingScope)
             const catalogEntry = currentCatalogEntries.find((entry) => entry.packageId === packageId)
             const catalogStatus = catalogEntry
               ? componentCatalogInstallStatus(catalogEntry, data)
               : null
-            const canUpdate = catalogStatus === 'update-available'
+            const canUpdate = catalogStatus === 'update-available' && !v9Mode
             return (
               <article className="project-component-card" key={packageId} data-testid={`component-package-${packageId}`}>
                 <div className="project-component-card__main">
@@ -497,13 +638,13 @@ export function ComponentsTab({
                       ? `插入“${data.manifest.name}”`
                       : `该组件不支持${editingScope === 'global' ? '全局层' : '场景层'}；仍可从右侧菜单管理。`}
                     onDragStart={(event) => setComponentDragData(event, packageId, data.manifest.name)}
-                    onClick={() => addExternalComponentNode(packageId)}
+                    onClick={() => insertComponent(packageId)}
                   >
                     <span className="component-thumb"><ComponentThumbnail data={data} /></span>
                     <span>
                       <span className="component-name">{data.manifest.name}</span>
                       <span className="component-version">v{data.manifest.version} · {data.provenance?.sourceLabel ?? '工程组件'}</span>
-                      <span className="component-version">场景 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}{canUpdate ? ' · 有更新' : ''}</span>
+                      <span className="component-version">场景 {usage.sceneInstanceCount} · 共用 {usage.surfaceInstanceCount} · 全局 {usage.globalInstanceCount}{canUpdate ? ' · 有更新' : ''}</span>
                     </span>
                     <Box size={15} />
                   </button>
@@ -514,11 +655,11 @@ export function ComponentsTab({
                         closeContainingMenu(event.currentTarget)
                         setDetailsPackageId(packageId)
                       }}><Info size={14} />查看详情</button>
-                      <button type="button" role="menuitem" disabled={!canUpdate || !onUpdateCatalogComponent} onClick={(event) => {
+                      <button type="button" role="menuitem" disabled={!canUpdate || !onUpdateCatalogComponent} title={v9Mode ? v9MutationUnavailableReason : undefined} onClick={(event) => {
                         closeContainingMenu(event.currentTarget)
                         if (catalogEntry) onUpdateCatalogComponent?.(catalogEntry)
                       }}><RefreshCw size={14} />更新组件</button>
-                      <button type="button" role="menuitem" disabled={!onReplaceComponent} onClick={(event) => {
+                      <button type="button" role="menuitem" disabled={!onReplaceComponent || v9Mode} title={v9Mode ? v9MutationUnavailableReason : undefined} onClick={(event) => {
                         closeContainingMenu(event.currentTarget)
                         onReplaceComponent?.(packageId)
                       }}><Upload size={14} />替换组件包</button>
@@ -528,7 +669,7 @@ export function ComponentsTab({
                       }}><LocateFixed size={14} />定位使用位置</button>
                       <button type="button" role="menuitem" className="is-danger" disabled={usage.totalInstanceCount > 0} title={usage.totalInstanceCount > 0 ? '仍有实例引用，需先删除实例。' : '从工程移除未使用的组件包。'} onClick={(event) => {
                         closeContainingMenu(event.currentTarget)
-                        deleteComponentPackage(packageId)
+                        removePackage(packageId)
                       }}><Trash2 size={14} />从工程移除</button>
                     </div>
                   </details>
@@ -543,7 +684,7 @@ export function ComponentsTab({
                         draggable={scopeSupported}
                         title={preset.description}
                         onDragStart={(event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)}
-                        onClick={() => addExternalComponentNode(packageId, undefined, undefined, preset.id)}
+                        onClick={() => insertComponent(packageId, preset.id)}
                       >
                         {preset.label}
                       </button>

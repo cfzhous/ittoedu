@@ -1,17 +1,20 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { nanoid } from 'nanoid'
 import type {
+  CourseRuntimeDefinition,
   LayerItem,
   LayerItemOverride,
   NativeLayerItem,
 } from '../../shared/courseProjectTypes'
 import type {
   DeepPartial,
+  EmbeddedComponentPackageMeta,
   SceneDocument,
   SceneNode,
   ShapeType,
 } from '../../shared/projectTypes'
 import {
+  courseRuntimeDefinitionSchema,
   materializeNativeLayerItem,
   mergeCourseNativeData,
 } from '../../shared/courseProjectSchema'
@@ -23,6 +26,7 @@ import {
   type InteractionRule,
 } from '../../shared/interactionTypes'
 import {
+  addComponentLayer,
   addNativeVisualLayer,
   addSlideTextLayer,
   addSlidePresentationState,
@@ -46,9 +50,21 @@ import {
   undoCourseHistory,
   updateCourseProject,
 } from './courseStudioModel'
+import { componentContentSha256 } from '../../shared/componentContentIntegrity'
+import { componentSupportsScope } from '../../shared/componentCapabilities'
+import { resolveComponentPresetProps } from '../../shared/componentProps'
 import { componentPackagesFromArchive } from '../components/componentPackageStore'
+import { componentPackageKey } from '../project/archivePath'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import { createTextNode } from '../project/createProject'
+import {
+  addSlideInteractionRule,
+  deleteSlideInteractionRule,
+  duplicateSlideInteractionRule,
+  moveSlideInteractionRule,
+  type SlideInteractionTarget,
+  updateSlideInteractionRule,
+} from './slideInteractionCommands'
 import {
   selectSlideEditorLayers,
   transformSelectedSlideNativeLayers,
@@ -1995,4 +2011,515 @@ export function redoV9SlideVerticalSlice(
     state.componentFiles,
     state.componentPackages,
   )
+}
+
+function commitV9SlideHistory(
+  state: V9SlideVerticalSliceState,
+  history: CourseHistoryState,
+): V9SlideVerticalSliceState {
+  if (history === state.history) return state
+  return freezeState(
+    state.sessionId,
+    history,
+    state.selection,
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
+}
+
+function v9InteractionTarget(state: V9SlideVerticalSliceState): SlideInteractionTarget {
+  return {
+    locationId: state.selection.locationId,
+    scope: state.editingScope === 'global' ? 'global' : 'scene',
+  }
+}
+
+/** Adds one interaction rule to the scene or global scope in one history entry. */
+export function addV9SlideInteractionRule(
+  state: V9SlideVerticalSliceState,
+  rule: InteractionRule,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return commitV9SlideHistory(
+    state,
+    addSlideInteractionRule(state.history, v9InteractionTarget(state), rule, now),
+  )
+}
+
+/** Applies one patch to an existing rule in one history entry. */
+export function updateV9SlideInteractionRule(
+  state: V9SlideVerticalSliceState,
+  ruleId: string,
+  patch: Partial<Omit<InteractionRule, 'id'>>,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return commitV9SlideHistory(
+    state,
+    updateSlideInteractionRule(state.history, v9InteractionTarget(state), ruleId, patch, now),
+  )
+}
+
+export function deleteV9SlideInteractionRule(
+  state: V9SlideVerticalSliceState,
+  ruleId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return commitV9SlideHistory(
+    state,
+    deleteSlideInteractionRule(state.history, v9InteractionTarget(state), ruleId, now),
+  )
+}
+
+export function duplicateV9SlideInteractionRule(
+  state: V9SlideVerticalSliceState,
+  ruleId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return commitV9SlideHistory(
+    state,
+    duplicateSlideInteractionRule(state.history, v9InteractionTarget(state), ruleId, now),
+  )
+}
+
+export function moveV9SlideInteractionRule(
+  state: V9SlideVerticalSliceState,
+  ruleId: string,
+  direction: -1 | 1,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return commitV9SlideHistory(
+    state,
+    moveSlideInteractionRule(state.history, v9InteractionTarget(state), ruleId, direction, now),
+  )
+}
+
+/** Marks entrance targets hidden on the base or state override in one history entry. */
+export function updateV9SlideMotionTargets(
+  state: V9SlideVerticalSliceState,
+  layerItemIds: readonly string[],
+  now?: string,
+): V9SlideVerticalSliceState {
+  const uniqueIds = [...new Set(layerItemIds)]
+  if (uniqueIds.length === 0) return state
+  const scopedIds = new Set(activeSlideView(state).layers
+    .filter((layer) => layer.source === state.editingScope && layer.item.kind === 'native')
+    .map((layer) => layer.selectionId))
+  if (uniqueIds.some((id) => !scopedIds.has(id))) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  let changed = false
+  const next = updateCourseProject(state.history.present, (draft) => {
+    if (state.editingScope !== 'scene') {
+      const entries = state.editingScope === 'global'
+        ? draft.globalLayerItems
+        : draft.surfaces.find((candidate) => candidate.id === surface.id)
+          ?.surfaceLayerItems
+      for (const id of uniqueIds) {
+        const item = entries?.find((entry) => entry.item.layerItemId === id)?.item
+        if (item && item.kind === 'native' && item.playbackInitialVisibility !== 'hidden') {
+          item.playbackInitialVisibility = 'hidden'
+          changed = true
+        }
+      }
+      return
+    }
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    if (!draftScene) throw new Error('当前幻灯片已失效')
+    const presentationState = state.selection.stateId === null
+      ? undefined
+      : draftScene.presentation?.states.find(
+          (candidate) => candidate.id === state.selection.stateId,
+        )
+    if (state.selection.stateId !== null && !presentationState) {
+      throw new Error('当前命名状态已失效')
+    }
+    for (const id of uniqueIds) {
+      const item = draftScene.layerItems.find((candidate) => candidate.layerItemId === id)
+      if (!item || item.kind !== 'native' || item.playbackInitialVisibility === 'hidden') {
+        continue
+      }
+      if (!presentationState) {
+        item.playbackInitialVisibility = 'hidden'
+        changed = true
+        continue
+      }
+      const baseNode = materializeNativeLayerItem(structuredClone(item) as NativeLayerItem)
+      const nextNode = { ...baseNode, playbackInitialVisibility: 'hidden' as const }
+      const override = presentationState.layerItemOverrides[id] ?? {}
+      synchronizeNativeNodeOverride(override, item, nextNode)
+      presentationState.layerItemOverrides[id] = override
+      deleteEmptyOverride(presentationState.layerItemOverrides, id)
+      changed = true
+    }
+  }, now)
+  if (!changed) return state
+  return commitV9SlideDocument(state, next)
+}
+
+/**
+ * Replaces the selected native layer item's full content from a parsed Scene
+ * JSON document. `id` and `type` are immutable; one history entry is created.
+ */
+export function replaceV9SlideNativeNode(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+  node: SceneNode,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = activeScopedNativeLayer(state, layerItemId)
+  if (layer.item.content.nativeType === 'teacher-controller') {
+    throw new Error('教师控制器不支持整对象 JSON 替换')
+  }
+  if (node.id !== layerItemId) throw new Error('对象 ID 不可修改')
+  const current = materializeNativeLayerItem(structuredClone(layer.item) as NativeLayerItem)
+  if (node.type !== current.type) throw new Error('对象类型不可修改')
+  const candidate = {
+    ...current,
+    ...structuredClone(node),
+    id: layerItemId,
+    type: current.type,
+  } as SceneNode
+  const parsed = sceneNodeSchema.safeParse(candidate)
+  if (!parsed.success || parsed.data.type === 'external-component') {
+    throw new Error(parsed.error?.issues[0]?.message ?? '对象 JSON 无效')
+  }
+  if (courseValuesEqual(current, parsed.data)) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const entries = state.editingScope === 'global'
+      ? draft.globalLayerItems
+      : state.editingScope === 'surface'
+        ? draft.surfaces.find((candidate) => candidate.id === surface.id)
+          ?.surfaceLayerItems
+        : null
+    if (state.editingScope !== 'scene') {
+      const base = entries?.find(
+        (entry) => entry.item.layerItemId === layerItemId,
+      )?.item
+      if (!base || base.kind !== 'native') throw new Error('当前元素已失效')
+      replaceNativeItemFromNode(base, parsed.data)
+      return
+    }
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    const base = draftScene?.layerItems.find((item) => item.layerItemId === layerItemId)
+    if (!draftScene || !base || base.kind !== 'native') throw new Error('当前元素已失效')
+    const presentationState = state.selection.stateId === null
+      ? undefined
+      : draftScene.presentation?.states.find(
+          (candidate) => candidate.id === state.selection.stateId,
+        )
+    if (state.selection.stateId !== null && !presentationState) {
+      throw new Error('当前命名状态已失效')
+    }
+    if (!presentationState) {
+      replaceNativeItemFromNode(base, parsed.data)
+      return
+    }
+    const override = presentationState.layerItemOverrides[layerItemId] ?? {}
+    synchronizeNativeNodeOverride(override, base, parsed.data)
+    presentationState.layerItemOverrides[layerItemId] = override
+    deleteEmptyOverride(presentationState.layerItemOverrides, layerItemId)
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+export interface V9SlideRuntimePatch {
+  readonly source?: string
+  readonly enabled?: boolean
+  readonly contentValues?: Record<string, string>
+  readonly assets?: Record<string, { assetId: string }>
+}
+
+function scopedRuntimeLayer(
+  state: V9SlideVerticalSliceState,
+): { layerItem: LayerItem | undefined; location: 'global' | 'surface' | 'scene' } {
+  if (state.editingScope === 'global') {
+    return {
+      layerItem: state.history.present.globalLayerItems.find(
+        (entry) => entry.item.kind === 'runtime',
+      )?.item,
+      location: 'global',
+    }
+  }
+  const { surface, scene } = activeSlideSceneContext(state)
+  const sceneRuntime = scene.layerItems.find((item) => item.kind === 'runtime')
+  if (state.editingScope === 'surface') {
+    return {
+      layerItem: surface.surfaceLayerItems.find(
+        (entry) => entry.item.kind === 'runtime',
+      )?.item,
+      location: 'surface',
+    }
+  }
+  return { layerItem: sceneRuntime, location: 'scene' }
+}
+
+export interface V9ScopedRuntimeView {
+  readonly layerItemId: string
+  readonly label: string
+  readonly runtime: DeepReadonly<CourseRuntimeDefinition>
+}
+
+/** Read-only projection of the active scope's first runtime layer item. */
+export function v9ScopedRuntimeView(
+  state: V9SlideVerticalSliceState,
+): V9ScopedRuntimeView | null {
+  const { layerItem } = scopedRuntimeLayer(state)
+  if (!layerItem || layerItem.kind !== 'runtime') return null
+  return {
+    layerItemId: layerItem.layerItemId,
+    label: layerItem.label,
+    runtime: structuredClone(layerItem.runtime),
+  }
+}
+
+/**
+ * Updates one runtime layer item (source / enabled / content values / asset
+ * bindings) in the active scope. Exactly one history entry is created per
+ * invocation; the resulting runtime must pass the Course Project V9 schema.
+ */
+export function updateV9SlideRuntime(
+  state: V9SlideVerticalSliceState,
+  patch: V9SlideRuntimePatch,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const { layerItem } = scopedRuntimeLayer(state)
+  if (!layerItem || layerItem.kind !== 'runtime') {
+    throw new Error('当前作用域没有运行时')
+  }
+  const runtime = layerItem.runtime
+  const nextRuntime: CourseRuntimeDefinition = {
+    ...runtime,
+    ...(patch.source === undefined ? {} : { source: patch.source }),
+    ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
+    ...(patch.contentValues === undefined
+      ? {}
+      : { content: { ...runtime.content, values: { ...patch.contentValues } } }),
+    ...(patch.assets === undefined
+      ? {}
+      : { assets: structuredClone(patch.assets) }),
+  }
+  const parsed = courseRuntimeDefinitionSchema.safeParse(nextRuntime)
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? '运行时数据无效')
+  }
+  if (courseValuesEqual(runtime, nextRuntime)) return state
+  const next = updateCourseProject(state.history.present, (draft) => {
+    const location = state.editingScope === 'global'
+      ? { entries: draft.globalLayerItems, itemId: layerItem.layerItemId }
+      : state.editingScope === 'surface'
+        ? { entries: null, itemId: layerItem.layerItemId }
+        : { entries: null, itemId: layerItem.layerItemId }
+    if (location.entries) {
+      const target = location.entries.find(
+        (entry) => entry.item.layerItemId === location.itemId,
+      )?.item
+      if (target && target.kind === 'runtime') {
+        target.runtime = structuredClone(nextRuntime)
+        return
+      }
+      throw new Error('当前运行时已失效')
+    }
+    const { surface, scene } = activeSlideSceneContext(state)
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    const items = state.editingScope === 'surface'
+      ? draftSurface.surfaceLayerItems.map((entry) => entry.item)
+      : draftScene?.layerItems ?? []
+    const target = items.find((item) => item.layerItemId === layerItem.layerItemId)
+    if (!target || target.kind !== 'runtime') throw new Error('当前运行时已失效')
+    target.runtime = structuredClone(nextRuntime)
+  }, now)
+  return commitV9SlideDocument(state, next)
+}
+
+/**
+ * Adds one component instance from an embedded package to the active scene or
+ * global scope in one history entry. Package meta must already be embedded.
+ */
+export function addV9SlideComponentLayer(
+  state: V9SlideVerticalSliceState,
+  packageId: string,
+  x?: number,
+  y?: number,
+  presetId?: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (state.editingScope === 'surface') {
+    throw new Error('当前内容共用层暂不能插入组件')
+  }
+  const packageData = state.componentPackages[packageId]
+  if (!packageData) throw new Error(`组件包未嵌入工程：${packageId}`)
+  if (!componentSupportsScope(packageData.manifest, state.editingScope)) {
+    throw new Error('该组件不支持当前层')
+  }
+  const { surface, scene } = activeSlideSceneContext(state)
+  const preset = presetId
+    ? packageData.manifest.presets?.find((candidate) => candidate.id === presetId)
+    : undefined
+  const props = preset
+    ? resolveComponentPresetProps(packageData.manifest, preset.id)
+    : structuredClone(packageData.manifest.defaultProps ?? {})
+  const project = addComponentLayer(state.history.present, {
+    surfaceId: surface.id,
+    sceneId: scene.id,
+    packageId,
+    version: packageData.manifest.version,
+    label: preset?.label ?? packageData.manifest.name,
+    props,
+    width: packageData.manifest.defaultSize?.width ?? 320,
+    height: packageData.manifest.defaultSize?.height ?? 180,
+    x,
+    y,
+    now,
+  })
+  const selection = selectSlideEditorLayers({
+    project,
+    locationId: state.selection.locationId,
+    stateId: state.selection.stateId,
+    selectionIds: [],
+  })
+  return commitV9SlideDocument(state, project, selection)
+}
+
+/**
+ * Embeds component packages (data + files) into the V9 project in one history
+ * entry. Existing package ids reject unless a version already matches.
+ */
+export function addV9SlideComponentPackages(
+  state: V9SlideVerticalSliceState,
+  packages: readonly ComponentPackageData[],
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (packages.length === 0) return state
+  const byId = new Map(packages.map((data) => [data.manifest.id, data]))
+  if (byId.size !== packages.length) {
+    throw new Error('同一批次不能包含重复组件 ID')
+  }
+  const project = state.history.present
+  for (const data of packages) {
+    const existing = project.componentPackages[data.manifest.id]
+    if (existing && existing.version !== data.manifest.version) {
+      throw new Error(
+        `工程已包含组件“${data.manifest.name}” ${existing.version}，不能再加入同 ID 的 ${data.manifest.version}`,
+      )
+    }
+  }
+  const next = updateCourseProject(project, (draft) => {
+    for (const data of packages) {
+      draft.componentPackages[data.manifest.id] = componentMetaForV9(data)
+    }
+  }, now)
+  const componentPackages = { ...state.componentPackages }
+  const componentFiles = { ...state.componentFiles }
+  for (const data of packages) {
+    const key = componentPackageKey(data.manifest.id, data.manifest.version)
+    componentPackages[data.manifest.id] = data
+    componentFiles[key] = { ...data.files }
+  }
+  return freezeState(
+    state.sessionId,
+    commitCourseHistory(state.history, next),
+    state.selection,
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    componentFiles,
+    componentPackages,
+  )
+}
+
+function componentMetaForV9(data: ComponentPackageData): EmbeddedComponentPackageMeta {
+  const base = `components/${data.manifest.id}@${data.manifest.version}`
+  return {
+    packageId: data.manifest.id,
+    version: data.manifest.version,
+    name: data.manifest.name,
+    manifestPath: `${base}/manifest.json`,
+    runtimePath: `${base}/${data.manifest.entry}`,
+    contentSha256: data.contentSha256 ?? componentContentSha256(data.files),
+    ...(data.manifest.thumbnail
+      ? { thumbnailPath: `${base}/${data.manifest.thumbnail}` }
+      : {}),
+    ...(data.provenance === undefined ? {} : data.provenance),
+  }
+}
+
+/** Removes an unused component package (files and meta) in one history entry. */
+export function deleteV9SlideComponentPackage(
+  state: V9SlideVerticalSliceState,
+  packageId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const project = state.history.present
+  const meta = project.componentPackages[packageId]
+  if (!meta) throw new Error(`工程中不存在组件包“${packageId}”`)
+  const usage = collectV9ComponentPackageUsage(project, packageId)
+  if (usage > 0) {
+    throw new Error(`组件包仍被 ${usage} 个实例引用。请先删除这些实例，再删除组件包。`)
+  }
+  const next = updateCourseProject(project, (draft) => {
+    delete draft.componentPackages[packageId]
+  }, now)
+  const componentPackages = { ...state.componentPackages }
+  delete componentPackages[packageId]
+  const componentFiles = { ...state.componentFiles }
+  for (const key of Object.keys(componentFiles)) {
+    if (key === componentPackageKey(meta.packageId, meta.version) || key === meta.packageId) {
+      delete componentFiles[key]
+    }
+  }
+  return freezeState(
+    state.sessionId,
+    commitCourseHistory(state.history, next),
+    state.selection,
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    componentFiles,
+    componentPackages,
+  )
+}
+
+export function collectV9ComponentPackageUsage(
+  project: V9SlideVerticalSliceState['history']['present'],
+  packageId: string,
+): number {
+  let count = 0
+  for (const entry of project.globalLayerItems) {
+    if (entry.item.kind === 'component' && entry.item.component.packageId === packageId) count += 1
+  }
+  for (const surface of project.surfaces) {
+    if (surface.type === 'slide') {
+      for (const entry of surface.surfaceLayerItems) {
+        if (entry.item.kind === 'component' && entry.item.component.packageId === packageId) {
+          count += 1
+        }
+      }
+      for (const scene of surface.scenes) {
+        for (const item of scene.layerItems) {
+          if (item.kind === 'component' && item.component.packageId === packageId) count += 1
+        }
+      }
+    } else if (surface.type === 'spatial-2d') {
+      for (const item of surface.world.layerItems) {
+        if (item.kind === 'component' && item.component.packageId === packageId) count += 1
+      }
+    } else {
+      for (const block of surface.blocks) {
+        if (block.type === 'component' && block.component.packageId === packageId) count += 1
+      }
+    }
+  }
+  return count
 }
