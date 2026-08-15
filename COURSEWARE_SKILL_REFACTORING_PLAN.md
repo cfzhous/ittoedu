@@ -1,22 +1,24 @@
 # V8 前端原地升级为 V9：经只读审计的最终执行计划
 
-> `PLAN_VERSION: 3.1-audited-bounded-parallel`
-> `DATE: 2026-08-14`
+> `PLAN_VERSION: 3.2-fast-track`
+> `DATE: 2026-08-15`
 > `EXECUTION_CLASS: production-system`
 > `BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485`
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
-> `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Surface Runtime API 3 / Component API 4`
-> `ACTIVE_WAVE: W11 [V05 blocked / GATE-V = NO-GO]`
+> `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Runtime API 2/3 compatibility / Component API 4`
+> `ACTIVE_WAVE: W12 [V05F fast Gate recovery]`
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
-> `INTEGRATION_CURSOR: stopped at V04 accepted / no ready set`
-> `PRIMARY_COORDINATOR: 当前根代理；复杂架构任务优先使用 GPT-5.6 Sol / max`
+> `INTEGRATION_CURSOR: V04 accepted / V05F ready`
+> `PRIMARY_COORDINATOR: 当前根代理；GPT-5.6 Sol / xhigh，只有 Gate 与重大架构裁决临时 max`
 > `ATOMIC_EXECUTOR: GPT-5.6 Terra / max`
 > `ULTRA_WORKFLOW: 仅由主协调者按需用于只读审计、独立验证或已通过隔离预检的执行波`
-> `PLAN_STATUS: GATE-V NO-GO / implementation-stopped`
+> `PLAN_STATUS: implementation-active / fast-track`
 > `CURRENT_PRODUCT_STATUS: unusable`
+> `DEFAULT_REASONING: xhigh；仅 Gate、Schema/架构裁决和重大集成冲突临时 max；不常态使用 ultra`
+> `STANDING_AUTHORIZATION: 主协调者可在本仓库、本目标和既有依赖内自行修订计划、白名单与实现接缝并持续推进；不再因普通架构调整逐次询问用户`
 
 本文件是仓库根目录唯一长期开发计划。它不是把当前失败的 V9 前端改得“像 V8”，而是从真正包含成熟 V8 前端的 `3e41ec0` 出发，在原文件、原 DOM、原画布和原交互链中逐步换入 V9 数据与运行内核。
 
@@ -45,6 +47,18 @@ Git 与前端实现基线 = 3e41ec0
 ```
 
 这里的“基于 V8”指的是前端代码、信息架构、交互行为、布局、画布和测试合同；“升级到 V9”指唯一数据协议、运行内核、发布协议和新多表面能力。二者不是二选一，也不得再互换含义。
+
+### 0.1 快速开发覆盖条款（优先于后文冲突条款）
+
+本节是 2026-08-15 的执行授权与收敛规则。后文旧任务编号继续作为能力验收清单，但不再要求逐编号拆卡、逐卡全量验证或逐次请求授权。
+
+1. 以可运行的端到端纵切为最小交付，不为单个 helper、Adapter、测试夹具或文件边界单独建卡；同一用户行为需要的相邻文件一次完成。
+2. 不新建第二套 App、Store、Workspace 或协议；优先直接扩展已 accepted 的窄接缝。只有当前纵切真实需要且至少有两个立即消费者时才抽象公共层。
+3. 主协调者默认 `xhigh`；只有 Gate、Schema/架构裁决和重大集成冲突临时使用 `max`。Terra 原子执行仍可用 `max`，但不得把额外推理转化为额外文档或重复验证。
+4. 用户已授权主协调者在既有目标、仓库和依赖内自行修改计划、任务白名单、Workspace/Player 接缝与内部架构；普通 NO-GO 先转为一个最短恢复纵切继续推进，不再停下等待。只有权限、付费、新依赖、不可恢复的数据破坏、仓库外操作或目标本身不可调和时才询问用户。
+5. 自动验证采用第 6.3 节分层策略：单卡定向、Gate 汇总、M8 全量。同一 accepted SHA 的绿色证据可复用；无代码变化不得重复跑同一命令来“增加信心”。
+6. UI 纵切只保留一个主视口、一个真实指针路径和一个可见结果；三尺寸、像素 golden、系统级 SendInput 仅在布局变化或最终收敛需要时运行，不再与 Playwright 重复证明同一事实。
+7. 发现局部缺口时先修最短根因，不建设通用平台、未来插件层、并行协议或完整迁移框架；尚无当前消费者的能力保持未实现。
 
 ---
 
@@ -391,15 +405,14 @@ Ultra 不得用于：
 
 ### 5.4 普通 Terra Max 任务上限
 
-- 产品文件：2–3 个；
-- 产品净改：不超过 350 行；
-- 测试文件：原则上 1 个既有文件；确无旧覆盖才可新建；
-- 测试净改：不超过 250 行；
-- 用户可见行为：1 个；
+- 产品文件：通常 2–5 个；同一端到端行为不得仅因多一个相邻 helper 被机械拆卡；
+- 产品净改：通常不超过 600 行；
+- 测试文件：1–3 个，优先修改既有测试；确无覆盖才新建；
+- 用户可见行为：1 个完整纵切，而不是一个内部函数；
 - commit：1 个；
 - 禁止附带格式化、重命名、依赖、Schema、IPC 或清理。
 
-超过任一上限，必须 `blocked`，由协调者拆卡。`Workspace.tsx`、`PropertiesTab.tsx`、`editorStore.ts` 只能按函数或控件区域拆卡，绝不能作为整文件重写任务。
+数值上限是审查信号，不是自动 `blocked`。若扩展仍属于同一可见纵切且白名单无冲突，协调者可在派发前一次性放宽；只有出现第二个独立结果才拆卡。主协调者的高冲突集成卡不受数值硬限制，但仍禁止整文件重写 `Workspace.tsx`、`PropertiesTab.tsx` 或 `editorStore.ts`。
 
 ### 5.5 Terra Max 遇到这些事实必须停止
 
@@ -410,7 +423,7 @@ Ultra 不得用于：
 - 需要新 App/Shell/Slide Workspace；
 - 需要同时写 V8/V9；
 - 既有行为测试与需求冲突；
-- 变更超上限；
+- 变更已明显形成第二个独立结果；
 - 基线 guard 失败。
 
 停止时只报告证据，不扩大范围，不制造 placeholder，不弱化测试。
@@ -426,7 +439,7 @@ pending → ready → in_progress → done-awaiting-review → accepted
 - 一个 ACTIVE_WAVE 默认只有 1 张写入卡，满足第 5.8 节时最多 2 张；另可并行 1 个只读审计；
 - 并行卡分别验收，不能以“整波测试通过”替代单卡 diff、测试和视觉审查；
 - Terra Max 只做到 `done-awaiting-review`；
-- UI 任务必须经强协调者真实视觉/鼠标复核才能 `accepted`；
+- UI 任务必须经强协调者复核一个代表性可见路径才能 `accepted`；同一路径不再追加第二套鼠标工具证明；
 - 自动化最多证明 `engineering candidate`；
 - 失败的 accepted 任务用 `git revert <task-sha>`，禁止 reset。
 
@@ -455,7 +468,7 @@ pending → ready → in_progress → done-awaiting-review → accepted
 3. 产品白名单、测试白名单、生成物和截图输出目录完全不重叠；
 4. 不修改共享高冲突区：本计划、`AGENTS.md`、package/tsconfig、Schema/IPC、反重写 guard、behavior map、golden、`App.tsx`、`Workspace.tsx`、`editorStore.ts`、`globals.css`；协调者可在审计后为某一波明确放宽其中一个区域，但同波只能由一张卡拥有；
 5. 每张卡有独立 worktree、独立 `codex/` 分支、独立日志和一个 commit；只创建不同分支但仍共享目录不算隔离；
-6. 协调者已经做过并行环境预检：验证磁盘余量、依赖解析、定向测试、构建缓存和清理路径；协作运行时必须能让每次工具调用稳定落在指定 worktree，否则退回串行；禁止复制主工作区 `node_modules`，未经审计不得建立 junction/symlink；
+6. 协调者已经做过一次并行环境预检，且 worktree、依赖解析和定向测试路径自上次预检后没有变化；环境未变化时复用该证据，不重复测磁盘、缓存或清理路径。工具调用必须稳定落在指定 worktree，否则退回串行；禁止复制主工作区 `node_modules`，未经审计不得建立 junction/symlink；
 7. 两张卡都能独立运行各自门禁；若 worktree 无法安全运行测试，则该波退回串行；
 8. 预计冲突、接口漂移或额外文件需求一旦出现，执行器立即 `blocked`，不得自行 merge/rebase 或扩大白名单。
 
@@ -470,10 +483,10 @@ pending → ready → in_progress → done-awaiting-review → accepted
 
 #### 主线集成永远串行
 
-1. 调度前，协调者先把完整 ACTIVE_WAVE 写入本计划并提交；该计划提交的完整 SHA 才是同波共同 accepted parent；
+1. 调度前，协调者先把完整 ACTIVE_WAVE 写入本计划并提交；卡内 `Accepted parent SHA` 始终指上一产品 accepted SHA，纯计划提交只作为编排记录，不扩大产品 diff 基线；
 2. 执行器把单卡提交交给协调者，状态仅为 `done-awaiting-review`；
 3. 协调者从 accepted parent 核对精确 diff、测试和 UI 证据；
-4. 一次只集成一个提交；每次集成后运行 verifier、该卡测试和受影响的共享测试；
+4. 一次只集成一个提交；每次集成后只运行该卡定向测试和真正受影响的共享测试；verifier 与全量测试按第 6.3 节分层执行；
 5. 第一张卡 accepted 后，第二张卡若仍能无冲突应用，才继续审查；否则废弃旧结果并基于新 accepted SHA 重新物化，不做临场冲突拼接；
 6. 只有协调者更新本计划中的 accepted SHA、波次状态和下一 ACTIVE_WAVE；
 7. worktree 仅在对应提交 accepted 或明确 rejected 后按核验路径回收。
@@ -526,39 +539,49 @@ verifier 必须有三个必失败负例：删除 `Workspace`、新增 `Converged
 
 - 保留原 `describe/it` 的行为含义；只替换 V9 fixture、Store 或 Adapter；
 - 删除或弱化断言必须由协调者批准；
-- 只有 Project V8 顶层 schema、Runtime API2、PublishedLesson V1 等明确退休协议可 retire；
+- 只有已被当前产品协议明确退休的路径才可 retire；Runtime API 2/3 兼容必须保留，Project V8 只保留显式导入迁移与必要兼容测试；
 - retire 前必须在行为映射中写出原因和 V9 replacement test；
 - Flow/Spatial/Mixed 是 V8 从未有的新能力，可以新增专属测试。
 
-### 6.3 每张任务的固定门禁
+### 6.3 分层验证：单卡定向、Gate 汇总、M8 全量
 
-任务卡必须给出无占位符的精确命令，至少覆盖：
+验证的目标是尽快发现会阻断当前纵切的问题，不是重复证明已经 accepted 的事实。每条命令只在其覆盖面与本次 diff 相交时运行。
+
+#### A. 实现循环
+
+- 完成一个连贯 diff 后运行 1–3 个最相关的既有测试；失败先修根因，不在代码未变时反复重跑。
+- 只在类型边界变化时运行 `npm run typecheck`；同一波后续纯样式/测试修补复用该结果。
+- 开发中不跑全量 `npm test`、全量 E2E、三尺寸 golden、clean-Windows 或系统级 SendInput。
+
+#### B. 单卡提交门禁
 
 ```powershell
 git status --short
-git branch --show-current
-git merge-base --is-ancestor 3e41ec0 HEAD
-npx tsx scripts/verify-editor-preservation.ts
-<卡内既有定向测试>
-npm run typecheck
+<1–3 个定向测试命令>
+<仅在相关时：typecheck 或对应 renderer/player/electron build>
 git diff --check
-
-# 提交前：分别核对未暂存、已暂存，以及从 accepted parent 到工作树的全部变化。
-git diff --name-only
-git diff --cached --name-only
 git diff --name-only <accepted-parent-sha>
-
-# 提交后：再核对实际提交范围。
-git diff --name-only <accepted-parent-sha>...HEAD
 ```
 
-按任务增加：
+- UI 行为：一个 1366×768 Electron/Playwright 主路径和一张结果截图；只有 CSS/DOM/viewport 变化才跑 preservation verifier 或额外尺寸。
+- Player/Runtime/Component：只跑受影响的 build 与协议测试。
+- archive/export：只跑一次真实文件 roundtrip 或对应导出，不同时复制多套等价 fixture。
+- Playwright `page.mouse` 已从原 canvas 坐标进入真实 Phaser bridge 并由保存结果证明写入时，不再追加 SendInput。
 
-- UI：`npm run build:renderer` 和精确 Playwright；
-- Player：`npm run build:player`；
-- Electron/IPC：`npm run build:electron` 和真实 Electron；
-- archive/export：schema、保存重开、真实文件检查；
-- milestone：完整 `npm test`、clean-Windows、真实导出。
+#### C. Gate 与里程碑
+
+- `GATE-V`、`GATE-S`、`GATE-FEATURES`：定向套件、typecheck、受影响 build，加一条代表性真实 Electron 纵切；仅在 Gate 汇总时跑一次 `npm test`。
+- 三尺寸 golden：仅在壳层/CSS/viewport 改动后、`GATE-S` 和 M8 运行。
+- 五类真实导出：M7 首次汇合和 M8 最终各运行一次；中间卡只测自己新增的格式。
+- clean-Windows、完整 E2E 与仓库卫生只在 M8 最终收敛运行；`npm test` 在三道 Gate 各一次，并在 M8 最终再跑一次。
+
+#### D. 证据复用与停止浪费
+
+- 绿色结果绑定 accepted SHA 与受影响文件集合；集合未变化即可复用。
+- 同一失败命令允许在修复后复验一次；再次失败才继续诊断，不做无变化重试。
+- 单卡验证目标控制在 10 分钟内，Gate 汇总目标控制在 30 分钟内；天然更慢的全量命令只按 C 层运行一次，不为了凑时限拆成重复证据。
+- 不为“更有把握”新增平行测试、截图、日志或审计；只有现有证据不能二元判断合同才补一项最短证据。
+- 自动化通过即记 `engineering candidate` 并继续下一 ready set；只有最终教师验收才使用 `accepted` 的产品质量含义，代码任务的 Git `accepted` 不等待教师逐卡确认。
 
 ### 6.4 最小纵切 Go/No-Go
 
@@ -575,13 +598,35 @@ git diff --name-only <accepted-parent-sha>...HEAD
 9. 1366×768 壳层截图与 V8 baseline 一致；
 10. 无新 App/Shell/Workspace，无可写兼容 View，无双 Store 同步。
 
-任一失败即 `GATE-V = NO-GO`，后续全部 blocked。强协调者负责判断接缝是否可靠；用户只看原界面是否仍熟悉、移动是否自然、重开是否一致。
+任一失败即本次 `GATE-V = NO-GO`，当前实现不得 accepted。主协调者按第 0.1 节自动物化一个最短恢复纵切并重跑 Gate；只有证明目标本身不可调和或触发外部授权边界时才阻塞后续。用户只看原界面是否仍熟悉、移动是否自然、重开是否一致。
 
 ---
 
-## 7. 完整任务 DAG
+## 7. 快速里程碑 DAG 与能力验收清单
 
-本节定义依赖和结果，不是给 Terra Max 的静态白名单，也不是看到两个节点同为 ready 就自动获准并行。协调者只有在依赖 accepted 后才能物化节点，并必须再通过第 5.8 节的文件、接口、测试和 worktree 隔离检查。
+### 7.0 实际执行图
+
+实际执行只按下面 8 个纵切批次推进。后续 7.1–7.10 的旧 ID 是能力验收清单，不再是必须逐一物化、逐一提交、逐一跑全量门禁的微任务；协调者应把同一用户路径所需的旧 ID 合并进一张可运行纵切卡。
+
+| Fast Track | 依赖 | 一次收敛的结果 | 允许执行形态 |
+|---|---|---|---|
+| FT1 / M1 | V04 | 原 App/Workspace 可见 V9 text，真实拖动、Undo/Redo、V9 archive 完全重开，`GATE-V=GO` | 主协调者串行；当前 `V05F` |
+| FT2 / M2 | FT1 | 直接 V9 factories/commands、窄 EditorPort、文件生命周期与原顶栏/左栏/状态条/右栏切到单写 V9 | 高冲突 UI 串行；纯模型卡仅在 §5.8 全部成立时并行 |
+| FT3 / M3 | FT2 | Slide Native/Runtime/Component 可见、可选、变换、文字/媒体/图层/状态/全局层/控制器/互动完整，`GATE-S=GO` | 以 3–5 个用户纵切完成，不按 S01–S28 逐卡 |
+| FT4 / M4 | FT3 | 隔离 Player、Runtime 2/3、Component 4、开发区、课程逻辑和 checkpoint 形成一条真实闭环 | Player 与纯开发模型可在文件完全隔离时双卡 |
+| FT5 / M5 | FT4 | Flow 语义编辑、层级/表格/公式/媒体、真实拖动、统一层、Player、HTML/PDF/DOCX | 可与 FT6 双 worktree 并行 |
+| FT6 / M6 | FT4 | Spatial pan/zoom、选择/变换、关系、镜头/路径/小地图、统一层、Player、导出 | 可与 FT5 双 worktree 并行 |
+| FT7 / M7 | FT5,FT6 | Mixed 导航/state/guard/controller、完全重开、整课 Player、HTML/网页包/PDF/PPTX/DOCX | 主线串行汇合 |
+| FT8 / M8 | FT7 | 原 App 唯一入口、显式 V8 导入兼容、旧失败前端清理、行为/视觉/导出最终门禁 | 主协调者串行清理与最终审计 |
+
+执行规则：
+
+- 一个 Fast Track 通常物化 1–5 张端到端卡；只有白名单或可见结果真正独立才拆分。
+- 不为接口定义、Adapter、fixture、测试迁移、文档更新单独建卡；它们随第一个真实消费者进入同一提交。
+- 同一 Fast Track 内定向测试随卡运行，全量只按第 6.3 节在 Gate/M8 运行。
+- 只有 §5.8 的全部隔离条件成立才启用最多两个 Terra Max；否则主工作区单写入持续推进。
+
+下面的旧 DAG 仅用于防止能力遗漏和定位依赖，不控制提交粒度。
 
 ### 7.1 基线与守卫：协调者专属
 
@@ -757,14 +802,14 @@ AI 入口在整个 D 链中仍为 0。
 | Q06 | Q05 | 用户只按教师可见任务验收，不判断技术架构 |
 | Z01 | Q06 | 原 App 成为唯一正式 V9 入口；开发 backend flag 删除 |
 | Z02 | Z01 | 按可达性簇删除 CourseStudio 失败前端和替代测试 |
-| Z03 | Z02,A10 | 删除 V8 顶层 schema/archive/store、Runtime2、PublishedV1 临时路径；先有 replacement |
+| Z03 | Z02,A10 | 删除不可达的 V8 默认编辑真相源与 PublishedV1 临时路径；保留显式 V8 导入迁移、必要兼容测试和 Runtime API 2/3 兼容 |
 | Z04 | Z03 | full、clean-Windows、真实 Preview/导出；仓库生成物卫生 |
 
 `projectTypes.ts`、`projectSchema.ts` 中被 V9 Native 内容真实复用的中性类型不能按文件名误删。Component 包的内容完整性 hash 属于内部包校验，不是教师审批流程，也不能误删。
 
-### 7.11 推荐并行波形
+### 7.11 旧 ID 的并行提示（不控制拆卡粒度）
 
-以下只是强协调者计算 ready set 时的候选波形；实际 ACTIVE_WAVE 仍必须根据当前 accepted SHA 重新核对文件所有权：
+以下只帮助协调者识别高冲突区；实际执行优先服从 7.0 的 Fast Track，并根据当前 accepted SHA 核对文件所有权：
 
 | 阶段 | 推荐执行形态 | 原因 |
 |---|---|---|
@@ -794,15 +839,15 @@ Goal 长程运行不得在每个里程碑等待用户确认；里程碑是自动
 | M7 Mixed | 跨表面 location/state/guard/controller、重开、五类导出 |
 | M8 收敛 | 原 App 唯一入口；失败前端和旧顶层协议清理；全门禁通过 |
 
-任一里程碑只有自动化绿色但教师可见结果差，只能记为 `engineering candidate`，不得进入下一用户体验里程碑。
+每个里程碑只复核一条代表性教师路径；若可见结果明显不可用，先修该路径再前进，不扩展成全功能体验审计。自动化通过记为 `engineering candidate`，无需等待用户逐里程碑确认。
 
-里程碑完成后主协调者要记录简短检查点，但不暂停 Goal。只有二元 Gate 为 NO-GO、需要用户授权的破坏性/付费/新依赖决策、权限阻塞，或计划本身出现不可调和矛盾时才停止长程运行。
+里程碑完成后主协调者只记录结果、SHA 和未覆盖风险，不暂停 Goal。普通 Gate 失败自动物化最短恢复卡；只有权限、付费、新依赖、不可恢复的破坏性操作、仓库外授权或目标本身不可调和时才停止长程运行。
 
 ---
 
 ## 9. 每张动态任务卡与执行波的固定结构
 
-协调者物化下一任务时必须填写所有字段，不得使用“相关文件”“必要测试”等占位语：
+任务卡只保留执行与审查真正需要的信息。不得为填写模板而重复源码事实、实现步骤或测试背景：
 
 ````markdown
 ### ACTIVE_CARD｜<ID> <名称>
@@ -815,44 +860,19 @@ Goal 长程运行不得在每个里程碑等待用户确认；里程碑是自动
 - Assigned worktree: <绝对路径；协调者串行卡写“主工作区”>
 - Assigned branch: <codex/...；只读卡写“不适用”>
 - Parallel eligibility: serial | isolated-write
-- File-overlap proof: <与同波卡逐项核对；串行写“不适用”>
 - Integration order: <协调者指定序号；执行器不得自行集成>
-- 唯一可见/模型结果: <一句话、可二元判断>
-- Before: <当前可复现事实>
-- After: <完成后的二元事实>
-
-读取来源：
-- BASE3E: <精确路径/函数>
-- DONORF77: <精确路径/函数；没有则写“无”>
-- CURRENT: <精确直接依赖>
-
-产品修改白名单：
-- <精确文件 1>
-- <精确文件 2>
-
-测试修改白名单：
-- <优先既有精确测试文件>
-
-明确禁止：
-- <本任务专属禁止项>
-
-实现步骤：
-1. <精确步骤>
-2. <精确步骤>
-
-验证命令：
-```powershell
-<无占位符的精确命令>
-```
-
-鼠标/截图证据：
-- <UI 卡必填；非 UI 写“不适用”>
+- Outcome: <一句话、可二元判断的端到端结果>
+- Product whitelist: <精确文件列表>
+- Test whitelist: <精确测试列表>
+- Targeted checks: <第 6.3 节 A/B 层的最短命令>
+- Stop only if: <权限/依赖/不可恢复破坏，或需要第二个独立结果>
+- Visual evidence: <UI 卡写一个主路径；非 UI 省略>
 
 Commit: `<type(scope): result>`
 Rollback: `git revert <task-sha>`
 ````
 
-ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只读审计卡、并行预检结果、串行集成次序和波次停止条件。协调者不能为了让 Terra Max 继续而把已发现的额外工作偷偷加进当前卡；必须拆为新节点或判定 blocked。
+ACTIVE_WAVE 只列 wave ID、共同 accepted parent、卡列表、并行结论和串行集成次序。串行单卡无需重复写文件重叠证明；双卡仍必须完整满足第 5.8 节。局部相邻缺口由协调者直接补入当前端到端卡，只有形成第二个独立结果才拆卡。
 
 ---
 
@@ -884,9 +904,9 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - 测试 V9 单后端：只有精确 query 才让原 App/Workspace 读取直接 V9 fixture；一个 Native text 以稳定 `layerItemId` 投影、选择并一次性移动，V8 Store project 不变；全量 147 个 Vitest 文件 / 920 个测试和 8 个 Agent Kit 测试全绿，默认三尺寸 mask 外像素差异均为 0。
 - `V05 not accepted / GATE-V = NO-GO`：真实 Electron 可以通过 Phaser 几何代理移动 V9 frame，Undo/Redo 与 schemaVersion 9 archive 也已走通到首轮保存，但 V9 Native text 没有进入隔离 Player 的视觉树；当前 accepted cursor 仍为 V04 `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`。
 
-### W11｜V9 最小纵切真实闭环波
+### W11｜V9 最小纵切真实闭环波（历史记录）
 
-- Status: `blocked / GATE-V = NO-GO`
+- Status: `archived / superseded by W12`
 - Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - Write cards: `V05`（主协调者，主工作区，串行）
 - Read-only audit cards: 无
@@ -894,20 +914,20 @@ ACTIVE_WAVE 还必须列出：wave ID、共同 accepted parent、卡列表、只
 - Integration order: `V05`
 - Stop condition: 若真实 Electron 指针不能通过原 Phaser bridge 只写 V9，Undo/Redo 不能恢复同一稳定 ID，archive 不是 schemaVersion 9，完全销毁进程后无法从文件恢复相同 text/frame/ID，或必须修改 Store/Workspace/Phaser/Schema/IPC/TopToolbar 才能闭环，则 `GATE-V = NO-GO` 并停止后续开发；全部通过后由主协调者立即执行 GATE-V 二元裁决
 
-### GATE-V 二元裁决｜NO-GO
+### GATE-V 二元裁决｜历史 NO-GO（已获授权恢复）
 
 - Decision date: `2026-08-15`
 - Accepted cursor: `V04 @ 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`；V05 未 accepted，后续 DAG 没有 ready set。
 - Failed contract: 第 6.4 节第 2 项“通过纯只读 View 显示一个 V9 Native text”。1366×768 真实 Electron 截图中，V9 text 的预期屏幕区域为纯白；`245 × 62 = 15190` 个像素中低于 RGB 248 的像素为 `0`，而原 V8 Player 教师控制器仍可见。
 - Root cause: `ProxyNodeAdapter` 按冻结设计只维护几何命中和变换手柄，隔离 Player 才是视觉真相；V03 的 `slideAuthoring` 只替换 Phaser 的 `document/componentPackages/selection/move` 输入。Workspace 的 Player 启动 payload 仍固定读取 V8 `project/assetFiles/componentPackages`，现有完整 authoring snapshot 也固定读取 `useEditorStore`，且未由握手路径调用。因此 V9 节点可被无形命中并写回 V9，却不能被 Player 显示。
 - Prohibited escape hatches: 在 App 内同步写一份 V8 scene、伪造同 ID V8 节点、覆盖 Canvas/Player DOM 或增加 test-only visual 都违反“单 backend、只读 View、无双 Store”；让现有 Player 正确显示 V9 则必须修改 Workspace/Player 接缝，直接命中本波停止条件与 V05 白名单禁令。
-- Consequence: `GATE-V = NO-GO`，V05 blocked，K01 及全部后续节点 blocked；不得把仅有命中、history/archive 通过的结果称为 Gate 通过。
-- Resume condition: 只有在冻结计划获准修订后，才可物化一个 Gate 前的只读 Player 视觉投影节点（由主协调者裁决接口与白名单），随后重新执行 V05 与完整 GATE-V；不得把 A07/S02 偷跑进当前卡。
+- Consequence at the time: V05 未 accepted；不得把仅有命中、history/archive 通过的结果称为 Gate 通过。
+- Superseding authorization: 用户已于 2026-08-15 授权主协调者修订计划并持续推进。W12 只补足已证明缺失的 Player 只读视觉投影，不引入双 Store，也不提前建设通用 A07/S02。
 
 ### ACTIVE_CARD｜V05 闭合 V9 Slide 真实鼠标、历史与 archive 重开
 
 - Owner: `strong-coordinator`
-- Status: `blocked / not accepted`
+- Status: `superseded by V05F / not accepted`
 - Wave: `W11`
 - Accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - Dependencies: `V04 accepted @ 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
@@ -990,6 +1010,35 @@ git diff --name-only 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6
 Commit: `feat(editor): close V9 Slide gate vertical slice`
 Rollback: `git revert <task-sha>`
 
+### W12｜FT1 / V05F 快速恢复可见纵切
+
+- Status: `in_progress`
+- Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
+- Write cards: `V05F`（主协调者，主工作区，串行）
+- Parallel result: `App.tsx` 与 `Workspace.tsx` 均为高冲突主入口，且当前未 accepted 的 V05 调查 diff 已在主工作区；不创建 Terra worktree。
+- Integration order: `V05F → GATE-V`
+
+### ACTIVE_CARD｜V05F 可见 V9 text、真实拖动与 archive 重开
+
+- Owner: `strong-coordinator`
+- Status: `in_progress`
+- Wave: `W12`
+- Accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
+- Dependencies: `V04 accepted`
+- Assigned worktree: `C:\Users\74755\Documents\HTML课件编辑器`
+- Assigned branch: `codex/v9-editor-v8-base`
+- Parallel eligibility: `serial`
+- Integration order: `1`
+- Outcome: 原 App/Workspace 的隔离 Player 通过现有 authoring patch 协议显示 V9 只读 `SceneDocument` 投影；同一 text 可被真实 canvas 指针拖动、Undo/Redo、保存 schemaVersion 9、完全关闭重开并继续拖动，且 V8 Store 不写入。
+- Product whitelist: `src/renderer/course/v9SlideVerticalSlice.ts`、`src/renderer/App.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/workspaceSlideAuthoring.ts`。
+- Test whitelist: `tests/unit/v9SlideVerticalSlice.test.ts`、`tests/unit/workspaceSlideAuthoring.test.ts`、`tests/e2e/v9SlideVerticalSlice.spec.ts`。
+- Targeted checks: 两个相关 unit 文件、typecheck、Renderer/Electron build、一次 `v9SlideVerticalSlice.spec.ts --workers=1`、`git diff --check`；通过后 GATE-V 只额外汇总一次 `npm test`。
+- Stop only if: 闭环必须引入新依赖、改 Schema/IPC、写入 V8 Store 或建立第二套 Player/Workspace；普通 Workspace/Player 接缝调整由主协调者自行处理。
+- Visual evidence: 只保留 1366×768 重开截图和 Playwright `page.mouse` 从原 canvas 坐标进入 Phaser 的一次路径；archive 同时证明 frame/ID 写入。取消三尺寸重复截图与 SendInput。
+
+Commit: `feat(editor): close visible V9 Slide gate`
+Rollback: `git revert <task-sha>`
+
 ---
 
 ## 11. 最终完成定义
@@ -1000,13 +1049,13 @@ Rollback: `git revert <task-sha>`
 2. 教师看到的是原 V8 `App/ui/Workspace/CSS` 原地升级后的产品；
 3. `ProductApp` 只有原 `App` 一个入口；
 4. Course Project V9 是唯一可写、可保存、可发布协议；
-5. 不打开、不迁移 Project V8；
+5. Project V8 只作为用户显式导入迁移和必要兼容测试存在，不得成为新课件默认生成或编辑真相源；
 6. Slide 的全局层、状态条、画布、字体、文字背景、属性、开发、控制器和试运行达到成熟合同；
 7. Flow 和 Spatial 使用各自合适的编辑形式，但共享原外壳、文件、历史、作用域、控制器和隔离 Player；
-8. Runtime API3、Component API4、Published V2、五类导出真实闭环；
+8. Runtime API 2/3 兼容、Component API4、Published V2、五类导出真实闭环；
 9. 试运行和导出 capture 不污染编辑 Project 或现场运行会话；
 10. 原高价值测试在行为映射中全部保留或有明确 replacement；
-11. 反重写 verifier、三尺寸 Electron、真实鼠标、保存重开、clean-Windows 全绿；
+11. 反重写 verifier、三尺寸 Electron、一个真实鼠标主路径、保存重开、clean-Windows 在 M8 最终门禁全绿；
 12. 普通教师界面没有协议词和未接入 AI 的占位入口；
 13. 强模型体验审计至少为 `art candidate`；
 14. 最终 `accepted` 来自教师对可见任务的明确验收，而不是自动化或模型自评。
