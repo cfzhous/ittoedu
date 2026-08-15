@@ -132,15 +132,15 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前为 M4，恢复于产品检查点 `6361641`（M3 Gate 已于 2026-08-15 通过）。
+当前为 M5/M6，恢复于产品检查点 `7f04a8a`（M4 Gate 已于 2026-08-15 通过）。
 
-M3 已成立（`6361641`）：media/text/背景作者链与原子 IME 事务、互动/开发 UI 接 V9、Runtime/Component 作者目标入统一图层、一次手势一次 history、Published Slide 会话生命周期与异步 action await、Runtime API 2/3 与 Component API 4 全链；L3 证据（定向测试、typecheck、build、代表性 Electron、npm test、preservation）全通过。
+M4 已成立（`7f04a8a`）：Published Slide 会话生命周期与异步 action await、教师控制器运行合同（收展/拖动/目录/静音/全屏/重播/重启单 owner）、Runtime API 2/3 与 Component API 4 全链、课程状态与恢复单一 owner（replay 单次进入、会话态不写 archive、checkpoint 无 history/dirty、隔离销毁无泄漏）；L3 证据全通过。
 
-M4 依次推进：
+M5/M6 依次推进（默认并行，按根计划任务板）：
 
-1. 教师控制器运行合同（T-CTRL，依赖 T-PSES 已集成，派发中）。
-2. 课程状态与恢复（T-CSTATE，依赖 T-PSES + T-CTRL）。
-3. M4 Gate：代表性双场景 Slide 状态互动、导航、目录、收展、session 移动、重播、重启、静音、全屏、Runtime 2/3、Component 4、销毁重建。
+1. Flow：语义结构、层级、表格、公式、媒体、统一图层、稳定选择、属性、状态、互动；Player、保存重开与 HTML/PDF/DOCX 路径。
+2. Spatial：pan/zoom、选择、变换、关系、镜头、路径、小地图、状态、互动；world/viewport 坐标分离；Player、保存重开与导出。
+3. M5/M6 Gate 后进入 M7（Mixed 与发布导出）与 M8（最终收敛）。
 
 ## 7. 关键不变量
 

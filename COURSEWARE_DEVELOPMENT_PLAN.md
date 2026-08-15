@@ -4,8 +4,8 @@
 > DATE: 2026-08-15
 > ROLE: 本仓库唯一长期开发计划
 > EXECUTION_MODE: 并行 Agent 集群（唯一协调者 + 多执行者 + 单一集成主线）
-> CURRENT_STAGE: M4 / Player、Runtime、Component 与课程逻辑
-> CURRENT_PRODUCT_CHECKPOINT: 6361641
+> CURRENT_STAGE: M5/M6 / Flow 与 Spatial 并行
+> CURRENT_PRODUCT_CHECKPOINT: 7f04a8a（M4 Gate）
 > CURRENT_PLAN_CHECKPOINT: 8b4513c
 > BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485
 > V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d
@@ -123,6 +123,7 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 | M2 | `cc8c6c4` | 默认 V9 单写生命周期及原壳主要区域 Gate |
 | M3-A | `b6d1787` | surface Native 作者闭环、共享显示、统一顺序、陈旧目标拒绝和保存重开 |
 | M3 | `6361641` | 完整 Slide 作者闭环：media/text/背景作者链、原子 IME 事务、互动/开发 UI 接 V9、动态作者目标入统一图层、一次手势一次 history、M3 Gate 全证据通过 |
+| M4 | `7f04a8a` | Player/Runtime/Component 与课程逻辑：Published Slide 会话生命周期、教师控制器运行合同、Runtime API 2/3、Component API 4、课程状态与恢复单一 owner、M4 Gate 全证据通过 |
 
 产品 accepted cursor 仍是 M1。反重写 diff 基线固定为 `BASE_COMMIT`，不能随阶段移动。
 
@@ -155,6 +156,15 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 修复：ProductApp 直接渲染原 App，不加任何包装元素；`v9SlideVerticalSlice` Electron 路径新增 `expectAppShellFillsViewport` 几何断言，断言添加元素前后壳顶对齐视口顶、壳与底部状态栏贴合视口底、`scrollY` 为 0。
 
 已验证：1280×720、1366×768、1920×1080 三档视口添加 text/rectangle/formula 前后壳与底部状态栏贴合窗口底部、几何不变、页面无滚动；工程、history、selection、dirty 与保存语义不受影响。当前无登记的 P1。
+
+### 3.5 M4 Gate 已通过（2026-08-15，`7f04a8a`）
+
+- Published Slide 会话生命周期统一：session 创建/切换/销毁、稳定 layer item 事件、scene/presentation enter/exit、计时/媒体/motion 完成事件、异步 action 真实 await、失败停链并报教师安全错误（T-PSES）。
+- 教师控制器运行合同：收展/进度/目录/静音/全屏与状态标签、session-only 拖动与 Alt+方向键、点击拖拽互斥、收起命中收缩、`controls:none` 隐藏、destroy/restart 恢复默认、教师动作单一 owner 管线（T-CTRL）。
+- Runtime API 2/3：加载/通信/资源访问/错误隔离/destroy、作者目标、hit field、状态热更新、capture/checkpoint 屏障、API 2/3 各真实路径测试（T-RT）。
+- Component API 4：package/版本/manifest/runtime/props/preset/资源加载、多版本显式拒绝、props/hot update 不重建无关实例、fallback/thumbnail/实跑职责分离（T-COMP）。
+- 课程状态与恢复：CourseLocation/state/guard/controller 同一课程状态、replay 单语义单元单次进入、restart 整课重置、会话状态不写 archive、checkpoint 不产生 history/dirty、Trial/Preview/HTML 隔离销毁无泄漏（T-CSTATE）。
+- L3 证据：M4 定向测试、typecheck、build:player、代表性 Electron 3 条、`npm test`、preservation 门禁全部通过。
 
 ## 4. 并行任务模式
 
@@ -202,10 +212,10 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 
 | ID | 目标 | 供给 | 依赖 | 状态 |
 |---|---|---|---|---|
-| T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | dispatched |
-| T-CSTATE | 课程状态与恢复（M4-E） | M4 | T-PSES、T-CTRL | pending |
+| T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | integrated |
+| T-CSTATE | 课程状态与恢复（M4-E） | M4 | T-PSES、T-CTRL | integrated |
 
-M3 Gate 后协调者按同一规范拆 M5/M6 任务板：M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
+M3/M4 任务板已清空。M5/M6 任务板由协调者按 §4.5 规范拆出后在本节登记；M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
 
 ### 4.6 集成 Gate
 
@@ -225,7 +235,7 @@ M3 Gate 后协调者按同一规范拆 M5/M6 任务板：M5 与 M6 默认并行�
 - `scene.interactions` 的 Native 点击、条件和 action 在隔离 Player 与最小 Published Slide 中真实执行。
 - “当前位置试运行”使用独立 Published snapshot，会话停止即销毁。
 
-### M4 — Player、Runtime、Component 与课程逻辑
+### M4 — Player、Runtime、Component 与课程逻辑（Gate 通过，2026-08-15，`7f04a8a`）
 
 供给任务：T-PSES、T-CTRL、T-RT、T-COMP、T-CSTATE。
 
