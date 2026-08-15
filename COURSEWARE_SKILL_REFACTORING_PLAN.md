@@ -1,6 +1,6 @@
 # Courseware V9 原地重构：Sol Ultra 直接执行计划
 
-> PLAN_VERSION: 5.0-sol-ultra-direct
+> PLAN_VERSION: 5.1-sol-ultra-direct-guarded
 > DATE: 2026-08-15
 > EXECUTION_ENGINE: GPT-5.6 Sol / ultra workflow
 > EXECUTION_TOPOLOGY: Ultra 端到端直接执行；无任务卡、无 Owner、无协调者交接
@@ -13,6 +13,8 @@
 > USER_CONFIRMATION_POLICY: 里程碑是自动检查点，不等待逐次确认
 > USER_STOP_POLICY: 仅权限、付费、新依赖、不可恢复破坏、仓库外操作或目标本身不可调和
 > VALIDATION_POLICY: 当前变化的最小证据；同一事实不重复证明；M8 才做最终全量
+> ANTI_REWRITE_GATE: preservation verifier + behavior map + original-shell golden
+> REWRITE_DECISION: 任一原文件删除/替代、正式入口偏离原 App 或禁止结构可达，立即 NO-GO
 > STATUS: implementation-active
 
 本文件是本仓库唯一长期执行计划。后续全部工作直接交给 GPT-5.6 Sol Ultra 工作流：它自行完成架构判断、内部拆分、实现、审查、Git、本地集成、Gate、失败恢复和阶段记录，并从当前状态连续运行到 M8。
@@ -75,6 +77,109 @@
 - 不做与当前里程碑无关的清理、格式化、重命名或未来抽象。
 - 尚无当前消费者的接口、Adapter、配置、状态机和插件层保持不存在。
 
+### 2.4 不可删除、重命名或替代的原前端文件
+
+下列文件必须在原路径原地演进；文件名存在不是充分条件，它们还必须继续位于正式可达调用链中：
+
+- src/renderer/App.tsx
+- src/renderer/ui/TopToolbar.tsx
+- src/renderer/ui/ScenePanel.tsx
+- src/renderer/ui/SceneThumbnail.tsx
+- src/renderer/ui/Workspace.tsx
+- src/renderer/ui/SceneStateStrip.tsx
+- src/renderer/ui/RightSidebar.tsx
+- src/renderer/ui/ElementsTab.tsx
+- src/renderer/ui/NodesTab.tsx
+- src/renderer/ui/PropertiesTab.tsx
+- src/renderer/ui/ComponentsTab.tsx
+- src/renderer/ui/AutomationTab.tsx
+- src/renderer/ui/DeveloperTab.tsx
+- src/renderer/ui/PresenterSettingsEditor.tsx
+- src/renderer/authoring/stageViewportTransform.ts
+- src/renderer/phaser/**
+- src/renderer/styles/globals.css
+
+ProductApp.tsx 最终只能渲染同一个原 App。Flow 和 Spatial 可以在原中央编辑区拥有适合自己的内容工作区，但不得成为新产品壳，也不得反向改写 Slide 的成熟画布交互。
+
+### 2.5 永久禁止的重写结构与路线
+
+以下结构一旦出现即视为反重写 Gate 失败，不因测试通过而接受：
+
+- ConvergedEditorApp、任何新 *EditorApp 或 *EditorShell。
+- 新 Slide Workspace、src/renderer/converged/** 或替代原 UI 的 src/renderer/studio/**。
+- 以 CourseStudioApp、CourseSurfaceCanvas 或 V9EditorShell 为母体重建产品。
+- 用 course-studio.css 覆盖原壳。
+- 新建多组 slice、Context Provider、service/plugin/command 框架替代现成前端。
+- 为新壳建立 converged*.test 自证成功。
+- 从 donor 新建壳再移植 V8 UI。
+- 保留 CourseStudioApp 再逐步仿制 V8。
+- 让 Project V8 继续作为最终默认编辑协议。
+
+唯一允许的路线是：以 3e41ec0 的原 App/ui/Workspace/Phaser/CSS 为前端基线，原地换入 Course Project V9；f77ba9e 只提供按函数或纯模型摘取的逻辑参考。
+
+这不是风格偏好，而是已有 Git 证据：3e41ec0→f77ba9e 删除了原 App、约 4,200 行 editorStore、约 2,700 行 Workspace、TopToolbar/ScenePanel/SceneStateStrip/RightSidebar/Properties/Developer 等整套 UI、Phaser 编辑链及大量高价值测试，并新建了 V9EditorShell、CourseStudioApp 和另一套 Canvas/CSS。以 donor 为壳再“移植 V8”就是再次重写前端，永久否决。
+
+### 2.6 教师可见交互冻结合同
+
+| 区域 | 必须保留的行为 |
+|---|---|
+| 顶部 | 新建、打开、保存、撤销、重做、当前位置试运行、整课预览、导出；不随意改变顺序和密度 |
+| 左侧 | 固定一级“全局层”；幻灯片缩略图；拖动排序、重命名、复制、删除 |
+| 中央 | 1280×720 Slide 逻辑画布；缩放、平移、点选、框选、Shift 多选、移动、八向缩放、旋转、方向键微调、双击编辑、吸附 |
+| 状态条 | 基础画面与命名状态始终在画布下方；新增、复制、重命名、设初始、设缩略图、删除 |
+| 右侧 | 简洁/专业模式；元素、图层、属性；专业模式中的互动与开发；普通教师不看到协议分层 |
+| 字体与样式 | 字体搜索、完整列表、系统检测、自定义字体、文字颜色、高亮、文本框背景/透明度/圆角与完整排版 |
+| 开发 | Runtime 源码/内容/素材、Component manifest/runtime/props、Object/Rules JSON、校验、错误和预览 |
+| 教师控制器 | 全局层中的真实作者对象；可编辑、可恢复；编辑态按钮不执行，试运行中正确导航和收展 |
+| 底部状态 | 状态、选择、缩放、dirty 与错误可见；普通错误不暴露内部 ID/API 方法名 |
+
+教师概念映射必须保持：
+
+- Slide scene 显示为“幻灯片”，不显示 Surface/Scene。
+- project.globalLayerItems 显示为固定一级“全局层”。
+- surfaceLayerItems 只在需要时显示为“当前内容共用”，不得取代全局层。
+- scene layerItems 是当前幻灯片内容。
+- presentation.states 与 overrides 显示为画布下方状态条。
+- CourseLocation 只作为内部导航事实，教师看到幻灯片、讲义位置、镜头或目录名称。
+- 所有 Native、Runtime、Component 和教师控制器参加同一图层、命中和选择链。
+
+普通教师界面不得出现：V8、V9、Surface、Native、Runtime、Component（专业开发区例外）、API、Manifest、Package ID、Layer Item ID、authoringAddress、targetId、revision、JSON Pointer、AI Patch 或尚未接入的 AI 引用按钮。
+
+### 2.7 冻结数据迁移与运行架构
+
+迁移采用“影子构建、单次切换”，不得大爆炸重写，也不得双写：
+
+1. V9 document、history、location、selection、archive 和只读 View 先独立成立。
+2. 兼容 View 只机械投影旧 UI 暂时需要的读取形状；不可写、不可持久化、不可进入 history/archive/export。
+3. 每个旧 action 先有等价 V9 command，再切换对应原组件。
+4. 启动参数只能选择一个 backend；一次操作绝不能同时写 V8/V9。
+5. 原 useEditorStore 导入路径可以暂时保留以降低切换风险，但不得因此新增 Provider 生命周期。
+6. Slide 合同成立后单次切换正式 V9 backend，再逐步删除无消费者的兼容层与 V8 默认 backend。
+
+作者检查和试运行必须分离：
+
+- AuthoringInspectHost 常驻编辑画布，只负责作者渲染、命中和稳定地址，不承担真实课程会话。
+- TrialRunSession 从当前 V9 snapshot 构建 Published Course V2，从当前 location/state 启动，停止即销毁，不改 Project/history/revision/selection/viewport。
+- FullPreviewWindow 复用现有 standalone HTML → openPreview → previewWindow 链。
+- 禁止编辑 Host 原地切 inspect/playback、复用上次运行实例、让 Player 普通事件直接改编辑器，或从 Player DOM/Canvas 反序列化工程。
+
+### 2.8 Donor 摘取边界
+
+| 功能 | 允许参考/摘取 | 永久禁止 |
+|---|---|---|
+| V9 协议 | frame/runtime 收窄、Flow level、Spatial relations/zoom、Published label 的局部差异 | 整体覆盖 types/schema/model |
+| Native factory | text → formula/shape → image → video → controller 逐项 | 整体复制大型 courseStudioModel |
+| Slide Host | unified order、hit、capture、controller、interaction、media 的单项算法 | 复制 CourseSurfaceCanvas |
+| Runtime/Component | mount、hit field、checkpoint、hot update 算法 | 复制强耦合 editor dynamic host |
+| Flow | flowListStructure、纯 move model、Host/export 增量 | 复制 FlowBlockEditor UI |
+| Spatial | viewport/zoom/relations 纯模型、Host/export 增量 | 复制 SpatialAuthoringPanels UI |
+| 互动/声音 | 纯 model、Player controller/audio 增量 | 复制整套 Course Studio 面板 |
+| 发布 | producer、consumer、schema 同时闭合 | 只改一端或整体替换 Published App |
+
+以下文件或模块永远不能作为前端 donor：CourseStudioApp.tsx、CourseSurfaceCanvas.tsx、V9EditorShell.tsx、course-studio.css、CourseElementPalette、CourseLayerPanel、CourseSceneThumbnail、CourseSoundLibrary、SpatialAuthoringPanels、V9CourseLogicEditor、V9InteractionEditor、FlowBlockEditor、整套 CourseTransformOverlay UI、CourseStudioPlaybackSession。
+
+K00 已经完成直接 V9 新工程 factory；不得再次为此复制 donor 模型。projectTypes.ts/projectSchema.ts 中被 V9 Native 内容实际复用的中性类型不能按文件名误删。
+
 ---
 
 ## 3. 给 Sol Ultra 的直接执行提示词
@@ -89,6 +194,7 @@
 每次只推进当前里程碑中一个可运行、可二元判断的端到端结果。不要把 helper、Adapter、fixture、文档或测试单独拆成工作单元。完成一个结果后自行审查、提交并立即继续下一个结果；Gate 只是自动检查点，GO 后继续，NO-GO 后自行选择最短恢复路径，不等待用户确认。
 
 严格限制过度设计：
+- §2.4–§2.8 是机械硬约束，不得以“更现代”“更统一”“更容易测试”重新解释；任何方案触碰禁止结构立即放弃。
 - 只实现当前结果立即需要的行为。
 - 优先最小补丁和现有调用链。
 - 禁止未来抽象、通用平台、第二套实现、无立即消费者的接口、状态机、配置系统、插件层、批量重构和顺手清理。
@@ -116,8 +222,10 @@
 
 Git 与工作区：
 - 先检查 branch、status、diff 和 accepted product cursor。
+- 每次准备提交前检查相对 BASE_COMMIT 的 name-status；§2.4 文件出现 D/R、新 App/Shell/Workspace 或正式入口偏离原 App 时禁止提交。
 - 保留用户和外部工具已有的未提交文件；不得用 reset、checkout 或 stash 抹掉它们。
 - 当前 dirty diff 先逐项判断属于当前结果、失败实验或无关文件；只清理能够由证据判定的失败实验。
+- 不得通过删除、弱化或改写 preservation verifier、behavior map、既有高价值测试或 golden 来让重写路线变绿。
 - 每完成一个可见端到端结果或一个里程碑，做一次意图明确的本地 commit；不要为 helper 或计划记录制造微提交。
 - 不 push，不修改远端，不执行破坏性历史改写。
 - 更新本文件只记录 CURRENT_STAGE、已完成里程碑 SHA 和一个未覆盖风险，不恢复任务卡体系。
@@ -284,11 +392,160 @@ M1 完成条件：
 - 完成第 6 节最终验证并提交 M8。
 - 输出 engineering candidate 或 art candidate 的真实等级；教师未明确验收前不得写 accepted。
 
+### 5.9 机械能力验收清单
+
+以下各行是里程碑完成前必须二元核对的产品事实，不是任务、执行顺序或提交单位。Ultra 不得因为实现路径不同而省略；若源码已具备，只需用最小证据确认，不重复实现。
+
+#### V9 公共内核与文件生命周期
+
+| 能力组 | 必须成立 |
+|---|---|
+| Factory | fixture、测试 producer 和产品新建都直接生成 V9；text、formula/shape、image、video、controller 逐类有直接 factory |
+| Scope/order | global/surface/scene/world 有统一 scope/order command 与引用安全 |
+| Slide scene | 新增、复制、排序、定位、重命名、删除和引用修复为原子操作 |
+| Slide state | CRUD、initial、thumbnail、override、order 和引用修复为原子操作 |
+| Flow model | block/list/location、0–5 层级与移动具有纯模型和引用修复 |
+| Spatial model | world、relations、camera、path 与唯一 viewport 常量 |
+| Mixed model | location、course state、guard 与跨表面 action 一致 |
+| History/file | V9 history、dirty、archive new/open/save/reopen 完整；V8 只走显式迁移 |
+| Publish | Published V2 producer/schema/label/assets 同时闭合，不能只改 producer 或 consumer |
+
+#### 原 UI 数据切换
+
+| 原组件/区域 | 必须成立 |
+|---|---|
+| TopToolbar | 文件、Undo/Redo、预览、导出走 V9；位置、快捷键和视觉密度不变 |
+| ScenePanel/Thumbnail | 全局层仍是固定一级入口；幻灯片 CRUD、排序与缩略图状态走 V9 |
+| SceneStateStrip | 基础/命名状态、initial/thumbnail 与原交互不变 |
+| RightSidebar/tabs | 简洁/专业、元素、图层、属性、互动、开发继续使用原组件 |
+| Properties | 原控件设计不重写；公共选择与提交边界写 V9 command |
+| Workspace | 原 stageViewportTransform、Phaser bridge、选择、命中和变换手感继续工作 |
+| App lifecycle | new/open/recent/save/save-as/dirty/recovery/title/current location 全走 V9 |
+| Backend switch | 正式产品启动后只运行 V9；开发 flag 和临时兼容 facade 在无消费者后删除 |
+
+#### Slide 成熟交互
+
+| 能力组 | 必须成立 |
+|---|---|
+| 渲染 | text、shape、formula、image、video、Runtime、Component、controller 在原画布真实可见 |
+| 命中 | 点选、稳定 layerItemId、Runtime/Component 内公开 field 命中 |
+| 变换 | 鼠标移动、方向键微调、八向 resize、rotate、角度吸附；一次手势一次 history |
+| 多选 | 框选、Shift 多选、锁定语义与批量变换 |
+| 吸附 | 8px、中心、边缘吸附与 Alt 临时关闭 |
+| 文字 | 双击编辑、富文本、IME、Ctrl+Enter/失焦提交、缩放下定位 |
+| 图片/视频 | 命中、替换、裁切、导入、素材闭包和保存重开 |
+| 公式/形状 | 原位或属性编辑，显示、Player 和导出一致 |
+| 插入 | text/shape/formula 连续插入；image/video/Component 导入当前画布 |
+| 图层 | Nodes 与画布选择双向同步；显隐、锁定、order、scope move、多选操作统一 |
+| 幻灯片 | 新增、复制、排序、删除、重命名，缩略图使用 initial/thumbnail 有效状态 |
+| 状态 | CRUD、设初始、设缩略图、override/order/background 与 base 可预测编辑 |
+| 全局层 | 固定一级、切场景稳定、上下文灰化不可误选；当前内容共用不得取代全局层 |
+| 字体样式 | 搜索、系统检测、完整列表、预览、自定义字体、颜色、高亮、背景/透明度/圆角和排版 |
+| 剪贴板 | copy/paste/delete 后 interaction/state/order 引用正确修复 |
+| 互动 | 原 InteractionEditor 的 click/scene/state/media/rule/trigger/action 写 V9 |
+| 控制器 | 原 PresenterSettings 作者属性与恢复；编辑态只选中/变换，按钮不执行导航 |
+
+#### Player、专业开发与课程逻辑
+
+| 能力组 | 必须成立 |
+|---|---|
+| Player lifecycle | 从当前 location/state 新建隔离 Published Player；停止、restart、连续运行无泄漏 |
+| 编辑隔离 | 运行不改变 Project、history、selection、viewport；编辑 Host 不切 playback |
+| 控制器运行 | 导航、收展、目录、静音、全屏在 Player 正确工作 |
+| Snapshot | 默认不回写；显式保存时只写结构化可作者状态，一次事务；不支持动态状态用中文说明 |
+| DeveloperTab | 继续使用原 DeveloperTab，选择来自 V9，保留 Runtime/Object/Rules/Component 区域 |
+| Runtime | API 2/3 source 校验、编辑、撤销、content、assets、fallback、错误、作者预览和公开地址 |
+| Component | API 4 manifest/runtime/props/assets/static preview、包校验、内部命中、hot update/checkpoint |
+| 声音媒体 | 原媒体区课程声音库、试听、用途与删除引用保护 |
+| 课程逻辑 | variables、conditions、navigation guards、global interactions 与跨表面 action |
+| 诊断 | 面向教师的中文错误与发布差异；内部详情折叠；普通 UI 不出现 AI 入口 |
+
+#### Flow
+
+| 能力组 | 必须成立 |
+|---|---|
+| 壳层位置 | 使用原壳左侧大纲和中央内容区，不成为新 App/Shell |
+| 内容 | 段落、标题、引用、提示、列表、0–5 层级、表格、公式 |
+| 媒体 | 图片、音频、视频、Component 和分节 |
+| 编辑 | 画布直接编辑与属性面板同步；缩进/减少缩进；跨节真实鼠标拖动一次 history |
+| 稳定性 | 失焦不取消正在进行的手势；保存重开结构与位置一致 |
+| 统一层 | global/surface 浮动层、教师控制器和 scope |
+| Player/export | 隔离 Flow Player、当前位置导航、HTML/PDF 与 DOCX 语义列表/表格/公式/媒体后备 |
+
+#### Spatial
+
+| 能力组 | 必须成立 |
+|---|---|
+| 坐标 | 原壳中央区只有一个 world↔screen 变换，支持 pan/zoom/fit |
+| 编辑 | 点选、框选、多选、move、resize、rotate、text edit |
+| 关系 | relation、label、普通/箭头连线 |
+| 镜头 | 首页、镜头新增/定位/重命名/排序/删除 |
+| 路径 | 教学路径、小地图和语义缩放 |
+| 统一层 | global/surface/world 图层与教师控制器 |
+| Player/export | location/camera 一致的隔离 Player；HTML/PDF/PPTX 的 effective layer 与静态排除规则一致 |
+
+#### Mixed、质量与清理
+
+| 能力组 | 必须成立 |
+|---|---|
+| Navigation | Slide→Flow→Spatial 的 CourseLocation 导航 |
+| Cross-surface | global layer/controller visibility、course state、guard、action 与当前 location 一致 |
+| Reopen | 保存、完全关闭、重开后 location/state/camera/reference 一致 |
+| Whole-course | 整课隔离 Player 与 restart |
+| Export | HTML、网页包、PDF、PPTX、DOCX；capture 不污染编辑 Project 或运行会话 |
+| Behavior | 原高价值行为全部 keep 或有明确 replacement；不得静默删除 |
+| Visual | 原壳结构、字体、状态条、控制器和三档布局在 M8 机械通过 |
+| Samples | 至少一份覆盖 Slide/Flow/Spatial/Mixed 的真实课例完成构建、保存重开、Player 与五类导出 |
+| Reachability | 原 App 唯一正式入口；CourseStudio 失败前端和替代测试按可达性簇删除 |
+| Legacy | V8 默认编辑真相源和 Published V1 临时路径删除；显式 V8 导入与 Runtime 2/3 兼容保留 |
+
 ---
 
 ## 6. 验证预算
 
-### 6.1 实现循环
+### 6.1 反重写机械门禁
+
+以下资产已在 G02–G04 建立并冻结：
+
+- scripts/verify-editor-preservation.ts
+- tests/contracts/v8-behavior-map.json
+- 原 V8 壳层三尺寸 golden 与 geometry 证据
+- verifier 的三个必失败负例：删除 Workspace、新增 ConvergedEditorApp、ProductApp 重新导入 CourseStudioApp
+
+verifier 必须继续机械断言：
+
+1. §2.4 核心文件相对 BASE_COMMIT 不得出现 D 或 R。
+2. 不存在 converged/**、替代 studio/**、新 *EditorApp/*EditorShell 或新 Slide Workspace。
+3. ProductApp → 原 App → TopToolbar/ScenePanel/Workspace/SceneStateStrip/RightSidebar 正式可达。
+4. CourseStudioApp、V9EditorShell、CourseSurfaceCanvas 在正式产品 import graph 中不可达。
+5. .app-shell、顶部、左栏、中央、canvas viewport、canvas stage、状态条、右栏和底部状态栏同时存在。
+6. 1280×720 逻辑画布以及 1366×768、1920×1080 壳层不存在页面级溢出或区域遮挡。
+7. 壳层 golden 通过；动态画布区只能使用既有 mask。
+8. tests 中不存在 .skip、.todo、.only。
+9. behavior map 中没有未映射删除。
+
+Ultra 不得删除、弱化或绕过 verifier 和负例。behavior map 只有在旧行为被当前产品协议明确退休且已有 replacement test 时才可改，并必须记录原因；golden 不得为了接受新壳而更新。
+
+### 6.2 原高价值行为测试
+
+| 既有测试 | 必须继续保护的合同 |
+|---|---|
+| tests/unit/editorStore.test.ts | scene/layer/state/history/native CRUD、一次变换一次历史、剪贴板 |
+| globalEditorStore.test.ts | 全局层、控制器、作用范围、全局互动 |
+| globalLayerUi.test.tsx | 固定全局入口、场景切换、全局组件/属性 |
+| sceneStateUi.test.tsx | 状态条、状态角色、覆盖、缩略图状态 |
+| stageViewportTransform.test.ts | 1280×720、50%–200%、fit、pan、坐标换算 |
+| editorFormattingUi.test.tsx | 字体、背景、富文本、IME、缩放下编辑 |
+| simpleEditorMode.test.tsx | 简洁/专业模式与渐进显示 |
+| developerMode.test.tsx | Runtime/Component 开发工作区与历史 |
+| mediaTab.test.tsx | 素材、声音、视频与音频设置 |
+| componentPropertiesEditor.test.tsx | Component props、preset、嵌套内容 |
+| presenterSettingsUi.test.tsx | 教师控制器、快捷键、修复入口 |
+| interactionEditor.test.tsx | 互动、动作、规则、场景/状态/媒体 |
+
+保留原 describe/it 的行为含义，只替换 V9 fixture、Store 或 Adapter。不得删除或弱化断言来适配新实现；Runtime API 2/3 兼容必须保留。Flow/Spatial/Mixed 是新增能力，可新增专属测试，但不能建立一套与原 UI 隔离的平行自证体系。
+
+### 6.3 实现循环
 
 - 一个连贯修改后只跑 1–3 个最相关检查。
 - 失败先读首次证据；代码未变化不重跑。
@@ -297,7 +554,7 @@ M1 完成条件：
 - UI 只跑一个主视口和一条真实指针路径。
 - 临时日志、测试诊断或 instrumentation 在提交前删除。
 
-### 6.2 阶段 Gate
+### 6.4 阶段 Gate
 
 GATE-V、GATE-S、GATE-FEATURES 各自只做：
 
@@ -306,10 +563,11 @@ GATE-V、GATE-S、GATE-FEATURES 各自只做：
 3. 一条代表性真实 Electron 路径。
 4. 一次 npm test。
 5. git diff --check 与范围审查。
+6. 本阶段触及 App/ui/Workspace/Phaser/CSS、ProductApp 或正式 import graph 时运行一次 verify:editor-preservation。
 
 如果同一 SHA 上已有等价绿色证据，直接复用，不为 Gate 重跑。
 
-### 6.3 M8 最终验证
+### 6.5 M8 最终验证
 
 只在 M8 运行一次最终集合：
 
