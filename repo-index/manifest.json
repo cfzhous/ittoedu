@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "sourceBaselineCommit": "8b4513c9081bf65a0f108627cc499914d4f9a969",
+  "productCheckpoint": "b6d1787875339fff8ba03d80cfbf80187c009caa",
+  "generatedAt": "2026-08-15",
+  "plan": "COURSEWARE_DEVELOPMENT_PLAN.md",
+  "humanEntry": "PROJECT_COGNITION_INDEX.md",
+  "scope": [
+    "src",
+    "tests",
+    "scripts",
+    "agent-kit",
+    ".agents/skills",
+    "courseware-capabilities",
+    "package.json"
+  ],
+  "freshnessPolicy": {
+    "rule": "Compare product-source changes after sourceBaselineCommit for the module or feature being used. Current source and schemas override this index.",
+    "docsOnlyCommitsInvalidateAll": false,
+    "updateWithRelevantFeatureChange": true
+  },
+  "intentionallyOmitted": [
+    "all local TypeScript symbols",
+    "full import graph",
+    "Git hotspot metrics",
+    "coverage database",
+    "generated knowledge graph"
+  ]
+}

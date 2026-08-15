@@ -1,0 +1,283 @@
+{
+  "schemaVersion": 1,
+  "modules": {
+    "desktop-entry": {
+      "entrypoints": [
+        "src/main/index.ts",
+        "src/preload/index.ts",
+        "src/renderer/main.tsx"
+      ],
+      "keyFiles": [
+        "src/main/createWindow.ts",
+        "src/main/ipc.ts",
+        "src/main/rendererClosePreparation.ts",
+        "src/renderer/ProductApp.tsx",
+        "src/renderer/App.tsx"
+      ],
+      "responsibilities": [
+        "Electron window and IPC lifecycle",
+        "preload desktop API boundary",
+        "single production route into the original App"
+      ],
+      "dependsOn": [
+        "project-lifecycle",
+        "editor-session"
+      ],
+      "mustNotDependOn": [
+        "CourseStudioApp as a production entry",
+        "V9EditorShell",
+        "a second editor App"
+      ]
+    },
+    "course-project-v9": {
+      "entrypoints": [
+        "src/shared/courseProjectTypes.ts",
+        "src/shared/courseProjectSchema.ts"
+      ],
+      "keyFiles": [
+        "src/shared/courseProjectModel.ts",
+        "src/shared/interactionTypes.ts",
+        "src/shared/interactionSchema.ts",
+        "src/shared/componentTypes.ts",
+        "src/shared/componentSchema.ts",
+        "src/shared/runtimeTypes.ts",
+        "src/shared/surfaceRuntimeTypes.ts"
+      ],
+      "responsibilities": [
+        "canonical project types and validation",
+        "pure project mutation and reference consistency",
+        "interaction, Runtime and Component contracts"
+      ],
+      "dependsOn": [],
+      "mustNotDependOn": [
+        "renderer UI",
+        "Electron",
+        "Phaser editor runtime"
+      ]
+    },
+    "published-course-v2": {
+      "entrypoints": [
+        "src/shared/publishedCourseTypes.ts",
+        "src/shared/publishedCourseSchema.ts"
+      ],
+      "keyFiles": [
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "responsibilities": [
+        "published payload contract",
+        "Course Project to Published Course producer"
+      ],
+      "dependsOn": [
+        "course-project-v9"
+      ],
+      "mustNotDependOn": [
+        "editor compatibility views",
+        "V8 project persistence"
+      ]
+    },
+    "editor-session": {
+      "entrypoints": [
+        "src/renderer/store/editorStore.ts"
+      ],
+      "keyFiles": [
+        "src/renderer/course/v9SlideVerticalSlice.ts",
+        "src/renderer/course/slideEditorView.ts",
+        "src/renderer/course/slideEditorCommands.ts"
+      ],
+      "responsibilities": [
+        "single active V9 document session",
+        "history, dirty, location, scope and selection",
+        "atomic editor commands"
+      ],
+      "dependsOn": [
+        "course-project-v9",
+        "project-lifecycle"
+      ],
+      "mustNotDependOn": [
+        "a second Zustand store",
+        "writable V9-to-V8 compatibility projection"
+      ]
+    },
+    "original-editor-shell": {
+      "entrypoints": [
+        "src/renderer/App.tsx"
+      ],
+      "keyFiles": [
+        "src/renderer/ui/TopToolbar.tsx",
+        "src/renderer/ui/ScenePanel.tsx",
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/ui/SceneStateStrip.tsx",
+        "src/renderer/ui/RightSidebar.tsx",
+        "src/renderer/styles/globals.css"
+      ],
+      "responsibilities": [
+        "teacher-facing editor workflow",
+        "document-control ports into the original UI",
+        "viewport-contained application layout"
+      ],
+      "dependsOn": [
+        "editor-session",
+        "slide-authoring",
+        "project-lifecycle",
+        "delivery-export"
+      ],
+      "mustNotDependOn": [
+        "CourseStudioApp",
+        "CourseSurfaceCanvas",
+        "course-studio.css",
+        "a replacement shell"
+      ]
+    },
+    "slide-authoring": {
+      "entrypoints": [
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/ui/workspaceSlideAuthoring.ts"
+      ],
+      "keyFiles": [
+        "src/renderer/phaser/EditorScene.ts",
+        "src/renderer/phaser/EditorPhaserBridge.ts",
+        "src/renderer/phaser/adapters/ProxyNodeAdapter.ts",
+        "src/renderer/authoring/stageViewportTransform.ts",
+        "src/renderer/course/v9SlideVerticalSlice.ts"
+      ],
+      "responsibilities": [
+        "Slide authoring projection",
+        "Phaser hit testing, selection and transforms",
+        "authoring Player visual projection"
+      ],
+      "dependsOn": [
+        "editor-session",
+        "published-player"
+      ],
+      "mustNotDependOn": [
+        "a new Slide Workspace",
+        "Player DOM as persisted data",
+        "hidden V8 project writes"
+      ]
+    },
+    "project-lifecycle": {
+      "entrypoints": [
+        "src/renderer/project/courseProjectArchive.ts"
+      ],
+      "keyFiles": [
+        "src/renderer/project/recoveryWriteCoordinator.ts",
+        "src/main/projectPersistence.ts",
+        "src/main/fileDialogs.ts",
+        "src/main/rendererClosePreparation.ts"
+      ],
+      "responsibilities": [
+        "V9 archive and sidecars",
+        "open, save, recovery, recent projects and close handshake",
+        "explicit V8 import migration"
+      ],
+      "dependsOn": [
+        "course-project-v9"
+      ],
+      "mustNotDependOn": [
+        "compatibility view serialization",
+        "implicit V8 open as the active backend"
+      ]
+    },
+    "published-player": {
+      "entrypoints": [
+        "src/player/index.ts",
+        "src/player/PublishedCourseApp.ts"
+      ],
+      "keyFiles": [
+        "src/player/surfaces/CoursePlayer.ts",
+        "src/player/surfaces/slide/SlideSurfaceHost.ts",
+        "src/player/surfaces/flow/FlowSurfaceHost.ts",
+        "src/player/surfaces/spatial/SpatialSurfaceHost.ts",
+        "src/player/InteractionEngine.ts",
+        "src/player/CourseEventBus.ts"
+      ],
+      "responsibilities": [
+        "Published Course session and navigation",
+        "surface host lifecycle",
+        "interaction and teacher-controller runtime"
+      ],
+      "dependsOn": [
+        "published-course-v2"
+      ],
+      "mustNotDependOn": [
+        "editorStore",
+        "editor history",
+        "V8 ProjectDocument as published truth"
+      ]
+    },
+    "dynamic-content": {
+      "entrypoints": [
+        "src/shared/runtimeTypes.ts",
+        "src/shared/componentTypes.ts"
+      ],
+      "keyFiles": [
+        "src/renderer/ui/DeveloperTab.tsx",
+        "src/renderer/ui/ComponentsTab.tsx",
+        "src/renderer/ui/PropertiesTab.tsx"
+      ],
+      "responsibilities": [
+        "Runtime API 2/3 compatibility",
+        "Component API 4 packages and props",
+        "stable authoring targets for dynamic content"
+      ],
+      "dependsOn": [
+        "course-project-v9",
+        "published-player",
+        "editor-session"
+      ],
+      "mustNotDependOn": [
+        "build scripts as the primary authoring UI",
+        "a copied CourseStudio developer workspace"
+      ]
+    },
+    "delivery-export": {
+      "entrypoints": [
+        "src/renderer/export/course/buildPublishedCourse.ts"
+      ],
+      "keyFiles": [
+        "src/renderer/export/course/buildCoursePackages.ts",
+        "src/renderer/export/course/buildCoursePptx.ts",
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+        "src/renderer/export/loadPlayerBundle.ts"
+      ],
+      "responsibilities": [
+        "HTML and web package delivery",
+        "PPTX, PDF and DOCX artifacts",
+        "export preflight and resource completeness"
+      ],
+      "dependsOn": [
+        "published-course-v2",
+        "published-player",
+        "project-lifecycle"
+      ],
+      "mustNotDependOn": [
+        "editor compatibility project",
+        "legacy outer course navigation"
+      ]
+    },
+    "agent-kit-workflow": {
+      "entrypoints": [
+        ".agents/skills/orchestrate-courseware/SKILL.md",
+        ".agents/skills/build-courseware-project/SKILL.md",
+        "agent-kit/capabilities/index.json"
+      ],
+      "keyFiles": [
+        "agent-kit/bin/courseware-agent-kit.mjs",
+        "courseware-capabilities"
+      ],
+      "responsibilities": [
+        "teacher planning and presentation script workflow",
+        "course project construction and validation",
+        "discoverable product capabilities"
+      ],
+      "dependsOn": [
+        "course-project-v9",
+        "delivery-export"
+      ],
+      "mustNotDependOn": [
+        "undocumented editor-only hacks",
+        "capabilities not reachable in the product"
+      ]
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "docsOnly": "Validate links and JSON, then run git diff --check. Do not run product tests.",
+    "implementationLoop": "Run one most relevant focused command. Add a second only when the first cannot cover the changed boundary.",
+    "verticalSlice": "Focused tests, affected typecheck/build only when relevant, at most one representative Electron path, and diff review.",
+    "phaseGate": "Run the full phase gate once per final SHA. Reuse equivalent green evidence on the same SHA.",
+    "e2eFailure": "Read the first trace or screenshot, make one targeted correction, and rerun only the failed spec once."
+  },
+  "suites": {
+    "documentation-index": {
+      "fast": "node -e \"for (const f of ['repo-index/manifest.json','repo-index/modules.json','repo-index/features.json','repo-index/tests.json']) JSON.parse(require('fs').readFileSync(f,'utf8'))\"",
+      "additional": "git diff --check",
+      "full": null,
+      "when": "Only Markdown or repo-index JSON changed"
+    },
+    "editor-shell-layout": {
+      "fast": "npx vitest run tests/unit/editorShellLayoutCss.test.ts",
+      "e2e": null,
+      "phaseOnly": "npm run verify:editor-preservation:visual",
+      "when": "App shell, grid, viewport height, CSS overflow, state strip or status bar changed"
+    },
+    "slide-session-and-layers": {
+      "fast": "npx vitest run tests/unit/v9SlideVerticalSlice.test.ts tests/unit/v9SlideLayerSession.test.ts tests/unit/v9SlideLayerRegression.test.ts",
+      "e2e": "npx playwright test tests/e2e/v9SlideVerticalSlice.spec.ts",
+      "when": "Slide scene/state/layer/selection/transform commands changed"
+    },
+    "surface-scope": {
+      "fast": "npx vitest run tests/unit/v9SlideSurfaceSession.test.ts",
+      "e2e": "npx playwright test tests/e2e/v9SurfaceScope.spec.ts",
+      "when": "Surface scope, shared items, base/effective visibility or stale targets changed"
+    },
+    "global-controller-authoring": {
+      "fast": "npx vitest run tests/unit/teacherControllerLayout.test.ts tests/unit/teacherControllerRuntimeSession.test.ts tests/unit/teacherControllerActions.test.ts",
+      "e2e": "npx playwright test tests/e2e/v9GlobalControllerAndHealth.spec.ts",
+      "when": "Global controller authoring, health check or controller session behavior changed"
+    },
+    "published-interactions": {
+      "fast": "npx vitest run tests/unit/interactionEngine.test.ts tests/unit/interactionSchema.test.ts tests/unit/coursePublishPipeline.test.ts",
+      "e2e": null,
+      "when": "Interaction engine, Published App, SlideSurfaceHost or published interaction payload changed"
+    },
+    "v9-file-lifecycle": {
+      "fast": "npx vitest run tests/unit/projectPersistence.test.ts tests/unit/recoveryWriteCoordinator.test.ts tests/unit/courseStateAndArchive.test.ts",
+      "e2e": "npx playwright test tests/e2e/v9DefaultBoundary.spec.ts",
+      "when": "New/open/recent/save/recovery/close/archive sidecars changed"
+    },
+    "runtime-component-compatibility": {
+      "fast": "npm run test:compat",
+      "e2e": null,
+      "when": "Runtime API, Component API or explicit V8 import compatibility changed"
+    },
+    "flow": {
+      "fast": "npx vitest run tests/unit/flowUnifiedLayers.test.tsx",
+      "e2e": null,
+      "when": "Flow model, authoring projection, Host or export changed"
+    },
+    "spatial": {
+      "fast": null,
+      "e2e": null,
+      "when": "No dedicated current suite is indexed; add focused tests with the first Spatial authoring vertical slice rather than running the whole repository"
+    },
+    "published-delivery": {
+      "fast": "npx vitest run tests/unit/coursePublishPipeline.test.ts tests/unit/export.test.ts tests/unit/exportPreflight.test.ts",
+      "build": "npm run build:player",
+      "when": "Published producer, Player bundle, HTML/web package or export preflight changed"
+    },
+    "phase-gate": {
+      "typecheck": "npm run typecheck",
+      "unit": "npm test",
+      "build": "Build only affected bundles; use npm run build:desktop only when Renderer, Player and Electron all changed",
+      "preservation": "npm run verify:editor-preservation",
+      "visual": "npm run verify:editor-preservation:visual",
+      "when": "Once on the final phase SHA; visual only when shell DOM/CSS/viewport changed"
+    },
+    "final-m8": {
+      "full": "npm run verify:full",
+      "additional": "Representative archive, Published V2, Runtime 2/3, Component 4 and five-format export inspection",
+      "when": "Once at M8; reuse unchanged M7 delivery evidence"
+    }
+  },
+  "e2ePreparation": {
+    "command": "npm run prepare:e2e",
+    "rule": "Run only when Renderer, Electron, Player or generated course-case inputs changed. Reuse the existing build for test-only locator changes."
+  }
+}

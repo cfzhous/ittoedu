@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 1,
+  "statusValues": {
+    "checkpoint": "Established at the product checkpoint but still subject to regression protection",
+    "partial": "A real vertical slice exists; listed gaps remain",
+    "current-p1": "Current user-visible blocker to fix before broader feature work",
+    "pending": "Planned but not yet a product capability"
+  },
+  "features": {
+    "editor-shell-viewport-stability": {
+      "status": "current-p1",
+      "productFiles": [
+        "src/renderer/App.tsx",
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/styles/globals.css"
+      ],
+      "tests": [
+        "tests/unit/editorShellLayoutCss.test.ts"
+      ],
+      "invariants": [
+        "Adding an element must not move the application shell upward",
+        "The status bar must meet the viewport bottom with no page-level black region",
+        "The page itself must not scroll; side panels scroll within their own containers",
+        "Scene state strip, zoom controls and bottom status remain visible"
+      ],
+      "nextEvidence": [
+        "Before/after geometry for html, body, root, app shell, main, workspace, state strip and status bar",
+        "One focused regression test",
+        "One Electron viewport during the fix loop"
+      ]
+    },
+    "v9-file-lifecycle": {
+      "status": "checkpoint",
+      "productFiles": [
+        "src/renderer/App.tsx",
+        "src/renderer/store/editorStore.ts",
+        "src/renderer/project/courseProjectArchive.ts",
+        "src/renderer/project/recoveryWriteCoordinator.ts",
+        "src/main/projectPersistence.ts",
+        "src/main/rendererClosePreparation.ts"
+      ],
+      "tests": [
+        "tests/unit/projectPersistence.test.ts",
+        "tests/unit/recoveryWriteCoordinator.test.ts",
+        "tests/unit/courseStateAndArchive.test.ts",
+        "tests/e2e/v9DefaultBoundary.spec.ts"
+      ],
+      "invariants": [
+        "New, open, recent, save, save-as, dirty, recovery and close use the active V9 session",
+        "Asset and component sidecars survive open and save",
+        "Saving an older snapshot while editing continues leaves the current document dirty",
+        "V8 opens only through explicit import migration and must be saved to a new V9 path"
+      ]
+    },
+    "slide-native-authoring": {
+      "status": "partial",
+      "productFiles": [
+        "src/renderer/course/v9SlideVerticalSlice.ts",
+        "src/renderer/course/slideEditorView.ts",
+        "src/renderer/course/slideEditorCommands.ts",
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/ui/ElementsTab.tsx",
+        "src/renderer/ui/NodesTab.tsx",
+        "src/renderer/ui/PropertiesTab.tsx"
+      ],
+      "tests": [
+        "tests/unit/v9SlideVerticalSlice.test.ts",
+        "tests/unit/v9SlideLayerSession.test.ts",
+        "tests/unit/v9SlideLayerRegression.test.ts",
+        "tests/e2e/v9SlideVerticalSlice.spec.ts"
+      ],
+      "invariants": [
+        "A gesture produces one command, history entry and revision",
+        "Selection uses stable session, location, state, scope and layer identities",
+        "Hidden and locked rows remain selectable from Layers but are not transformable",
+        "Player visual projection and Phaser authoring proxy derive from the same V9 document"
+      ],
+      "remaining": [
+        "image and video insertion and media-specific authoring",
+        "scene background authoring",
+        "text content and IME transaction",
+        "complete Runtime and Component authoring targets"
+      ]
+    },
+    "global-and-surface-authoring": {
+      "status": "checkpoint",
+      "productFiles": [
+        "src/renderer/course/v9SlideVerticalSlice.ts",
+        "src/renderer/ui/ScenePanel.tsx",
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/ui/NodesTab.tsx",
+        "src/renderer/ui/PropertiesTab.tsx"
+      ],
+      "tests": [
+        "tests/unit/v9SlideSurfaceSession.test.ts",
+        "tests/e2e/v9GlobalControllerAndHealth.spec.ts",
+        "tests/e2e/v9SurfaceScope.spec.ts"
+      ],
+      "invariants": [
+        "Global, surface and scene items share one effective order",
+        "Global and surface author proxies expose base visibility while Player preview obeys effective visibility",
+        "Surface items remain the same stable objects across scenes",
+        "Stale callbacks cannot edit another surface that legally reuses the same local layer ID"
+      ]
+    },
+    "teacher-controller": {
+      "status": "partial",
+      "productFiles": [
+        "src/shared/teacherControllerLayout.ts",
+        "src/player/teacherControllerRuntimeSession.ts",
+        "src/player/PublishedCourseApp.ts",
+        "src/player/surfaces/slide/SlideSurfaceHost.ts",
+        "src/renderer/course/v9SlideVerticalSlice.ts",
+        "src/renderer/ui/Workspace.tsx"
+      ],
+      "tests": [
+        "tests/unit/teacherControllerLayout.test.ts",
+        "tests/unit/teacherControllerRuntimeSession.test.ts",
+        "tests/unit/teacherControllerActions.test.ts",
+        "tests/e2e/v9GlobalControllerAndHealth.spec.ts"
+      ],
+      "invariants": [
+        "The controller is an authorable project object in the global layer",
+        "Authoring clicks do not execute course actions",
+        "Playback movement and collapsed state are session-only and never create editor history",
+        "Collapsed hit bounds match the collapsed visual bounds",
+        "Course restart restores project defaults"
+      ],
+      "remaining": [
+        "Published Slide collapse and defaultCollapsed",
+        "session drag and keyboard nudge",
+        "scene picker, mute and fullscreen",
+        "single-owner whole-course navigation and restart"
+      ]
+    },
+    "published-slide-interactions": {
+      "status": "pending",
+      "productFiles": [
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/player/PublishedCourseApp.ts",
+        "src/player/surfaces/slide/SlideSurfaceHost.ts",
+        "src/player/InteractionEngine.ts",
+        "src/player/CourseEventBus.ts"
+      ],
+      "tests": [
+        "tests/unit/interactionEngine.test.ts",
+        "tests/unit/interactionSchema.test.ts",
+        "tests/unit/coursePublishPipeline.test.ts"
+      ],
+      "invariants": [
+        "Published producer and consumer support the same scene interaction contract",
+        "Native node activation uses stable layer identity",
+        "Action sequences await asynchronous state changes",
+        "Changing scene or destroying the Player removes old subscriptions",
+        "Basic click-to-presentation-state interaction does not require a Runtime hotspot"
+      ]
+    },
+    "current-location-trial": {
+      "status": "pending",
+      "productFiles": [
+        "src/renderer/ui/Workspace.tsx",
+        "src/renderer/App.tsx",
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/player/PublishedCourseApp.ts"
+      ],
+      "tests": [],
+      "invariants": [
+        "Trial uses a separate Published Course V2 session rather than changing the authoring host mode",
+        "Trial starts at the current location and state",
+        "Stopping destroys the trial session",
+        "Project, history, selection and viewport are unchanged after trial"
+      ]
+    },
+    "runtime-and-component-authoring": {
+      "status": "partial",
+      "productFiles": [
+        "src/shared/runtimeTypes.ts",
+        "src/shared/surfaceRuntimeTypes.ts",
+        "src/shared/componentTypes.ts",
+        "src/shared/componentSchema.ts",
+        "src/renderer/ui/DeveloperTab.tsx",
+        "src/renderer/ui/ComponentsTab.tsx",
+        "src/renderer/ui/PropertiesTab.tsx"
+      ],
+      "tests": [
+        "tests/unit/runtimeHostV2.test.ts",
+        "tests/unit/componentProtocolV4.test.ts"
+      ],
+      "invariants": [
+        "Runtime API 2 and 3 remain compatible",
+        "Component API 4 package and props remain canonical",
+        "Editable text and ordinary replaceable images expose stable authoring addresses",
+        "Runtime and Component data are not persisted as fake Native nodes"
+      ]
+    },
+    "flow-authoring": {
+      "status": "pending",
+      "productFiles": [
+        "src/player/surfaces/flow/FlowSurfaceHost.ts"
+      ],
+      "tests": [
+        "tests/unit/flowUnifiedLayers.test.tsx"
+      ],
+      "invariants": [
+        "Flow uses the original application lifecycle and V9 session",
+        "Semantic hierarchy survives save and reopen",
+        "DOCX and PDF preserve Flow structure rather than only raster screenshots"
+      ]
+    },
+    "spatial-authoring": {
+      "status": "pending",
+      "productFiles": [
+        "src/player/surfaces/spatial/SpatialSurfaceHost.ts"
+      ],
+      "tests": [],
+      "invariants": [
+        "World content alone receives camera transform",
+        "Global teacher controller remains in viewport coordinates",
+        "Pan and zoom are session state while content transforms enter history",
+        "Relations, paths and cameras use stable IDs across save and reopen"
+      ]
+    },
+    "published-delivery": {
+      "status": "partial",
+      "productFiles": [
+        "src/renderer/export/course/buildPublishedCourse.ts",
+        "src/renderer/export/course/buildCoursePackages.ts",
+        "src/renderer/export/course/buildCoursePptx.ts",
+        "src/renderer/export/course/buildCoursePrintArtifacts.ts",
+        "src/player/PublishedCourseApp.ts"
+      ],
+      "tests": [
+        "tests/unit/coursePublishPipeline.test.ts",
+        "tests/unit/export.test.ts",
+        "tests/unit/exportPreflight.test.ts"
+      ],
+      "invariants": [
+        "HTML and web packages use the real Published Course V2 Player",
+        "No published mode injects the removed outer course navigation rail",
+        "Export validates all referenced asset and component sidecars",
+        "A generated file is not accepted until its representative content or rendering is inspected"
+      ],
+      "remaining": [
+        "PDF capture",
+        "semantic DOCX",
+        "Mixed representative artifacts for all five formats"
+      ]
+    }
+  }
+}

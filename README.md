@@ -2,7 +2,7 @@
 
 这是一个面向教师的可编辑互动课件桌面编辑器。当前主线以 Course Project V9 为工程真相，在同一项目中支持 Slide、Flow、Spatial 2D 与 Mixed 课程；网页发布使用 Published Course V2。V8 仅保留显式导入迁移和必要兼容测试，不再是 AI 新建课件的默认路线。
 
-长期开发范围和完成定义只看 [根目录唯一计划](COURSEWARE_SKILL_REFACTORING_PLAN.md)。当前可用能力以源码、Schema 与 [Agent Kit 能力卡](agent-kit/capabilities/index.json) 为准。
+长期开发范围和完成定义只看 [根目录唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)。新 Agent 可从 [项目认知索引](PROJECT_COGNITION_INDEX.md) 进入真实代码；当前可用能力仍以源码、Schema 与 [Agent Kit 能力卡](agent-kit/capabilities/index.json) 为准。
 
 当前仓库状态是 `engineering candidate`：自动化能够证明协议、构建和交付闭环，但不能代替课堂品质判断。`art candidate` 只适用于已经过真实画面与关键交互复核的具体课例；`accepted` 必须由教师明确确认，当前不作此声明。
 
