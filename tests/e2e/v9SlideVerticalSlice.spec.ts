@@ -150,6 +150,28 @@ async function resizeContent(
   }))).toEqual({ width, height })
 }
 
+async function expectAppShellFillsViewport(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>('.app-shell')
+    const statusBar = document.querySelector<HTMLElement>('.status-bar')
+    if (!shell || !statusBar) return null
+    const shellRect = shell.getBoundingClientRect()
+    const statusBarRect = statusBar.getBoundingClientRect()
+    return {
+      shellPinnedToViewportTop: Math.abs(shellRect.top) <= 0.5,
+      shellFillsToViewportBottom: Math.abs(shellRect.bottom - window.innerHeight) <= 0.5,
+      statusBarPinnedToViewportBottom:
+        Math.abs(statusBarRect.bottom - window.innerHeight) <= 0.5,
+      pageHasNoScroll: window.scrollY === 0,
+    }
+  })).toEqual({
+    shellPinnedToViewportTop: true,
+    shellFillsToViewportBottom: true,
+    statusBarPinnedToViewportBottom: true,
+    pageHasNoScroll: true,
+  })
+}
+
 async function expectFrozenEditorChromeInsideViewport(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => {
     const selectors = [
@@ -435,8 +457,8 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
       name: '编辑状态',
       exact: true,
     })
-    await expect(runCurrentLocation).toBeDisabled()
-    await expect(runCurrentLocation).toHaveAttribute(
+    await expect(runCurrentLocation).toBeEnabled()
+    await expect(runCurrentLocation).not.toHaveAttribute(
       'title',
       '当前位置试运行暂不可用',
     )
@@ -530,6 +552,7 @@ test('authors V9 scenes and presentation states through the original panels', as
   let editor = await launchEditor()
   try {
     await resizeContent(editor.app, editor.page, 1366, 768)
+    await expectAppShellFillsViewport(editor.page)
     const sceneItems = editor.page.locator('.scene-item')
     await expect(sceneItems).toHaveCount(1)
     const globalLayer = editor.page.getByTestId('global-layer-entry')
@@ -563,6 +586,7 @@ test('authors V9 scenes and presentation states through the original panels', as
     await editor.page.getByTestId('add-rectangle').click()
     await expect(editor.page.getByTestId('nodes-tab')).toBeVisible()
     await expect(editor.page.getByText('矩形', { exact: true })).toBeVisible()
+    await expectAppShellFillsViewport(editor.page)
     await editor.page.getByText('矩形', { exact: true }).dblclick()
     const layerNameInput = editor.page.getByRole('textbox', { name: '重命名“矩形”' })
     await layerNameInput.fill('实验框')
@@ -621,6 +645,7 @@ test('authors V9 scenes and presentation states through the original panels', as
     await editor.page.getByTestId('add-formula').click()
     await expect(editor.page.getByTestId('nodes-tab')).toBeVisible()
     await expect(editor.page.getByText('公式', { exact: true })).toBeVisible()
+    await expectAppShellFillsViewport(editor.page)
 
     await editor.page.getByRole('button', { name: '管理状态' }).click()
     await expect(editor.page.getByRole('button', { name: '新建场景状态' })).toBeVisible()

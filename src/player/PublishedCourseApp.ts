@@ -8,6 +8,7 @@ import type {
 } from '../shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../shared/publishedCourseTypes'
 import type { TeacherControllerAction } from '../shared/projectTypes'
+import type { RuntimeHostActions } from '../shared/runtimeTypes'
 import { CourseEventBus } from './CourseEventBus'
 import { DeclarativeCourseState, type CourseNavigationEntryPoint } from './DeclarativeCourseState'
 import {
@@ -43,6 +44,17 @@ function locationFromUrl(): string | undefined {
   if (typeof location === 'undefined') return undefined
   const params = new URLSearchParams(location.hash.replace(/^#/, ''))
   return params.get('location') ?? undefined
+}
+
+/**
+ * Optional presentation state for the very first navigation only. The trial
+ * run overlay uses it to enter at the author's current state; locations that
+ * pin their own stateId always win over this hint.
+ */
+function startStateFromUrl(): string | undefined {
+  if (typeof location === 'undefined') return undefined
+  const params = new URLSearchParams(location.hash.replace(/^#/, ''))
+  return params.get('state') ?? undefined
 }
 
 function mergeGlobalLayers(
@@ -156,6 +168,7 @@ export class PublishedCourseApp {
   async navigate(
     locationId: string,
     entryPoint: CourseNavigationEntryPoint = 'presenter',
+    startStateId?: string,
   ): Promise<boolean> {
     this.#assertAlive()
     const target = this.#locationMap.get(locationId)
@@ -178,7 +191,10 @@ export class PublishedCourseApp {
       return false
     }
     if (target.kind === 'slide-scene') {
-      await this.#slideHosts.get(target.surfaceId)?.setScene(target.sceneId, target.stateId)
+      await this.#slideHosts.get(target.surfaceId)?.setScene(
+        target.sceneId,
+        target.stateId ?? startStateId,
+      )
     } else if (target.kind === 'flow-block') {
       await this.#flowHosts.get(target.surfaceId)?.setLocationId(target.id)
       const container = this.#surfaceContainers.get(target.surfaceId)
@@ -303,6 +319,10 @@ export class PublishedCourseApp {
           globalLayerItems: structuredClone(this.project.globalLayerItems),
           componentHostFactory: this.#dynamicHosts.componentHost,
           runtimeHostFactory: this.#dynamicHosts.runtimeHost,
+          interactions: {
+            events: this.events,
+            hostActions: this.#interactionHostActions(),
+          },
           resolveLocationId: (sceneId, stateId) => this.#locations.find((location) => (
             location.kind === 'slide-scene' && location.surfaceId === surface.id &&
             location.sceneId === sceneId &&
@@ -369,10 +389,32 @@ export class PublishedCourseApp {
 
     const linked = locationFromUrl()
     const initial = linked && this.#locationMap.has(linked) ? linked : this.project.startLocationId
-    const started = await this.navigate(initial, 'initial-entry')
+    const started = await this.navigate(initial, 'initial-entry', startStateFromUrl())
     if (!started) {
       const firstHealthy = this.#locations.find((location) => this.#player.statusOf(location.surfaceId) !== 'failed')
       if (firstHealthy) await this.navigate(firstHealthy.id, 'initial-entry')
+    }
+  }
+
+  /**
+   * Interaction rules navigate through the same guarded location pipeline as
+   * presenter and teacher-controller navigation. The engine contract is
+   * synchronous, so the async navigation runs detached; failures surface on
+   * the same console channel as the engine's own rule errors.
+   */
+  #interactionHostActions(): Readonly<RuntimeHostActions> {
+    const run = (navigation: Promise<unknown>): boolean => {
+      navigation.catch((error: unknown) => {
+        console.error('互动规则导航失败', error)
+      })
+      return true
+    }
+    return {
+      goToScene: (sceneId, targetStateId) => run(this.goToScene(sceneId, targetStateId, 'runtime')),
+      nextScene: () => run(this.next('runtime')),
+      previousScene: () => run(this.previous('runtime')),
+      replayScene: () => run(this.replay()),
+      restartCourse: () => run(this.restart()),
     }
   }
 

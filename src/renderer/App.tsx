@@ -1058,7 +1058,7 @@ export default function App() {
       sceneName: v9ActiveSlideContext?.scene.name ?? snapshot.document.name,
       stateName,
       editingScope: v9SlideVerticalSlice.editingScope,
-      unsupportedActionReason: '当前位置试运行暂不可用',
+      unsupportedActionReason: '当前版本暂不支持此操作；现有内容不会改变',
       onSelectionChange: (event) => {
         if (lifecycleOperationInFlightRef.current) return false
         return useEditorStore.getState().selectCourseLayers(event)

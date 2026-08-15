@@ -336,6 +336,73 @@ describe('Published Course V2 product pipeline', () => {
     root.remove()
   })
 
+  it('executes a published Slide click interaction through the real Course Player', async () => {
+    const sources = fixture()
+    // Same single-Slide focus as the boot smoke: this test is about the
+    // interaction contract, not about multi-surface navigation.
+    sources.project.surfaces = [sources.project.surfaces[0]!]
+    sources.project.locations = [sources.project.locations[0]!]
+    sources.project.startLocationId = sources.project.locations[0]!.id
+    delete sources.project.mixedPrintPlan
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const textItemId = slide.scenes[0]!.layerItems.find((item) => item.kind === 'native')!.layerItemId
+    slide.scenes[0]!.interactions = [{
+      id: 'reveal-on-click',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: textItemId },
+      conditions: [{ type: 'presentation.in', stateIds: ['slide-base'] }],
+      actions: [{
+        id: 'reveal-step',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'presentation.set', stateId: 'slide-state-cover' },
+      }],
+    }]
+    const published = buildPublishedCourseV2Payload(sources)
+    const publishedSlide = published.surfaces[0]!
+    if (publishedSlide.type !== 'slide') throw new Error('expected Slide')
+    expect(publishedSlide.scenes[0]!.interactions).toHaveLength(1)
+
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-state-id', 'slide-base')
+    const target = root.querySelector<HTMLElement>(`[data-layer-item-id="${textItemId}"]`)
+    expect(target).not.toBeNull()
+    target!.dispatchEvent(new Event('pointerup', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(root.querySelector('.slide-surface')).toHaveAttribute('data-state-id', 'slide-state-cover')
+    })
+    expect(app.presentationState(publishedSlide.id).current).toBe('slide-state-cover')
+    expect(app.diagnostics).toEqual([])
+    await app.destroy()
+    expect(root.childElementCount).toBe(0)
+    root.remove()
+  })
+
+  it('starts the published course at the hash-provided presentation state', async () => {
+    const sources = fixture()
+    // Same single-Slide focus as the other player smokes: this test is about
+    // the deep-linked start state used by the editor trial run overlay.
+    sources.project.surfaces = [sources.project.surfaces[0]!]
+    sources.project.locations = [sources.project.locations[0]!]
+    sources.project.startLocationId = sources.project.locations[0]!.id
+    delete sources.project.mixedPrintPlan
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    history.replaceState(null, '', '#location=location-slide&state=slide-state-cover')
+    const app = await startPublishedCourse(published, root)
+    expect(app.currentLocationId).toBe('location-slide')
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-state-id', 'slide-state-cover')
+    expect(app.presentationState(published.surfaces[0]!.id).current).toBe('slide-state-cover')
+    expect(app.diagnostics).toEqual([])
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
   it.each(['none', 'canvas'] as const)(
     'never mounts the removed outer navigation when playback controls are %s',
     async (controls) => {

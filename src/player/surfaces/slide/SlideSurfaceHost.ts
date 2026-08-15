@@ -1,6 +1,15 @@
 import { renderFormulaNodeSvg } from '../../../shared/formulaRenderer'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import type {
+  CourseEventBus,
+  RuntimeHostActions,
+  RuntimePresentationApi,
+} from '../../../shared/runtimeTypes'
+import {
+  InteractionEngine,
+  type InteractionBindableRoot,
+} from '../../InteractionEngine'
+import type {
   ComponentLayerItem,
   LayerItem,
   NativeLayerItem,
@@ -80,6 +89,11 @@ export type RuntimeSlideItemHostFactory = (
   item: RuntimeLayerItem,
 ) => SlideItemHost<RuntimeLayerItem>
 
+export interface SlideInteractionSession {
+  events: CourseEventBus
+  hostActions: Readonly<RuntimeHostActions>
+}
+
 export interface SlideSurfaceHostOptions {
   initialSceneId?: string
   initialStateId?: string
@@ -87,6 +101,12 @@ export interface SlideSurfaceHostOptions {
   runtimeHostFactory?: RuntimeSlideItemHostFactory
   /** Course-scoped items participate in the exact same sparse order. */
   globalLayerItems?: readonly ScopedLayerItem[]
+  /**
+   * Published playback interaction session. When omitted the surface stays
+   * inert: it renders and reports hits but never executes scene rules.
+   * Authoring inspect hosts, Flow overlays and capture paths must omit it.
+   */
+  interactions?: SlideInteractionSession
   /** Resolves CourseLocation.id when this surface is hosted by a mixed course. */
   resolveLocationId?(sceneId: string, stateId: string | undefined): string | undefined
   /** Guard hook evaluated before any built-in teacher-controller side effect. */
@@ -691,6 +711,31 @@ function pointInsideItem(item: LayerItem, x: number, y: number): boolean {
 }
 
 /**
+ * Adapts one compositor wrapper to the interaction engine's bindable-root
+ * contract. Visibility, input and cursor reads stay live so state-driven
+ * layout changes apply without rebinding.
+ */
+function interactionBindableRoot(record: ItemRecord): InteractionBindableRoot {
+  const wrapper = record.wrapper
+  const input = {
+    get enabled() { return record.item.hitPolicy !== 'pass-through' },
+    get cursor() { return wrapper.style.cursor },
+    set cursor(value: string | undefined) { wrapper.style.cursor = value ?? '' },
+  }
+  return {
+    get active() { return true },
+    get visible() { return !wrapper.hidden },
+    input,
+    on: (eventName, listener) => {
+      wrapper.addEventListener(eventName, listener as EventListener)
+    },
+    off: (eventName, listener) => {
+      wrapper.removeEventListener(eventName, listener as EventListener)
+    },
+  }
+}
+
+/**
  * A cloned canvas has the same attributes as its live source but none of its
  * drawing buffer. Materialize that buffer as a PNG before the capture clone is
  * serialized, otherwise a later detached/PPTX rasterization sees a blank box.
@@ -746,6 +791,7 @@ export class SlideSurfaceHost implements SurfaceHost {
   #surfaceAbortController: AbortController | null = null
   #queue: Promise<void> = Promise.resolve()
   #domPlayback = new DomPlaybackFreeze()
+  #interactionEngine: InteractionEngine | null = null
 
   constructor(surface: SlideSurfaceDocument, options: SlideSurfaceHostOptions = {}) {
     if (surface.scenes.length === 0) throw new TypeError('Slide surface requires at least one scene')
@@ -793,6 +839,9 @@ export class SlideSurfaceHost implements SurfaceHost {
         this.#surfaceAbortController?.abort(context.signal.reason)
       }, { once: true })
       await this.#reconcile()
+      // Mount stays quiet: the Published boot always follows with navigate →
+      // setScene, which owns the scene-enter announcement.
+      this.#syncInteractionEngine()
     })
   }
 
@@ -808,6 +857,7 @@ export class SlideSurfaceHost implements SurfaceHost {
       }
       this.#stateId = this.#validStateId(scene, this.#stateId)
       await this.#reconcile()
+      this.#syncInteractionEngine()
     })
   }
 
@@ -830,14 +880,30 @@ export class SlideSurfaceHost implements SurfaceHost {
       this.#sceneId = scene.id
       this.#stateId = this.#validStateId(scene, stateId)
       await this.#reconcile()
+      this.#syncInteractionEngine()
+      this.#emitSceneEntered()
     })
   }
 
   setPresentationState(stateId?: string): Promise<void> {
     return this.#run(async () => {
       const scene = this.#currentScene()
+      const previousStateId = this.#stateId
       this.#stateId = this.#validStateId(scene, stateId)
       await this.#reconcile()
+      const session = this.#options.interactions
+      if (
+        session &&
+        this.#interactionEngine &&
+        this.#stateId &&
+        this.#stateId !== previousStateId
+      ) {
+        session.events.emit('presentation:change', {
+          sceneId: this.#sceneId,
+          fromStateId: previousStateId ?? null,
+          stateId: this.#stateId,
+        })
+      }
     })
   }
 
@@ -853,6 +919,8 @@ export class SlideSurfaceHost implements SurfaceHost {
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'activate', () => record.host.setInspectionMode?.(mode))
       }
+      // Inspection is an authoring frame: interaction execution never runs there.
+      this.#syncInteractionEngine()
       this.#syncDomPlayback()
     })
   }
@@ -907,6 +975,8 @@ export class SlideSurfaceHost implements SurfaceHost {
       const scene = this.#currentScene()
       this.#stateId = this.#validStateId(scene, undefined)
       await this.#reconcile()
+      // A reset must not keep rule-run or media-threshold session state.
+      this.#syncInteractionEngine()
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'reset', () => record.host.reset?.(scope))
       }
@@ -1014,6 +1084,8 @@ export class SlideSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       if (this.#destroyed) return
       this.#destroyed = true
+      this.#interactionEngine?.destroy()
+      this.#interactionEngine = null
       this.#surfaceAbortController?.abort('slide-surface-destroyed')
       for (const record of [...this.#orderedRecords].reverse()) {
         await this.#destroyRecord(record)
@@ -1134,6 +1206,7 @@ export class SlideSurfaceHost implements SurfaceHost {
     this.#root.style.backgroundImage = backgroundUrl ? `url("${backgroundUrl.replace(/"/g, '\\"')}")` : ''
     this.#root.style.backgroundSize = 'cover'
     this.#root.style.backgroundPosition = 'center'
+    this.#bindInteractionHandles()
     this.#syncDomPlayback()
   }
 
@@ -1143,6 +1216,77 @@ export class SlideSurfaceHost implements SurfaceHost {
     } else {
       this.#domPlayback.release()
     }
+  }
+
+  /**
+   * Rebuilds the scene interaction session from the current scene's rules.
+   * Subscriptions and rule-run state never outlive their scene: every scene
+   * switch, document replacement and reset starts from a fresh engine, and an
+   * inspecting or session-less surface stays inert.
+   */
+  #syncInteractionEngine(): void {
+    this.#interactionEngine?.destroy()
+    this.#interactionEngine = null
+    const session = this.#options.interactions
+    if (!session || this.#destroyed || this.#mode !== 'playback') return
+    const scene = this.#currentScene()
+    this.#interactionEngine = new InteractionEngine({
+      sceneId: scene.id,
+      rules: scene.interactions,
+      events: session.events,
+      presentation: this.#presentationApi(),
+      hostActions: session.hostActions,
+    })
+    this.#bindInteractionHandles()
+  }
+
+  #bindInteractionHandles(): void {
+    this.#interactionEngine?.bindNodeHandles(
+      this.#orderedRecords
+        .filter((record) => record.source === 'scene')
+        .map((record) => ({
+          id: record.item.layerItemId,
+          root: interactionBindableRoot(record),
+        })),
+    )
+  }
+
+  /** Announces the entered scene so scene.enter / presentation.enter rules fire. */
+  #emitSceneEntered(): void {
+    const session = this.#options.interactions
+    if (!session || !this.#interactionEngine) return
+    if (this.#stateId) {
+      session.events.emit('presentation:change', {
+        sceneId: this.#sceneId,
+        fromStateId: null,
+        stateId: this.#stateId,
+      })
+    }
+    session.events.emit('scene:enter', { sceneId: this.#sceneId })
+  }
+
+  #presentationApi(): RuntimePresentationApi {
+    return {
+      current: () => this.#stateId ?? null,
+      states: () => this.#currentScene().presentation?.states.map((state) => ({
+        id: state.id,
+        name: state.name,
+      })) ?? [],
+      setState: (stateId) => this.#setPresentationFromInteraction(stateId),
+      // The DOM compositor applies state switches immediately; transition
+      // timing is honored by the Phaser player, not this host.
+      transitionTo: (stateId) => this.#setPresentationFromInteraction(stateId),
+    }
+  }
+
+  #setPresentationFromInteraction(stateId: string): boolean {
+    if (this.#destroyed || this.#mode !== 'playback') return false
+    const scene = this.#currentScene()
+    if (!scene.presentation?.states.some((state) => state.id === stateId)) return false
+    void this.setPresentationState(stateId).catch((error: unknown) => {
+      console.error('互动状态切换失败', error)
+    })
+    return true
   }
 
   async #createRecord(entry: EffectiveLayerEntry): Promise<ItemRecord> {

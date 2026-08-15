@@ -8,6 +8,8 @@ import type {
   SlideSurfaceDocument,
 } from '../../src/shared/courseProjectTypes'
 import type { TeacherControllerAction } from '../../src/shared/projectTypes'
+import type { RuntimeHostActions } from '../../src/shared/runtimeTypes'
+import { CourseEventBus } from '../../src/player/CourseEventBus'
 import {
   SlideSurfaceHost,
   type SlideItemHost,
@@ -787,5 +789,151 @@ describe('SlideSurfaceHost unified compositor', () => {
     ))
     expect(host.sceneId).toBe('scene-1')
     expect(after).not.toHaveBeenCalled()
+  })
+})
+
+describe('SlideSurfaceHost scene interactions', () => {
+  function interactionHostActions(overrides: Partial<RuntimeHostActions> = {}): RuntimeHostActions {
+    return {
+      goToScene: vi.fn(() => true),
+      nextScene: vi.fn(() => true),
+      previousScene: vi.fn(() => true),
+      replayScene: vi.fn(() => true),
+      restartCourse: vi.fn(() => true),
+      ...overrides,
+    }
+  }
+
+  function interactiveDocument(): SlideSurfaceDocument {
+    const document = slide([textItem('click-target', 0), textItem('passive', 1)])
+    const scene = document.scenes[0]!
+    scene.presentation = {
+      initialStateId: 'base',
+      states: [
+        { id: 'base', name: '基础', layerItemOverrides: {} },
+        { id: 'revealed', name: '揭示', layerItemOverrides: { passive: { visible: false } } },
+      ],
+    }
+    scene.interactions = [{
+      id: 'reveal-on-click',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: 'click-target' },
+      conditions: [{ type: 'presentation.in', stateIds: ['base'] }],
+      actions: [{
+        id: 'reveal-step',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'presentation.set', stateId: 'revealed' },
+      }],
+    }]
+    return document
+  }
+
+  function wrapperOf(host: SlideSurfaceHost, layerItemId: string): HTMLElement {
+    const wrapper = host.rootElement!.querySelector<HTMLElement>(
+      `.slide-layer-item[data-layer-item-id="${layerItemId}"]`,
+    )
+    if (!wrapper) throw new Error(`missing wrapper for ${layerItemId}`)
+    return wrapper
+  }
+
+  function pointerUp(element: HTMLElement): void {
+    element.dispatchEvent(new Event('pointerup', { bubbles: true }))
+  }
+
+  it('executes a conditioned node.click rule on the stable layer item and tears down on destroy', async () => {
+    const events = new CourseEventBus()
+    const host = new SlideSurfaceHost(interactiveDocument(), {
+      interactions: { events, hostActions: interactionHostActions() },
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const target = wrapperOf(host, 'click-target')
+    expect(target.style.cursor).toBe('pointer')
+    expect(wrapperOf(host, 'passive').style.cursor).toBe('')
+    expect(host.stateId).toBe('base')
+
+    pointerUp(target)
+    await vi.waitFor(() => expect(host.stateId).toBe('revealed'))
+    expect(wrapperOf(host, 'passive').hidden).toBe(true)
+
+    // The presentation.in condition no longer matches, so re-clicking is a no-op.
+    pointerUp(target)
+    await new Promise((resolve) => { setTimeout(resolve, 10) })
+    expect(host.stateId).toBe('revealed')
+
+    await host.destroy()
+    expect(events.listenerCount()).toBe(0)
+    pointerUp(target)
+    expect(host.stateId).toBe('revealed')
+  })
+
+  it('rebuilds subscriptions on scene switch and runs the entered scene’s scene.enter rules', async () => {
+    const document = interactiveDocument()
+    document.scenes.push({
+      id: 'scene-2',
+      name: '场景二',
+      backgroundColor: '#ffffff',
+      layerItems: [textItem('scene-2-target', 0)],
+      interactions: [{
+        id: 'scene-2-entry',
+        enabled: true,
+        trigger: { type: 'scene.enter' },
+        conditions: [],
+        actions: [{
+          id: 'mark-entered',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'presentation.set', stateId: 'entered' },
+        }],
+      }],
+      presentation: {
+        initialStateId: 'initial',
+        states: [
+          { id: 'initial', name: '初始', layerItemOverrides: {} },
+          { id: 'entered', name: '已进入', layerItemOverrides: {} },
+        ],
+      },
+    })
+    const events = new CourseEventBus()
+    const host = new SlideSurfaceHost(document, {
+      interactions: { events, hostActions: interactionHostActions() },
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+    const mountedListeners = events.listenerCount()
+    expect(mountedListeners).toBeGreaterThan(0)
+
+    await host.setScene('scene-2')
+    expect(events.listenerCount()).toBe(mountedListeners)
+    await vi.waitFor(() => expect(host.stateId).toBe('entered'))
+
+    // The previous scene's click binding is gone with its records and engine.
+    pointerUp(wrapperOf(host, 'scene-2-target'))
+    await new Promise((resolve) => { setTimeout(resolve, 10) })
+    expect(host.stateId).toBe('entered')
+
+    await host.destroy()
+    expect(events.listenerCount()).toBe(0)
+  })
+
+  it('stays inert without an interaction session', async () => {
+    const events = new CourseEventBus()
+    const host = new SlideSurfaceHost(interactiveDocument())
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const target = wrapperOf(host, 'click-target')
+    expect(target.style.cursor).toBe('')
+    pointerUp(target)
+    await new Promise((resolve) => { setTimeout(resolve, 10) })
+    expect(host.stateId).toBe('base')
+    expect(events.listenerCount()).toBe(0)
+
+    await host.destroy()
   })
 })

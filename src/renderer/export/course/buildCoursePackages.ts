@@ -11,7 +11,7 @@ export interface PublishedCoursePackageOptions {
   lang?: string
 }
 
-const COURSE_PLAYER_CSS = `
+export const COURSE_PLAYER_CSS = `
 :root{color-scheme:light;font-family:Inter,"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;background:#f8fafc;color:#172033}
 *{box-sizing:border-box}
 html,body,#course-root{width:100%;height:100%;margin:0}

@@ -9,6 +9,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -87,6 +88,7 @@ import {
 } from '../../shared/presentation'
 import { buildStandaloneHtml } from '../export/buildStandaloneHtml'
 import { loadPlayerBundle } from '../export/loadPlayerBundle'
+import { createTrialRunOverlay, resolveTrialRunStart } from '../preview/trialRunOverlay'
 import {
   createRuntimePreviewBlobResources,
   type RuntimePreviewBlobResources,
@@ -459,6 +461,9 @@ function WorkspaceEditor({
     originX: number
     originY: number
   } | null>(null)
+  const [trialRun, setTrialRun] = useState<{ readonly url: string } | null>(null)
+  const trialRunResourceRef = useRef<{ revoke(): void } | null>(null)
+  const trialRunFrameRef = useRef<HTMLIFrameElement | null>(null)
 
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -492,6 +497,54 @@ function WorkspaceEditor({
     )
     return true
   }, [])
+
+  const closeTrialRun = useCallback(() => {
+    const frame = trialRunFrameRef.current
+    // Unloading the frame tears down the Published Course runtime (pagehide)
+    // before the standalone HTML Blob is revoked.
+    if (frame) frame.src = 'about:blank'
+    trialRunResourceRef.current?.revoke()
+    trialRunResourceRef.current = null
+    setTrialRun(null)
+  }, [])
+
+  const startTrialRun = useCallback(() => {
+    if (trialRunResourceRef.current) return
+    const state = useEditorStore.getState()
+    const courseSession = state.courseSession
+    if (courseSession === null) return
+    try {
+      const start = resolveTrialRunStart(
+        courseSession.history.present,
+        courseSession.selection,
+      )
+      const resource = createTrialRunOverlay(
+        {
+          project: courseSession.history.present,
+          assetFiles: courseSession.assetFiles,
+          components: courseSession.componentPackages,
+        },
+        start,
+        loadPlayerBundle(),
+      )
+      trialRunResourceRef.current = resource
+      setTrialRun({ url: resource.url })
+      state.setStatus('当前位置试运行已启动；退出后回到编辑画布，现有内容不会改变')
+    } catch (error) {
+      state.setStatus(`当前位置试运行启动失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [])
+
+  // The trial run is a throwaway snapshot: switching project or authoring
+  // session, or unmounting the workspace, must never orphan the overlay.
+  useEffect(() => () => {
+    trialRunResourceRef.current?.revoke()
+    trialRunResourceRef.current = null
+  }, [])
+
+  useEffect(() => {
+    closeTrialRun()
+  }, [closeTrialRun, project.id, slideAuthoring?.sessionId])
 
   useEffect(() => setLastAuthoringSelection(null), [
     editingScope,
@@ -2820,10 +2873,14 @@ function WorkspaceEditor({
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
           type="button"
-          className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
-          aria-pressed={canvasMode === 'edit'}
+          className={canvasMode === 'edit' && !trialRun ? 'canvas-mode-switch__active' : ''}
+          aria-pressed={canvasMode === 'edit' && !trialRun}
           disabled={interactionDisabled}
           onClick={() => {
+            if (trialRun) {
+              closeTrialRun()
+              return
+            }
             if (!slideAuthoring) setCanvasMode('edit')
           }}
         >
@@ -2831,18 +2888,13 @@ function WorkspaceEditor({
         </button>
         <button
           type="button"
-          className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
-          aria-pressed={canvasMode === 'run'}
-          disabled={
-            interactionDisabled ||
-            Boolean(slideAuthoring)
-          }
-          title={slideAuthoring
-            ? activeSlideAuthoring.unsupportedActionReason
-            : undefined}
+          className={canvasMode === 'run' || trialRun ? 'canvas-mode-switch__active' : ''}
+          aria-pressed={canvasMode === 'run' || trialRun !== null}
+          disabled={interactionDisabled}
           onClick={() => {
+            if (trialRun) return
             if (slideAuthoring) {
-              reportUnsupportedInjectedAction('当前位置试运行暂不可用')
+              startTrialRun()
               return
             }
             setCanvasMode('run')
@@ -2941,6 +2993,15 @@ function WorkspaceEditor({
             data-testid="canvas-stage"
             aria-hidden={canvasMode === 'run'}
           />
+          {trialRun && (
+            <iframe
+              ref={trialRunFrameRef}
+              className="trial-run-frame"
+              data-testid="trial-run-frame"
+              title="当前位置试运行"
+              src={trialRun.url}
+            />
+          )}
           {authoringCanvasInteractive && (
             visibleRuntimeTargets.length > 0 ||
             visibleComponentTargets.length > 0 ||
@@ -3098,6 +3159,16 @@ function WorkspaceEditor({
             </div>
           )}
         </div>
+        {trialRun && (
+          <button
+            type="button"
+            className="trial-run-exit"
+            data-testid="trial-run-exit"
+            onClick={closeTrialRun}
+          >
+            <X size={13} />退出试运行
+          </button>
+        )}
       </div>
       {!interactionDisabled && canvasMode === 'edit' && editingFormulaNode && (
         <FormulaEditDialog
