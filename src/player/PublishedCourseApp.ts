@@ -251,6 +251,16 @@ export class PublishedCourseApp {
     const location = this.#locationMap.get(this.#currentLocationId)
     if (!location) return
     await this.#player.resetSurface(location.surfaceId, 'surface')
+    // reset('surface') already re-entered the current scene and announced the
+    // fresh scene.enter once. Re-navigating would replay the semantic unit's
+    // entry rules a second time, so only re-pin a location-pinned state.
+    if (location.kind === 'slide-scene') {
+      const host = this.#slideHosts.get(location.surfaceId)
+      if (host && location.stateId && host.stateId !== location.stateId) {
+        await host.setPresentationState(location.stateId)
+      }
+      return
+    }
     await this.navigate(location.id, 'replay')
   }
 
@@ -261,6 +271,23 @@ export class PublishedCourseApp {
     this.#muted = this.project.media.audio.defaultMuted
     this.events.emit('audio:change', { muted: this.#muted })
     await this.#player.resetCourse()
+    // reset('course') already restored every surface to its authored default
+    // scene and announced the fresh entry once. Activate the start location
+    // without re-navigating, so the start scene's enter rules run exactly once.
+    const target = this.#locationMap.get(decision.toLocationId)
+    if (target?.kind === 'slide-scene') {
+      await this.#player.activateSurface(target.surfaceId)
+      const host = this.#slideHosts.get(target.surfaceId)
+      if (host && host.sceneId !== target.sceneId) {
+        await host.setScene(target.sceneId, target.stateId)
+      } else if (host && target.stateId && host.stateId !== target.stateId) {
+        await host.setPresentationState(target.stateId)
+      }
+      this.#currentLocationId = target.id
+      this.#syncContainers(target.surfaceId)
+      replaceUrlLocation(target.id)
+      return
+    }
     this.#currentLocationId = null
     await this.navigate(decision.toLocationId, 'restart')
   }
