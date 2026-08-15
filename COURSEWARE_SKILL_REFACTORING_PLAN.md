@@ -1,6 +1,6 @@
 # V8 前端原地升级为 V9：经只读审计的最终执行计划
 
-> `PLAN_VERSION: 3.2-fast-track`
+> `PLAN_VERSION: 3.3-fast-track`
 > `DATE: 2026-08-15`
 > `EXECUTION_CLASS: production-system`
 > `BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485`
@@ -11,7 +11,7 @@
 > `ACTIVE_WAVE_OWNER: strong-coordinator`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
 > `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
-> `INTEGRATION_CURSOR: V04 accepted / V05F ready`
+> `INTEGRATION_CURSOR: V04 accepted / V05F in_progress`
 > `PRIMARY_COORDINATOR: 当前根代理；GPT-5.6 Sol / xhigh，只有 Gate 与重大架构裁决临时 max`
 > `ATOMIC_EXECUTOR: GPT-5.6 Terra / max`
 > `ULTRA_WORKFLOW: 仅由主协调者按需用于只读审计、独立验证或已通过隔离预检的执行波`
@@ -29,6 +29,8 @@
 - 对弱模型执行风险、测试退化和“再次重写”风险的对抗审计。
 
 审计没有修改产品代码。任何后续实现都必须服从本文件的冻结裁决和机械门禁。开发采用“依赖图并行、主线串行集成”：共享工作区永远只有一个写入者；只有满足第 5.8 节全部条件的任务，才可在独立 Git worktree/分支中并行。
+
+仓库中的 `.workflow/` 是未启用的编排脚手架，不计算 ready set、不授予写入或 accepted 权限，也不得覆盖本文件与第 5.8 节；本轮执行不使用它派发任务。
 
 ---
 
@@ -617,7 +619,7 @@ git diff --name-only <accepted-parent-sha>
 | FT5 / M5 | FT4 | Flow 语义编辑、层级/表格/公式/媒体、真实拖动、统一层、Player、HTML/PDF/DOCX | 可与 FT6 双 worktree 并行 |
 | FT6 / M6 | FT4 | Spatial pan/zoom、选择/变换、关系、镜头/路径/小地图、统一层、Player、导出 | 可与 FT5 双 worktree 并行 |
 | FT7 / M7 | FT5,FT6 | Mixed 导航/state/guard/controller、完全重开、整课 Player、HTML/网页包/PDF/PPTX/DOCX | 主线串行汇合 |
-| FT8 / M8 | FT7 | 原 App 唯一入口、显式 V8 导入兼容、旧失败前端清理、行为/视觉/导出最终门禁 | 主协调者串行清理与最终审计 |
+| FT8 / M8 | FT7 | 原 App 唯一入口、显式 V8 导入兼容、旧失败前端清理、docs/Builder skill/能力卡与可达产品事实对齐、行为/视觉/导出最终门禁 | 主协调者串行清理与最终审计 |
 
 执行规则：
 
@@ -651,7 +653,7 @@ G05 到 V9 backend 切换前是不可发布的开发中间态。它只能运行�
 | V03 | V02 | 原 Workspace 建立最窄数据注入边界；默认 V8 行为不变 |
 | V04 | V03 | 同一个原 App/Workspace 在测试启动参数下读取 V9 fixture；只启用一个 backend |
 | V05 | V04 | 真实鼠标、Undo/Redo、V9 archive、完全关闭重开和壳层截图闭环 |
-| GATE-V | V05 | 强协调者做 Go/No-Go；No-Go 时停止全部开发 |
+| GATE-V | V05 | 强协调者做 Go/No-Go；No-Go 时自动物化一个最短恢复纵切，只有触发第 0.1 节授权边界才停止 |
 
 ### 7.3 GATE-V 后的公共 V9 内核
 
@@ -912,7 +914,7 @@ ACTIVE_WAVE 只列 wave ID、共同 accepted parent、卡列表、并行结论�
 - Read-only audit cards: 无
 - Parallel preflight: V05 修改第 5.8 节列出的高冲突冻结文件 `App.tsx`，且把真实鼠标、history、archive、进程生命周期和视觉证据汇合为 GATE-V 前唯一事实；`V01→V05` 按计划串行，本波不创建执行器 worktree、不并行写入
 - Integration order: `V05`
-- Stop condition: 若真实 Electron 指针不能通过原 Phaser bridge 只写 V9，Undo/Redo 不能恢复同一稳定 ID，archive 不是 schemaVersion 9，完全销毁进程后无法从文件恢复相同 text/frame/ID，或必须修改 Store/Workspace/Phaser/Schema/IPC/TopToolbar 才能闭环，则 `GATE-V = NO-GO` 并停止后续开发；全部通过后由主协调者立即执行 GATE-V 二元裁决
+- Stop condition（历史口径，已由第 0.1 节取代）: 若真实 Electron 指针不能通过原 Phaser bridge 只写 V9，Undo/Redo 不能恢复同一稳定 ID，archive 不是 schemaVersion 9，或完全销毁进程后无法从文件恢复相同 text/frame/ID，则当次 `GATE-V = NO-GO`；主协调者自动物化最短恢复纵切。只有触发权限、付费、新依赖、不可恢复的数据破坏、仓库外操作或目标不可调和时才停止。
 
 ### GATE-V 二元裁决｜历史 NO-GO（已获授权恢复）
 
@@ -1015,6 +1017,7 @@ Rollback: `git revert <task-sha>`
 - Status: `in_progress`
 - Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
 - Write cards: `V05F`（主协调者，主工作区，串行）
+- Read-only audit: 只允许一个 Terra 审计槽串行反证 Phaser/生命周期根因；用户另行取得的 Kimi 报告只作为外部意见，由主协调者核实后选择性吸收，不授予写入或 Gate 权限。
 - Parallel result: `App.tsx` 与 `Workspace.tsx` 均为高冲突主入口，且当前未 accepted 的 V05 调查 diff 已在主工作区；不创建 Terra worktree。
 - Integration order: `V05F → GATE-V`
 
@@ -1032,7 +1035,8 @@ Rollback: `git revert <task-sha>`
 - Outcome: 原 App/Workspace 的隔离 Player 通过现有 authoring patch 协议显示 V9 只读 `SceneDocument` 投影；同一 text 可被真实 canvas 指针拖动、Undo/Redo、保存 schemaVersion 9、完全关闭重开并继续拖动，且 V8 Store 不写入。
 - Product whitelist: `src/renderer/course/v9SlideVerticalSlice.ts`、`src/renderer/App.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/workspaceSlideAuthoring.ts`。
 - Test whitelist: `tests/unit/v9SlideVerticalSlice.test.ts`、`tests/unit/workspaceSlideAuthoring.test.ts`、`tests/e2e/v9SlideVerticalSlice.spec.ts`。
-- Targeted checks: 两个相关 unit 文件、typecheck、Renderer/Electron build、一次 `v9SlideVerticalSlice.spec.ts --workers=1`、`git diff --check`；通过后 GATE-V 只额外汇总一次 `npm test`。
+- Targeted checks: 两个相关 unit 文件、typecheck、受影响的 Renderer build、一次 `v9SlideVerticalSlice.spec.ts --workers=1`、一次 `verify:editor-preservation` 静态守卫和 `git diff --check`；Electron main 未变化时复用既有 build 证据，不重跑。通过后 GATE-V 只额外汇总一次 `npm test`。
+- Preservation scope: 本卡不得修改 JSX DOM、className、style、data-testid、画布尺寸或 golden；若最终 diff 触及这些范围，才升级为对应视觉复核，不因 `Workspace.tsx` 文件名本身重复运行三尺寸或 SendInput。
 - Stop only if: 闭环必须引入新依赖、改 Schema/IPC、写入 V8 Store 或建立第二套 Player/Workspace；普通 Workspace/Player 接缝调整由主协调者自行处理。
 - Visual evidence: 只保留 1366×768 重开截图和 Playwright `page.mouse` 从原 canvas 坐标进入 Phaser 的一次路径；archive 同时证明 frame/ID 写入。取消三尺寸重复截图与 SendInput。
 
