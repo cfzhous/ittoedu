@@ -272,20 +272,24 @@ Git 与工作区：
 | M2-D | e04d017a6e244329212cae0ec53467d31bcca23f | 原 ScenePanel、SceneStateStrip 与底部状态栏接入 V9 场景/状态事实 |
 | M2-E | b010947d62fdc0fabb6fb08c56d95edc771fe6ed | 原 Elements、Nodes 与 Workspace 接入 V9 场景 Native 增删改、多选与变换 |
 | M2-F | 3e7e12120acb84135a0173dceb3d17bc91ec25d4 | 原 Properties 接入 V9 通用属性、整段文字样式、公式/图形与命名状态覆盖 |
+| M2-G | 996ebd2af45418eb915dd0a36abd156c2cca855f | 默认 V9 文件生命周期、显式旧版导入、非 Slide 安全门禁与 Published 预览/HTML/网页包/PPTX |
 
 产品 accepted cursor 是 M1。反重写 diff 基线仍固定为 BASE_COMMIT。
 
 ### 4.2 当前 M2 恢复点
 
-M2 当前恢复 cursor 为 `3e7e12120acb84135a0173dceb3d17bc91ec25d4`，已成立：
+M2 当前恢复 cursor 为 `996ebd2af45418eb915dd0a36abd156c2cca855f`，已成立：
 
 - V9 document/history/archive 由原 editorStore 单一持有；顶栏、标题、dirty、关闭、保存、sidecar 与恢复副本不再读写隐藏 V8 工程。
 - 原 ScenePanel、SceneStateStrip、底部状态栏、Elements、Nodes、Properties 与 Workspace 的已接能力共用同一 V9 session；未接能力按面板/操作局部灰化，不回落写 V8。
 - 场景/命名状态 CRUD、Native text/formula/shape 插入、图层操作、多选变换、通用属性与状态稀疏覆盖均为一操作一 history/revision。
-- 真实 Electron 已覆盖拖动/Undo/Redo/恢复副本/保存/完全重开，以及场景/状态/元素/属性/再保存/再重开/继续编辑两条纵切。
-- 当前门禁为 typecheck、164 个 Vitest 文件/1001 项测试、8 项 Agent Kit、两条 Electron E2E、反重写静态门禁与 1280×720 / 1366×768 / 1920×1080 三视口视觉比对全部通过。
+- 默认无参数入口创建正式 V9 工程；普通 Open/Recent 只接受 V9，旧工程只能经显式导入迁移且强制另存，schema 8 恢复副本也只迁移到 V9。
+- 保存、dirty、恢复副本、关闭丢弃与最近工程确认均以当前 V9 session 为真相；关闭准备回执带 requestId，不会被迟到响应串线。
+- Flow/Spatial 位置在尚未接入作者能力时显示原壳内只读门禁，快捷键不会写隐藏 V8；默认 V9 新文本恢复原名称与居中位置。
+- 原顶栏已真实接通 V9 Published 整课预览、单 HTML、网页包和基础 PPTX；PDF 仍按能力局部禁用；Published V2 不再注入废弃的外层上一页/下一页底栏。
+- 当前绿色证据为 typecheck、166 个 Vitest 文件/1013 项测试、8 项 Agent Kit、5 项真实 Electron E2E、Player/Renderer/Electron build 与反重写静态门禁。
 
-M2 尚未完成：默认产品入口尚未原子切换为 V9；显式旧版导入与普通 Open/Recent 的最终边界尚未收口；全局/表面统一层、教师控制器作者对象、当前位置试运行与媒体/Runtime/Component/互动的原 UI 路径仍是诚实门禁。下一步必须继续在原 Workspace/Store/面板内接同一 V9 真相，不得新建 Workspace 或用兼容 View 反建工程。
+M2 尚未完成：全局/表面统一层、教师控制器作者对象、当前位置试运行、V9 工程检查、PDF 捕获与媒体/Runtime/Component/互动的原 UI 路径仍是诚实门禁。冻结视觉比对当前为 `0.008730 > 0.0015`，主要剩余差异来自这些未接原壳能力；不得修改 golden、mask、阈值或增加 V8 启动旁路。下一步必须继续在原 Workspace/Store/面板内接同一 V9 真相，优先闭合全局层与教师控制器作者对象，不得新建 Workspace 或从兼容 View 反建工程。
 
 ---
 
