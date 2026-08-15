@@ -734,6 +734,27 @@ export const spatialCameraFrameSchema = z.object({
   zoom: finiteNumber.positive().max(1_000),
 }).strict()
 
+const spatialPathStyleSchema = z.object({
+  color: colorSchema.optional(),
+  width: finiteNumber.positive().max(10_000).optional(),
+  dash: z.enum(['solid', 'dashed', 'dotted']).optional(),
+}).strict()
+
+export const spatialPathDocumentSchema = z.object({
+  id: stableIdSchema,
+  name: z.string().trim().min(1).max(200),
+  layerItemIds: z.array(stableIdSchema).min(1).max(20_000),
+  style: spatialPathStyleSchema.optional(),
+}).strict()
+
+export const spatialRelationDocumentSchema = z.object({
+  id: stableIdSchema,
+  sourceLayerItemId: stableIdSchema,
+  targetLayerItemId: stableIdSchema,
+  label: z.string().trim().min(1).max(500).optional(),
+  kind: z.enum(['line', 'arrow', 'bidirectional']),
+}).strict()
+
 const surfaceBaseFields = {
   id: stableIdSchema,
   title: z.string().trim().min(1).max(500),
@@ -800,6 +821,8 @@ const spatialSurfaceSchema = z.object({
       }).strict(),
     ]),
     layerItems: layerItemListSchema,
+    paths: z.array(spatialPathDocumentSchema).max(10_000).default([]),
+    relations: z.array(spatialRelationDocumentSchema).max(10_000).default([]),
   }).strict(),
   camera: z.object({
     home: spatialCameraPoseSchema,
@@ -839,6 +862,65 @@ const spatialSurfaceSchema = z.object({
         })
       }
     })
+  })
+  const pathIds = new Set<string>()
+  surface.world.paths.forEach((path, index) => {
+    if (pathIds.has(path.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'paths', index, 'id'],
+        message: `Spatial path ids must be unique: ${path.id}`,
+      })
+    }
+    pathIds.add(path.id)
+    if (new Set(path.layerItemIds).size !== path.layerItemIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'paths', index, 'layerItemIds'],
+        message: 'Spatial path item ids must be unique',
+      })
+    }
+    path.layerItemIds.forEach((itemId) => {
+      if (!itemIds.has(itemId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['world', 'paths', index, 'layerItemIds'],
+          message: `Spatial path references missing world item: ${itemId}`,
+        })
+      }
+    })
+  })
+  const relationIds = new Set<string>()
+  surface.world.relations.forEach((relation, index) => {
+    if (relationIds.has(relation.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'id'],
+        message: `Spatial relation ids must be unique: ${relation.id}`,
+      })
+    }
+    relationIds.add(relation.id)
+    if (!itemIds.has(relation.sourceLayerItemId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'sourceLayerItemId'],
+        message: `Spatial relation references missing world item: ${relation.sourceLayerItemId}`,
+      })
+    }
+    if (!itemIds.has(relation.targetLayerItemId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'targetLayerItemId'],
+        message: `Spatial relation references missing world item: ${relation.targetLayerItemId}`,
+      })
+    }
+    if (relation.sourceLayerItemId === relation.targetLayerItemId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index],
+        message: 'Spatial relation source and target must be different world items',
+      })
+    }
   })
 })
 

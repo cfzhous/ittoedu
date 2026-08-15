@@ -313,6 +313,31 @@ export interface SpatialSemanticZoomRule {
   visible: boolean
 }
 
+export type SpatialPathDash = 'solid' | 'dashed' | 'dotted'
+
+export interface SpatialPathStyle {
+  color?: string
+  width?: number
+  dash?: SpatialPathDash
+}
+
+export interface SpatialPathDocument {
+  id: string
+  name: string
+  layerItemIds: string[]
+  style?: SpatialPathStyle
+}
+
+export type SpatialRelationKind = 'line' | 'arrow' | 'bidirectional'
+
+export interface SpatialRelationDocument {
+  id: string
+  sourceLayerItemId: string
+  targetLayerItemId: string
+  label?: string
+  kind: SpatialRelationKind
+}
+
 export interface SpatialSurfaceDocument extends SurfaceBase {
   type: 'spatial-2d'
   world: {
@@ -326,6 +351,8 @@ export interface SpatialSurfaceDocument extends SurfaceBase {
           height: number
         }
     layerItems: LayerItem[]
+    paths?: SpatialPathDocument[]
+    relations?: SpatialRelationDocument[]
   }
   camera: {
     home: SpatialCameraPose
