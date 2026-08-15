@@ -12,8 +12,8 @@
 ## 1. 新 Agent 的最短启动顺序
 
 1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品合同、当前恢复点和验证预算。
-3. 阅读当前阶段 [`docs/plans/M3_SLIDE_AUTHORING_PLAN.md`](docs/plans/M3_SLIDE_AUTHORING_PLAN.md)。
+2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品合同、当前恢复点、并行任务板（§4.5）和验证预算。
+3. 协调者继续阅读当前阶段 [`docs/plans/M3_SLIDE_AUTHORING_PLAN.md`](docs/plans/M3_SLIDE_AUTHORING_PLAN.md)；执行者只读自己的任务行与对应阶段计划小节。
 4. 运行 `git status --short`，保留所有不属于当前任务的修改和未跟踪文件。
 5. 从本文件“改什么看哪里”进入相关源码，不先遍历全仓库。
 6. 修改前确认当前源码，而不是照搬索引中的示例或 donor 路径。
@@ -134,7 +134,7 @@ CourseProjectArchiveData
 
 当前为 M3，恢复于产品检查点 `b6d1787`。
 
-首要 P1：新增元素后 App 壳上弹、状态栏下方出现大块黑区。它是编辑器壳层/重排回归，不应等待后续功能自然消失。验收与最小诊断写在 M3 计划。
+壳层上弹/底部黑区 P1 已关闭（2026-08-15）：`ProductApp.tsx` 的匿名包装 `div` 曾断开 `#root` → `.app-shell` 的 100% 高度链，使壳退化为内容高度并在视口底部露出窗口背景；修复为 ProductApp 直接渲染原 App，几何断言在 `v9SlideVerticalSlice` Electron 路径常驻。
 
 随后依次是：
 
@@ -142,8 +142,6 @@ CourseProjectArchiveData
 2. 独立当前位置试运行。
 3. image/video、背景、文字事务与剩余 Native。
 4. Runtime/Component 作者目标和原互动/开发 UI。
-
-不要在修复黑区前继续扩大互动或 Player 改动面。
 
 ## 7. 关键不变量
 

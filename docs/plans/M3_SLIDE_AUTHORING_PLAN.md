@@ -19,77 +19,45 @@
 
 尚未成立：
 
-- 新增元素后偶发 App 壳上弹并露出底部黑区。
 - Published Slide 尚未完整执行 `scene.interactions`。
 - “当前位置试运行”尚未使用独立 Published snapshot 会话。
 - image/video、背景、富文本/IME、Runtime/Component 作者目标和互动编辑尚未形成完整 Slide 闭环。
 
-## 2. 实施顺序
+## 2. 任务单元
 
-### M3-B0：修复壳层上弹与底部黑区
+执行顺序以根计划 §4.5 并行任务板为准；本节只定义各单元的目标与边界，不构成串行链。
 
-目标：先恢复稳定编辑视口，再继续扩功能。
+### M3-B0：修复壳层上弹与底部黑区（已关闭，2026-08-15）
 
-最短诊断：
+根因：`ProductApp.tsx` 在 `#root` 与 `.app-shell` 之间的匿名包装 `div` 断开 100% 高度链，壳退化为内容高度（`min-height: 720px` 兜底），视口更高时底部露出窗口背景色，新增元素改变右栏内容高度导致壳纵向跳动。页面无滚动，根节点高度正常。
 
-1. 在一个可复现视口记录添加元素前后的 `innerHeight`。
-2. 同时记录 html、body、root、app-shell、app-main、workspace、state strip、status bar 的 rect 与 scrollHeight。
-3. 判断是根节点高度、grid min-content、容器滚动还是新增内容触发的重排。
-4. 只修改负责该几何事实的现有 CSS/组件，不引入新壳或第二布局系统。
+修复：ProductApp 直接渲染原 App，不引入新壳或第二布局系统。
 
-验收：添加 text/formula/shape 前后无页面级黑区和页面滚动；画布、状态条、缩放控件、底部状态栏保持原位置；工程状态不变。
+证据：`v9SlideVerticalSlice` Electron 路径新增 `expectAppShellFillsViewport` 几何断言（添加矩形/公式前后壳与状态栏贴合视口、`scrollY` 为 0）；修复后 1280×720、1366×768、1920×1080 三档视口几何复核通过。工程、history、selection、dirty 与保存语义不变。
 
-最小证据：一个布局回归单测或几何断言，加一个真实 Electron 视口。三尺寸视觉留到 M3 Gate。
+### M3-B1：Published Slide 基础互动执行（已关闭，2026-08-15）
 
-### M3-B1：Published Slide 基础互动执行
+闭环：`SlideSurfaceHost` 新增可选 `SlideInteractionSession`（省略即 inert，编辑态 Authoring host 不受影响），playback 模式下为当前场景建/毁 `InteractionEngine`，`#reconcile()` 后重绑 `source === 'scene'` 的稳定 layer item；`setScene`/`setPresentationState` 发出 `scene:enter` 与 `presentation:change`。`PublishedCourseApp` 把 goToScene/next/previous/replay/restart 包成受守卫的同步宿主动作供规则导航。
 
-目标：让课例中的 Native 点击规则真实运行，不再依赖 Runtime 热点绕行。
+证据：`slideSurfaceHost.test.ts` 互动会话三例、`coursePublishPipeline.test.ts` 真实 Course Player 点击切状态一例通过；typecheck 与 build:player 绿。
 
-范围：
+### M3-B2：独立“当前位置试运行”（已关闭，2026-08-15）
 
-- producer 与 consumer 对同一 `scene.interactions` 契约达成一致。
-- 在 Published Slide 绑定稳定 layer item 激活事件。
-- 复用协议中性的互动执行能力，先闭合 `node.click`、`presentation.in`、`presentation.set`。
-- 切 scene/location 时销毁旧订阅；重启和 destroy 不残留会话状态。
-- 编辑态 Authoring host 保持 inert，不能因为接入执行器而执行按钮或规则。
+闭环：`trialRunOverlay.ts` 从当前 selection 解析 location/state（未知项全部回退），把当前 V9 snapshot 构建为 Published Course V2 payload，经外链 blob 脚本（payload + player bundle）注入独立 overlay iframe——blob 文档继承编辑器 CSP（禁内联脚本、允许 blob: 脚本源），不能复用内联版 standalone HTML。`PublishedCourseApp` 新增 hash `state` 参数，仅作用于首次 `initial-entry` 导航。Workspace 按钮启动/关闭试运行：覆盖层 z-index 高于全部 authoring 层，退出即卸载 iframe 并 revoke blob，不写 Project/history/revision/selection/viewport，换工程或换会话自动清理。
 
-主要入口：
+证据：`trialRunOverlay.test.ts` 七例（起点解析五种情形 + blob 结构与 revoke）、`coursePublishPipeline.test.ts` hash 初始状态一例、Electron `v9TrialRun.spec.ts` 全路径（进入试运行→点击 trial-text 切到 state_reveal→dirty 保持 false→退出→添加文本→撤销移除）；全量 vitest 1059 例绿、typecheck 绿、`v9SlideVerticalSlice` 旧断言同步更新（按钮不再禁用、无暂不可用提示）。
 
-- `src/renderer/export/course/buildPublishedCourse.ts`
-- `src/player/PublishedCourseApp.ts`
-- `src/player/surfaces/slide/SlideSurfaceHost.ts`
-- `src/player/InteractionEngine.ts`
-- `src/player/CourseEventBus.ts`
+### M3-B3：剩余 Native 与画布编辑（拆为 T-IMG / T-TEXT / T-GEST）
 
-最小证据：一个纯互动顺序/条件测试，一个 Slide Host 激活测试，一个 Published V2 点击切状态测试。
+并行拆分，owns 与依赖见根计划 §4.5：
 
-### M3-B2：独立“当前位置试运行”
+1. T-IMG：image/video 的插入、素材引用、稳定选择、通用属性、保存重开；场景背景颜色与背景素材。
+2. T-TEXT：text 的正文/富文本/IME 事务；一次编辑只产生一次 history。
+3. T-GEST（待 T-IMG、T-TEXT 集成后派发）：formula/shape/media 的已有属性与 Workspace 视觉同步；resize、rotate、多选变换、方向键微调在各 scope/state 下保持一次手势一次 history。
 
-目标：在原 Workspace 中启动当前 V9 snapshot 的真实课程会话。
+不在本阶段重建 MediaTab 或 Properties；只给原组件增加 V9 窄控制边界。`Workspace.tsx` 等共享热点按根计划 §4.3 串行增量。
 
-合同：
-
-- 作者 iframe 常驻且 inert；试运行使用独立 overlay/iframe 和 Published Course V2 payload。
-- 从当前 location/state 启动；停止即 destroy。
-- 试运行不得写 Project/history/revision/selection/viewport。
-- 退出后作者画布、选择与缩放恢复原样。
-- 不把 authoring host 原地切成 playback。
-
-最小证据：一条 Electron 路径完成进入试运行、点击切状态、退出、继续编辑和 Undo。
-
-### M3-B3：剩余 Native 与画布编辑
-
-依次完成：
-
-1. image/video 的插入、素材引用、稳定选择、通用属性、保存重开。
-2. 场景背景颜色与背景素材。
-3. text 的正文/富文本/IME 事务；一次编辑只产生一次 history。
-4. formula/shape/media 的已有属性与 Workspace 视觉同步。
-5. resize、rotate、多选变换、方向键微调在各 scope/state 下保持一次手势一次 history。
-
-不在本阶段重建 MediaTab 或 Properties；只给原组件增加 V9 窄控制边界。
-
-### M3-B4：Runtime/Component 作者目标进入统一图层
+### M3-B4：Runtime/Component 作者目标进入统一图层（任务 T-RTGT）
 
 目标：Runtime/Component 的作者目标可在原 Workspace/Nodes/Properties 中命中和编辑。
 
@@ -99,7 +67,7 @@
 - Runtime/Component 仍由其各自运行 Host 管理，不投影成假 Native 保存。
 - 尚未支持的专属属性局部禁用，不把整个通用属性区隐藏。
 
-### M3-B5：原互动/开发 UI 接线
+### M3-B5：原互动/开发 UI 接线（任务 T-IUI）
 
 - 原 InteractionEditor、AutomationTab、DeveloperTab、ComponentsTab 逐项接 V9 command。
 - 普通教师只看到教学概念；协议和 manifest 只出现在专业开发区。

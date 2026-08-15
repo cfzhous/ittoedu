@@ -1,8 +1,9 @@
 # Courseware 产品开发总纲
 
-> PLAN_VERSION: 6.0
+> PLAN_VERSION: 7.0
 > DATE: 2026-08-15
 > ROLE: 本仓库唯一长期开发计划
+> EXECUTION_MODE: 并行 Agent 集群（唯一协调者 + 多执行者 + 单一集成主线）
 > CURRENT_STAGE: M3 / 完成 Slide 作者闭环
 > CURRENT_PRODUCT_CHECKPOINT: b6d1787875339fff8ba03d80cfbf80187c009caa
 > CURRENT_PLAN_CHECKPOINT: 8b4513c
@@ -11,7 +12,7 @@
 > PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Runtime API 2/3 / Component API 4
 > STATUS: implementation-active
 
-本文件只维护长期目标、不可违背的产品合同、当前阶段、阶段入口和验证预算。详细实施放在从属阶段计划中；从属计划不得修改本文件的产品合同。
+本文件维护长期目标、不可违背的产品合同、并行任务模式、当前任务板、集成 Gate 与验证预算。详细实施说明放在从属阶段计划中；从属计划不得修改本文件的产品合同与集成协议。
 
 事实优先级如下：用户明确要求与 `AGENTS.md` → 当前源码、Schema 和可复现证据 → 本总纲 → 当前阶段计划 → 项目认知索引。认知索引用于导航，不是第二真相源。
 
@@ -133,39 +134,76 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 - 原顶栏已接通工程检查、整课预览、HTML、网页包和基础 PPTX；PDF、DOCX 仍在后续发布阶段闭合。
 - 编辑态只显示工程内教师控制器；全局控制器可选择、缩放下移动、Undo/Redo、保存重开。
 - Published V2 已移除废弃的画布外 `.course-nav` 底栏。
+- App 壳在 1280×720、1366×768、1920×1080 三档视口贴合窗口；新增元素后无壳层跳动、页面滚动或底部黑区。
 
-### 3.3 当前首要 P1：新增元素后壳层上弹并露出底部黑区
+### 3.3 已关闭 P1：新增元素后壳层上弹并露出底部黑区
 
-观察到：在默认编辑器添加元素后，中央画布和主区域向上跳动，底部状态栏下方出现大块黑色页面区域。截图表明黑区位于应用壳之后，不属于课件画布内容。
+根因（2026-08-15 经几何诊断确认）：`ProductApp.tsx` 在 `#root` 与 `.app-shell` 之间引入匿名包装 `div`，断开 html → body → #root → 壳的 100% 高度链；`.app-shell` 退化为内容高度（`min-height: 720px` 兜底），视口更高时底部露出窗口背景色，新增元素改变右栏内容高度导致壳纵向跳动。页面无滚动，根节点高度正常。
 
-当前只登记事实，不预判根因。优先核对 `html/body/#root/.app-shell/.app-main` 的高度、grid min-content、页面滚动以及新增元素触发的重排。
+修复：ProductApp 直接渲染原 App，不加任何包装元素；`v9SlideVerticalSlice` Electron 路径新增 `expectAppShellFillsViewport` 几何断言，断言添加元素前后壳顶对齐视口顶、壳与底部状态栏贴合视口底、`scrollY` 为 0。
 
-修复验收：
+已验证：1280×720、1366×768、1920×1080 三档视口添加 text/rectangle/formula 前后壳与底部状态栏贴合窗口底部、几何不变、页面无滚动；工程、history、selection、dirty 与保存语义不受影响。当前无登记的 P1。
 
-1. 添加 text/formula/shape 前后，App 壳和底部状态栏都贴合窗口底部，不出现页面级黑区。
-2. 画布、状态条、缩放控件与底部状态栏不发生非预期纵向跳动。
-3. 页面本身无滚动；右栏或状态列表只在自身容器滚动。
-4. 1280×720、1366×768、1920×1080 至少在阶段 Gate 覆盖；修复循环只用一个复现视口。
-5. 不改变 Project、history、selection、dirty 或保存语义。
+## 4. 并行任务模式
 
-首次诊断只采集添加前后的 `window.innerHeight` 以及 html、body、root、app-shell、app-main、workspace、state strip、status bar 的 bounding rect/scrollHeight，不先扩大到全量 E2E。
+开发不再按阶段串行推进，而是由唯一协调者把阶段完成定义拆成任务单元，多执行者并行交付，按依赖序集成进单一主线。阶段 Gate 保留为唯一验收标准，但不再是执行链。
 
-## 4. 阶段计划
+### 4.1 角色
 
-| 阶段 | 状态 | 从属计划 | 结果 Gate |
-|---|---|---|---|
-| M1 | 完成 | 本文件检查点 | 最小 V9 Slide 保存重开闭环 |
-| M2 | 完成 | 本文件检查点 | 默认 V9 单写生命周期与原壳主要区域 |
-| M3 | 进行中 | [Slide 作者闭环](docs/plans/M3_SLIDE_AUTHORING_PLAN.md) | Native/媒体/互动/作者目标与真实试运行 |
-| M4 | 未开始 | [Player、Runtime 与 Component](docs/plans/M4_PLAYER_RUNTIME_COMPONENT_PLAN.md) | 隔离 Player、课程逻辑、动态载体与控制器运行合同 |
-| M5–M6 | 未开始 | [Flow 与 Spatial](docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md) | 两类表面的编辑、Player、保存重开与导出 |
-| M7–M8 | 未开始 | [发布与最终收敛](docs/plans/M7_M8_DELIVERY_HARDENING_PLAN.md) | Mixed、五类导出、文档能力卡和最终 Gate |
+- **协调者（唯一）**：维护 §4.5 任务板，派发任务，声明和调整文件所有权，持有唯一主线集成权，裁决冲突，运行集成 Gate。只有协调者可以改本文件；执行者不得改任务板，不得直接向主线落代码。
+- **执行者（多个）**：一个执行者同一时刻只持一个任务单元，只在该任务 owns 范围内工作，完成后向协调者交付分支 diff、L2 证据和范围声明。执行者之间不互相等待、不互相 rebase。
+- 教师验收不变：`accepted` 仍只来自教师明确验收。
 
-阶段计划是当前阶段的实施说明，不是新的治理体系。阶段内只维护结果、依赖、最短纵切、验收和剩余风险；不创建任务卡、Owner、审批状态或平行路线图。
+### 4.2 任务单元
+
+每个任务单元必须在 §4.5 登记：ID、目标、供给的 Gate、依赖、owns 路径集、验证级别、状态（`pending` / `dispatched` / `integrated`）。任务口径直接从从属阶段计划的对应小节切出，不自创范围；执行中发现必要的新工作时只登记建议，由协调者入库后再派发。任务单元是最小可独立验证纵切，不是任务卡流程，不设 Owner 头衔、审批状态机或平行路线图。
+
+### 4.3 文件所有权与共享区
+
+- 同一文件同一时刻只允许一个活跃任务深改；派发前协调者按 owns 集合做交集检查。
+- 共享热点文件（`Workspace.tsx`、`editorStore`、`PropertiesTab.tsx`、`globals.css`、`PublishedCourseApp.ts`、`SlideSurfaceHost.ts` 等正式调用链文件）只允许窄接口增量；两个任务同时需要同一共享文件时，协调者串行派发，或由协调者亲自完成共享部分后再放行。
+- 测试文件随任务 owns 走；`tests/contracts/**`、冻结视觉基线与 `scripts/verify-editor-preservation.ts` 属反重写禁区，任何任务不得改写。
+
+### 4.4 隔离与集成
+
+- 每个任务一个 worktree：`output/worktrees/<task-id>`，分支 `task/<task-id>`，从登记时的主线 SHA 切出。
+- 执行者交付 = 分支 diff + 定向 L2 证据 + 范围声明；协调者先审范围，再验证证据。
+- 协调者按依赖序集成：互不触及的批次可同时评审，但串行落主线；每落一批跑受影响定向测试。
+- 冲突由协调者回源裁决：以已集成主线为准，被推翻的一方基于新主线重派，不在主线之外长期分叉。
+
+### 4.5 当前任务板
+
+可立即并行派发（依赖已满足，owns 两两无交集；标 ★ 者属后续阶段供给，与 M3 在途任务无文件交集，前置并行）：
+
+| ID | 目标（口径见从属计划） | 供给 | 依赖 | owns | 状态 |
+|---|---|---|---|---|---|
+| T-IMG | image/video 插入、素材引用、稳定选择、通用属性、保存重开；场景背景颜色与背景素材（M3-B3.1/2） | M3 | 无 | 媒体作者链与对应测试 | pending |
+| T-TEXT | text 正文/富文本/IME 事务，一次编辑一次 history（M3-B3.3） | M3 | 无 | 文本编辑链与对应测试 | pending |
+| T-RTGT | Runtime/Component 作者目标进入统一图层（M3-B4） | M3 | 无 | authoring host、hit/address 映射、Nodes/Properties 窄边界 | pending |
+| T-IUI | 原 Interaction/Automation/Developer/Components 逐项接 V9（M3-B5） | M3 | 无 | 右栏四个 Tab 与对应 commands | pending |
+| T-PSES ★ | Published Slide 会话生命周期统一（M4-A） | M4 | 无（M3-B1/B2 已集成） | `src/player/**` Slide 会话链 | pending |
+| T-RT ★ | Runtime API 2/3 全链（M4-C） | M4 | 无 | Runtime host 链与对应测试 | pending |
+| T-COMP ★ | Component API 4 全链（M4-D） | M4 | 无 | Component host 链与对应测试 | pending |
+
+依赖队列（条件满足后由协调者派发）：
+
+| ID | 目标 | 供给 | 依赖 | 状态 |
+|---|---|---|---|---|
+| T-GEST | formula/shape/media 属性视觉同步；resize/rotate/多选/方向键跨 scope/state 一次手势一次 history（M3-B3.4/5） | M3 | T-IMG、T-TEXT 集成 | pending |
+| T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | pending |
+| T-CSTATE | 课程状态与恢复（M4-E） | M4 | T-PSES、T-CTRL | pending |
+
+M3 Gate 后协调者按同一规范拆 M5/M6 任务板：M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
+
+### 4.6 集成 Gate
+
+§5 的里程碑完成定义是唯一验收标准。Gate 在供给它的全部任务到达 `integrated` 后由协调者运行一次 L3；Gate 判定仍按 M3 → M4 → M5/M6 → M7 → M8 次序，前置并行只提前产出任务，不提前判定 Gate。
 
 ## 5. 里程碑完成定义
 
 ### M3 — 完整 Slide 作者闭环
+
+供给任务：T-IMG、T-TEXT、T-GEST、T-RTGT、T-IUI（M3-B0/B1/B2 已集成）。
 
 - 原壳上弹/底部黑区 P1 已修复。
 - text、formula、shape、image、video、背景和教师控制器可在原 Workspace 作者链中工作。
@@ -176,6 +214,8 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 - “当前位置试运行”使用独立 Published snapshot，会话停止即销毁。
 
 ### M4 — Player、Runtime、Component 与课程逻辑
+
+供给任务：T-PSES、T-CTRL、T-RT、T-COMP、T-CSTATE。
 
 - Runtime API 2/3 与 Component API 4 的加载、通信、作者目标、checkpoint、hot update 和释放成立。
 - location/state/guard/controller 在独立试运行中成立，不污染编辑工程。
@@ -211,6 +251,12 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 
 验证是风险控制，不是工作量证明。同一 SHA 的等价绿色证据直接复用；代码、环境和失败条件未变化时不得重复运行。
 
+并行条款：
+
+- 执行者只对自己任务跑 L2，不得自行跑全量测试、preservation 或三尺寸 visual。
+- Electron/E2E 类验证使用本机单一会话资源，由协调者在集成时统一串行运行；执行者以 vitest、typecheck、受影响 build 为主。
+- 协调者每集成一批只跑受影响定向测试；L3 每 Gate 一次，不随任务批次重复。
+
 ### L0 — 文档或索引变更
 
 只运行：
@@ -235,7 +281,7 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 
 1. 该纵切的定向单测。
 2. 受影响类型边界或 bundle 的检查（确实涉及才运行）。
-3. 用户可见路径最多一条代表性 Electron E2E。
+3. 用户可见路径最多一条代表性 Electron E2E（由协调者在集成窗口运行）。
 4. `git diff --check`、临时诊断清理和范围审查。
 
 默认不运行 `npm test`、全量 Electron、三尺寸视觉或 preservation visual。
@@ -261,6 +307,8 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 
 `scripts/verify-editor-preservation.ts`、`tests/contracts/v8-behavior-map.json` 和冻结视觉基线不得被删除、弱化或用测试入口旁路。behavior map 只有在旧行为被产品协议明确退休且已有 replacement test 时才能更新；golden 不能为了接受新壳而修改。
 
+并行执行不豁免任何产品合同与反重写门禁。两个任务对同一事实给出冲突证据时，以已集成主线为准，另一方由协调者基于新主线重派。
+
 开发只在以下情况停下并请求用户决定：
 
 1. 需要新增依赖、付费能力或仓库外操作。
@@ -268,16 +316,22 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 3. 权限阻止继续。
 4. 产品合同内部不可调和，且已有最小证据证明不存在安全路径。
 
-普通测试失败、复杂 bug、相邻文件需求或阶段 NO-GO 不是停止条件；应回到首次证据并选择最短安全路径。
+普通测试失败、复杂 bug、任务冲突、相邻文件需求或阶段 NO-GO 不是停止条件；应回到首次证据并选择最短安全路径。
 
 ## 8. 接手入口
 
-新 Agent 依次阅读：
+协调者依次阅读：
 
 1. [`AGENTS.md`](AGENTS.md)
-2. 本总纲的当前恢复点与产品合同
+2. 本总纲的产品合同、当前恢复点、任务板与集成协议
 3. 当前 [M3 阶段计划](docs/plans/M3_SLIDE_AUTHORING_PLAN.md)
 4. [`PROJECT_COGNITION_INDEX.md`](PROJECT_COGNITION_INDEX.md)
-5. `git status --short` 与任务相关源码
+5. `git status --short` 与 `output/worktrees/` 中各任务分支状态
+
+执行者只读：
+
+1. 本总纲 §2 产品合同与 §4.3 所有权规则
+2. 自己的任务行（§4.5）与从属阶段计划对应小节
+3. owns 范围内的当前源码
 
 不要先读全仓库、全量测试或 donor 前端；先从认知索引的“改什么看哪里”进入实际代码。

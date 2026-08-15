@@ -1,7 +1,7 @@
 # M4：Player、Runtime、Component 与课程逻辑
 
 > PARENT: [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md)
-> PREREQUISITE: M3 Gate
+> PREREQUISITE: 见根计划 §4.5 任务板（T-PSES/T-RT/T-COMP 与 M3 在途任务前置并行；M4 Gate 判定仍在 M3 Gate 之后）
 > STATUS: pending
 > OUTCOME: 编辑 snapshot、课程运行会话和动态载体具有完整且单一的运行合同
 
@@ -16,7 +16,9 @@ M4 解决“编辑器能表达，但真实 Player 尚未完整兑现”的问题
 - location、state、guard、controller、互动、媒体与课程重启只有一个动作 owner。
 - 运行时状态、capture 和 checkpoint 不回写工程历史。
 
-## 2. 实施顺序
+## 2. 任务单元
+
+A–E 对应根任务板 T-PSES / T-CTRL / T-RT / T-COMP / T-CSTATE：T-PSES、T-RT、T-COMP 三者相互并行，并可与 M3 在途任务前置并行；T-CTRL 依赖 T-PSES；T-CSTATE 依赖 T-PSES 与 T-CTRL。owns 与派发状态以根计划 §4.5 为准。
 
 ### M4-A：统一 Published Slide 会话生命周期
 
