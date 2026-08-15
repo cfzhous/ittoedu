@@ -1,23 +1,29 @@
 # V8 前端原地升级为 V9：经只读审计的最终执行计划
 
-> `PLAN_VERSION: 3.3-fast-track`
+> `PLAN_VERSION: 4.0-ultra-continuous`
 > `DATE: 2026-08-15`
-> `EXECUTION_CLASS: production-system`
+> `EXECUTION_CLASS: production-system / minimum-sufficient-patch`
 > `BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485`
 > `V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d`
 > `UI_BASE: 3e41ec0 中真实存在的 V8 App / UI / Workspace / Phaser / CSS`
 > `CANONICAL_PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Runtime API 2/3 compatibility / Component API 4`
 > `ACTIVE_WAVE: W12 [V05F fast Gate recovery]`
-> `ACTIVE_WAVE_OWNER: strong-coordinator`
+> `EXECUTION_MODE: Sol Ultra continuous FT1 → FT8`
+> `ACTIVE_WAVE_OWNER: Sol Ultra sole writer / strong-coordinator review`
+> `DEFAULT_PARALLEL_WRITE_CARDS: 1`
 > `MAX_PARALLEL_WRITE_CARDS: 2`
-> `MAX_PARALLEL_READ_ONLY_AUDITS: 1`
-> `INTEGRATION_CURSOR: V04 accepted / V05F in_progress`
-> `PRIMARY_COORDINATOR: 当前根代理；GPT-5.6 Sol / xhigh，只有 Gate 与重大架构裁决临时 max`
-> `ATOMIC_EXECUTOR: GPT-5.6 Terra / max`
-> `ULTRA_WORKFLOW: 仅由主协调者按需用于只读审计、独立验证或已通过隔离预检的执行波`
+> `MAX_PARALLEL_READ_ONLY_AUDITS: 0；当前证据不能二元判断时可临时启用 1 个`
+> `INTEGRATION_CURSOR: V04 accepted / W12 dirty V05F resume`
+> `PRIMARY_COORDINATOR: 当前根代理；独占架构裁决、任务交接、Git、Gate 与 accepted`
+> `PRIMARY_EXECUTOR: GPT-5.6 Sol / ultra；默认在一个工作区连续完成当前端到端卡`
+> `TERRA_HELPER: 仅用于机械、独立、已二元定义的叶子任务；不负责疑难根因或跨生命周期架构`
+> `GIT_AND_ACCEPTED_OWNER: 主协调者独占`
+> `VALIDATION_POLICY: 单卡定向一次；Gate/M8 汇总；覆盖集合未变时复用绿色证据`
+> `EXECUTOR_RETURN_POLICY: 一次诊断与一次最短修复复验后仍失败，只交回主协调者重新定界，不停止 Goal`
+> `USER_STOP_POLICY: 仅权限、付费、新依赖、不可恢复破坏、仓库外操作或目标本身不可调和`
 > `PLAN_STATUS: implementation-active / fast-track`
 > `CURRENT_PRODUCT_STATUS: unusable`
-> `DEFAULT_REASONING: xhigh；仅 Gate、Schema/架构裁决和重大集成冲突临时 max；不常态使用 ultra`
+> `DEFAULT_REASONING: Sol Ultra；必须受第 0.2 节快速执行合同约束，不得把更高推理强度转化为更大范围或更多验证`
 > `STANDING_AUTHORIZATION: 主协调者可在本仓库、本目标和既有依赖内自行修订计划、白名单与实现接缝并持续推进；不再因普通架构调整逐次询问用户`
 
 本文件是仓库根目录唯一长期开发计划。它不是把当前失败的 V9 前端改得“像 V8”，而是从真正包含成熟 V8 前端的 `3e41ec0` 出发，在原文件、原 DOM、原画布和原交互链中逐步换入 V9 数据与运行内核。
@@ -56,11 +62,33 @@ Git 与前端实现基线 = 3e41ec0
 
 1. 以可运行的端到端纵切为最小交付，不为单个 helper、Adapter、测试夹具或文件边界单独建卡；同一用户行为需要的相邻文件一次完成。
 2. 不新建第二套 App、Store、Workspace 或协议；优先直接扩展已 accepted 的窄接缝。只有当前纵切真实需要且至少有两个立即消费者时才抽象公共层。
-3. 主协调者默认 `xhigh`；只有 Gate、Schema/架构裁决和重大集成冲突临时使用 `max`。Terra 原子执行仍可用 `max`，但不得把额外推理转化为额外文档或重复验证。
+3. 从 W12 起默认由 Sol Ultra 执行当前端到端卡；更高推理强度只用于更快缩小根因和完成结果，不得转化为额外文档、抽象、审计或重复验证。
 4. 用户已授权主协调者在既有目标、仓库和依赖内自行修改计划、任务白名单、Workspace/Player 接缝与内部架构；普通 NO-GO 先转为一个最短恢复纵切继续推进，不再停下等待。只有权限、付费、新依赖、不可恢复的数据破坏、仓库外操作或目标本身不可调和时才询问用户。
 5. 自动验证采用第 6.3 节分层策略：单卡定向、Gate 汇总、M8 全量。同一 accepted SHA 的绿色证据可复用；无代码变化不得重复跑同一命令来“增加信心”。
 6. UI 纵切只保留一个主视口、一个真实指针路径和一个可见结果；三尺寸、像素 golden、系统级 SendInput 仅在布局变化或最终收敛需要时运行，不再与 Playwright 重复证明同一事实。
 7. 发现局部缺口时先修最短根因，不建设通用平台、未来插件层、并行协议或完整迁移框架；尚无当前消费者的能力保持未实现。
+
+### 0.2 Sol Ultra 快速执行合同（W12 到 M8 的默认提示词）
+
+每次向 Ultra 交接任务时，必须原样包含下面合同；ACTIVE_CARD 的具体 Outcome、accepted parent、工作目录、白名单和定向检查附在合同之后。旧 DAG、历史命令或报告与本合同冲突时，以本节为准。
+
+```text
+你是当前 ACTIVE_CARD 的唯一写入执行器。目标是从现有 accepted parent 与工作区状态出发，交付一个可运行、可二元判断的端到端结果；不要规划下一卡，不拆 helper、Adapter、fixture、文档或未来能力。
+
+上下文只读取：计划 §0、§2、§5.8、§6.3、§7.0、§10 当前 ACTIVE_CARD，git status/diff，以及该结果的直接调用链、首次失败证据和最相关测试。除非当前合同缺失，不通读 §7.1–§7.11 的旧 ID，不做全仓泛审计。
+
+动手前用一句话写清本卡唯一结果和通过条件。先读当前 diff、直接调用链与首次失败证据；如果根因仍不能二元判断，只允许选择一个能明确区分两个主假设的最短诊断。已有失败证据足以区分时，它已经算诊断，不得再加日志、截图、审计或换工具重复证明。
+
+实施最短充分补丁，只改当前结果真实需要的相邻文件并复用现有路径。禁止未来抽象、通用平台、第二套 App/Store/Workspace/Player、无立即消费者的接口、状态机、配置层、顺手重构、批量重命名、依赖升级或额外文档。临时诊断必须在交付前删除。
+
+每个故障最多执行一个循环：保留一次失败证据 → 做一次根因诊断 → 应用一次最短修复 → 复验原失败检查一次。复验仍失败时立即停止继续打补丁，把新证据和两个剩余假设交回主协调者；不得换名字重试、扩大白名单或新建测试体系。
+
+验证只覆盖本次 diff：实现循环先跑 1–3 个最相关检查，类型或构建边界实际变化时才加 typecheck/build。覆盖集合未变化的绿色证据直接复用；禁止无代码变化重跑、换工具重复证明或为了放心追加矩阵。UI 只保留一个 1366×768 主路径和一个结果截图；Gate/M8 之外不跑全量、三尺寸、SendInput、clean-Windows 或全部导出。
+
+除 GATE-V、GATE-S、GATE-FEATURES 与 M8 外不停顿、不汇总、不请求用户逐步确认。Gate 只是自动检查点：GO 后立即物化下一卡，NO-GO 后立即物化最短恢复卡，不等待用户。普通技术问题自行按最短路径处理；只有权限、付费、新依赖、不可恢复破坏、仓库外操作或目标不可调和才交给用户。
+
+Ultra 不得执行 git add/commit/stash/reset/checkout/rebase/merge/push，不得建立分支/worktree，不得修改本计划或标记 accepted；所有 Git 写操作、任务交接、Gate 和 accepted 只归主协调者。不得自行生成子智能体或并行写入者。交付时只报告：结果、精确 diff、已跑检查、未覆盖的一个主要风险。
+```
 
 ---
 
@@ -355,80 +383,72 @@ FullPreviewWindow
 
 ---
 
-## 5. 角色、任务和弱模型执行协议
+## 5. 角色、任务和 Ultra 连续执行协议
 
 ### 5.1 强协调者负责
 
-- 由当前根代理担任持续主脑；复杂架构决策优先使用 GPT-5.6 Sol / max，不把总协调权交给执行子智能体；
+- 由当前根代理担任持续主脑，独占架构裁决、ready set、任务交接、Git、Gate 与 accepted；
 - Git 基线、分支和 accepted SHA；
-- 从 DAG 计算当前 ready set，把它编译为 1～2 张互不冲突的 ACTIVE_WAVE 精确任务卡；
+- 从第 7.0 节计算当前 ready set，默认只编译 1 张端到端 ACTIVE_CARD；只有第 5.8 节全部成立才可编译 2 张；
 - 创建、核验和回收独立 worktree/分支；任何隔离条件不成立时自动退回单写入串行；
-- 反重写 verifier、golden screenshots、行为测试映射；
-- 从 donor 选择精确函数；
-- 在上一 accepted SHA 上把下一 DAG 节点编译为精确任务卡；
-- Schema、IPC、新依赖和架构裁决；
-- 审查 UI diff、真实鼠标、截图和视觉结果；
-- `go/no-go`、`accepted`、回退和 push；
-- 对并行结果逐个审查、逐个集成、逐个重跑门禁；并行实现不等于并行合并；
+- 把第 0.2 节合同、当前 Outcome、accepted parent、工作目录、白名单和最小检查一次性交给 Ultra；
+- Ultra 写入期间不并行修改同一产品工作区，只做进度协调和只读复核；
+- 审查精确 diff、代表性可见结果和真正受影响的检查；不补做第二套等价验证；
+- 执行 `git add/commit/revert/cherry-pick`、`go/no-go`、`accepted` 与 push；
+- 对双 worktree 结果逐个审查、逐个提交、逐个集成；并行实现不等于并行合并；
 - 把技术判断转换成教师可见验收，不能让用户判断 Store/Adapter。
 
-### 5.2 Terra Max 原子执行器负责
+### 5.2 Sol Ultra 单写入执行器负责
 
-- 使用 `gpt-5.6-terra` 且推理强度设为 `max`；
-- 一次只执行 ACTIVE_WAVE 中分配给自己的一个 Owner 为 `Terra Max`、状态为 `ready` 的 ACTIVE_CARD；
-- 只在任务卡指定的工作目录和分支工作，不读取或修改另一个执行器的工作树；
-- 开放读取直接依赖，但只改任务白名单；
-- 优先运行和保留既有行为测试；
-- 完成一个可见行为或一个纯模型闭环；
-- 运行任务卡全部门禁；
-- 通过后提交一个 commit，报告 `done-awaiting-review`；
-- 不更新本计划、不 push、不自行变更 `accepted`；
-- 不再生成子智能体、不启动 Ultra 工作流、不规划下一任务。
+- 使用 `gpt-5.6-sol` 且推理强度设为 `ultra`，每次只接收一个状态为 `ready` 或明确交接的 `in_progress` ACTIVE_CARD；
+- 严格执行第 0.2 节提示词合同，只在分配的工作目录写入，只完成一个端到端结果；
+- 在共享脏工作区接续时成为唯一产品写入者，保留现有用户/外部文件，不 stash/reset/checkout，不触碰白名单外 diff；
+- 在独立 worktree 执行时也不得创建、切换或回收 worktree；这些均由主协调者完成；
+- 可以读取直接依赖并提出一个最小相邻白名单修订，由主协调者自行裁决，不向用户转嫁 Store/Adapter/Schema 或拆卡判断；
+- 运行卡内最小检查并删除临时诊断后报告 `done-awaiting-review`；
+- 不执行任何 Git 写操作，不修改本计划，不标记 accepted，不规划或启动下一卡。
 
-### 5.3 Ultra 工作流边界
+### 5.3 Ultra 快速工作流边界
 
-Ultra 是多智能体编排工作流，不是普通任务执行者，也不是 Terra 的推理强度名称。只有强协调者可以决定是否启用，适用范围仅限：
+本计划中的 Ultra 是 Sol 的默认高推理执行强度，不授予额外范围、并行、Git 或 accepted 权限。它从 W12 连续用于所有剩余 Fast Track，目的只是更快找到最短充分路径。
 
-术语依据：官方 OpenAI 文档将 Terra 的 `reasoning.effort` 列为最高 `max`，并把 Codex Ultra 描述为类似 multi-agent 的编排模式；参见 [GPT-5.6 Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra) 与 [GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model)。
+- 默认一个 Ultra 单写入执行器，不因 Ultra 自行扩展为 swarm；
+- 一次接收一张端到端卡，从当前 diff 连续做到 `done-awaiting-review`，不在里程碑中途等待用户；
+- 当前失败证据足够时直接修根因；不足时只做一个能区分主假设的诊断；
+- Terra Max 仅作为可选机械助手处理已经二元定义、与主写入完全隔离的叶子任务，不负责疑难根因、架构或跨生命周期时序；
+- 只读审计默认关闭；只有一次最短诊断仍不能区分主假设时，主协调者才临时启用一个审计槽，结论必须直接减少下一步分支。
 
-- 多路只读架构或风险审计；
-- 互不依赖、互不写同一文件的测试分片；
-- 完成实现后的独立对抗复核；
-- 可以清楚拆成独立工作流、且最终由主协调者统一综合的调查。
-- 第 5.8 节全部成立后，编排独立 worktree 中互不依赖的 ACTIVE_CARD；实际写入者仍各自遵守 Terra Max 原子卡约束。
+Ultra 不得把以下行为解释为“更稳妥”：
 
-Ultra 不得用于：
-
-- 执行一张普通原子修改卡；
+- 通读无关旧 DAG、全仓巡检或重新设计计划；
 - 让多个子智能体同时修改相同或相邻产品文件；
 - 在共享工作区中启动第二个写入者，或把“不同分支”误当作“不同工作目录”；
-- 自行拆分 DAG、变更白名单、接受提交或继续下一任务；
-- 取代主协调者对 diff、测试、截图和教师体验的最终责任。
+- 为未来能力增加接口、Adapter、平台、配置、状态机或第二实现；
+- 在卡内添加额外报告、rubric、测试矩阵、截图矩阵或第二种鼠标工具；
+- 自行拆分 DAG、扩大 Outcome、变更计划、接受提交或继续下一任务。
 
-### 5.4 普通 Terra Max 任务上限
+### 5.4 Ultra ACTIVE_CARD 大小
 
-- 产品文件：通常 2–5 个；同一端到端行为不得仅因多一个相邻 helper 被机械拆卡；
-- 产品净改：通常不超过 600 行；
-- 测试文件：1–3 个，优先修改既有测试；确无覆盖才新建；
-- 用户可见行为：1 个完整纵切，而不是一个内部函数；
-- commit：1 个；
-- 禁止附带格式化、重命名、依赖、Schema、IPC 或清理。
+- 结果：一个完整用户行为或一个 producer/consumer 同时闭合的纯模型结果；
+- 文件：只包含该结果必需的相邻文件，不因 helper 数量机械拆卡；
+- 测试：1–3 个最相关检查，优先既有测试；确无可判定证据才新增一个；
+- 提交：主协调者审查后形成一个产品 commit；
+- 第二个独立结果、无立即消费者的抽象、格式化、批量重命名或旁路清理一律留到后卡。
 
-数值上限是审查信号，不是自动 `blocked`。若扩展仍属于同一可见纵切且白名单无冲突，协调者可在派发前一次性放宽；只有出现第二个独立结果才拆卡。主协调者的高冲突集成卡不受数值硬限制，但仍禁止整文件重写 `Workspace.tsx`、`PropertiesTab.tsx` 或 `editorStore.ts`。
+文件数和行数只用于发现范围漂移，不是为了拆碎同一行为。若相邻文件仍属于唯一 Outcome，主协调者一次性修订白名单并继续，不询问用户；仍禁止整文件重写 `Workspace.tsx`、`PropertiesTab.tsx` 或 `editorStore.ts`。
 
-### 5.5 Terra Max 遇到这些事实必须停止
+### 5.5 Ultra 执行器交回主协调者的条件
 
-- 需要白名单外产品文件；
-- 需要改 Schema、IPC、package、tsconfig、AGENTS；
-- 需要新增依赖；
-- 任务卡中的接口或路径与 accepted parent 不符；
+- 一次最短诊断和一次修复复验后，原失败仍未二元收敛；
+- 出现第二个独立 Outcome，或需要白名单外的非相邻产品范围；
+- 需要改 Schema、IPC、package、tsconfig、AGENTS 或新增依赖；
+- 任务卡中的 accepted parent、接口或路径与工作区事实不符；
 - 需要新 App/Shell/Slide Workspace；
 - 需要同时写 V8/V9；
 - 既有行为测试与需求冲突；
-- 变更已明显形成第二个独立结果；
 - 基线 guard 失败。
 
-停止时只报告证据，不扩大范围，不制造 placeholder，不弱化测试。
+交回只面向主协调者，不面向用户。只报告最短证据、已排除假设和建议的一个下一步；不扩大范围，不制造 placeholder，不弱化测试。主协调者对普通技术接缝自行修订计划或白名单并重新交接；只有第 0.1 节授权边界才询问用户。
 
 ### 5.6 任务状态
 
@@ -438,16 +458,16 @@ pending → ready → in_progress → done-awaiting-review → accepted
 ```
 
 - 同一 worktree 同时只能有一个写入 ACTIVE_CARD；
-- 一个 ACTIVE_WAVE 默认只有 1 张写入卡，满足第 5.8 节时最多 2 张；另可并行 1 个只读审计；
+- 一个 ACTIVE_WAVE 默认只有 1 张写入卡，满足第 5.8 节时最多 2 张；只读审计默认 0，只有当前证据不能二元判断时临时启用 1 个；
 - 并行卡分别验收，不能以“整波测试通过”替代单卡 diff、测试和视觉审查；
-- Terra Max 只做到 `done-awaiting-review`；
+- Ultra 执行器只做到 `done-awaiting-review`；
 - UI 任务必须经强协调者复核一个代表性可见路径才能 `accepted`；同一路径不再追加第二套鼠标工具证明；
 - 自动化最多证明 `engineering candidate`；
 - 失败的 accepted 任务用 `git revert <task-sha>`，禁止 reset。
 
 ### 5.7 为什么不预写几十张未来白名单
 
-未来第 20 张卡的接口和文件位置取决于前 19 张 accepted 结果。现在伪造精确白名单，只会迫使弱模型猜测或频繁越权。
+未来第 20 张卡的接口和文件位置取决于前 19 张 accepted 结果。现在伪造精确白名单，只会迫使执行器猜测或扩大范围。
 
 因此本计划保存：
 
@@ -455,7 +475,7 @@ pending → ready → in_progress → done-awaiting-review → accepted
 冻结裁决 + 完整 DAG + 唯一 ACTIVE_WAVE
 ```
 
-强协调者只能从依赖均已 accepted 的 ready set 中，根据真实 SHA 物化当前波次。Terra Max 每轮只读第 0、2、3、5、6 节和分配给自己的 ACTIVE_CARD，不需要把完整 DAG 或同波其他任务装入上下文。
+强协调者只能从依赖均已 accepted 的 ready set 中，根据真实 SHA 物化当前波次。Ultra 每轮按第 0.2 节只读必要章节、当前 ACTIVE_CARD、当前 diff 和直接调用链，不把完整旧 DAG 或同波其它任务装入上下文。
 
 ### 5.8 受限并行与串行集成协议
 
@@ -468,25 +488,25 @@ pending → ready → in_progress → done-awaiting-review → accepted
 1. 所有依赖均已 `accepted`，且两张卡基于同一个完整 accepted parent SHA；
 2. 两张卡互相没有数据、接口、测试或验收依赖；任一张的 After 不能成为另一张的 Before；
 3. 产品白名单、测试白名单、生成物和截图输出目录完全不重叠；
-4. 不修改共享高冲突区：本计划、`AGENTS.md`、package/tsconfig、Schema/IPC、反重写 guard、behavior map、golden、`App.tsx`、`Workspace.tsx`、`editorStore.ts`、`globals.css`；协调者可在审计后为某一波明确放宽其中一个区域，但同波只能由一张卡拥有；
+4. 不修改共享高冲突区：本计划、`AGENTS.md`、package/tsconfig、Schema/IPC、反重写 guard、behavior map、golden、`App.tsx`、`Workspace.tsx`、`editorStore.ts`、`globals.css`；协调者可在核对直接依赖后为某一波明确放宽其中一个区域，但同波只能由一张卡拥有；
 5. 每张卡有独立 worktree、独立 `codex/` 分支、独立日志和一个 commit；只创建不同分支但仍共享目录不算隔离；
 6. 协调者已经做过一次并行环境预检，且 worktree、依赖解析和定向测试路径自上次预检后没有变化；环境未变化时复用该证据，不重复测磁盘、缓存或清理路径。工具调用必须稳定落在指定 worktree，否则退回串行；禁止复制主工作区 `node_modules`，未经审计不得建立 junction/symlink；
 7. 两张卡都能独立运行各自门禁；若 worktree 无法安全运行测试，则该波退回串行；
-8. 预计冲突、接口漂移或额外文件需求一旦出现，执行器立即 `blocked`，不得自行 merge/rebase 或扩大白名单。
+8. 预计冲突、接口漂移或额外文件需求一旦出现，执行器暂停写入并交回主协调者，不得自行 merge/rebase；若额外相邻文件仍只服务同一 Outcome，主协调者可直接修订白名单后继续，否则另物化后卡。
 
 #### 固定并行宽度
 
 - 主协调者占 1 个槽位；
-- 最多 2 个 Terra Max 写入执行器，各在独立 worktree；
-- 最多 1 个只读审计/测试复核执行器；
+- 默认 1 个、最多 2 个 Sol Ultra 写入执行器；双写时各在独立 worktree；
+- 默认 0 个只读审计；当前证据不能二元判断时临时启用最多 1 个，得到判别结论后立即结束；
 - `G00`、`G01`、`G04`、`G05`、所有 Gate 裁决、主入口切换、Mixed 汇合与最终清理默认串行；
 - `G02` 与 `G03` 可以并行收集证据，但其产物仍由协调者串行审查和提交；
 - `V01→V05` 是高耦合纵切，默认串行；`GATE-V` 通过后才常态启用双写入波。
 
 #### 主线集成永远串行
 
-1. 调度前，协调者先把完整 ACTIVE_WAVE 写入本计划并提交；卡内 `Accepted parent SHA` 始终指上一产品 accepted SHA，纯计划提交只作为编排记录，不扩大产品 diff 基线；
-2. 执行器把单卡提交交给协调者，状态仅为 `done-awaiting-review`；
+1. 调度前，协调者只把最小 ACTIVE_WAVE 写入第 10 节；串行卡不要求单独提交计划，双 worktree 波才先提交编排记录。卡内 `Accepted parent SHA` 始终指上一产品 accepted SHA，纯计划提交不扩大产品 diff 基线；
+2. 执行器把单卡 diff、最小证据和检查结果交给协调者，状态仅为 `done-awaiting-review`，不执行 Git 写操作；
 3. 协调者从 accepted parent 核对精确 diff、测试和 UI 证据；
 4. 一次只集成一个提交；每次集成后只运行该卡定向测试和真正受影响的共享测试；verifier 与全量测试按第 6.3 节分层执行；
 5. 第一张卡 accepted 后，第二张卡若仍能无冲突应用，才继续审查；否则废弃旧结果并基于新 accepted SHA 重新物化，不做临场冲突拼接；
@@ -580,7 +600,7 @@ git diff --name-only <accepted-parent-sha>
 #### D. 证据复用与停止浪费
 
 - 绿色结果绑定 accepted SHA 与受影响文件集合；集合未变化即可复用。
-- 同一失败命令允许在修复后复验一次；再次失败才继续诊断，不做无变化重试。
+- 同一失败命令只允许在最短修复后复验一次；再次失败立即交回主协调者重新定界，不在同一卡追加第三个补丁或无变化重试。
 - 单卡验证目标控制在 10 分钟内，Gate 汇总目标控制在 30 分钟内；天然更慢的全量命令只按 C 层运行一次，不为了凑时限拆成重复证据。
 - 不为“更有把握”新增平行测试、截图、日志或审计；只有现有证据不能二元判断合同才补一项最短证据。
 - 自动化通过即记 `engineering candidate` 并继续下一 ready set；只有最终教师验收才使用 `accepted` 的产品质量含义，代码任务的 Git `accepted` 不等待教师逐卡确认。
@@ -626,7 +646,7 @@ git diff --name-only <accepted-parent-sha>
 - 一个 Fast Track 通常物化 1–5 张端到端卡；只有白名单或可见结果真正独立才拆分。
 - 不为接口定义、Adapter、fixture、测试迁移、文档更新单独建卡；它们随第一个真实消费者进入同一提交。
 - 同一 Fast Track 内定向测试随卡运行，全量只按第 6.3 节在 Gate/M8 运行。
-- 只有 §5.8 的全部隔离条件成立才启用最多两个 Terra Max；否则主工作区单写入持续推进。
+- 只有 §5.8 的全部隔离条件成立才启用最多两个 Sol Ultra；否则主工作区由一个 Ultra 单写入持续推进。
 
 下面的旧 DAG 仅用于防止能力遗漏和定位依赖，不控制提交粒度。
 
@@ -854,7 +874,7 @@ Goal 长程运行不得在每个里程碑等待用户确认；里程碑是自动
 ````markdown
 ### ACTIVE_CARD｜<ID> <名称>
 
-- Owner: Terra Max | strong-coordinator
+- Owner: Sol Ultra | strong-coordinator
 - Status: ready
 - Wave: <Wxx>
 - Accepted parent SHA: <完整 SHA>
@@ -907,6 +927,8 @@ ACTIVE_WAVE 只列 wave ID、共同 accepted parent、卡列表、并行结论�
 - `V05 not accepted / GATE-V = NO-GO`：真实 Electron 可以通过 Phaser 几何代理移动 V9 frame，Undo/Redo 与 schemaVersion 9 archive 也已走通到首轮保存，但 V9 Native text 没有进入隔离 Player 的视觉树；当前 accepted cursor 仍为 V04 `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`。
 
 ### W11｜V9 最小纵切真实闭环波（历史记录）
+
+> 本节及其 V05 卡中的实现步骤、命令、三尺寸、SendInput 与证据要求只保存历史，不得继续执行。当前执行口径只看第 0.2、6.3 节与 W12/V05F。
 
 - Status: `archived / superseded by W12`
 - Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
@@ -1016,14 +1038,14 @@ Rollback: `git revert <task-sha>`
 
 - Status: `in_progress`
 - Common accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
-- Write cards: `V05F`（主协调者，主工作区，串行）
-- Read-only audit: 只允许一个 Terra 审计槽串行反证 Phaser/生命周期根因；用户另行取得的 Kimi 报告只作为外部意见，由主协调者核实后选择性吸收，不授予写入或 Gate 权限。
-- Parallel result: `App.tsx` 与 `Workspace.tsx` 均为高冲突主入口，且当前未 accepted 的 V05 调查 diff 已在主工作区；不创建 Terra worktree。
+- Write cards: `V05F`（Sol Ultra 唯一写入者，接续主工作区现有 dirty diff，串行）
+- Read-only audit: 默认关闭；此前 Terra 假设审查已结束且未产生可接受修复。Kimi 报告只作为已核实的外部意见，不授予写入或 Gate 权限。
+- Parallel result: `App.tsx` 与 `Workspace.tsx` 均为高冲突主入口，且当前未 accepted 的 V05F diff 已在主工作区；不建 worktree、不 stash/reset/checkout，主协调者在 Ultra 交付前停止产品写入。
 - Integration order: `V05F → GATE-V`
 
 ### ACTIVE_CARD｜V05F 可见 V9 text、真实拖动与 archive 重开
 
-- Owner: `strong-coordinator`
+- Owner: `Sol Ultra sole writer / strong-coordinator review`
 - Status: `in_progress`
 - Wave: `W12`
 - Accepted parent SHA: `62cd1a4255f3f2d82fd98b1978fce3392bbc16e6`
@@ -1032,10 +1054,12 @@ Rollback: `git revert <task-sha>`
 - Assigned branch: `codex/v9-editor-v8-base`
 - Parallel eligibility: `serial`
 - Integration order: `1`
+- Handoff safety: Ultra 在当前主工作区接续已有 7 个 V05F 产品/测试变更，保留并不得触碰未跟踪的 `PLAN_EVALUATION_REPORT.md`；不得执行任何 Git 写操作。主协调者只在 `done-awaiting-review` 后审查、运行 Gate 汇总并提交。
 - Outcome: 原 App/Workspace 的隔离 Player 通过现有 authoring patch 协议显示 V9 只读 `SceneDocument` 投影；同一 text 可被真实 canvas 指针拖动、Undo/Redo、保存 schemaVersion 9、完全关闭重开并继续拖动，且 V8 Store 不写入。
 - Product whitelist: `src/renderer/course/v9SlideVerticalSlice.ts`、`src/renderer/App.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/workspaceSlideAuthoring.ts`。
 - Test whitelist: `tests/unit/v9SlideVerticalSlice.test.ts`、`tests/unit/workspaceSlideAuthoring.test.ts`、`tests/e2e/v9SlideVerticalSlice.spec.ts`。
-- Targeted checks: 两个相关 unit 文件、typecheck、受影响的 Renderer build、一次 `v9SlideVerticalSlice.spec.ts --workers=1`、一次 `verify:editor-preservation` 静态守卫和 `git diff --check`；Electron main 未变化时复用既有 build 证据，不重跑。通过后 GATE-V 只额外汇总一次 `npm test`。
+- Failure budget: 现有第二进程 `cursor:auto` 失败是本轮保留的首次失败证据。Ultra 只允许一个判别诊断、一个最短修复和一次原 E2E 复验；仍失败即交回主协调者重新定界，不追加第三个猜测补丁。
+- Targeted checks: 已绿且覆盖集合未变的两个 unit 文件直接复用；修复后只复验一次 `v9SlideVerticalSlice.spec.ts --workers=1`，通过后运行 typecheck、受影响的 Renderer build、一次 `verify:editor-preservation` 静态守卫和 `git diff --check`。Electron main 未变化时复用既有 build 证据，不重跑。GATE-V 由主协调者只额外汇总一次 `npm test`。
 - Preservation scope: 本卡不得修改 JSX DOM、className、style、data-testid、画布尺寸或 golden；若最终 diff 触及这些范围，才升级为对应视觉复核，不因 `Workspace.tsx` 文件名本身重复运行三尺寸或 SendInput。
 - Stop only if: 闭环必须引入新依赖、改 Schema/IPC、写入 V8 Store 或建立第二套 Player/Workspace；普通 Workspace/Player 接缝调整由主协调者自行处理。
 - Visual evidence: 只保留 1366×768 重开截图和 Playwright `page.mouse` 从原 canvas 坐标进入 Phaser 的一次路径；archive 同时证明 frame/ID 写入。取消三尺寸重复截图与 SendInput。
