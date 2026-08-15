@@ -11,6 +11,9 @@ import type { TeacherControllerAction } from '../../src/shared/projectTypes'
 import type { RuntimeHostActions } from '../../src/shared/runtimeTypes'
 import { CourseEventBus } from '../../src/player/CourseEventBus'
 import {
+  createTeacherControllerLayout,
+} from '../../src/shared/teacherControllerLayout'
+import {
   SlideSurfaceHost,
   type SlideItemHost,
   type SlideItemMountContext,
@@ -329,6 +332,63 @@ function controlRootAnimation(root: HTMLElement) {
     value: vi.fn(() => [animation]),
   })
   return animation
+}
+
+function mockControllerRects(
+  controllerRoot: HTMLElement,
+  content: HTMLElement,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): void {
+  const rect = () => ({
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  })
+  for (const element of [controllerRoot, content]) {
+    Object.defineProperty(element, 'getBoundingClientRect', {
+      configurable: true,
+      value: rect,
+    })
+  }
+}
+
+function pointerGesture(
+  element: HTMLElement,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): void {
+  element.dispatchEvent(new PointerEvent('pointerdown', {
+    bubbles: true,
+    pointerId: 1,
+    clientX: startX,
+    clientY: startY,
+    pointerType: 'mouse',
+  }))
+  element.dispatchEvent(new PointerEvent('pointermove', {
+    bubbles: true,
+    pointerId: 1,
+    clientX: endX,
+    clientY: endY,
+    pointerType: 'mouse',
+  }))
+  element.dispatchEvent(new PointerEvent('pointerup', {
+    bubbles: true,
+    pointerId: 1,
+    clientX: endX,
+    clientY: endY,
+    pointerType: 'mouse',
+  }))
 }
 
 describe('SlideSurfaceHost unified compositor', () => {
@@ -789,6 +849,171 @@ describe('SlideSurfaceHost unified compositor', () => {
     ))
     expect(host.sceneId).toBe('scene-1')
     expect(after).not.toHaveBeenCalled()
+  })
+
+  it('delegates teacher-controller actions to the course-level executor without local navigation', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.buttons = [{
+      id: 'next',
+      action: { type: 'scene.next' },
+      label: '下一场景',
+      visible: true,
+    }]
+    const document = slide([textItem('first', 0), controller])
+    document.scenes.push({
+      id: 'scene-2',
+      name: '场景二',
+      backgroundColor: '#ffffff',
+      layerItems: [textItem('second', 0)],
+      interactions: [],
+    })
+    const executor = vi.fn(async () => true)
+    const host = new SlideSurfaceHost(document, { executeTeacherControllerAction: executor })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    ;(host.rootElement!.querySelector('[data-controller-button-id="next"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(executor).toHaveBeenCalledOnce())
+    expect(executor).toHaveBeenCalledWith(
+      { type: 'scene.next' },
+      expect.objectContaining({ layerItemId: 'controller' }),
+    )
+    // The surface never navigates locally: the course owns the location.
+    expect(host.sceneId).toBe('scene-1')
+  })
+
+  it('moves the controller by session drag and restores project defaults on course restart', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.collapsible = true
+    const host = new SlideSurfaceHost(slide([controller]))
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const wrapper = host.rootElement!.querySelector<HTMLElement>(
+      '[data-layer-item-id="controller"]',
+    )!
+    expect(wrapper.style.left).toBe('820px')
+    const controllerRoot = wrapper.querySelector<HTMLElement>('.slide-native-teacher-controller')!
+    const content = wrapper.querySelector<HTMLElement>('.slide-layer-content')!
+    mockControllerRects(controllerRoot, content, 820, 640, 420, 60)
+
+    pointerGesture(controllerRoot, 900, 670, 950, 700)
+    expect(wrapper.style.left).not.toBe('820px')
+    expect(Number.parseFloat(wrapper.style.left)).toBeGreaterThan(820)
+
+    await host.reset('course')
+    expect(wrapper.style.left).toBe('820px')
+    expect(wrapper.style.top).toBe('640px')
+    expect(host.hitStack(1030, 670).some((hit) => hit.layerItemId === 'controller')).toBe(true)
+
+    await host.destroy()
+    expect(host.rootElement).toBeNull()
+  })
+
+  it('keeps the controller session across surface replay and clears it on destroy', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.collapsible = true
+    const host = new SlideSurfaceHost(slide([controller]))
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    const collapseButton = host.rootElement!.querySelector<HTMLButtonElement>(
+      '[data-teacher-controller-collapse]',
+    )!
+    collapseButton.click()
+    expect(host.rootElement!.querySelector('[data-controller-button-id]')).toBeNull()
+
+    // Replay resets the semantic unit but not the course session.
+    await host.reset('surface')
+    expect(host.rootElement!.querySelector('[data-controller-button-id]')).toBeNull()
+
+    await host.destroy()
+    const recreated = new SlideSurfaceHost(slide([structuredClone(controller)]))
+    const recreatedContainer = window.document.createElement('div')
+    await recreated.mount(mountContext(recreatedContainer))
+    await recreated.activate()
+    // A fresh host starts from the project defaults, not the collapsed session.
+    expect(recreated.rootElement!.querySelector('[data-controller-button-id]')).not.toBeNull()
+    await recreated.destroy()
+  })
+
+  it('only reports the collapse pill as the hit area of a collapsed controller', async () => {
+    const controller = controllerItem('controller', 1)
+    if (controller.content.nativeType !== 'teacher-controller') throw new Error('expected controller')
+    controller.content.data.collapsible = true
+    const host = new SlideSurfaceHost(slide([controller]))
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+
+    expect(host.hitTest(1030, 670)).toMatchObject({ layerItemId: 'controller' })
+
+    const collapseButton = host.rootElement!.querySelector<HTMLButtonElement>(
+      '[data-teacher-controller-collapse]',
+    )!
+    collapseButton.click()
+    // The panel center is no longer a controller hit…
+    expect(host.hitStack(1030, 670).some((hit) => hit.layerItemId === 'controller')).toBe(false)
+    // …only the pill rect is.
+    const pill = createTeacherControllerLayout(controller.content.data, 420, 60).collapse!
+    const pillCenter = {
+      x: 820 + pill.x + pill.width / 2,
+      y: 640 + pill.y + pill.height / 2,
+    }
+    expect(host.hitTest(pillCenter.x, pillCenter.y)).toMatchObject({ layerItemId: 'controller' })
+  })
+
+  it('hides authorable canvas controllers when playback controls are none', async () => {
+    const host = new SlideSurfaceHost(slide([controllerItem('controller', 1)]), {
+      playbackControls: 'none',
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    const wrapper = host.rootElement!.querySelector<HTMLElement>(
+      '[data-layer-item-id="controller"]',
+    )!
+    // The authored controller is not delivered: its wrapper is hidden and the
+    // surface hit test never reports it.
+    expect(wrapper.hidden).toBe(true)
+    expect(host.hitStack(1030, 670).some((hit) => hit.layerItemId === 'controller')).toBe(false)
+  })
+
+  it('refreshes the controller mute label from the course audio session', async () => {
+    const events = new CourseEventBus()
+    const host = new SlideSurfaceHost(slide([controllerItem('controller', 1)]), {
+      interactions: {
+        events,
+        hostActions: {
+          goToScene: vi.fn(() => true),
+          nextScene: vi.fn(() => true),
+          previousScene: vi.fn(() => true),
+          replayScene: vi.fn(() => true),
+          restartCourse: vi.fn(() => true),
+        },
+      },
+      initialMuted: false,
+    })
+    const container = window.document.createElement('div')
+    await host.mount(mountContext(container))
+    await host.activate()
+    const sound = host.rootElement!.querySelector<HTMLButtonElement>(
+      '[data-controller-button-id="mute"]',
+    )!
+    expect(sound).toHaveTextContent('静音 · 开')
+
+    events.emit('audio:change', { muted: true })
+    expect(host.rootElement!.querySelector<HTMLButtonElement>(
+      '[data-controller-button-id="mute"]',
+    )).toHaveTextContent('静音 · 关')
+
+    events.emit('audio:change', { muted: false })
+    expect(host.rootElement!.querySelector<HTMLButtonElement>(
+      '[data-controller-button-id="mute"]',
+    )).toHaveTextContent('静音 · 开')
   })
 })
 

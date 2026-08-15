@@ -23,6 +23,10 @@ import { SlideSurfaceHost } from './surfaces/slide/SlideSurfaceHost'
 import { spatialCameraFromPose } from './surfaces/spatial/spatialModel'
 import { SpatialSurfaceHost } from './surfaces/spatial/SpatialSurfaceHost'
 import type { SurfaceDiagnostic, SurfaceHost } from './surfaces/SurfaceHost'
+import {
+  ScenePickerOverlay,
+  type ScenePickerScene,
+} from './ScenePickerOverlay'
 
 export interface PublishedCourseAppOptions {
   onDiagnostic?: (diagnostic: SurfaceDiagnostic) => void
@@ -88,6 +92,8 @@ export class PublishedCourseApp {
   readonly #dynamicHosts: PublishedDynamicHostRegistry
   readonly #player: CoursePlayer
   #currentLocationId: string | null = null
+  #muted: boolean
+  #scenePicker: ScenePickerOverlay | null = null
   #destroyed = false
 
   private constructor(
@@ -97,6 +103,7 @@ export class PublishedCourseApp {
   ) {
     this.payload = publishedCourseV2Schema.parse(payload)
     this.project = publishedCourseToPlayerDocument(this.payload)
+    this.#muted = this.project.media.audio.defaultMuted
     this.courseState = new DeclarativeCourseState({
       projectId: this.project.id,
       projectRevision: 0,
@@ -249,6 +256,10 @@ export class PublishedCourseApp {
 
   async restart(): Promise<void> {
     const decision = this.courseState.restart()
+    // Restart restores the project defaults for every course session state,
+    // including the session mute override and controller offset/collapse.
+    this.#muted = this.project.media.audio.defaultMuted
+    this.events.emit('audio:change', { muted: this.#muted })
     await this.#player.resetCourse()
     this.#currentLocationId = null
     await this.navigate(decision.toLocationId, 'restart')
@@ -259,6 +270,8 @@ export class PublishedCourseApp {
     this.#destroyed = true
     await this.#player.destroy()
     this.#dynamicHosts.dispose()
+    this.#scenePicker?.destroy()
+    this.#scenePicker = null
     this.events.dispose()
     this.#root.replaceChildren()
     this.#surfaceContainers.clear()
@@ -328,8 +341,13 @@ export class PublishedCourseApp {
             location.sceneId === sceneId &&
             (stateId === undefined || location.stateId === stateId)
           ))?.id,
-          beforeTeacherControllerAction: (action) => this.#allowTeacherAction(surface.id, action),
-          onTeacherControllerAction: () => this.#syncSlideLocation(slide),
+          // Single owner: the course location pipeline executes every
+          // teacher-controller action (guards, cross-surface navigation, mute,
+          // fullscreen and the scene picker). The surface host never navigates
+          // locally, so App and host can never double-execute one action.
+          executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
+          playbackControls: this.project.playback.controls,
+          initialMuted: this.#muted,
         })
         this.#slideHosts.set(surface.id, slide)
         return slide
@@ -346,9 +364,9 @@ export class PublishedCourseApp {
           runtimeHostFactory: this.#dynamicHosts.runtimeHost,
           globalLayerItems: structuredClone(this.project.globalLayerItems),
           locationId: firstLocation?.id,
-          onTeacherControllerAction: (action) => {
-            void this.#handleCourseTeacherAction(action)
-          },
+          executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
+          playbackControls: this.project.playback.controls,
+          initialMuted: this.#muted,
         })
         this.#flowHosts.set(surface.id, flow)
         return flow
@@ -371,6 +389,8 @@ export class PublishedCourseApp {
   async #mount(): Promise<void> {
     this.#root.replaceChildren()
     const dom = this.#root.ownerDocument
+    // The scene directory layer positions against the course root.
+    this.#root.style.position = 'relative'
     const shell = dom.createElement('main')
     shell.className = 'course-shell'
     const stage = dom.createElement('section')
@@ -387,6 +407,18 @@ export class PublishedCourseApp {
     shell.appendChild(stage)
     this.#root.appendChild(shell)
 
+    this.#scenePicker = new ScenePickerOverlay({
+      stage: this.#root,
+      scenes: this.#pickerScenes(),
+      onSelect: (sceneId, bypassNavigationGuards) => {
+        void this.goToScene(
+          sceneId,
+          undefined,
+          bypassNavigationGuards ? 'author-force' : 'teacher-controller',
+        )
+      },
+    })
+
     const linked = locationFromUrl()
     const initial = linked && this.#locationMap.has(linked) ? linked : this.project.startLocationId
     const started = await this.navigate(initial, 'initial-entry', startStateFromUrl())
@@ -394,6 +426,22 @@ export class PublishedCourseApp {
       const firstHealthy = this.#locations.find((location) => this.#player.statusOf(location.surfaceId) !== 'failed')
       if (firstHealthy) await this.navigate(firstHealthy.id, 'initial-entry')
     }
+  }
+
+  /** Slide-scene locations, deduplicated by scene id, in course order. */
+  #pickerScenes(): ScenePickerScene[] {
+    const scenes: ScenePickerScene[] = []
+    const seen = new Set<string>()
+    for (const location of this.#locations) {
+      if (location.kind !== 'slide-scene' || seen.has(location.sceneId)) continue
+      seen.add(location.sceneId)
+      const surface = this.project.surfaces.find((entry) => entry.id === location.surfaceId)
+      const scene = surface?.type === 'slide'
+        ? surface.scenes.find((entry) => entry.id === location.sceneId)
+        : undefined
+      scenes.push({ id: location.sceneId, name: scene?.name ?? location.sceneId })
+    }
+    return scenes
   }
 
   /**
@@ -435,70 +483,44 @@ export class PublishedCourseApp {
     return this.#locations.findIndex((location) => location.id === this.#currentLocationId)
   }
 
-  async #allowTeacherAction(surfaceId: string, action: TeacherControllerAction): Promise<boolean> {
-    if (action.type === 'course.restart' || action.type === 'scene.replay') return true
-    const host = this.#slideHosts.get(surfaceId)
-    if (!host) return false
-    let target: CourseLocation | undefined
-    if (action.type === 'scene.go') {
-      target = this.#locations.find((location) => (
-        location.kind === 'slide-scene' && location.surfaceId === surfaceId &&
-        location.sceneId === action.sceneId &&
-        (action.targetStateId === undefined || location.stateId === action.targetStateId)
-      ))
-    } else if (action.type === 'scene.next' || action.type === 'scene.previous') {
-      const sceneIndex = host.document.scenes.findIndex((scene) => scene.id === host.sceneId)
-      const scene = host.document.scenes[sceneIndex + (action.type === 'scene.next' ? 1 : -1)]
-      target = scene ? this.#locations.find((location) => (
-        location.kind === 'slide-scene' && location.surfaceId === surfaceId && location.sceneId === scene.id
-      )) : undefined
-    } else {
-      return true
-    }
-    if (!target) return true
-    const decision = this.courseState.requestNavigation({
-      entryPoint: 'teacher-controller',
-      ...(this.#currentLocationId ? { fromLocationId: this.#currentLocationId } : {}),
-      toLocationId: target.id,
-    })
-    if (!decision.allowed) {
-      const messages = decision.blockedBy.map((entry) => entry.message)
-      this.#options.onNavigationBlocked?.(messages)
-      this.#showNotice(messages.join('；'))
-    }
-    return decision.allowed
-  }
-
-  #syncSlideLocation(host: SlideSurfaceHost): void {
-    const location = this.#locations.find((candidate) => (
-      candidate.kind === 'slide-scene' && candidate.surfaceId === host.id &&
-      candidate.sceneId === host.sceneId &&
-      (candidate.stateId === undefined || candidate.stateId === host.stateId)
-    ))
-    if (location) {
-      this.#currentLocationId = location.id
-      replaceUrlLocation(location.id)
-    }
-  }
-
+  /**
+   * Single executor for teacher-controller actions from Slide, Flow and Spatial
+   * surfaces. Navigation always runs through the guarded course location
+   * pipeline, so a blocked or failed action stops here and surfaces a
+   * teacher-understandable notice instead of an internal identifier.
+   */
   async #handleCourseTeacherAction(action: TeacherControllerAction): Promise<void> {
-    if (action.type === 'scene.previous') await this.previous('teacher-controller')
-    else if (action.type === 'scene.next') await this.next('teacher-controller')
-    else if (action.type === 'scene.replay') await this.replay()
-    else if (action.type === 'course.restart') await this.restart()
-    else if (action.type === 'scene.go') await this.goToScene(
-      action.sceneId,
-      action.targetStateId,
-      'teacher-controller',
-    )
-    else if (action.type === 'audio.toggle-mute') {
-      const media = this.#root.querySelectorAll<HTMLMediaElement>('audio, video')
-      const muted = ![...media].every((element) => element.muted)
-      media.forEach((element) => { element.muted = muted })
-    } else if (action.type === 'player.fullscreen.toggle') {
-      const dom = this.#root.ownerDocument
-      if (dom.fullscreenElement) await dom.exitFullscreen?.()
-      else await this.#root.requestFullscreen?.()
+    try {
+      if (action.type === 'scene.previous') await this.previous('teacher-controller')
+      else if (action.type === 'scene.next') await this.next('teacher-controller')
+      else if (action.type === 'scene.replay') await this.replay()
+      else if (action.type === 'course.restart') await this.restart()
+      else if (action.type === 'scene.go') await this.goToScene(
+        action.sceneId,
+        action.targetStateId,
+        'teacher-controller',
+      )
+      else if (action.type === 'scene.open-picker') {
+        const current = this.#currentLocationId
+          ? this.#locationMap.get(this.#currentLocationId)
+          : undefined
+        this.#scenePicker?.open(
+          current?.kind === 'slide-scene' ? current.sceneId : null,
+        )
+      } else if (action.type === 'audio.toggle-mute') {
+        this.#muted = !this.#muted
+        this.#root.querySelectorAll<HTMLMediaElement>('audio, video')
+          .forEach((element) => { element.muted = this.#muted })
+        // The slide host refreshes controller mute labels from this session event.
+        this.events.emit('audio:change', { muted: this.#muted })
+      } else if (action.type === 'player.fullscreen.toggle') {
+        const dom = this.#root.ownerDocument
+        if (dom.fullscreenElement) await dom.exitFullscreen?.()
+        else await this.#root.requestFullscreen?.()
+      }
+    } catch (error) {
+      console.error('教师控制器动作失败', error)
+      this.#showNotice('教师控制器动作失败，请重试。')
     }
   }
 

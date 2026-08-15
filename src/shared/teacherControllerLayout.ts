@@ -51,7 +51,7 @@ export interface TeacherControllerViewStatus {
   fullscreen: boolean
 }
 
-type TeacherControllerLayoutSource = Pick<
+export type TeacherControllerLayoutSource = Pick<
   TeacherControllerNode,
   'compact' | 'showSceneProgress' | 'collapsible' | 'buttons' | 'style'
 >

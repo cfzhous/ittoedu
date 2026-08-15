@@ -1,6 +1,6 @@
-import type { TeacherControllerNode } from '../shared/projectTypes'
 import {
   createTeacherControllerLayout,
+  type TeacherControllerLayoutSource,
   type TeacherControllerRect,
 } from '../shared/teacherControllerLayout'
 
@@ -22,6 +22,20 @@ export interface TeacherControllerLogicalSize {
 
 export type TeacherControllerGestureOutcome = 'activate' | 'moved' | 'cancelled'
 
+/**
+ * Structural node view shared by the Phaser renderer and the DOM surface
+ * adapter: the authoring frame plus the layout source fields. `TeacherControllerNode`
+ * satisfies it, and DOM hosts compose it from a layer item's frame + content.
+ */
+export type TeacherControllerRuntimeNode = TeacherControllerLayoutSource & {
+  title: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+}
+
 /** Keeps Phaser callback payloads out of the click-versus-drag decision. */
 export function teacherControllerGestureOutcome(
   dragging: boolean,
@@ -39,7 +53,7 @@ interface AxisAlignedBounds {
 }
 
 function visibleLocalRect(
-  node: TeacherControllerNode,
+  node: TeacherControllerRuntimeNode,
   collapsed: boolean,
 ): TeacherControllerRect {
   if (collapsed) {
@@ -51,7 +65,7 @@ function visibleLocalRect(
 }
 
 function rotatedBounds(
-  node: TeacherControllerNode,
+  node: TeacherControllerRuntimeNode,
   offset: TeacherControllerSessionOffset,
   collapsed: boolean,
 ): AxisAlignedBounds {
@@ -100,7 +114,7 @@ function moveInsideCanvas(
 
 /** Keeps the currently visible controller geometry on the logical canvas. */
 export function constrainTeacherControllerOffset(
-  node: TeacherControllerNode,
+  node: TeacherControllerRuntimeNode,
   proposed: TeacherControllerSessionOffset,
   collapsed: boolean,
   canvas: TeacherControllerLogicalSize,
@@ -152,4 +166,17 @@ export function logicalDragDelta(
     dx: (current.x - start.x) * logicalCanvas.width / width,
     dy: (current.y - start.y) * logicalCanvas.height / height,
   }
+}
+
+/**
+ * World-space axis-aligned bounds of the currently visible controller surface
+ * (full panel when expanded, only the collapse pill when collapsed). Surface
+ * hosts use it so a collapsed controller's real hit area is the pill only.
+ */
+export function teacherControllerHitBounds(
+  node: TeacherControllerRuntimeNode,
+  offset: TeacherControllerSessionOffset,
+  collapsed: boolean,
+): { left: number; top: number; right: number; bottom: number } {
+  return rotatedBounds(node, offset, collapsed)
 }

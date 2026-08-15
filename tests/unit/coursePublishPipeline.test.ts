@@ -8,6 +8,7 @@ import type {
   CourseProjectDocument,
   FlowSurfaceDocument,
   LayerItem,
+  ScopedLayerItem,
   SpatialSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
@@ -203,6 +204,85 @@ function fixture(): {
     project,
     assetFiles: Object.fromEntries(Object.keys(project.assets).map((id) => [id, new Uint8Array([1, 2, 3])])),
     components: { 'component.quiz': quiz },
+  }
+}
+
+function teacherControllerLayer(): ScopedLayerItem {
+  return {
+    item: {
+      layerItemId: 'course-teacher-controller',
+      label: '教师控制器',
+      frame: { mode: 'absolute', x: 190, y: 638, width: 900, height: 64 },
+      order: 50,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      kind: 'native',
+      content: {
+        nativeType: 'teacher-controller',
+        data: {
+          title: '教师控制台',
+          showSceneProgress: true,
+          compact: false,
+          collapsible: true,
+          defaultCollapsed: false,
+          buttons: [
+            { id: 'previous', action: { type: 'scene.previous' }, label: '上一页', visible: true },
+            { id: 'next', action: { type: 'scene.next' }, label: '下一页', visible: true },
+            { id: 'replay', action: { type: 'scene.replay' }, label: '重播', visible: true },
+            { id: 'restart', action: { type: 'course.restart' }, label: '重新开始', visible: true },
+            { id: 'picker', action: { type: 'scene.open-picker' }, label: '场景目录', visible: true },
+            { id: 'sound', action: { type: 'audio.toggle-mute' }, label: '声音', visible: true },
+          ],
+          style: {
+            backgroundColor: '#172033',
+            backgroundOpacity: 0.94,
+            accentColor: '#e7b85c',
+            textColor: '#f8fafc',
+            cornerRadius: 16,
+          },
+          includeInStaticExports: false,
+        },
+      },
+    },
+    visibility: { mode: 'all', locationIds: [] },
+  }
+}
+
+function videoLayerItem(id: string): LayerItem {
+  return {
+    layerItemId: id,
+    label: id,
+    frame: { mode: 'absolute', x: 60, y: 80, width: 320, height: 180 },
+    order: 3,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'video',
+      data: {
+        assetId: 'unused',
+        fit: 'cover',
+        autoplay: false,
+        loop: false,
+        muted: false,
+        volume: 0.5,
+        playbackRate: 1,
+        showControls: true,
+        clickToToggle: false,
+        startTime: 0,
+        endTime: null,
+        poster: { mode: 'image', time: 0, assetId: 'unused' },
+        backgroundAudioMode: 'none',
+      },
+    },
   }
 }
 
@@ -586,6 +666,209 @@ describe('Published Course V2 product pipeline', () => {
     expect(app.diagnostics.some((entry) => (
       entry.phase === 'execute' && entry.message.includes('状态切换未执行')
     ))).toBe(true)
+    await app.destroy()
+    root.remove()
+  })
+
+  it('navigates the whole course location order from a canvas teacher controller', async () => {
+    const sources = fixture()
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    expect(app.currentLocationId).toBe('location-slide')
+    const slideSurfaceId = sources.project.surfaces[0]!.id
+
+    const slideNext = root.querySelector<HTMLButtonElement>(
+      `[data-surface-id="${slideSurfaceId}"] [data-controller-button-id="next"]`,
+    )!
+    slideNext.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-flow'))
+    expect(root.querySelector('[data-surface-id="flow-surface"]')).toBeVisible()
+
+    // The Flow overlay reuses the same controller contract and single owner:
+    // its previous button moves the whole course back to the Slide location.
+    const flowPrevious = root.querySelector<HTMLButtonElement>(
+      '[data-surface-id="flow-surface"] [data-controller-button-id="previous"]',
+    )!
+    flowPrevious.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide'))
+    expect(root.querySelector('.slide-surface')).toBeVisible()
+
+    await app.destroy()
+    root.remove()
+  })
+
+  it('keeps the controller session on replay and restores project defaults on restart', async () => {
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const sceneTwo = structuredClone(slide.scenes[0]!)
+    sceneTwo.id = 'slide-scene-2'
+    sceneTwo.name = 'Slide 2'
+    sceneTwo.interactions = []
+    slide.scenes.push(sceneTwo)
+    sources.project.surfaces = [slide]
+    sources.project.locations = [
+      {
+        id: 'location-slide',
+        label: 'Slide 1',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: slide.scenes[0]!.id,
+      },
+      {
+        id: 'location-slide-2',
+        label: 'Slide 2',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: sceneTwo.id,
+      },
+    ]
+    sources.project.startLocationId = 'location-slide'
+    delete sources.project.mixedPrintPlan
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    const slideSurfaceId = sources.project.surfaces[0]!.id
+
+    root.querySelector<HTMLButtonElement>(
+      `[data-surface-id="${slideSurfaceId}"] [data-controller-button-id="next"]`,
+    )!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
+    // Collapse the controller; the session belongs to the course run.
+    root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+    expect(root.querySelector('[data-controller-button-id]')).toBeNull()
+
+    // Replay only replays the current semantic unit: the collapse persists.
+    await app.replay()
+    await vi.waitFor(() => {
+      expect(root.querySelector('.slide-surface')).toHaveAttribute('data-scene-id', 'slide-scene-2')
+    })
+    expect(app.currentLocationId).toBe('location-slide-2')
+    expect(root.querySelector('[data-controller-button-id]')).toBeNull()
+    expect(root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]'))
+      .toHaveTextContent('展')
+
+    // Expand, then restart: the course restart restores the project defaults.
+    root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="restart"]')!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide'))
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-scene-id', slide.scenes[0]!.id)
+    expect(root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]'))
+      .toHaveTextContent('收')
+    expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
+      .toHaveTextContent('声音 · 开')
+
+    await app.destroy()
+    root.remove()
+  })
+
+  it('opens the scene directory from the teacher controller and jumps guarded', async () => {
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const sceneTwo = structuredClone(slide.scenes[0]!)
+    sceneTwo.id = 'slide-scene-2'
+    sceneTwo.name = 'Slide 2'
+    sceneTwo.interactions = []
+    slide.scenes.push(sceneTwo)
+    sources.project.surfaces = [slide]
+    sources.project.locations = [
+      {
+        id: 'location-slide',
+        label: 'Slide 1',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: slide.scenes[0]!.id,
+      },
+      {
+        id: 'location-slide-2',
+        label: 'Slide 2',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: sceneTwo.id,
+      },
+    ]
+    sources.project.startLocationId = 'location-slide'
+    delete sources.project.mixedPrintPlan
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    const slideSurfaceId = sources.project.surfaces[0]!.id
+
+    root.querySelector<HTMLButtonElement>(
+      `[data-surface-id="${slideSurfaceId}"] [data-controller-button-id="picker"]`,
+    )!.click()
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-scene-id="slide-scene-2"]')).not.toBeNull()
+    })
+    ;(root.querySelector<HTMLButtonElement>('[data-scene-id="slide-scene-2"]')!).click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
+    expect(root.querySelector('.lesson-scene-picker-layer')).not.toBeVisible()
+
+    await app.destroy()
+    root.remove()
+  })
+
+  it('toggles course session mute across all media and refreshes the controller label', async () => {
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    slide.scenes[0]!.layerItems.push(videoLayerItem('slide-video'))
+    sources.project.surfaces = [slide]
+    sources.project.locations = [sources.project.locations[0]!]
+    sources.project.startLocationId = sources.project.locations[0]!.id
+    delete sources.project.mixedPrintPlan
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+
+    const video = root.querySelector<HTMLVideoElement>('[data-asset-id="unused"]')!
+    expect(video.muted).toBe(false)
+    const sound = root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!
+    expect(sound).toHaveTextContent('声音 · 开')
+
+    sound.click()
+    await vi.waitFor(() => expect(video.muted).toBe(true))
+    expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
+      .toHaveTextContent('声音 · 关')
+
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => expect(video.muted).toBe(false))
+    expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
+      .toHaveTextContent('声音 · 开')
+
+    await app.destroy()
+    root.remove()
+  })
+
+  it('delivers no authorable controller when playback controls are none', async () => {
+    const sources = fixture()
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'none'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    const wrapper = root.querySelector<HTMLElement>(
+      '[data-layer-item-id="course-teacher-controller"]',
+    )!
+    // The authored controller is not delivered: its compositor wrapper is
+    // hidden, so neither the canvas nor the hit test exposes it.
+    expect(wrapper.hidden).toBe(true)
+    expect(root.querySelector('.slide-native-teacher-controller')).not.toBeVisible()
     await app.destroy()
     root.remove()
   })

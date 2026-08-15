@@ -69,6 +69,15 @@ export interface FlowScopedLayerHostOptions {
     item: NativeLayerItem,
   ): boolean | Promise<boolean>
   onTeacherControllerAction?(action: TeacherControllerAction, item: NativeLayerItem): void
+  /** Single course-level executor; when present the slide host never navigates locally. */
+  executeTeacherControllerAction?(
+    action: TeacherControllerAction,
+    item: NativeLayerItem,
+  ): boolean | void | Promise<boolean | void>
+  /** Authorable canvas controls toggle (`project.playback.controls`). */
+  playbackControls?: 'canvas' | 'none'
+  /** Course session mute seed (`project.media.audio.defaultMuted`). */
+  initialMuted?: boolean
   onLayerHit?(hit: FlowLayerHit): void
 }
 
@@ -125,6 +134,9 @@ export class FlowScopedLayerHost {
       resolveLocationId: () => this.#locationId,
       beforeTeacherControllerAction: options.beforeTeacherControllerAction,
       onTeacherControllerAction: options.onTeacherControllerAction,
+      executeTeacherControllerAction: options.executeTeacherControllerAction,
+      playbackControls: options.playbackControls,
+      initialMuted: options.initialMuted,
       onLayerHit: (hit) => {
         if (hit.source === 'scene') return
         options.onLayerHit?.({
