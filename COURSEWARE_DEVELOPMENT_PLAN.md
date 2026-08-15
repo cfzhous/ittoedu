@@ -230,7 +230,8 @@ M5/M6 任务板（协调者已按 §4.5 规范拆出并登记）：
 | T-FLOW-TARGETS | M5-B Flow 互动、状态与 Runtime/Component 作者目标：Flow 位置 globalInteractions 试运行执行/检查态惰性、稳定 block/图层目标 | M5 | T-FLOW-CMD、T-FLOW-VIEW、T-PLAYER-FLOW | `src/player/surfaces/flow/FlowSurfaceHost.ts` 中目标报告边界与对应测试 | pending |
 | T-SPAT-RELATIONS | M6-A/M6-B Spatial 路径与关系：共享 Schema/Types 最小增量、路径/关系命令与编辑器、稳定 ID 与悬空引用拒绝 | M6 | T-SPAT-VIEW | `src/renderer/course/spatialPathCommands.ts`、`src/renderer/ui/SpatialPathEditor.tsx`、`src/shared/courseProjectTypes.ts`、`src/shared/courseProjectSchema.ts` 中路径/关系最小边界与对应测试 | pending |
 | T-PUB-APP | M6-D PublishedCourseApp 接入 Spatial 单一 owner 教师动作/playbackControls/initialMuted 与镜头恢复 | M6 | T-PLAYER-SPATIAL | `src/player/PublishedCourseApp.ts` 中 Spatial 窄接线与对应测试 | pending |
-| T-M5M6-INTEGRATE | 共享热点串行集成：App/Workspace/RightSidebar/ScenePanel/editorStore 窄接口接入 Flow 与 Spatial 编辑路由；正式 PDF/DOCX 菜单接线 | M5/M6 | 上述 Flow/Spatial 模块任务 | `src/renderer/App.tsx`、`src/renderer/store/editorStore.ts`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/TopToolbar.tsx` 与对应测试 | pending |
+| T-M5M6-STORE | 共享热点串行集成第一步：editorStore 增加 Flow/Spatial 会话选择、块/图层/镜头/语义缩放/路径命令、Flow/Spatial surface 创建；保持 Slide 一操作一 history 回归 | M5/M6 | 上述 Flow/Spatial 模块任务 | `src/renderer/store/editorStore.ts`、`src/renderer/course/v9SlideVerticalSlice.ts` 窄边界与对应测试 | pending |
+| T-M5M6-SHELL | 共享热点串行集成第二步：App/Workspace/ScenePanel/RightSidebar/TopToolbar 接入 Flow 与 Spatial 编辑路由与正式 PDF/DOCX 菜单；不动 Store 真相 | M5/M6 | T-M5M6-STORE | `src/renderer/App.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/ui/TopToolbar.tsx` 与对应测试 | pending |
 
 M3/M4 任务板已清空。M5/M6 任务板由协调者按 §4.5 规范拆出后在本节登记；M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
 
