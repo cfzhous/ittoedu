@@ -79,6 +79,50 @@ function componentItem(order = 5): ComponentLayerItem {
   }
 }
 
+function nativeTextItem(layerItemId: string, order: number, text: string): NativeLayerItem {
+  return {
+    layerItemId,
+    label: text,
+    kind: 'native',
+    frame: { mode: 'absolute', x: 24, y: 80, width: 320, height: 64 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    content: {
+      nativeType: 'text',
+      data: {
+        text,
+        runs: [],
+        style: {
+          fontFamily: 'sans-serif',
+          fontSize: 24,
+          color: '#172033',
+          bold: false,
+          italic: false,
+          underline: false,
+          strike: false,
+          emphasis: false,
+          highlightColor: null,
+          align: 'left',
+          verticalAlign: 'top',
+          writingMode: 'horizontal',
+          lineSpacing: 1.3,
+          letterSpacing: 0,
+          padding: 4,
+          overflow: 'fixed',
+          backgroundColor: '#ffffff',
+          backgroundOpacity: 0,
+          cornerRadius: 0,
+        },
+      },
+    },
+  }
+}
+
 function flowDocument(): FlowSurfaceDocument {
   return {
     id: 'flow-main', type: 'flow', title: '讲义',
@@ -275,5 +319,54 @@ describe('Flow unified authored layers', () => {
     expect(root.querySelector<HTMLElement>('[data-layer-item-id][hidden]')).not.toBeNull()
     await app.destroy()
     root.remove()
+  })
+
+  it('awaits updateDocument before capture and never serializes stale overlay content', async () => {
+    const flow = flowDocument()
+    const host = new FlowSurfaceHost(flow, { locationId: 'flow-a' })
+    const container = document.createElement('div')
+    await host.mount({ surfaceId: flow.id, container, services, signal: new AbortController().signal })
+    await host.activate()
+
+    const updated = flowDocument()
+    updated.surfaceLayerItems = [{
+      item: nativeTextItem('flow-native', 7, '更新后的图层文字'),
+      visibility: { mode: 'all', locationIds: [] },
+    }]
+    const updating = host.updateDocument(updated)
+    expect(updating).toBeInstanceOf(Promise)
+    await updating
+
+    expect(container.querySelector<HTMLElement>('[data-layer-item-id="flow-native"]')?.textContent)
+      .toContain('更新后的图层文字')
+    expect(container.textContent).not.toContain('Flow Runtime')
+
+    const captured = await host.capture({ purpose: 'export' })
+    expect(captured.content).toContain('更新后的图层文字')
+    expect(captured.content).not.toContain('Flow Runtime')
+    expect(captured.content).toContain('data-flow-layer-composition="ordered"')
+    await host.destroy()
+  })
+
+  it('awaits updateDocument before destroy and leaves no stale overlay content behind', async () => {
+    const flow = flowDocument()
+    const host = new FlowSurfaceHost(flow, { locationId: 'flow-a' })
+    const container = document.createElement('div')
+    await host.mount({ surfaceId: flow.id, container, services, signal: new AbortController().signal })
+    await host.activate()
+
+    const updated = flowDocument()
+    updated.surfaceLayerItems = [{
+      item: nativeTextItem('flow-native', 7, '销毁前的新图层'),
+      visibility: { mode: 'all', locationIds: [] },
+    }]
+    await host.updateDocument(updated)
+    expect(container.querySelector<HTMLElement>('[data-layer-item-id="flow-native"]')?.textContent)
+      .toContain('销毁前的新图层')
+
+    await host.destroy()
+    expect(container.querySelector('.flow-scoped-layer-surface')).toBeNull()
+    expect(container.querySelector('[data-layer-item-id="flow-native"]')).toBeNull()
+    expect(container.children).toHaveLength(0)
   })
 })

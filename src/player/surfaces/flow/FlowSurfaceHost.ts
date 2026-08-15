@@ -535,6 +535,7 @@ export class FlowSurfaceHost implements SurfaceHost {
   #renderedComponents: FlowRenderedComponent[] = []
   #mode: SlideInspectionMode = 'playback'
   #domPlayback = new DomPlaybackFreeze()
+  #queue: Promise<void> = Promise.resolve()
 
   constructor(
     flow: FlowSurfaceDocument,
@@ -552,37 +553,41 @@ export class FlowSurfaceHost implements SurfaceHost {
     return cloneFlowDocument(this.#current)
   }
 
-  updateDocument(flow: FlowSurfaceDocument): void {
-    if (flow.id !== this.id) throw new Error('Flow surface identity cannot change')
-    this.#current = cloneFlowDocument(flow)
-    this.#render()
-    void this.#scopedLayers.updateDocument(flow)
+  async updateDocument(flow: FlowSurfaceDocument): Promise<void> {
+    await this.#enqueue(async () => {
+      if (flow.id !== this.id) throw new Error('Flow surface identity cannot change')
+      this.#current = cloneFlowDocument(flow)
+      this.#render()
+      await this.#scopedLayers.updateDocument(flow)
+    })
   }
 
-  async mount(context: SurfaceMountContext): Promise<void> {
-    if (this.#context) throw new Error('Flow surface is already mounted')
-    this.#context = context
-    const dom = context.container.ownerDocument
-    const root = dom.createElement('section')
-    root.className = 'flow-surface-stack'
-    root.dataset.surfaceId = this.id
-    root.style.position = 'relative'
-    root.style.isolation = 'isolate'
-    root.style.minHeight = '100%'
-    root.hidden = !this.#active
-    const overlayMount = dom.createElement('div')
-    overlayMount.className = 'flow-scoped-layer-mount'
-    overlayMount.style.position = 'absolute'
-    overlayMount.style.inset = '0 auto auto 0'
-    overlayMount.style.width = '1280px'
-    overlayMount.style.height = '720px'
-    overlayMount.style.pointerEvents = 'none'
-    root.appendChild(overlayMount)
-    context.container.appendChild(root)
-    this.#root = root
-    this.#overlayMount = overlayMount
-    this.#render()
-    await this.#scopedLayers.mount({ ...context, container: overlayMount })
+  mount(context: SurfaceMountContext): Promise<void> {
+    return this.#enqueue(async () => {
+      if (this.#context) throw new Error('Flow surface is already mounted')
+      this.#context = context
+      const dom = context.container.ownerDocument
+      const root = dom.createElement('section')
+      root.className = 'flow-surface-stack'
+      root.dataset.surfaceId = this.id
+      root.style.position = 'relative'
+      root.style.isolation = 'isolate'
+      root.style.minHeight = '100%'
+      root.hidden = !this.#active
+      const overlayMount = dom.createElement('div')
+      overlayMount.className = 'flow-scoped-layer-mount'
+      overlayMount.style.position = 'absolute'
+      overlayMount.style.inset = '0 auto auto 0'
+      overlayMount.style.width = '1280px'
+      overlayMount.style.height = '720px'
+      overlayMount.style.pointerEvents = 'none'
+      root.appendChild(overlayMount)
+      context.container.appendChild(root)
+      this.#root = root
+      this.#overlayMount = overlayMount
+      this.#render()
+      await this.#scopedLayers.mount({ ...context, container: overlayMount })
+    })
   }
 
   async activate(): Promise<void> {
@@ -609,11 +614,13 @@ export class FlowSurfaceHost implements SurfaceHost {
     this.#syncDomPlayback()
   }
 
-  async reset(scope: SurfaceResetScope): Promise<void> {
-    this.#current = cloneFlowDocument(this.#initial)
-    this.#render()
-    await this.#scopedLayers.updateDocument(this.#current)
-    await this.#scopedLayers.reset(scope)
+  reset(scope: SurfaceResetScope): Promise<void> {
+    return this.#enqueue(async () => {
+      this.#current = cloneFlowDocument(this.#initial)
+      this.#render()
+      await this.#scopedLayers.updateDocument(this.#current)
+      await this.#scopedLayers.reset(scope)
+    })
   }
 
   updateGlobalLayerItems(items: readonly ScopedLayerItem[]): Promise<void> {
@@ -631,33 +638,43 @@ export class FlowSurfaceHost implements SurfaceHost {
     this.#syncDomPlayback()
   }
 
-  async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
-    const layers = await this.#scopedLayers.capture(request)
-    return {
-      format: 'html',
-      content: buildFlowStandaloneHtml(this.#current, {
-        expandSections: true,
-        resolveAsset: (assetId) => this.#context?.services.resolveAsset(assetId),
-        layerHtml: layers.content,
-      }),
-      width: layers.width,
-      height: layers.height,
-      warnings: layers.warnings,
-    }
+  capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    return this.#enqueue(async () => {
+      const layers = await this.#scopedLayers.capture(request)
+      return {
+        format: 'html',
+        content: buildFlowStandaloneHtml(this.#current, {
+          expandSections: true,
+          resolveAsset: (assetId) => this.#context?.services.resolveAsset(assetId),
+          layerHtml: layers.content,
+        }),
+        width: layers.width,
+        height: layers.height,
+        warnings: layers.warnings,
+      }
+    })
   }
 
-  async destroy(): Promise<void> {
-    const components = this.#renderedComponents
-    this.#renderedComponents = []
-    await Promise.all(components.map((component) => component.destroy?.()))
-    await this.#scopedLayers.destroy()
-    this.#root?.remove()
-    this.#root = null
-    this.#article = null
-    this.#overlayMount = null
-    this.#context = null
-    this.#active = false
-    this.#domPlayback.discard()
+  destroy(): Promise<void> {
+    return this.#enqueue(async () => {
+      const components = this.#renderedComponents
+      this.#renderedComponents = []
+      await Promise.all(components.map((component) => component.destroy?.()))
+      await this.#scopedLayers.destroy()
+      this.#root?.remove()
+      this.#root = null
+      this.#article = null
+      this.#overlayMount = null
+      this.#context = null
+      this.#active = false
+      this.#domPlayback.discard()
+    })
+  }
+
+  #enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
+    const result = this.#queue.then(operation, operation)
+    this.#queue = result.then(() => undefined, () => undefined)
+    return result
   }
 
   #render(): void {
