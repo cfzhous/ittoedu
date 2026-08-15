@@ -1,10 +1,10 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type {
-  CourseProjectDocument,
   NativeLayerItem,
 } from '../../shared/courseProjectTypes'
 import type { SceneDocument, TextNode } from '../../shared/projectTypes'
 import {
+  commitCourseHistory,
   createCourseHistory,
   createCourseProject,
   redoCourseHistory,
@@ -12,6 +12,8 @@ import {
   undoCourseHistory,
   updateCourseProject,
 } from './courseStudioModel'
+import { componentPackagesFromArchive } from '../components/componentPackageStore'
+import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import {
   moveSelectedSlideText,
   selectSlideEditorLayer,
@@ -28,15 +30,17 @@ export const V9_SLIDE_TEST_QUERY = '?editor-backend=v9-slide-test' as const
 export const V9_SLIDE_TEST_TEXT_ID = 'v9-test-text' as const
 
 const FIXTURE_NOW = '2026-08-15T02:00:00.000Z'
-const EMPTY_COMPONENT_PACKAGES = Object.freeze({}) as Record<string, ComponentPackageData>
 
 export type EditorStartupBackend = 'v8' | typeof V9_SLIDE_TEST_BACKEND
 
 export interface V9SlideVerticalSliceState {
   readonly history: CourseHistoryState
   readonly selection: SlideEditorSelection
-  readonly savedProject: CourseProjectDocument
+  readonly savedSnapshot: CourseProjectArchiveData | null
   readonly projectPath: string | null
+  readonly assetFiles: Record<string, Uint8Array>
+  readonly componentFiles: Record<string, Record<string, Uint8Array>>
+  readonly componentPackages: Record<string, ComponentPackageData>
 }
 
 export interface V9SlideSelectionInput {
@@ -133,21 +137,38 @@ function createFixtureProject() {
 function freezeState(
   history: CourseHistoryState,
   selection: SlideEditorSelection,
-  savedProject: CourseProjectDocument,
+  savedSnapshot: CourseProjectArchiveData | null,
   projectPath: string | null,
+  assetFiles: Record<string, Uint8Array>,
+  componentFiles: Record<string, Record<string, Uint8Array>>,
+  componentPackages: Record<string, ComponentPackageData>,
 ): V9SlideVerticalSliceState {
-  return Object.freeze({ history, selection, savedProject, projectPath })
+  return Object.freeze({
+    history,
+    selection,
+    savedSnapshot,
+    projectPath,
+    assetFiles,
+    componentFiles,
+    componentPackages,
+  })
 }
 
 export function createV9SlideVerticalSliceState(): V9SlideVerticalSliceState {
   const project = createFixtureProject()
-  return openV9SlideVerticalSliceState(project, null)
+  return openV9SlideVerticalSliceState({
+    project,
+    assetFiles: {},
+    componentFiles: {},
+  }, null)
 }
 
 export function openV9SlideVerticalSliceState(
-  project: CourseProjectDocument,
+  archive: CourseProjectArchiveData,
   projectPath: string | null,
+  options: { markDirty?: boolean } = {},
 ): V9SlideVerticalSliceState {
+  const { project, assetFiles, componentFiles } = archive
   const history = createCourseHistory(project)
   const selection = selectSlideEditorLayer({
     project,
@@ -155,28 +176,76 @@ export function openV9SlideVerticalSliceState(
     stateId: null,
     selectionId: null,
   })
-  return freezeState(history, selection, project, projectPath)
+  const componentPackages = componentPackagesFromArchive(project, componentFiles)
+  return freezeState(
+    history,
+    selection,
+    options.markDirty ? null : archive,
+    projectPath,
+    assetFiles,
+    componentFiles,
+    componentPackages,
+  )
 }
 
 export function isV9SlideVerticalSliceDirty(
   state: V9SlideVerticalSliceState,
 ): boolean {
-  return state.history.present !== state.savedProject
+  return state.savedSnapshot === null ||
+    state.history.present !== state.savedSnapshot.project ||
+    state.assetFiles !== state.savedSnapshot.assetFiles ||
+    state.componentFiles !== state.savedSnapshot.componentFiles
+}
+
+export function captureV9SlideVerticalSliceArchive(
+  state: V9SlideVerticalSliceState,
+): CourseProjectArchiveData {
+  return {
+    project: state.history.present,
+    assetFiles: state.assetFiles,
+    componentFiles: state.componentFiles,
+  }
 }
 
 export function completeV9SlideVerticalSliceSave(
   state: V9SlideVerticalSliceState,
-  savedProject: CourseProjectDocument,
+  savedSnapshot: CourseProjectArchiveData,
   projectPath: string,
 ): V9SlideVerticalSliceState {
-  const belongsToHistory = state.history.present === savedProject ||
-    state.history.past.includes(savedProject) ||
-    state.history.future.includes(savedProject)
-  if (!belongsToHistory) {
-    throw new Error('保存结果不属于当前 V9 Slide 纵切工程')
+  if (state.history.present.id !== savedSnapshot.project.id) {
+    throw new Error('保存结果不属于当前 V9 Slide 工程')
   }
-  if (state.savedProject === savedProject && state.projectPath === projectPath) return state
-  return freezeState(state.history, state.selection, savedProject, projectPath)
+  if (state.savedSnapshot === savedSnapshot && state.projectPath === projectPath) return state
+  return freezeState(
+    state.history,
+    state.selection,
+    savedSnapshot,
+    projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
+}
+
+export function renameV9SlideVerticalSlice(
+  state: V9SlideVerticalSliceState,
+  title: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const normalized = title.trim().slice(0, 80)
+  if (!normalized || normalized === state.history.present.title) return state
+  const project = updateCourseProject(state.history.present, (draft) => {
+    draft.title = normalized
+  }, now)
+  return freezeState(
+    commitCourseHistory(state.history, project),
+    state.selection,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
 }
 
 type ReadonlyNativeTextContent = Extract<
@@ -268,7 +337,7 @@ export function buildV9SlideWorkspaceSnapshot(
       nodes,
       interactions: [],
     },
-    componentPackages: EMPTY_COMPONENT_PACKAGES,
+    componentPackages: state.componentPackages,
     selectedNodeIds,
   }
 }
@@ -284,7 +353,7 @@ export function selectV9SlideVerticalSlice(
       locationId: state.selection.locationId,
       stateId: state.selection.stateId,
       selectionId: null,
-    }), state.savedProject, state.projectPath)
+    }), state.savedSnapshot, state.projectPath, state.assetFiles, state.componentFiles, state.componentPackages)
   }
   if (input.nodeIds.length !== 1) return state
   const selectionId = input.nodeIds[0]!
@@ -298,7 +367,7 @@ export function selectV9SlideVerticalSlice(
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
     selectionId: nextSelectionId,
-  }), state.savedProject, state.projectPath)
+  }), state.savedSnapshot, state.projectPath, state.assetFiles, state.componentFiles, state.componentPackages)
 }
 
 export function moveV9SlideVerticalSlice(
@@ -324,7 +393,15 @@ export function moveV9SlideVerticalSlice(
     y: y - layer.item.frame.y,
   }, now)
   if (history === state.history && selection === state.selection) return state
-  return freezeState(history, selection, state.savedProject, state.projectPath)
+  return freezeState(
+    history,
+    selection,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
 }
 
 function selectionForHistory(
@@ -356,8 +433,11 @@ export function undoV9SlideVerticalSlice(
   return freezeState(
     history,
     selectionForHistory(state, history),
-    state.savedProject,
+    state.savedSnapshot,
     state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
   )
 }
 
@@ -369,7 +449,10 @@ export function redoV9SlideVerticalSlice(
   return freezeState(
     history,
     selectionForHistory(state, history),
-    state.savedProject,
+    state.savedSnapshot,
     state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
   )
 }

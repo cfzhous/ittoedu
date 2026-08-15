@@ -1,5 +1,5 @@
 import { AlertCircle, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   AvailableComponentCatalogPackage,
   ComponentCatalogSnapshot,
@@ -20,6 +20,7 @@ import type {
   SelectedMediaBatchFile,
 } from '../shared/ipcTypes'
 import type { AssetKind, ProjectDocument } from '../shared/projectTypes'
+import type { CourseProjectDocument } from '../shared/courseProjectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
 import { buildStandaloneHtml } from './export/buildStandaloneHtml'
@@ -39,12 +40,14 @@ import { loadPlayerBundle } from './export/loadPlayerBundle'
 import { renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
 import {
   buildV9SlideWorkspaceSnapshot,
+  captureV9SlideVerticalSliceArchive,
   completeV9SlideVerticalSliceSave,
   createV9SlideVerticalSliceState,
   isV9SlideVerticalSliceDirty,
   moveV9SlideVerticalSlice,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
+  renameV9SlideVerticalSlice,
   resolveEditorStartupBackend,
   selectV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
@@ -76,6 +79,7 @@ import { openProjectArchiveAsync } from './project/projectArchive'
 import {
   createCourseProjectArchiveAsync,
   openCourseProjectArchiveAsync,
+  UnsupportedCourseProjectVersionError,
 } from './project/courseProjectArchive'
 import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
 import { saveProjectAsync } from './project/saveProject'
@@ -218,12 +222,23 @@ function isInteractiveControlTarget(target: EventTarget | null): boolean {
   )
 }
 
-interface RecoverySnapshot {
+interface V8RecoverySnapshot {
+  backend: 'v8'
   project: ProjectDocument
   assetFiles: Record<string, Uint8Array>
   componentPackages: Record<string, ComponentPackageData>
   projectPath: string | null
 }
+
+interface V9RecoverySnapshot {
+  backend: 'v9'
+  project: CourseProjectDocument
+  assetFiles: Record<string, Uint8Array>
+  componentFiles: Record<string, Record<string, Uint8Array>>
+  projectPath: string | null
+}
+
+type RecoverySnapshot = V8RecoverySnapshot | V9RecoverySnapshot
 
 function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
   RecoverySnapshot,
@@ -232,6 +247,13 @@ function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
   return new RecoveryWriteCoordinator({
     delayMs: 1800,
     async build(snapshot, signal) {
+      if (snapshot.backend === 'v9') {
+        return createCourseProjectArchiveAsync({
+          project: snapshot.project,
+          assetFiles: snapshot.assetFiles,
+          componentFiles: snapshot.componentFiles,
+        }, { signal })
+      }
       const archive = await saveProjectAsync({
         project: snapshot.project,
         assetFiles: snapshot.assetFiles,
@@ -267,7 +289,6 @@ export default function App() {
         : null
     ))
   const v9SlideVerticalSliceRef = useRef(v9SlideVerticalSlice)
-  v9SlideVerticalSliceRef.current = v9SlideVerticalSlice
   const [busy, setBusy] = useState(false)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
     | {
@@ -297,8 +318,10 @@ export default function App() {
   const [exportPreflightReport, setExportPreflightReport] =
     useState<ExportPreflightReport | null>(null)
   const saveInFlightRef = useRef(false)
+  const lifecycleOperationInFlightRef = useRef(false)
   const pendingLargeHtmlRef = useRef<string | null>(null)
   const recoveryRevisionRef = useRef(0)
+  const previousActiveDirtyRef = useRef(false)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
     RecoverySnapshot,
     Uint8Array
@@ -330,6 +353,9 @@ export default function App() {
   const activeDocumentTitle = v9SlideVerticalSlice === null
     ? project.title
     : v9SlideVerticalSlice.history.present.title
+  const activeDocumentPath = v9SlideVerticalSlice === null
+    ? projectPath
+    : v9SlideVerticalSlice.projectPath
   const projectHealthDiagnostics = useMemo(
     () => collectProjectHealth(project, componentPackages),
     [project, componentPackages],
@@ -338,12 +364,24 @@ export default function App() {
     () => summarizeProjectHealth(projectHealthDiagnostics),
     [projectHealthDiagnostics],
   )
+  const activeProjectHealthSummary = v9SlideVerticalSlice === null
+    ? projectHealthSummary
+    : { error: 0, warning: 0, info: 0, total: 0, canExport: true }
+  const activeDocumentLocationLabel = v9SlideVerticalSlice === null
+    ? `场景 ${project.scenes.findIndex((scene) => scene.id === activeScene.id) + 1} / ${project.scenes.length}`
+    : (() => {
+        const index = v9SlideVerticalSlice.history.present.locations.findIndex(
+          (location) => location.id === v9SlideVerticalSlice.selection.locationId,
+        )
+        return `场景 ${index + 1} / ${v9SlideVerticalSlice.history.present.locations.length}`
+      })()
   const v9SlideAuthoring = useMemo<WorkspaceSlideAuthoringInput | undefined>(() => {
     if (v9SlideVerticalSlice === null) return undefined
     const snapshot = buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice)
     return {
       ...snapshot,
       onSelectionChange: (event) => {
+        if (lifecycleOperationInFlightRef.current) return
         setV9SlideVerticalSlice((current) => {
           const next = current === null
             ? null
@@ -353,6 +391,7 @@ export default function App() {
         })
       },
       onMoveEnd: (event) => {
+        if (lifecycleOperationInFlightRef.current) return
         setV9SlideVerticalSlice((current) => {
           const next = current === null
             ? null
@@ -383,9 +422,49 @@ export default function App() {
   const importAssets = useEditorStore((state) => state.importAssets)
   const importSounds = useEditorStore((state) => state.importSounds)
 
+  const undoActiveDocument = useCallback(() => {
+    if (lifecycleOperationInFlightRef.current) return
+    if (!v9BackendActive) {
+      useEditorStore.getState().undo()
+      return
+    }
+    setV9SlideVerticalSlice((current) => {
+      const next = current === null ? null : undoV9SlideVerticalSlice(current)
+      v9SlideVerticalSliceRef.current = next
+      return next
+    })
+  }, [v9BackendActive])
+
+  const redoActiveDocument = useCallback(() => {
+    if (lifecycleOperationInFlightRef.current) return
+    if (!v9BackendActive) {
+      useEditorStore.getState().redo()
+      return
+    }
+    setV9SlideVerticalSlice((current) => {
+      const next = current === null ? null : redoV9SlideVerticalSlice(current)
+      v9SlideVerticalSliceRef.current = next
+      return next
+    })
+  }, [v9BackendActive])
+
+  const renameActiveDocument = useCallback((title: string) => {
+    if (lifecycleOperationInFlightRef.current) return
+    if (!v9BackendActive) {
+      useEditorStore.getState().renameProject(title)
+      return
+    }
+    setV9SlideVerticalSlice((current) => {
+      const next = current === null ? null : renameV9SlideVerticalSlice(current, title)
+      v9SlideVerticalSliceRef.current = next
+      return next
+    })
+  }, [v9BackendActive])
+
   const run = useCallback(
     async <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
-      if (busy) return undefined
+      if (lifecycleOperationInFlightRef.current) return undefined
+      lifecycleOperationInFlightRef.current = true
       setBusy(true)
       setError(null)
       try {
@@ -394,10 +473,11 @@ export default function App() {
         setError(readableError(error, fallback))
         return undefined
       } finally {
+        lifecycleOperationInFlightRef.current = false
         setBusy(false)
       }
     },
-    [busy, setError],
+    [setError],
   )
 
   const reportBatchOutcome = useCallback((input: {
@@ -438,6 +518,11 @@ export default function App() {
     setRecentProjects(await window.desktopAPI.listRecentProjects())
   }, [])
 
+  const clearRecoveryCopy = useCallback(async () => {
+    recoveryCoordinatorRef.current?.cancel()
+    await desktopApi().clearRecoveryProject()
+  }, [])
+
   const confirmDiscardIfNeeded = useCallback(async () => {
     if (!activeDocumentDirty) return true
     return (await desktopApi().confirmDiscardChanges()) === 'discard'
@@ -446,7 +531,7 @@ export default function App() {
   const handleNew = useCallback(() => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
-      await desktopApi().clearRecoveryProject().catch((error) => {
+      await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       if (v9BackendActive) {
@@ -457,7 +542,7 @@ export default function App() {
       }
       createNewProject()
     }, '新建课件失败，请重试。')
-  }, [confirmDiscardIfNeeded, createNewProject, run, v9BackendActive])
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, createNewProject, run, v9BackendActive])
 
   const handleOpen = useCallback(() => {
     void run(async () => {
@@ -466,10 +551,10 @@ export default function App() {
       if (!file) return
       if (v9BackendActive) {
         const archive = await openCourseProjectArchiveAsync(file.bytes)
-        const next = openV9SlideVerticalSliceState(archive.project, file.path)
+        const next = openV9SlideVerticalSliceState(archive, file.path)
         v9SlideVerticalSliceRef.current = next
         setV9SlideVerticalSlice(next)
-        await desktopApi().clearRecoveryProject().catch((error) => {
+        await clearRecoveryCopy().catch((error) => {
           console.error('清理恢复数据失败', error)
         })
         await refreshRecentProjects()
@@ -481,12 +566,12 @@ export default function App() {
         archive.componentFiles,
       )
       loadProject(archive.project, file.path, archive.assetFiles, packages)
-      await desktopApi().clearRecoveryProject().catch((error) => {
+      await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
     }, '打开工程失败。请检查文件是否损坏后重试。')
-  }, [confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run, v9BackendActive])
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run, v9BackendActive])
 
   const handleOpenRecent = useCallback((path: string) => {
     void run(async () => {
@@ -494,10 +579,10 @@ export default function App() {
       const file = await desktopApi().openRecentProject({ path })
       if (v9BackendActive) {
         const archive = await openCourseProjectArchiveAsync(file.bytes)
-        const next = openV9SlideVerticalSliceState(archive.project, file.path)
+        const next = openV9SlideVerticalSliceState(archive, file.path)
         v9SlideVerticalSliceRef.current = next
         setV9SlideVerticalSlice(next)
-        await desktopApi().clearRecoveryProject().catch((error) => {
+        await clearRecoveryCopy().catch((error) => {
           console.error('清理恢复数据失败', error)
         })
         await refreshRecentProjects()
@@ -509,12 +594,12 @@ export default function App() {
         archive.componentFiles,
       )
       loadProject(archive.project, file.path, archive.assetFiles, packages)
-      await desktopApi().clearRecoveryProject().catch((error) => {
+      await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
     }, '最近工程打开失败。文件可能已被移动，请使用“打开工程”重新选择。')
-  }, [confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run, v9BackendActive])
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run, v9BackendActive])
 
   const handleSave = useCallback(
     async (saveAs = false) => {
@@ -526,15 +611,11 @@ export default function App() {
           if (v9BackendActive) {
             const state = v9SlideVerticalSliceRef.current
             if (state === null) throw new Error('V9 Slide 测试 backend 状态不可用')
-            const savedProject = state.history.present
-            const bytes = await createCourseProjectArchiveAsync({
-              project: savedProject,
-              assetFiles: {},
-              componentFiles: {},
-            })
+            const savedSnapshot = captureV9SlideVerticalSliceArchive(state)
+            const bytes = await createCourseProjectArchiveAsync(savedSnapshot)
             const result = await desktopApi().saveProject({
               path: saveAs ? undefined : (state.projectPath ?? undefined),
-              suggestedName: `${savedProject.title}.h5lesson`,
+              suggestedName: `${savedSnapshot.project.title}.h5lesson`,
               bytes,
             })
             if (result) {
@@ -542,15 +623,17 @@ export default function App() {
               if (current === null) throw new Error('V9 Slide 测试 backend 已关闭')
               const next = completeV9SlideVerticalSliceSave(
                 current,
-                savedProject,
+                savedSnapshot,
                 result.path,
               )
-              savedCurrentRevision = current.history.present === savedProject
+              savedCurrentRevision = !isV9SlideVerticalSliceDirty(next)
               v9SlideVerticalSliceRef.current = next
               setV9SlideVerticalSlice(next)
-              await desktopApi().clearRecoveryProject().catch((error) => {
-                console.error('清理恢复数据失败', error)
-              })
+              if (savedCurrentRevision) {
+                await clearRecoveryCopy().catch((error) => {
+                  console.error('清理恢复数据失败', error)
+                })
+              }
               await refreshRecentProjects()
             }
             return
@@ -580,7 +663,7 @@ export default function App() {
             if (revisionStillCurrent) {
               markSaved(result.path, saved.project)
               savedCurrentRevision = true
-              await desktopApi().clearRecoveryProject().catch((error) => {
+              await clearRecoveryCopy().catch((error) => {
                 console.error('清理恢复数据失败', error)
               })
             } else {
@@ -598,7 +681,7 @@ export default function App() {
       }
       return savedCurrentRevision
     },
-    [markSaved, refreshRecentProjects, run, v9BackendActive],
+    [clearRecoveryCopy, markSaved, refreshRecentProjects, run, v9BackendActive],
   )
 
   const selectAndImportImage = useCallback(
@@ -1109,7 +1192,12 @@ export default function App() {
     setLargeHtmlByteLength(null)
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    v9SlideVerticalSliceRef.current = v9SlideVerticalSlice
+  }, [v9SlideVerticalSlice])
+
+  useLayoutEffect(() => {
+    window.__COURSEWARE_EDITOR_DIRTY__ = activeDocumentDirty
     document.title = `${activeDocumentTitle}${activeDocumentDirty ? ' *' : ''} - ${APP_NAME}`
     if (window.desktopAPI) {
       void window.desktopAPI.setDirtyState(activeDocumentDirty).catch((error) => {
@@ -1157,19 +1245,48 @@ export default function App() {
   useEffect(() => {
     const coordinator = recoveryCoordinatorRef.current
     if (!coordinator) return
-    if (!recoveryDecisionComplete || !dirty) {
+    const wasDirty = previousActiveDirtyRef.current
+    previousActiveDirtyRef.current = activeDocumentDirty
+    if (!recoveryDecisionComplete || !activeDocumentDirty) {
       coordinator.cancel()
+      if (recoveryDecisionComplete && wasDirty && window.desktopAPI) {
+        void clearRecoveryCopy().catch((error) => {
+          console.error('清理已撤销修改的恢复副本失败', error)
+          setError('无法清理已过期的恢复副本。')
+        })
+      }
+      return
+    }
+    recoveryRevisionRef.current += 1
+    if (v9SlideVerticalSlice !== null) {
+      coordinator.schedule(recoveryRevisionRef.current, {
+        backend: 'v9',
+        project: v9SlideVerticalSlice.history.present,
+        assetFiles: v9SlideVerticalSlice.assetFiles,
+        componentFiles: v9SlideVerticalSlice.componentFiles,
+        projectPath: v9SlideVerticalSlice.projectPath,
+      })
       return
     }
     const state = useEditorStore.getState()
-    recoveryRevisionRef.current += 1
     coordinator.schedule(recoveryRevisionRef.current, {
+      backend: 'v8',
       project: state.project,
       assetFiles: state.assetFiles,
       componentPackages: state.componentPackages,
       projectPath: state.projectPath,
     })
-  }, [assetFiles, componentPackages, dirty, project, projectPath, recoveryDecisionComplete])
+  }, [
+    activeDocumentDirty,
+    assetFiles,
+    clearRecoveryCopy,
+    componentPackages,
+    project,
+    projectPath,
+    recoveryDecisionComplete,
+    setError,
+    v9SlideVerticalSlice,
+  ])
 
   useEffect(() => () => {
     recoveryCoordinatorRef.current?.dispose()
@@ -1196,27 +1313,11 @@ export default function App() {
         void handleSave(event.shiftKey)
       } else if ((event.ctrlKey || event.metaKey) && key === 'z') {
         event.preventDefault()
-        if (v9BackendActive) {
-          setV9SlideVerticalSlice((current) => {
-            const next = current === null
-              ? null
-              : event.shiftKey
-                ? redoV9SlideVerticalSlice(current)
-                : undoV9SlideVerticalSlice(current)
-            v9SlideVerticalSliceRef.current = next
-            return next
-          })
-        } else if (event.shiftKey) useEditorStore.getState().redo()
-        else useEditorStore.getState().undo()
+        if (event.shiftKey) redoActiveDocument()
+        else undoActiveDocument()
       } else if ((event.ctrlKey || event.metaKey) && key === 'y') {
         event.preventDefault()
-        if (v9BackendActive) {
-          setV9SlideVerticalSlice((current) => {
-            const next = current === null ? null : redoV9SlideVerticalSlice(current)
-            v9SlideVerticalSliceRef.current = next
-            return next
-          })
-        } else useEditorStore.getState().redo()
+        redoActiveDocument()
       } else if ((event.ctrlKey || event.metaKey) && key === 'n') {
         event.preventDefault()
         handleNew()
@@ -1263,18 +1364,35 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleNew, handleOpen, handleSave, v9BackendActive])
+  }, [handleNew, handleOpen, handleSave, redoActiveDocument, undoActiveDocument])
 
   return (
     <div className="app-shell">
       <TopToolbar
         busy={busy}
+        documentControl={{
+          title: activeDocumentTitle,
+          dirty: activeDocumentDirty,
+          canUndo: v9SlideVerticalSlice === null
+            ? useEditorStore.getState().history.past.length > 0
+            : v9SlideVerticalSlice.history.past.length > 0,
+          canRedo: v9SlideVerticalSlice === null
+            ? useEditorStore.getState().history.future.length > 0
+            : v9SlideVerticalSlice.history.future.length > 0,
+          locationLabel: activeDocumentLocationLabel,
+          canInspectHealth: !v9BackendActive,
+          canPreview: !v9BackendActive,
+          canExport: !v9BackendActive,
+          onRename: renameActiveDocument,
+          onUndo: undoActiveDocument,
+          onRedo: redoActiveDocument,
+        }}
         onNew={handleNew}
         onOpen={handleOpen}
         recentProjects={recentProjects}
         onOpenRecent={handleOpenRecent}
         onSave={(saveAs) => void handleSave(saveAs)}
-        healthSummary={projectHealthSummary}
+        healthSummary={activeProjectHealthSummary}
         onOpenHealth={() => setProjectHealthOpen(true)}
         onPreview={handlePreview}
         onExport={handleExport}
@@ -1336,7 +1454,7 @@ export default function App() {
         <span>·</span>
         <span>{selectedNodeIds.length > 1 ? `已选 ${selectedNodeIds.length} 个图层` : selectedNode ? `已选：${selectedNode.name}` : editingScope === 'global' ? '未选择全局元素' : '未选择节点'}</span>
         <span>·</span>
-        <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
+        <span>{activeDocumentPath ? '工程已命名' : '尚未保存'}</span>
       </footer>
 
       {errorMessage && (
@@ -1431,7 +1549,7 @@ export default function App() {
         confirmLabel="恢复课件"
         cancelLabel="丢弃副本"
         onCancel={() => {
-          void desktopApi().clearRecoveryProject().catch((error) => {
+          void clearRecoveryCopy().catch((error) => {
             setError(readableError(error, '恢复副本清理失败。'))
           }).finally(() => {
             setRecoveryProject(null)
@@ -1441,14 +1559,37 @@ export default function App() {
         onConfirm={() => {
           if (!recoveryProject) return
           void run(async () => {
+            try {
+              const archive = await openCourseProjectArchiveAsync(recoveryProject.bytes)
+              const next = openV9SlideVerticalSliceState(archive, null, {
+                markDirty: true,
+              })
+              v9SlideVerticalSliceRef.current = next
+              setV9SlideVerticalSlice(next)
+              setStatus('已恢复未保存的课件，请尽快另存为工程文件')
+              await clearRecoveryCopy()
+              setRecoveryProject(null)
+              setRecoveryDecisionComplete(true)
+              return
+            } catch (error) {
+              const cause = error instanceof UserFacingError ? error.cause : undefined
+              if (
+                !(cause instanceof UnsupportedCourseProjectVersionError) ||
+                cause.schemaVersion !== 8
+              ) {
+                throw error
+              }
+            }
             const archive = await openProjectArchiveAsync(recoveryProject.bytes)
             const packages = componentPackagesFromArchive(archive.project, archive.componentFiles)
+            v9SlideVerticalSliceRef.current = null
+            setV9SlideVerticalSlice(null)
             loadProject(archive.project, null, archive.assetFiles, packages)
             useEditorStore.setState({
               dirty: true,
               statusMessage: '已恢复未保存的课件，请尽快另存为工程文件',
             })
-            await desktopApi().clearRecoveryProject()
+            await clearRecoveryCopy()
             setRecoveryProject(null)
             setRecoveryDecisionComplete(true)
           }, '恢复课件失败。恢复副本可能已经损坏。')

@@ -175,10 +175,16 @@ export async function createMainWindow(
       window.webContents.executeJavaScript(
         'Boolean(window.__COURSEWARE_EDITOR_DIRTY__)',
         true,
-      ).then(Boolean),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500)),
+      ).then((dirty) => ({ read: true as const, dirty: Boolean(dirty) }))
+        .catch(() => ({ read: false as const, dirty: true })),
+      new Promise<{ read: false; dirty: true }>((resolve) => {
+        setTimeout(() => resolve({ read: false, dirty: true }), 1_500)
+      }),
     ]).then(async (rendererDirty) => {
-      const dirty = rendererDirty || appState.isDirty()
+      // A successful renderer read is the current document authority. The IPC
+      // mirror can legitimately lag one React commit, so OR-ing it here would
+      // turn a just-saved V9 document back into a false dirty state.
+      const dirty = rendererDirty.read ? rendererDirty.dirty : true
       const decision = dirty ? confirmClose(window) : 'discard'
       if (decision === 'cancel') return
       if (decision === 'save' && !(await requestRendererSaveBeforeClose(window))) {

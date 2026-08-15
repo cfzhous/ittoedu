@@ -25,6 +25,19 @@ import { useEditorStore } from '../store/editorStore'
 
 interface TopToolbarProps {
   busy: boolean
+  documentControl?: {
+    title: string
+    dirty: boolean
+    canUndo: boolean
+    canRedo: boolean
+    locationLabel: string
+    canInspectHealth: boolean
+    canPreview: boolean
+    canExport: boolean
+    onRename(title: string): void
+    onUndo(): void
+    onRedo(): void
+  }
   onNew(): void
   onOpen(): void
   recentProjects: RecentProjectEntry[]
@@ -72,6 +85,7 @@ function ToolButton({
 
 export function TopToolbar({
   busy,
+  documentControl,
   onNew,
   onOpen,
   recentProjects,
@@ -91,19 +105,30 @@ export function TopToolbar({
   const redo = useEditorStore((state) => state.redo)
   const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const renameProject = useEditorStore((state) => state.renameProject)
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState(project.title)
-  useEffect(() => setTitleDraft(project.title), [project.title])
-  const commitTitle = () => {
-    const normalized = titleDraft.trim()
-    if (normalized) renameProject(normalized)
-    else setTitleDraft(project.title)
-    setEditingTitle(false)
-  }
   const sceneIndex = project.scenes.findIndex(
     (scene) => scene.id === activeSceneId,
   )
-
+  const projectTitle = documentControl?.title ?? project.title
+  const projectDirty = documentControl?.dirty ?? dirty
+  const canUndo = documentControl?.canUndo ?? history.past.length > 0
+  const canRedo = documentControl?.canRedo ?? history.future.length > 0
+  const handleRename = documentControl?.onRename ?? renameProject
+  const handleUndo = documentControl?.onUndo ?? undo
+  const handleRedo = documentControl?.onRedo ?? redo
+  const locationLabel = documentControl?.locationLabel ??
+    `场景 ${sceneIndex + 1} / ${project.scenes.length}`
+  const canInspectHealth = documentControl?.canInspectHealth ?? true
+  const canPreview = documentControl?.canPreview ?? true
+  const canExport = documentControl?.canExport ?? true
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(projectTitle)
+  useEffect(() => setTitleDraft(projectTitle), [projectTitle])
+  const commitTitle = () => {
+    const normalized = titleDraft.trim()
+    if (normalized) handleRename(normalized)
+    else setTitleDraft(projectTitle)
+    setEditingTitle(false)
+  }
   return (
     <header className="toolbar" data-testid="top-toolbar">
       <div className="toolbar__brand" title={APP_NAME}>
@@ -179,16 +204,16 @@ export function TopToolbar({
         <ToolButton
           label="撤销"
           title="撤销（Ctrl+Z）"
-          disabled={busy || history.past.length === 0}
-          onClick={undo}
+          disabled={busy || !canUndo}
+          onClick={handleUndo}
         >
           <Undo2 size={18} />
         </ToolButton>
         <ToolButton
           label="重做"
           title="重做（Ctrl+Y / Ctrl+Shift+Z）"
-          disabled={busy || history.future.length === 0}
-          onClick={redo}
+          disabled={busy || !canRedo}
+          onClick={handleRedo}
         >
           <Redo2 size={18} />
         </ToolButton>
@@ -221,7 +246,7 @@ export function TopToolbar({
               aria-label={healthSummary.total === 0
                 ? '工程检查：未发现问题'
                 : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
-              disabled={busy}
+              disabled={busy || !canInspectHealth}
               onClick={(event) => {
                 event.currentTarget.closest('details')?.removeAttribute('open')
                 onOpenHealth()
@@ -273,7 +298,7 @@ export function TopToolbar({
             onKeyDown={(event) => {
               if (event.key === 'Enter') event.currentTarget.blur()
               if (event.key === 'Escape') {
-                setTitleDraft(project.title)
+                setTitleDraft(projectTitle)
                 setEditingTitle(false)
               }
             }}
@@ -286,13 +311,11 @@ export function TopToolbar({
             aria-label="重命名课件"
             onClick={() => setEditingTitle(true)}
           >
-            <span>{project.title}{dirty ? ' *' : ''}</span>
+            <span>{projectTitle}{projectDirty ? ' *' : ''}</span>
             <Pencil size={11} aria-hidden="true" />
           </button>
         )}
-        <span className="toolbar__scene-index">
-          场景 {sceneIndex + 1} / {project.scenes.length}
-        </span>
+        <span className="toolbar__scene-index">{locationLabel}</span>
       </div>
 
       {editorMode === 'professional' && <ToolButton
@@ -300,7 +323,7 @@ export function TopToolbar({
         title={healthSummary.total === 0
           ? '工程检查：未发现问题'
           : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
-        disabled={busy}
+        disabled={busy || !canInspectHealth}
         onClick={onOpenHealth}
       >
         <span className="tool-button__badge-anchor">
@@ -316,7 +339,7 @@ export function TopToolbar({
       <ToolButton
         label="整课预览"
         title="在独立窗口整课预览"
-        disabled={busy}
+        disabled={busy || !canPreview}
         accent
         onClick={onPreview}
       >
@@ -328,9 +351,9 @@ export function TopToolbar({
           data-testid="export-menu-trigger"
           title="导出课件"
           aria-label="导出课件"
-          aria-disabled={busy}
+          aria-disabled={busy || !canExport}
           onClick={(event) => {
-            if (busy) event.preventDefault()
+            if (busy || !canExport) event.preventDefault()
           }}
         >
           <span className="export-menu__trigger-icon">

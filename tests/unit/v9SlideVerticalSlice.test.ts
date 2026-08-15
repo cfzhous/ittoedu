@@ -7,12 +7,14 @@ import {
 } from '@/renderer/project/courseProjectArchive'
 import {
   buildV9SlideWorkspaceSnapshot,
+  captureV9SlideVerticalSliceArchive,
   completeV9SlideVerticalSliceSave,
   createV9SlideVerticalSliceState,
   isV9SlideVerticalSliceDirty,
   moveV9SlideVerticalSlice,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
+  renameV9SlideVerticalSlice,
   resolveEditorStartupBackend,
   selectV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
@@ -146,7 +148,7 @@ describe('test-only V9 Slide vertical slice', () => {
     const redone = redoV9SlideVerticalSlice(undone)
     const saved = completeV9SlideVerticalSliceSave(
       redone,
-      redone.history.present,
+      captureV9SlideVerticalSliceArchive(redone),
       'C:\\courseware\\v9-slide.h5lesson',
     )
     const changedFromSaved = undoV9SlideVerticalSlice(saved)
@@ -168,11 +170,52 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(isV9SlideVerticalSliceDirty(saved)).toBe(false)
     expect(saved.projectPath).toBe('C:\\courseware\\v9-slide.h5lesson')
     expect(isV9SlideVerticalSliceDirty(changedFromSaved)).toBe(true)
+    const foreignSnapshot = captureV9SlideVerticalSliceArchive(
+      createV9SlideVerticalSliceState(),
+    )
+    foreignSnapshot.project.id = 'another-course-project'
     expect(() => completeV9SlideVerticalSliceSave(
       saved,
-      createV9SlideVerticalSliceState().history.present,
+      foreignSnapshot,
       'C:\\courseware\\other.h5lesson',
-    )).toThrow('保存结果不属于当前 V9 Slide 纵切工程')
+    )).toThrow('保存结果不属于当前 V9 Slide 工程')
+  })
+
+  it('updates the path but stays dirty when an older captured snapshot finishes saving', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const firstEdit = moveV9SlideVerticalSlice(initial, {
+      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 500, y: 360 }],
+    }, MOVE_NOW)
+    const captured = captureV9SlideVerticalSliceArchive(firstEdit)
+    const secondEdit = moveV9SlideVerticalSlice(firstEdit, {
+      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 530, y: 390 }],
+    }, '2026-08-15T02:06:00.000Z')
+    const completed = completeV9SlideVerticalSliceSave(
+      secondEdit,
+      captured,
+      'C:\\courseware\\concurrent-save.h5lesson',
+    )
+
+    expect(completed.projectPath).toBe('C:\\courseware\\concurrent-save.h5lesson')
+    expect(completed.history.present).toBe(secondEdit.history.present)
+    expect(isV9SlideVerticalSliceDirty(completed)).toBe(true)
+  })
+
+  it('renames through one V9 history entry and keeps empty or equal titles as no-ops', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const renamed = renameV9SlideVerticalSlice(initial, '  苏轼与暴雨  ', MOVE_NOW)
+
+    expect(renamed.history.present.title).toBe('苏轼与暴雨')
+    expect(renamed.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(renamed.history.past).toEqual([initial.history.present])
+    expect(isV9SlideVerticalSliceDirty(renamed)).toBe(true)
+    expect(renameV9SlideVerticalSlice(renamed, '苏轼与暴雨')).toBe(renamed)
+    expect(renameV9SlideVerticalSlice(renamed, '   ')).toBe(renamed)
+
+    const undone = undoV9SlideVerticalSlice(renamed)
+    expect(undone.history.present.title).toBe(initial.history.present.title)
+    expect(isV9SlideVerticalSliceDirty(undone)).toBe(false)
+    expect(redoV9SlideVerticalSlice(undone).history.present.title).toBe('苏轼与暴雨')
   })
 
   it('reopens a schemaVersion 9 archive with the exact text frame and stable ID', () => {
@@ -187,7 +230,7 @@ describe('test-only V9 Slide vertical slice', () => {
     }, { mtime: '2026-08-15T02:10:00.000Z' })
     const opened = openCourseProjectArchive(bytes)
     const reopened = openV9SlideVerticalSliceState(
-      opened.project,
+      opened,
       'C:\\courseware\\roundtrip.h5lesson',
     )
     const snapshot = buildV9SlideWorkspaceSnapshot(reopened)
@@ -206,5 +249,34 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(reopened.history.future).toEqual([])
     expect(reopened.projectPath).toBe('C:\\courseware\\roundtrip.h5lesson')
     expect(isV9SlideVerticalSliceDirty(reopened)).toBe(false)
+  })
+
+  it('keeps archive asset sidecars attached for a lossless subsequent save', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const project = structuredClone(initial.history.present)
+    const bytes = new Uint8Array([0, 1, 2, 3])
+    project.assets.diagram = {
+      id: 'diagram',
+      filename: 'diagram.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/diagram.bin',
+      byteLength: bytes.byteLength,
+      width: 2,
+      height: 2,
+    }
+    const state = openV9SlideVerticalSliceState({
+      project,
+      assetFiles: { diagram: bytes },
+      componentFiles: {},
+    }, 'C:\\courseware\\with-assets.h5lesson')
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({
+      project: state.history.present,
+      assetFiles: state.assetFiles,
+      componentFiles: state.componentFiles,
+    }))
+
+    expect(reopened.assetFiles.diagram).toEqual(bytes)
+    expect(reopened.project.assets.diagram).toEqual(project.assets.diagram)
   })
 })

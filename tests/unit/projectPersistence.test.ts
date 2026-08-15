@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
 
 import { openRecentProjectFile } from '../../src/main/fileDialogs'
 import {
+  clearRecoveryProject,
   listRecentProjects,
   MAX_RECOVERY_PROJECT_BYTES,
   readRecoveryProject,
@@ -90,6 +91,17 @@ describe('projectPersistence', () => {
     expect(metadata.sha256).toBe(
       crypto.createHash('sha256').update(second).digest('hex'),
     )
+  })
+
+  it('将紧随写入请求的清理串行化，最终不留过期恢复包', async () => {
+    const writing = writeRecoveryProject({
+      projectName: '过期课件.h5lesson',
+      bytes: makeArchive('obsolete'),
+    })
+    const clearing = clearRecoveryProject()
+
+    await Promise.all([writing, clearing])
+    expect(await readRecoveryProject()).toBeNull()
   })
 
   it('检测哈希不匹配并安全降级，遇到损坏 ZIP 时清除恢复数据', async () => {

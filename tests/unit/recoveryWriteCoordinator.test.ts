@@ -85,6 +85,40 @@ describe('RecoveryWriteCoordinator', () => {
     coordinator.dispose()
   })
 
+  it('已开始写入时取消会抑制过期成功回调', async () => {
+    vi.useFakeTimers()
+    let releaseWrite!: () => void
+    let reportWriteStarted!: () => void
+    const writeStarted = new Promise<void>((resolve) => {
+      reportWriteStarted = resolve
+    })
+    const write = vi.fn(async () => {
+      reportWriteStarted()
+      await new Promise<void>((resolve) => {
+        releaseWrite = resolve
+      })
+    })
+    const onSuccess = vi.fn()
+    const coordinator = new RecoveryWriteCoordinator({
+      delayMs: 10,
+      build: async (value: string) => `archive:${value}`,
+      write,
+      onSuccess,
+    })
+
+    coordinator.schedule(1, 'obsolete')
+    await vi.advanceTimersByTimeAsync(10)
+    await writeStarted
+    coordinator.cancel()
+    releaseWrite()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(write).toHaveBeenCalledOnce()
+    expect(onSuccess).not.toHaveBeenCalled()
+    coordinator.dispose()
+  })
+
   it('只报告当前修订的错误，不把取消当成保存失败', async () => {
     vi.useFakeTimers()
     const onError = vi.fn()

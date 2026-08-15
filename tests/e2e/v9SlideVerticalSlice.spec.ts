@@ -14,6 +14,7 @@ const root = resolve(__dirname, '..', '..')
 const runDirectory = join(tmpdir(), `ittoedu-v05-${process.pid}`)
 const userDataDirectory = join(runDirectory, 'electron-profile')
 const projectPath = join(runDirectory, 'v9-slide-roundtrip.h5lesson')
+const recoveredProjectPath = join(runDirectory, 'v9-recovered-from-default-start.h5lesson')
 const evidenceDirectory = join(root, 'test-results', 'v05')
 const screenshotPath = join(evidenceDirectory, 'v9-slide-reopened-1366x768.png')
 
@@ -25,7 +26,14 @@ interface LaunchedEditor {
   externalRequests: string[]
 }
 
-async function launchEditor(): Promise<LaunchedEditor> {
+async function launchEditor(options: {
+  query?: string | null
+  prepareWorkspace?: boolean
+} = {}): Promise<LaunchedEditor> {
+  const query = Object.hasOwn(options, 'query')
+    ? (options.query ?? null)
+    : V9_SLIDE_TEST_QUERY
+  const prepareWorkspace = options.prepareWorkspace ?? true
   const app = await electron.launch({
     args: ['.', `--user-data-dir=${userDataDirectory}`],
     cwd: root,
@@ -36,11 +44,13 @@ async function launchEditor(): Promise<LaunchedEditor> {
     },
   })
   try {
-    await app.context().addInitScript((query) => {
-      if (location.protocol === 'courseware-editor:') {
-        history.replaceState(null, '', query)
-      }
-    }, V9_SLIDE_TEST_QUERY)
+    if (query !== null) {
+      await app.context().addInitScript((startupQuery) => {
+        if (location.protocol === 'courseware-editor:') {
+          history.replaceState(null, '', startupQuery)
+        }
+      }, query)
+    }
     const page = await app.firstWindow()
     const pageErrors: string[] = []
     const consoleErrors: string[] = []
@@ -55,7 +65,10 @@ async function launchEditor(): Promise<LaunchedEditor> {
     await page.waitForLoadState('domcontentloaded')
     await page.locator('.app-shell').waitFor()
     await page.getByTestId('canvas-stage').locator('canvas').waitFor()
-    await expect.poll(() => page.evaluate(() => location.search)).toBe(V9_SLIDE_TEST_QUERY)
+    await expect.poll(() => page.evaluate(() => location.search)).toBe(query ?? '')
+    if (!prepareWorkspace) {
+      return { app, page, pageErrors, consoleErrors, externalRequests }
+    }
     const initialStateButton = page.locator('.scene-state-card').filter({
       has: page.locator('.scene-state-card__name', { hasText: '初始' }),
     })
@@ -266,19 +279,46 @@ test.afterAll(async () => {
 test('moves, undoes, redoes, saves and reopens one V9 text in the original App', async () => {
   test.slow()
   let editor = await launchEditor()
+  let lastSavedFrame: ReturnType<typeof readTextFrame> | null = null
   try {
     await resizeContent(editor.app, editor.page, 1366, 768)
     await expect.poll(() => editor.page.title()).not.toContain(' * - ')
+    await expect(editor.page.getByRole('button', { name: '重命名课件' })).toContainText('V9 Slide 纵切测试')
+    await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 1 / 1')
+    await expect(editor.page.getByRole('button', { name: '在独立窗口整课预览' })).toBeDisabled()
+    await expect(editor.page.getByLabel('导出课件')).toHaveAttribute('aria-disabled', 'true')
+    const undoButton = editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' })
+    const redoButton = editor.page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）' })
+    await expect(undoButton).toBeDisabled()
+    await expect(redoButton).toBeDisabled()
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
     const initialVisual = await playerTextCentroid(editor.page)
 
     await dragText(editor.page, { x: 440, y: 320 }, { x: 100, y: 67 })
     await expect.poll(() => editor.page.title()).toContain(' * - ')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(true)
+    await expect(undoButton).toBeEnabled()
+    await expect.poll(() => editor.page.evaluate(async () => Boolean(
+      await window.desktopAPI?.readRecoveryProject()
+    )), { timeout: 8_000 }).toBe(true)
     const movedVisual = await playerTextCentroid(editor.page)
     expect(Math.abs(movedVisual.x - initialVisual.x - 100)).toBeLessThanOrEqual(4)
     expect(Math.abs(movedVisual.y - initialVisual.y - 67)).toBeLessThanOrEqual(4)
 
-    await editor.page.keyboard.press('Control+z')
+    await undoButton.click()
     await expect.poll(() => editor.page.title()).not.toContain(' * - ')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
+    await expect(undoButton).toBeDisabled()
+    await expect(redoButton).toBeEnabled()
+    await expect.poll(() => editor.page.evaluate(async () => Boolean(
+      await window.desktopAPI?.readRecoveryProject()
+    )), { timeout: 5_000 }).toBe(false)
     const undoneVisual = await playerTextCentroid(editor.page)
     expect(Math.abs(undoneVisual.x - initialVisual.x)).toBeLessThanOrEqual(4)
     expect(Math.abs(undoneVisual.y - initialVisual.y)).toBeLessThanOrEqual(4)
@@ -292,7 +332,7 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
       layerItemId: V9_SLIDE_TEST_TEXT_ID,
     })
 
-    await editor.page.keyboard.press('Control+y')
+    await redoButton.click()
     await expect.poll(() => editor.page.title()).toContain(' * - ')
     const redoneVisual = await playerTextCentroid(editor.page)
     expect(Math.abs(redoneVisual.x - movedVisual.x)).toBeLessThanOrEqual(4)
@@ -303,6 +343,12 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
     expect(Math.abs(redone.x - 540)).toBeLessThanOrEqual(2)
     expect(Math.abs(redone.y - 387)).toBeLessThanOrEqual(2)
     await expect.poll(() => editor.page.title()).not.toContain(' * - ')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
+    await expect.poll(() => editor.page.evaluate(async () => Boolean(
+      await window.desktopAPI?.readRecoveryProject()
+    )), { timeout: 5_000 }).toBe(false)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)
@@ -329,10 +375,75 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
     await expect.poll(() => editor.page.title()).toContain(' * - ')
     await editor.page.keyboard.press('Control+s')
     const movedAgain = await waitForTextFrame(3)
+    lastSavedFrame = movedAgain
     expect(movedAgain.layerItemId).toBe(V9_SLIDE_TEST_TEXT_ID)
     expect(Math.abs(movedAgain.x - (reopened.x + 30))).toBeLessThanOrEqual(2)
     expect(Math.abs(movedAgain.y - (reopened.y + 20))).toBeLessThanOrEqual(2)
     await expect.poll(() => editor.page.title()).not.toContain(' * - ')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
+    const renameButton = editor.page.getByRole('button', { name: '重命名课件' })
+    await renameButton.click()
+    const titleInput = editor.page.getByRole('textbox', { name: '课件名称' })
+    await titleInput.fill('重开后的 V9 课件')
+    await titleInput.press('Enter')
+    await expect(renameButton).toContainText('重开后的 V9 课件 *')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(true)
+    await expect.poll(() => editor.page.evaluate(async () => Boolean(
+      await window.desktopAPI?.readRecoveryProject()
+    )), { timeout: 8_000 }).toBe(true)
+    const closePrompted = await editor.app.evaluate(async ({ BrowserWindow, dialog }) => {
+      let prompted = false
+      dialog.showMessageBoxSync = () => {
+        prompted = true
+        return 2
+      }
+      BrowserWindow.getAllWindows()[0]?.close()
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 300))
+      return prompted
+    })
+    expect(closePrompted).toBe(true)
+    await expect.poll(() => editor.app.evaluate(({ BrowserWindow }) => (
+      BrowserWindow.getAllWindows().length
+    ))).toBe(1)
+    expectCleanRenderer(editor)
+  } finally {
+    await closeEditor(editor.app)
+  }
+
+  editor = await launchEditor({ query: null, prepareWorkspace: false })
+  try {
+    await resizeContent(editor.app, editor.page, 1366, 768)
+    await editor.page.getByRole('button', { name: '恢复课件' }).click()
+    await expect(editor.page.getByRole('button', { name: '恢复课件' })).toHaveCount(0)
+    const recoveredTitle = editor.page.getByRole('button', { name: '重命名课件' })
+    await expect(recoveredTitle).toContainText('重开后的 V9 课件 *')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(true)
+    await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)
+
+    await patchProjectDialogs(editor.app, { save: recoveredProjectPath })
+    await editor.page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+    await expect.poll(() => existsSync(recoveredProjectPath)).toBe(true)
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
+    const recoveredArchive = openCourseProjectArchive(readFileSync(recoveredProjectPath))
+    const recoveredFrame = readTextFrame(recoveredProjectPath)
+    expect(recoveredArchive.project.title).toBe('重开后的 V9 课件')
+    expect(recoveredFrame.revision).toBe(4)
+    expect(recoveredFrame).toMatchObject({
+      x: lastSavedFrame?.x,
+      y: lastSavedFrame?.y,
+      layerItemId: V9_SLIDE_TEST_TEXT_ID,
+    })
+    await expect.poll(() => editor.page.evaluate(async () => Boolean(
+      await window.desktopAPI?.readRecoveryProject()
+    )), { timeout: 5_000 }).toBe(false)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)

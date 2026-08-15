@@ -1222,13 +1222,14 @@ export function Workspace({
           )
           return
         }
+        const editorState = useEditorStore.getState()
+        const active = selectActiveScene(editorState)
+        const expectedStateId = editorState.activePresentationStateId ??
+          ensureScenePresentation(active).initialStateId
         if (
           parsed.ready.sessionId !== init.token ||
-          parsed.ready.context.sceneId !== selectActiveScene(
-            useEditorStore.getState(),
-          ).id ||
-          parsed.ready.context.stateId !==
-            useEditorStore.getState().activePresentationStateId
+          parsed.ready.context.sceneId !== active.id ||
+          parsed.ready.context.stateId !== expectedStateId
         ) {
           failRuntimePreview(
             init.token,

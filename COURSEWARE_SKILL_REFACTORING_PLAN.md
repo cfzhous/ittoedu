@@ -5,8 +5,8 @@
 > EXECUTION_ENGINE: GPT-5.6 Sol / ultra workflow
 > EXECUTION_TOPOLOGY: Ultra 端到端直接执行；无任务卡、无 Owner、无协调者交接
 > TARGET: 从当前恢复点连续推进到 M8
-> CURRENT_STAGE: M1 / GATE-V recovery
-> ACCEPTED_PRODUCT_CURSOR: V04 @ 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6
+> CURRENT_STAGE: M2 / V9 single-write lifecycle
+> ACCEPTED_PRODUCT_CURSOR: M1 @ ecad7a17a36faab6c42916b0b291ef61ddff69c8
 > BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485
 > V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d
 > PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Runtime API 2/3 / Component API 4
@@ -263,48 +263,20 @@ Git 与工作区：
 | V02 | 49faf2366671b121558142c67a66364aaba6f138 | 稳定选择与 move command |
 | V03 | f00c01b1e870dea4db46a3434cbd99daa89deb82 | Workspace 窄注入边界 |
 | V04 | 62cd1a4255f3f2d82fd98b1978fce3392bbc16e6 | 精确 query 下 V9 单 backend |
+| M1 | ecad7a17a36faab6c42916b0b291ef61ddff69c8 | 原 App 中 V9 text 的 Player、拖动、Undo/Redo、保存、完全重开与继续拖动闭环 |
 
-产品 accepted cursor 仍是 V04。V04 之后的计划提交不扩大产品 diff 基线。
+产品 accepted cursor 是 M1。反重写 diff 基线仍固定为 BASE_COMMIT。
 
-### 4.2 当前未提交 M1 纵切
+### 4.2 当前 M2 恢复点
 
-当前工作区包含：
+M1 已完成并通过：
 
-- src/renderer/App.tsx
-- src/renderer/course/v9SlideVerticalSlice.ts
-- src/renderer/ui/Workspace.tsx
-- src/renderer/ui/workspaceSlideAuthoring.ts
-- tests/unit/v9SlideVerticalSlice.test.ts
-- tests/unit/workspaceSlideAuthoring.test.ts
-- tests/e2e/v9SlideVerticalSlice.spec.ts
-- 未跟踪的 PLAN_EVALUATION_REPORT.md 是外部只读评审材料，不属于产品结果，默认不提交。
+- 隔离 Player 文字随 move、Undo、Redo 同步，Phaser proxy 与 Player 视觉不分叉。
+- 第一进程真实拖动、Undo/Redo、schemaVersion 9 保存；完全关闭后重开并继续拖动，revision=3 且稳定 ID 不变。
+- typecheck、Renderer build、147 个测试文件/923 个测试、8 个 Agent Kit 测试、反重写门禁与 diff 检查通过。
+- M1 产品提交为 `ecad7a17a36faab6c42916b0b291ef61ddff69c8`。
 
-已成立：
-
-- V9 text 已进入隔离 Player 并在进程重开后可见。
-- 第一进程真实拖动、Undo/Redo、schemaVersion 9 保存已通过。
-- archive 重开后的 text、frame 与稳定 ID 已恢复。
-- 相关两个 unit 文件此前 10 个测试通过。
-- Electron main 未变化，既有 Electron build 证据可复用。
-
-当前唯一失败：
-
-- 第二进程重开 archive 后再次拖动时 canvas cursor 为 auto。
-- DOM elementFromPoint 是 canvas，pointer-events 为 auto，没有 renderer/console error。
-- 实际 canvas bounds 约 x=246、y=315.7、w=786、h=442，目标约 x=651.9、y=578.8。
-- Player 已显示 text，因此“视觉 payload 缺失”已排除。
-- 当前 diff 中“按 documentId 重建 EditorGame + create 后显式 bridge.loadScene”已经复验失败，不能再当作未经验证的修复。
-- 下一步必须区分：Phaser proxy/Zone 是否缺失，或 Phaser Scale 的 canvasBounds 在布局位移后陈旧。优先利用现有 trace/源码；证据不足时只做一个直接判别诊断。
-
-M1 完成条件：
-
-1. 第二进程真实 canvas 指针可继续拖动。
-2. 保存后 revision=3，frame 约增加 +30/+20，稳定 ID 不变。
-3. E2E 无 renderer/console/external error。
-4. 临时诊断已删除，失败生命周期实验已清理。
-5. typecheck、Renderer build、verify:editor-preservation、git diff --check 通过。
-6. GATE-V 只额外汇总一次 npm test。
-7. 形成一个 M1 产品 commit，然后立即进入 M2。
+当前唯一未覆盖风险：精确 V9 backend 的顶栏生命周期控件、关闭 dirty、archive sidecar 和跨启动恢复已闭合，未接 V9 的工程检查/预览/导出已明确禁用；正式启动与左栏、状态条、右栏等其余原 UI 仍以 V8 Store 为真相源，M2 必须继续切到同一个 V9 document/history/archive，禁止双写或从兼容 View 反建工程。
 
 ---
 

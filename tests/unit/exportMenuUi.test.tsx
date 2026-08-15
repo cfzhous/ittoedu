@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RecentProjectEntry } from '@/shared/ipcTypes'
 import { useEditorStore } from '@/renderer/store/editorStore'
@@ -22,11 +23,13 @@ function renderToolbar(
     onSave?: (saveAs?: boolean) => void
     recentProjects?: RecentProjectEntry[]
     onOpenRecent?: (path: string) => void
+    documentControl?: ComponentProps<typeof TopToolbar>['documentControl']
   } = {},
 ) {
   render(
     <TopToolbar
       busy={busy}
+      documentControl={options.documentControl}
       onNew={() => undefined}
       onOpen={() => undefined}
       recentProjects={options.recentProjects ?? []}
@@ -51,6 +54,48 @@ describe('unified export menu', () => {
     expect(useEditorStore.getState().dirty).toBe(true)
     useEditorStore.getState().undo()
     expect(useEditorStore.getState().project.title).toBe('未命名课件')
+  })
+
+  it('uses the injected active-document truth without mutating the hidden V8 project', () => {
+    const v8ProjectBefore = useEditorStore.getState().project
+    const onRename = vi.fn()
+    const onUndo = vi.fn()
+    const onRedo = vi.fn()
+    renderToolbar(vi.fn(), false, vi.fn(), {
+      documentControl: {
+        title: 'V9 标题',
+        dirty: true,
+        canUndo: false,
+        canRedo: true,
+        locationLabel: '场景 2 / 4',
+        canInspectHealth: false,
+        canPreview: false,
+        canExport: false,
+        onRename,
+        onUndo,
+        onRedo,
+      },
+    })
+
+    expect(screen.getByText('V9 标题 *')).toBeInTheDocument()
+    expect(screen.getByText('场景 2 / 4')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '撤销（Ctrl+Z）' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '在独立窗口整课预览' })).toBeDisabled()
+    expect(screen.getByLabelText('导出课件')).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(screen.getByTitle('更多工程操作'))
+    expect(screen.getByRole('menuitem', { name: '工程检查：未发现问题' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）' }))
+    expect(onRedo).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByRole('button', { name: '重命名课件' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '课件名称' }), {
+      target: { value: '新 V9 标题' },
+    })
+    fireEvent.blur(screen.getByRole('textbox', { name: '课件名称' }))
+    expect(onRename).toHaveBeenCalledWith('新 V9 标题')
+    expect(onUndo).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().project).toBe(v8ProjectBefore)
   })
 
   it('moves Save As, project health, and recent projects into More in simple mode', () => {
