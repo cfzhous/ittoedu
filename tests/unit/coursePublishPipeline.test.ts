@@ -872,4 +872,289 @@ describe('Published Course V2 product pipeline', () => {
     await app.destroy()
     root.remove()
   })
+
+  it('replays only the current semantic unit: one fresh entry, session and course state kept', async () => {
+    history.replaceState(null, '', '#')
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const sceneTwo = structuredClone(slide.scenes[0]!)
+    sceneTwo.id = 'slide-scene-2'
+    sceneTwo.name = 'Slide 2'
+    sceneTwo.interactions = []
+    slide.scenes.push(sceneTwo)
+    sources.project.surfaces = [slide]
+    sources.project.locations = [
+      {
+        id: 'location-slide',
+        label: 'Slide 1',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: slide.scenes[0]!.id,
+      },
+      {
+        id: 'location-slide-2',
+        label: 'Slide 2',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: sceneTwo.id,
+      },
+    ]
+    sources.project.startLocationId = 'location-slide'
+    delete sources.project.mixedPrintPlan
+    sources.project.courseState = [{ key: 'attempts', valueType: 'number', defaultValue: 0 }]
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
+    // Mutate session + course state before the replay.
+    app.courseState.increment('attempts', 3)
+    root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+
+    const enters: Array<{ sceneId?: string }> = []
+    const exits: Array<{ sceneId?: string }> = []
+    app.events.on('scene:enter', (detail) => { enters.push(detail as { sceneId?: string }) })
+    app.events.on('scene:exit', (detail) => { exits.push(detail as { sceneId?: string }) })
+
+    await app.replay()
+
+    // Replay replays the current scene exactly once: no exit, one fresh entry.
+    expect(enters.map((entry) => entry.sceneId)).toEqual(['slide-scene-2'])
+    expect(exits).toEqual([])
+    expect(app.currentLocationId).toBe('location-slide-2')
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-scene-id', 'slide-scene-2')
+    // Session state (collapse) and course state survive a replay.
+    expect(root.querySelector('[data-controller-button-id]')).toBeNull()
+    expect(app.courseState.get('attempts')).toBe(3)
+
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('restarts the whole course session to project defaults with a single fresh entry', async () => {
+    history.replaceState(null, '', '#')
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    slide.scenes[0]!.layerItems.push(videoLayerItem('slide-video'))
+    const sceneTwo = structuredClone(slide.scenes[0]!)
+    sceneTwo.id = 'slide-scene-2'
+    sceneTwo.name = 'Slide 2'
+    sceneTwo.interactions = []
+    slide.scenes.push(sceneTwo)
+    sources.project.surfaces = [slide]
+    sources.project.locations = [
+      {
+        id: 'location-slide',
+        label: 'Slide 1',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: slide.scenes[0]!.id,
+      },
+      {
+        id: 'location-slide-2',
+        label: 'Slide 2',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: sceneTwo.id,
+      },
+    ]
+    sources.project.startLocationId = 'location-slide'
+    delete sources.project.mixedPrintPlan
+    sources.project.courseState = [{ key: 'attempts', valueType: 'number', defaultValue: 0 }]
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
+    app.courseState.increment('attempts', 3)
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => expect(
+      root.querySelector<HTMLVideoElement>('[data-asset-id="unused"]')!.muted,
+    ).toBe(true))
+    root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+
+    const enters: Array<{ sceneId?: string }> = []
+    app.events.on('scene:enter', (detail) => { enters.push(detail as { sceneId?: string }) })
+    // Expand again so the restart button is reachable.
+    root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="restart"]')!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide'))
+
+    // The start scene is entered exactly once and every session state resets
+    // to the project defaults: location, course state, mute, controller.
+    expect(enters.map((entry) => entry.sceneId)).toEqual(['slide-scene'])
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-scene-id', slide.scenes[0]!.id)
+    expect(app.courseState.get('attempts')).toBe(0)
+    expect(root.querySelector<HTMLVideoElement>('[data-asset-id="unused"]')!.muted).toBe(false)
+    expect(root.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]'))
+      .toHaveTextContent('收')
+    expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
+      .toHaveTextContent('声音 · 开')
+
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('routes controller navigation through guards evaluated on the same course state', async () => {
+    history.replaceState(null, '', '#')
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    const sceneTwo = structuredClone(slide.scenes[0]!)
+    sceneTwo.id = 'slide-scene-2'
+    sceneTwo.name = 'Slide 2'
+    sceneTwo.interactions = []
+    slide.scenes.push(sceneTwo)
+    sources.project.surfaces = [slide]
+    sources.project.locations = [
+      {
+        id: 'location-slide',
+        label: 'Slide 1',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: slide.scenes[0]!.id,
+      },
+      {
+        id: 'location-slide-2',
+        label: 'Slide 2',
+        kind: 'slide-scene',
+        surfaceId: slide.id,
+        sceneId: sceneTwo.id,
+      },
+    ]
+    sources.project.startLocationId = 'location-slide'
+    delete sources.project.mixedPrintPlan
+    sources.project.courseState = [{ key: 'attempts', valueType: 'number', defaultValue: 0 }]
+    sources.project.navigationGuards = [{
+      id: 'attempts-before-scene-2',
+      effect: 'block',
+      toLocationIds: ['location-slide-2'],
+      match: 'all',
+      conditions: [{ type: 'compare', key: 'attempts', operator: 'gte', value: 1 }],
+      message: '请先完成一次尝试',
+    }]
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+    const next = root.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+
+    // The runtime-facing course state gates the controller action: no state
+    // change yet, so the guarded navigation is blocked with a teacher notice.
+    next.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide'))
+    expect(root.querySelector('[data-course-player-notice]')).toHaveTextContent('请先完成一次尝试')
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-scene-id', 'slide-scene')
+
+    // Mutating the same course state (as a Runtime/Component session does)
+    // unblocks the identical controller action.
+    app.courseState.increment('attempts', 1)
+    next.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
+    expect(root.querySelector('.slide-surface')).toHaveAttribute('data-scene-id', 'slide-scene-2')
+    expect(app.diagnostics).toEqual([])
+
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('never mutates the project or published payload across session operations', async () => {
+    history.replaceState(null, '', '#')
+    const sources = fixture()
+    sources.project.courseState = [{ key: 'attempts', valueType: 'number', defaultValue: 0 }]
+    const published = buildPublishedCourseV2Payload(sources)
+    const projectBefore = JSON.stringify(sources.project)
+    const payloadBefore = JSON.stringify(published)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+
+    // Exercise every session operation: navigation, replay, checkpoint
+    // restore, mute and restart. None of them may touch the authoring project
+    // or the published payload (the player owns no editor history/dirty).
+    await app.navigate('location-flow', 'presenter')
+    await app.navigate('location-spatial', 'presenter')
+    await app.navigate('location-slide', 'presenter')
+    await app.replay()
+    app.courseState.increment('attempts', 2)
+    const checkpoint = app.courseState.checkpoint()
+    app.courseState.set('attempts', 9)
+    app.courseState.restore(checkpoint)
+    expect(app.courseState.get('attempts')).toBe(2)
+    await app.restart()
+    expect(app.courseState.get('attempts')).toBe(0)
+
+    await app.destroy()
+    expect(JSON.stringify(sources.project)).toBe(projectBefore)
+    expect(JSON.stringify(published)).toBe(payloadBefore)
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('full-destroys the session without subscriptions, media or DOM leaks and keeps sessions isolated', async () => {
+    history.replaceState(null, '', '#')
+    const sources = fixture()
+    const slide = sources.project.surfaces[0]!
+    if (slide.type !== 'slide') throw new Error('expected Slide')
+    slide.scenes[0]!.layerItems.push(videoLayerItem('slide-video'))
+    sources.project.surfaces = [slide]
+    sources.project.locations = [sources.project.locations[0]!]
+    sources.project.startLocationId = sources.project.locations[0]!.id
+    delete sources.project.mixedPrintPlan
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const rootA = document.createElement('div')
+    const rootB = document.createElement('div')
+    document.body.appendChild(rootA)
+    document.body.appendChild(rootB)
+    const appA = await startPublishedCourse(published, rootA)
+    const appB = await startPublishedCourse(published, rootB)
+
+    // Two sessions over the same payload are independent: mutate A only.
+    expect(appA.events.listenerCount()).toBeGreaterThan(0)
+    rootA.querySelector<HTMLButtonElement>('[data-controller-button-id="picker"]')!.click()
+    await vi.waitFor(() => {
+      expect(rootA.querySelector('.lesson-scene-picker-layer')).toBeVisible()
+    })
+    rootA.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => expect(
+      rootA.querySelector<HTMLVideoElement>('[data-asset-id="unused"]')!.muted,
+    ).toBe(true))
+
+    await appA.destroy()
+    // Destroy releases every subscription, audio element, picker and the DOM.
+    expect(rootA.childElementCount).toBe(0)
+    expect(appA.events.listenerCount()).toBe(0)
+    expect(rootA.querySelector('.lesson-scene-picker-layer')).toBeNull()
+    expect(rootA.querySelector('.slide-native-teacher-controller')).toBeNull()
+    expect(rootA.querySelector('audio, video')).toBeNull()
+    expect(rootA.querySelector('[data-course-player-notice]')).toBeNull()
+
+    // Session B is untouched and still fully functional.
+    expect(rootB.querySelector('.slide-surface')).not.toBeNull()
+    expect(rootB.querySelector<HTMLVideoElement>('[data-asset-id="unused"]')!.muted).toBe(false)
+    expect(appB.events.listenerCount()).toBeGreaterThan(0)
+    await appB.destroy()
+    expect(rootB.childElementCount).toBe(0)
+    expect(appB.events.listenerCount()).toBe(0)
+    rootA.remove()
+    rootB.remove()
+    history.replaceState(null, '', '#')
+  })
 })
