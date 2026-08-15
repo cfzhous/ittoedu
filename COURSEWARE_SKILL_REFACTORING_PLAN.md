@@ -275,12 +275,13 @@ Git 与工作区：
 | M2-G | 996ebd2af45418eb915dd0a36abd156c2cca855f | 默认 V9 文件生命周期、显式旧版导入、非 Slide 安全门禁与 Published 预览/HTML/网页包/PPTX |
 | M2-H | cc8c6c4e318e676457444809c7d622b8b6b660e0 | 原全局层与 Workspace 接入可选择、缩放下移动、Undo/Redo、保存重开的教师控制器作者对象；原工程检查改为真实 V9 archive 与 Published producer 校验 |
 | M2 | cc8c6c4e318e676457444809c7d622b8b6b660e0 | 默认 V9 单写生命周期与原顶栏、左栏、状态条、右栏、Workspace、保存重开及三档冻结视觉 Gate 通过 |
+| M3-A | b6d1787875339fff8ba03d80cfbf80187c009caa | 原左栏“当前内容共用”、Workspace、Nodes 与 Properties 接入 surface Native 作者闭环；跨场景共享、统一顺序、base/effective visibility、陈旧目标拒绝、保存重开与缩放下继续编辑成立 |
 
 产品 accepted cursor 是 M1。反重写 diff 基线仍固定为 BASE_COMMIT。
 
 ### 4.2 当前 M3 恢复点
 
-M3 当前恢复 cursor 为 `cc8c6c4e318e676457444809c7d622b8b6b660e0`；M2 Gate 已通过，已成立：
+M3 当前恢复 cursor 为 `b6d1787875339fff8ba03d80cfbf80187c009caa`；M2 Gate 已通过，已成立：
 
 - V9 document/history/archive 由原 editorStore 单一持有；顶栏、标题、dirty、关闭、保存、sidecar 与恢复副本不再读写隐藏 V8 工程。
 - 原 ScenePanel、SceneStateStrip、底部状态栏、Elements、Nodes、Properties 与 Workspace 的已接能力共用同一 V9 session；未接能力按面板/操作局部灰化，不回落写 V8。
@@ -291,9 +292,10 @@ M3 当前恢复 cursor 为 `cc8c6c4e318e676457444809c7d622b8b6b660e0`；M2 Gate 
 - 原顶栏已真实接通 V9 Published 整课预览、单 HTML、网页包和基础 PPTX；PDF 仍按能力局部禁用；Published V2 不再注入废弃的外层上一页/下一页底栏。
 - 原全局层已显示真实 V9 global Native；教师控制器在原 Workspace 中可选择、缩放下移动，一次手势一次 history/revision，Undo/Redo、保存、完全关闭重开及继续移动均保持稳定 ID 与 frame；编辑态按钮不会执行导航，也不挂载额外播放控制器。
 - 原工程检查只有在当前 V9 archive 与 Published producer 均通过后才显示通过，document 或 sidecar 变化会立即回到未检查状态，不再读取隐藏 V8 工程或伪报零问题。
-- 当前绿色证据为 typecheck、169 个 Vitest 文件/1026 项测试、8 项 Agent Kit、默认入口全局控制器/工程检查 Electron 纵切与 2 项既有 V9 Electron 回归、Player/Renderer/Electron build、反重写静态门禁，以及 1280×720、1366×768、1920×1080 三档冻结视觉比对。
+- 原左栏按需显示“当前内容共用”；surface Native 在原 Workspace/Nodes/Properties 中可选择、缩放下变换、显隐、锁定、复制、删除、排序与编辑属性，跨场景共享同一稳定对象；作者 base visibility 与 Player effective visibility 分离，陈旧 surface/location target 会原子拒绝，不会误写同 ID 对象。
+- 当前绿色证据为 typecheck、170 个 Vitest 文件/1047 项测试、8 项 Agent Kit、默认入口 surface 作者 Electron 纵切、全局控制器/工程检查纵切与 2 项既有 V9 Electron 回归、Player/Renderer/Electron build、反重写静态门禁，以及 1280×720、1366×768、1920×1080 三档冻结视觉比对。
 
-M3 尚未完成：surface（“当前内容共用”）scope 作者闭环与 global/surface/scene 完整统一层语义，Native 图片/视频和背景的完整作者路径，Runtime/Component 作者目标，以及 `scene.interactions` 的 Native 命中与 action 执行仍是诚实门禁。当前位置试运行与教师控制器 PresenterSettings、收展、导航、目录、重播、静音、全屏属于后续 M4 运行合同；PDF 捕获属于 M7 导出 Gate，不再阻塞 M3。冻结视觉比对已在不修改 golden、mask、阈值且不增加 V8 启动旁路的前提下恢复通过；三档 mismatch ratio 分别为 `0.001123`、`0.000752`、`0.000682`。下一步继续在原 Workspace/Store/面板内接同一 V9 真相，优先闭合 surface scope 作者纵切，不得新建 Workspace 或从兼容 View 反建工程。
+M3 尚未覆盖的当前风险是：`scene.interactions` 虽已由 Published producer 写入负载，但隔离 Player 与 Published V2 Slide 尚未消费 Native 点击、条件和 action，课例仍可能被迫用 Runtime 热点绕行。下一步优先在现有 Slide Host 与 Published App 调用链中闭合共享互动执行器；Native 图片/视频与背景、Runtime/Component 作者目标仍按后续独立纵切推进。当前位置试运行与教师控制器 PresenterSettings、收展、导航、目录、重播、静音、全屏属于后续 M4 运行合同；PDF 捕获属于 M7 导出 Gate。冻结视觉比对继续在不修改 golden、mask、阈值且不增加 V8 启动旁路的前提下通过，三档 mismatch ratio 分别为 `0.001123`、`0.000752`、`0.000682`。
 
 ---
 
