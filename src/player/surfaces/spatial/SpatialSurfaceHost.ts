@@ -25,6 +25,12 @@ import type {
 } from '../slide/SlideSurfaceHost'
 import { DomPlaybackFreeze } from '../domPlaybackFreeze'
 import {
+  TeacherControllerDom,
+  teacherControllerDomNode,
+  type TeacherControllerDomContext,
+  type TeacherControllerDomSession,
+} from '../../teacherControllerDom'
+import {
   buildSpatialMinimap,
   cloneSpatialDocument,
   cullSpatialItems,
@@ -62,6 +68,24 @@ export interface SpatialSurfaceHostOptions {
   initialLocationId?: string
   onLayerHit?(hit: SpatialLayerHit): void
   onTeacherControllerAction?(action: TeacherControllerAction, item: NativeLayerItem): void | Promise<void>
+  /**
+   * Course-level single executor for teacher-controller actions. When present
+   * the host delegates every action (no local fallback, no guard hook) so the
+   * course location pipeline owns navigation exactly once.
+   */
+  executeTeacherControllerAction?(
+    action: TeacherControllerAction,
+    item: NativeLayerItem,
+  ): boolean | void | Promise<boolean | void>
+  /** Guard hook evaluated before any built-in teacher-controller side effect. */
+  beforeTeacherControllerAction?(
+    action: TeacherControllerAction,
+    item: NativeLayerItem,
+  ): boolean | Promise<boolean>
+  /** Authorable canvas controls toggle (`project.playback.controls`). */
+  playbackControls?: 'canvas' | 'none'
+  /** Course session mute seed (`project.media.audio.defaultMuted`). */
+  initialMuted?: boolean
 }
 
 export interface SpatialLayerHit {
@@ -77,11 +101,20 @@ export interface SpatialLayerHit {
 }
 
 type DynamicSpatialItem = ComponentLayerItem | RuntimeLayerItem
+type TeacherControllerNativeItem = NativeLayerItem & {
+  content: {
+    nativeType: 'teacher-controller'
+    data: Parameters<typeof teacherControllerDomNode>[2] & {
+      defaultCollapsed: boolean
+      includeInStaticExports?: boolean
+    }
+  }
+}
 
 interface SpatialItemRecord {
   item: LayerItem
   source: SpatialLayerHit['source']
-  wrapper: SVGGElement
+  wrapper: HTMLElement | SVGGElement
   content: HTMLElement | SVGElement
   host: SlideItemHost<DynamicSpatialItem> | null
   abortController: AbortController
@@ -89,6 +122,9 @@ interface SpatialItemRecord {
   active: boolean
   activatedOnce: boolean
   failed: boolean
+  /** Global/surface teacher controllers live outside the camera world group. */
+  screenSpace: boolean
+  controllerDom: TeacherControllerDom | null
 }
 
 function safeColor(value: string | undefined, fallback: string): string {
@@ -161,6 +197,17 @@ function imageAssetId(item: LayerItem): string | undefined {
   if (item.kind === 'component') return item.staticFallbackAssetId
   if (item.kind === 'runtime') return item.runtime.staticFallback?.assetId
   return undefined
+}
+
+function isTeacherControllerItem(item: LayerItem): boolean {
+  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
+function isScreenSpaceControllerEntry(
+  source: SpatialLayerHit['source'],
+  item: LayerItem,
+): boolean {
+  return source !== 'world' && isTeacherControllerItem(item)
 }
 
 function itemFill(item: LayerItem): string {
@@ -575,6 +622,25 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
+function foreignObjectCaptureMarkup(
+  item: LayerItem,
+  capture: SurfaceCapture,
+): string {
+  const { frame } = item
+  const width = Math.max(1, frame.width)
+  const height = Math.max(1, frame.height)
+  let body: string
+  if (capture.format === 'data-url') {
+    body = `<img src="${escapeXml(capture.content)}" alt="${escapeXml(item.label)}" style="width:100%;height:100%;object-fit:contain"/>`
+  } else if (capture.format === 'json') {
+    body = `<pre style="width:100%;height:100%;overflow:hidden;margin:0">${escapeXml(capture.content)}</pre>`
+  } else {
+    body = `<div style="width:100%;height:100%;overflow:hidden">${capture.content}</div>`
+  }
+  const itemAttributes = `opacity="${item.opacity}"${item.rotation !== 0 ? ` transform="rotate(${item.rotation} ${frame.x + frame.width / 2} ${frame.y + frame.height / 2})"` : ''}`
+  return `<foreignObject x="${frame.x}" y="${frame.y}" width="${width}" height="${height}" ${itemAttributes} data-layer-item-id="${escapeXml(item.layerItemId)}" data-layer-kind="${item.kind}" data-capture-format="${escapeXml(capture.format)}"><div xmlns="http://www.w3.org/1999/xhtml">${body}</div></foreignObject>`
+}
+
 function markupForItem(
   renderable: SpatialRenderableItem,
   resolveAsset: (assetId: string) => string | undefined,
@@ -685,14 +751,53 @@ function createSpatialRecord(
     action: TeacherControllerAction,
     item: NativeLayerItem,
   ) => void | Promise<void>,
+  teacherControllerContext: TeacherControllerDomContext | null = null,
+  teacherControllerSessionSeed: TeacherControllerDomSession | null = null,
 ): SpatialItemRecord {
-  const wrapper = dom.createElementNS(SVG_NS, 'g')
+  const screenSpace = isScreenSpaceControllerEntry(source, item)
+  const wrapper = screenSpace
+    ? dom.createElement('div')
+    : dom.createElementNS(SVG_NS, 'g')
   wrapper.dataset.spatialLayerRecord = 'true'
   wrapper.dataset.layerItemId = item.layerItemId
   wrapper.dataset.layerKind = item.kind
   wrapper.dataset.layerSource = source
   let content: HTMLElement | SVGElement
-  if (item.kind === 'component' || item.kind === 'runtime' || (
+  let controllerDom: TeacherControllerDom | null = null
+  if (screenSpace) {
+    const html = dom.createElement('div')
+    html.className = 'spatial-screen-teacher-controller-content'
+    Object.assign(html.style, {
+      position: 'relative', width: '100%', height: '100%', overflow: 'hidden', boxSizing: 'border-box',
+    })
+    wrapper.appendChild(html)
+    content = html
+    wrapper.classList.add('spatial-layer-item', 'spatial-screen-teacher-controller')
+    Object.assign(wrapper.style, {
+      position: 'absolute', boxSizing: 'border-box', overflow: 'hidden',
+    })
+    if (isTeacherControllerItem(item) && teacherControllerContext) {
+      const controllerItem = item as TeacherControllerNativeItem
+      const node = teacherControllerDomNode(
+        controllerItem.frame,
+        controllerItem.rotation,
+        controllerItem.content.data,
+      )
+      controllerDom = new TeacherControllerDom({
+        node,
+        container: html,
+        canvas: teacherControllerContext.canvas,
+        scenes: teacherControllerContext.scenes,
+        getCurrentSceneId: teacherControllerContext.getCurrentSceneId,
+        getStateLabel: teacherControllerContext.getStateLabel,
+        getStatus: teacherControllerContext.getStatus,
+        getSession: () => teacherControllerSessionSeed ?? teacherControllerContext.getSession(controllerItem.layerItemId),
+        onSessionChange: (next) => teacherControllerContext.onSessionChange(controllerItem.layerItemId, next),
+        onAction: (action) => { void onTeacherControllerAction(action, controllerItem) },
+        getInteractive: teacherControllerContext.getInteractive,
+      })
+    }
+  } else if (item.kind === 'component' || item.kind === 'runtime' || (
     item.kind === 'native' && (
       item.content.nativeType === 'video' || item.content.nativeType === 'teacher-controller'
     )
@@ -769,10 +874,15 @@ function createSpatialRecord(
     active: false,
     activatedOnce: false,
     failed: false,
+    screenSpace,
+    controllerDom,
   }
 }
 
-function applySpatialRecordLayout(record: SpatialItemRecord): void {
+function applySpatialRecordLayout(
+  record: SpatialItemRecord,
+  screenOffset?: { dx: number; dy: number },
+): void {
   const { item, wrapper } = record
   const { frame } = item
   wrapper.dataset.layerItemId = item.layerItemId
@@ -780,6 +890,18 @@ function applySpatialRecordLayout(record: SpatialItemRecord): void {
   wrapper.dataset.layerSource = record.source
   wrapper.dataset.layerOrder = String(item.order)
   wrapper.dataset.hitPolicy = item.hitPolicy
+  if (record.screenSpace) {
+    const html = wrapper as HTMLElement
+    html.style.left = `${frame.x + (screenOffset?.dx ?? 0)}px`
+    html.style.top = `${frame.y + (screenOffset?.dy ?? 0)}px`
+    html.style.width = `${frame.width}px`
+    html.style.height = `${frame.height}px`
+    html.style.opacity = String(Math.max(0, Math.min(1, item.opacity)))
+    html.style.transform = item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`
+    html.style.pointerEvents = item.hitPolicy === 'pass-through' ? 'none' : 'auto'
+    html.style.zIndex = String(item.order)
+    return
+  }
   wrapper.setAttribute('opacity', String(Math.max(0, Math.min(1, item.opacity))))
   wrapper.style.pointerEvents = item.hitPolicy === 'pass-through' ? 'none' : 'auto'
   wrapper.setAttribute(
@@ -813,6 +935,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   #root: HTMLElement | null = null
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
+  #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialItemRecord>()
   #visibleRecords: SpatialItemRecord[] = []
   #active = false
@@ -824,6 +947,8 @@ export class SpatialSurfaceHost implements SurfaceHost {
   #surfaceAbortController: AbortController | null = null
   #queue: Promise<void> = Promise.resolve()
   #domPlayback = new DomPlaybackFreeze()
+  #teacherControllerSession = new Map<string, TeacherControllerDomSession>()
+  #controllerMuted: boolean
 
   constructor(
     spatial: SpatialSurfaceDocument,
@@ -834,6 +959,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     this.#document = cloneSpatialDocument(spatial)
     this.#camera = spatialCameraFromPose(spatial.camera.home, viewport)
     this.#locationId = options.initialLocationId
+    this.#controllerMuted = options.initialMuted ?? false
     this.#options = {
       ...options,
       minZoom: options.minZoom ?? 0.05,
@@ -907,6 +1033,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
       this.#mode = mode
       if (this.#root) this.#root.dataset.inspectionMode = mode
       for (const record of this.#records.values()) {
+        this.#applyRecordLayout(record)
         if (!record.mounted) continue
         await this.#invoke(record, 'activate', () => record.host?.setInspectionMode?.(mode))
       }
@@ -941,10 +1068,18 @@ export class SpatialSurfaceHost implements SurfaceHost {
     world.dataset.spatialWorld = 'true'
     svg.appendChild(world)
     root.appendChild(svg)
+    const screenLayer = dom.createElement('div')
+    screenLayer.className = 'spatial-screen-layer'
+    screenLayer.style.position = 'absolute'
+    screenLayer.style.inset = '0'
+    screenLayer.style.overflow = 'visible'
+    screenLayer.style.pointerEvents = 'none'
+    root.appendChild(screenLayer)
     context.container.appendChild(root)
     this.#root = root
     this.#svg = svg
     this.#world = world
+    this.#screenLayer = screenLayer
     this.#surfaceAbortController = new AbortController()
     if (context.signal.aborted) this.#surfaceAbortController.abort(context.signal.reason)
     else context.signal.addEventListener('abort', () => {
@@ -994,16 +1129,83 @@ export class SpatialSurfaceHost implements SurfaceHost {
         width: this.#camera.viewportWidth,
         height: this.#camera.viewportHeight,
       })
+      if (scope === 'course') {
+        // Course restart restores the project defaults for controller session
+        // state (offset + collapse) and the session mute override.
+        this.#teacherControllerSession.clear()
+        this.#controllerMuted = this.#options.initialMuted ?? false
+      }
       this.#updateCameraTransform()
       this.#renderChrome()
       await this.#reconcileVisibility()
       for (const record of this.#records.values()) {
+        if (isTeacherControllerItem(record.item) && record.controllerDom) {
+          const controllerItem = record.item as TeacherControllerNativeItem
+          record.controllerDom.update(teacherControllerDomNode(
+            controllerItem.frame,
+            controllerItem.rotation,
+            controllerItem.content.data,
+          ))
+        }
         if (record.mounted) await this.#invoke(record, 'reset', () => record.host?.reset?.(scope))
       }
     })
   }
 
-  capture(request: SurfaceCaptureRequest): SurfaceCapture {
+  async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    const camera = this.#captureCamera(request)
+    const warnings: string[] = []
+    const entries = this.#effectiveEntries()
+    const visible = cullSpatialItems(
+      entries
+        .filter((entry) => !isScreenSpaceControllerEntry(entry.source, entry.item))
+        .map((entry) => entry.item),
+      camera,
+      this.#document.semanticZoom,
+    )
+    const capturedByItem = new Map<string, SurfaceCapture>()
+    if (this.#world && this.#context) {
+      for (const renderable of visible) {
+        const item = renderable.item
+        if (item.kind === 'native') continue
+        const record = this.#records.get(item.layerItemId)
+        if (!record) continue
+        await this.#ensureMounted(record)
+        if (!record.mounted || !record.host?.capture) continue
+        try {
+          const captured = await record.host.capture(request)
+          if (captured) {
+            capturedByItem.set(item.layerItemId, captured)
+            warnings.push(...(captured.warnings ?? []))
+          }
+        } catch (cause) {
+          warnings.push(`${item.label} capture failed`)
+          this.#report('capture', cause, item.layerItemId)
+        }
+      }
+    }
+    for (const record of this.#records.values()) {
+      if (record.failed) warnings.push(`${record.item.label} uses its static Spatial fallback`)
+    }
+    const resolveAsset = (assetId: string) => this.#context?.services.resolveAsset(assetId)
+    const items = visible.map((renderable) => {
+      const captured = capturedByItem.get(renderable.item.layerItemId)
+      if (captured) {
+        return foreignObjectCaptureMarkup(renderable.item, captured)
+      }
+      return markupForItem(renderable, resolveAsset)
+    }).join('')
+    const transform = `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
+    return {
+      format: 'svg',
+      content: `<svg xmlns="${SVG_NS}" width="${camera.viewportWidth}" height="${camera.viewportHeight}" viewBox="0 0 ${camera.viewportWidth} ${camera.viewportHeight}" role="img" aria-label="${escapeXml(this.#document.title)}"><g transform="${transform}">${items}</g></svg>`,
+      width: camera.viewportWidth,
+      height: camera.viewportHeight,
+      warnings: [...new Set(warnings)],
+    }
+  }
+
+  #captureCamera(request: SurfaceCaptureRequest): SpatialCamera {
     let camera = this.#camera
     if (request.frameId) {
       const frame = this.#document.camera.frames.find((item) => item.id === request.frameId)
@@ -1019,24 +1221,14 @@ export class SpatialSurfaceHost implements SurfaceHost {
         viewportHeight: request.height ?? camera.viewportHeight,
       }
     }
-    return {
-      format: 'svg',
-      content: renderSpatialSvgMarkup(
-        this.#effectiveDocument(),
-        camera,
-        (assetId) => this.#context?.services.resolveAsset(assetId),
-      ),
-      width: camera.viewportWidth,
-      height: camera.viewportHeight,
-      warnings: [...this.#records.values()].filter((record) => record.failed)
-        .map((record) => `${record.item.label} uses its static Spatial fallback`),
-    }
+    return camera
   }
 
   destroy(): Promise<void> {
     return this.#run(async () => {
       if (this.#destroyed) return
       this.#destroyed = true
+      this.#teacherControllerSession.clear()
       this.#surfaceAbortController?.abort('spatial-surface-destroyed')
       const dom = this.#root?.ownerDocument
       this.#root?.removeEventListener('pointerdown', this.#handlePointerDown)
@@ -1052,6 +1244,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
       this.#root = null
       this.#svg = null
       this.#world = null
+      this.#screenLayer = null
       this.#context = null
       this.#surfaceAbortController = null
       this.#active = false
@@ -1094,8 +1287,16 @@ export class SpatialSurfaceHost implements SurfaceHost {
 
   #effectiveDocument(): SpatialSurfaceDocument {
     const spatial = cloneSpatialDocument(this.#document)
-    spatial.surfaceLayerItems = []
-    spatial.world.layerItems = this.#effectiveEntries().map(({ item }) => structuredClone(item))
+    const entries = this.#effectiveEntries()
+    spatial.surfaceLayerItems = entries
+      .filter((entry) => isScreenSpaceControllerEntry(entry.source, entry.item))
+      .map((entry) => ({
+        item: structuredClone(entry.item),
+        visibility: { mode: 'all' as const, locationIds: [] },
+      }))
+    spatial.world.layerItems = entries
+      .filter((entry) => !isScreenSpaceControllerEntry(entry.source, entry.item))
+      .map(({ item }) => structuredClone(item))
     return spatial
   }
 
@@ -1120,21 +1321,28 @@ export class SpatialSurfaceHost implements SurfaceHost {
           structuredClone(item),
           entry.source,
           resolveAsset,
-          (action, controller) => this.#options.onTeacherControllerAction?.(action, controller),
+          (action, controller) => this.#handleTeacherControllerAction(action, controller),
+          this.#teacherControllerContext(),
+          this.#controllerSession(item) ?? null,
         )
         const surfaceSignal = this.#surfaceAbortController?.signal
         if (surfaceSignal?.aborted) record.abortController.abort(surfaceSignal.reason)
         else surfaceSignal?.addEventListener('abort', () => record?.abortController.abort(surfaceSignal.reason), { once: true })
         this.#records.set(item.layerItemId, record)
       } else if (record.item.kind === 'native') {
-        const wasVisible = record.wrapper.parentNode === this.#world
+        const wasVisible = record.screenSpace
+          ? record.wrapper.parentNode === this.#screenLayer
+          : record.wrapper.parentNode === this.#world
         const replacement = createSpatialRecord(
           this.#world.ownerDocument,
           structuredClone(item),
           entry.source,
           resolveAsset,
-          (action, controller) => this.#options.onTeacherControllerAction?.(action, controller),
+          (action, controller) => this.#handleTeacherControllerAction(action, controller),
+          this.#teacherControllerContext(),
+          this.#controllerSession(item) ?? null,
         )
+        record.controllerDom?.destroy()
         record.abortController.abort('spatial-native-item-updated')
         if (wasVisible) record.wrapper.replaceWith(replacement.wrapper)
         this.#records.set(item.layerItemId, replacement)
@@ -1149,18 +1357,29 @@ export class SpatialSurfaceHost implements SurfaceHost {
           ))
         }
       }
-      applySpatialRecordLayout(record)
+      this.#applyRecordLayout(record)
     }
     await this.#reconcileVisibility()
   }
 
   async #reconcileVisibility(): Promise<void> {
-    if (!this.#world) return
-    const visible = cullSpatialItems(
-      this.#effectiveEntries().map(({ item }) => item),
-      this.#camera,
-      this.#document.semanticZoom,
-    )
+    if (!this.#world || !this.#screenLayer) return
+    const entries = this.#effectiveEntries()
+    const visible = [
+      ...entries
+        .filter((entry) => isScreenSpaceControllerEntry(entry.source, entry.item) && entry.item.visible)
+        .map((entry) => ({ item: entry.item, semanticVisible: true })),
+      ...cullSpatialItems(
+        entries
+          .filter((entry) => !isScreenSpaceControllerEntry(entry.source, entry.item))
+          .map((entry) => entry.item),
+        this.#camera,
+        this.#document.semanticZoom,
+      ),
+    ].sort((left, right) => (
+      left.item.order - right.item.order ||
+      left.item.layerItemId.localeCompare(right.item.layerItemId)
+    ))
     const visibleIds = new Set(visible.map(({ item }) => item.layerItemId))
     for (const previous of this.#visibleRecords) {
       if (!visibleIds.has(previous.item.layerItemId)) {
@@ -1173,9 +1392,13 @@ export class SpatialSurfaceHost implements SurfaceHost {
       const record = this.#records.get(item.layerItemId)
       if (!record) continue
       await this.#ensureMounted(record)
-      applySpatialRecordLayout(record)
-      // appendChild moves existing SVG/foreignObject nodes without remounting hosts.
-      this.#world.appendChild(record.wrapper)
+      this.#applyRecordLayout(record)
+      if (record.screenSpace) {
+        this.#screenLayer.appendChild(record.wrapper)
+      } else {
+        // appendChild moves existing SVG/foreignObject nodes without remounting hosts.
+        this.#world.appendChild(record.wrapper)
+      }
       if (this.#active) await this.#activateRecord(record, record.active ? 'activate' : 'resume')
       nextRecords.push(record)
     }
@@ -1238,6 +1461,95 @@ export class SpatialSurfaceHost implements SurfaceHost {
     }
   }
 
+  #applyRecordLayout(record: SpatialItemRecord): void {
+    const session = this.#controllerSession(record.item)
+    applySpatialRecordLayout(record, session?.offset)
+    if (isTeacherControllerItem(record.item)) {
+      const hidden = this.#mode === 'playback' && !this.#controlsEnabled()
+      if (record.screenSpace) {
+        ;(record.wrapper as HTMLElement).hidden = hidden
+      } else {
+        record.wrapper.style.display = hidden ? 'none' : ''
+      }
+    }
+  }
+
+  #teacherControllerContext(): TeacherControllerDomContext {
+    return {
+      canvas: { width: this.#camera.viewportWidth, height: this.#camera.viewportHeight },
+      scenes: [],
+      getCurrentSceneId: () => null,
+      getStateLabel: () => null,
+      getStatus: () => ({
+        muted: this.#controllerMuted,
+        fullscreen: Boolean(this.#root?.ownerDocument.fullscreenElement),
+      }),
+      getSession: (layerItemId) => {
+        const item = this.#records.get(layerItemId)?.item
+        return this.#controllerSession(item) ?? {
+          offset: { dx: 0, dy: 0 },
+          collapsed: false,
+        }
+      },
+      onSessionChange: (layerItemId, next) => this.#applyTeacherControllerSession(layerItemId, next),
+      getInteractive: () => this.#controllerInteractive(),
+    }
+  }
+
+  /** Canonical session for a controller item; seeds the project defaults. */
+  #controllerSession(item: LayerItem | undefined): TeacherControllerDomSession | undefined {
+    if (!item || !isTeacherControllerItem(item)) return undefined
+    const controller = item as TeacherControllerNativeItem
+    const existing = this.#teacherControllerSession.get(controller.layerItemId)
+    if (existing) return existing
+    const session: TeacherControllerDomSession = {
+      offset: { dx: 0, dy: 0 },
+      collapsed: controller.content.data.collapsible && controller.content.data.defaultCollapsed,
+    }
+    this.#teacherControllerSession.set(controller.layerItemId, session)
+    return session
+  }
+
+  /** Persists a controller session change and moves the screen-space wrapper. */
+  #applyTeacherControllerSession(layerItemId: string, next: TeacherControllerDomSession): void {
+    this.#teacherControllerSession.set(layerItemId, {
+      offset: { ...next.offset },
+      collapsed: next.collapsed,
+    })
+    const record = this.#records.get(layerItemId)
+    if (record) this.#applyRecordLayout(record)
+  }
+
+  #controlsEnabled(): boolean {
+    return (this.#options.playbackControls ?? 'canvas') === 'canvas'
+  }
+
+  #controllerInteractive(): boolean {
+    return this.#mode === 'playback' && this.#controlsEnabled()
+  }
+
+  async #handleTeacherControllerAction(
+    action: TeacherControllerAction,
+    item: NativeLayerItem,
+  ): Promise<void> {
+    if (this.#options.executeTeacherControllerAction) {
+      // Single course-level owner: the published app navigates through the
+      // guarded course location pipeline and handles mute/fullscreen/picker.
+      await this.#options.executeTeacherControllerAction(action, item)
+    } else {
+      if (
+        this.#options.beforeTeacherControllerAction &&
+        await this.#options.beforeTeacherControllerAction(action, item) === false
+      ) return
+      this.#options.onTeacherControllerAction?.(action, item)
+    }
+    const CustomEventConstructor = this.#root?.ownerDocument.defaultView?.CustomEvent
+    const event = CustomEventConstructor
+      ? new CustomEventConstructor('courseware:teacher-controller-action', { detail: action })
+      : null
+    if (event) this.#root?.dispatchEvent(event)
+  }
+
   async #activateRecord(record: SpatialItemRecord, phase: 'activate' | 'resume'): Promise<void> {
     if (!record.mounted || record.item.kind === 'native') return
     if (record.active) return
@@ -1290,6 +1602,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   }
 
   async #destroyRecord(record: SpatialItemRecord): Promise<void> {
+    record.controllerDom?.destroy()
     record.abortController.abort('spatial-layer-item-removed')
     try { await record.host?.destroy?.() } catch (cause) {
       this.#report('destroy', cause, record.item.layerItemId)
@@ -1395,9 +1708,9 @@ export class SpatialSurfaceHost implements SurfaceHost {
     if (event.button !== 0 || !this.#root?.contains(event.target as Node)) return
     const target = event.target as Element
     if (target.closest?.('.spatial-controls, .spatial-minimap')) return
-    const wrapper = target.closest?.<SVGGElement>('[data-spatial-layer-record]')
+    const wrapper = target.closest?.<Element>('[data-spatial-layer-record]')
     if (wrapper) {
-      const record = this.#records.get(wrapper.dataset.layerItemId ?? '')
+      const record = this.#records.get((wrapper as HTMLElement).dataset.layerItemId ?? '')
       if (record && record.item.hitPolicy !== 'pass-through') {
         this.#options.onLayerHit?.({
           surfaceId: this.id,
@@ -1417,9 +1730,9 @@ export class SpatialSurfaceHost implements SurfaceHost {
 
   #handleDoubleClick = (event: MouseEvent): void => {
     if (this.#mode !== 'inspect' || !this.#root?.contains(event.target as Node)) return
-    const wrapper = (event.target as Element).closest?.<SVGGElement>('[data-spatial-layer-record]')
+    const wrapper = (event.target as Element).closest?.<Element>('[data-spatial-layer-record]')
     if (!wrapper) return
-    const record = this.#records.get(wrapper.dataset.layerItemId ?? '')
+    const record = this.#records.get((wrapper as HTMLElement).dataset.layerItemId ?? '')
     if (!record || record.item.kind !== 'native' || record.item.hitPolicy === 'pass-through') return
     const field = nativePrimaryAuthoringField(record.item)
     if (!field) return
