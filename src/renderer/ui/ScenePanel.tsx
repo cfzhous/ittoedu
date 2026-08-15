@@ -41,6 +41,8 @@ export interface ScenePanelSceneRow {
  * editor backend. It contains no ProjectDocument or editor-store operations.
  */
 export interface ScenePanelDocumentControl {
+  /** Explains why the current course location has no scene-authoring surface. */
+  unavailableReason?: string
   editingScope: 'scene' | 'global'
   globalElementCount: number
   globalHasRuntime: boolean
@@ -377,6 +379,23 @@ export function ScenePanel({
 }: {
   documentControl?: ScenePanelDocumentControl
 } = {}) {
+  if (documentControl?.unavailableReason) {
+    return (
+      <aside className="panel scene-panel" aria-label="场景列表">
+        <div className="panel-header">
+          <h2 className="panel-title">场景</h2>
+        </div>
+        <div
+          className="right-sidebar-capability-gate"
+          role="status"
+          data-testid="scene-panel-course-location-gate"
+        >
+          <strong>当前内容暂不可编辑</strong>
+          <p>{documentControl.unavailableReason}</p>
+        </div>
+      </aside>
+    )
+  }
   return documentControl
     ? <ScenePanelContent documentControl={documentControl} />
     : <LegacyScenePanelAdapter />

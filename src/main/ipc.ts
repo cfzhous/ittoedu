@@ -9,7 +9,9 @@ import {
 import type { AppState } from './appState'
 import { normalizeDesktopError, type DesktopErrorPayload } from './errors'
 import {
+  confirmOpenedProjectFile,
   openProjectFile,
+  selectLegacyProjectFile,
   selectCourseAuthoringPatchFile,
   openRecentProjectFile,
   saveProjectFile,
@@ -34,6 +36,7 @@ import {
   listRecentProjects,
   MAX_RECOVERY_PROJECT_BYTES,
   readRecoveryProject,
+  removeRecentProject,
   writeRecoveryProject,
 } from './projectPersistence'
 import { assertTrustedIpcSender } from './security'
@@ -244,6 +247,36 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
+    IPC_CHANNELS.confirmProjectOpened,
+    context,
+    {
+      code: 'RECENT_PROJECT_UPDATE_FAILED',
+      title: '最近工程更新失败',
+      message: '无法将已打开的工程记录到最近列表。',
+      suggestion: '工程已正常打开，仍可继续编辑和保存。',
+    },
+    async (_event, args) => {
+      const input = openRecentProjectSchema.parse(requireSingleArgument(args))
+      await confirmOpenedProjectFile(input.path)
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.selectLegacyProject,
+    context,
+    {
+      code: 'LEGACY_PROJECT_SELECT_FAILED',
+      title: '旧版工程导入失败',
+      message: '无法读取所选旧版课件工程。',
+      suggestion: '请确认文件没有损坏并重试。',
+    },
+    async (_event, args) => {
+      requireNoArguments(args)
+      return selectLegacyProjectFile(requireWindow(context))
+    },
+  )
+
+  registerSafeHandler(
     IPC_CHANNELS.selectCourseAuthoringPatch,
     context,
     {
@@ -285,6 +318,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       const input = openRecentProjectSchema.parse(requireSingleArgument(args))
       return openRecentProjectFile(input.path)
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.removeRecentProject,
+    context,
+    {
+      code: 'RECENT_PROJECT_REMOVE_FAILED',
+      title: '最近工程更新失败',
+      message: '无法从最近工程列表移除不兼容的文件。',
+      suggestion: '可继续使用“打开工程”或“导入旧版工程”。',
+    },
+    async (_event, args) => {
+      const input = openRecentProjectSchema.parse(requireSingleArgument(args))
+      await removeRecentProject(input.path)
     },
   )
 

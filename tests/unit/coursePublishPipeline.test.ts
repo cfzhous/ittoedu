@@ -13,6 +13,9 @@ import type {
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { AssetMeta, ProjectDocument } from '@/shared/projectTypes'
 import {
+  createCourseProject,
+} from '@/renderer/course/courseStudioModel'
+import {
   createProject,
   createTextNode,
 } from '@/renderer/project/createProject'
@@ -235,6 +238,7 @@ describe('Published Course V2 product pipeline', () => {
     expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
     expect(html).toContain('data:image/png;base64,')
     expect(html).not.toMatch(/https?:\/\//)
+    expect(html).not.toContain('.course-nav')
 
     const files = buildPublishedCourseWebPackageFiles(sources, 'window.CoursePlayerBundle=true;')
     const courseData = strFromU8(files['course-data.js']!)
@@ -244,6 +248,10 @@ describe('Published Course V2 product pipeline', () => {
     expect(courseData).not.toContain('data:image/png;base64,')
     expect(files['index.html']).toBeDefined()
     expect(files['player/player.iife.js']).toBeDefined()
+    const playerCss = strFromU8(files['player/player.css']!)
+    expect(playerCss).not.toContain('.course-nav')
+    expect(playerCss).not.toContain('grid-template-rows')
+    expect(playerCss).toContain('.course-stage{position:relative;width:100%;height:100%')
     expect(Object.keys(files).some((path) => path.includes('unused'))).toBe(false)
     // Files can be zipped/unzipped without changing the offline path graph.
     const archiveFiles = unzipSync(zipSync(files))
@@ -321,11 +329,41 @@ describe('Published Course V2 product pipeline', () => {
     expect(app.currentLocationId).toBe('location-slide')
     expect(root.querySelector('.slide-surface')).toBeVisible()
     expect(root.textContent).toContain('可编辑标题')
-    expect(root.querySelector('[data-course-location-label]')?.textContent).toContain('Slide')
+    expect(root.querySelector('.course-nav')).toBeNull()
+    expect(root.querySelector('[data-course-location-label]')).toBeNull()
     await app.destroy()
     expect(root.childElementCount).toBe(0)
     root.remove()
   })
+
+  it.each(['none', 'canvas'] as const)(
+    'never mounts the removed outer navigation when playback controls are %s',
+    async (controls) => {
+      const sources = controls === 'canvas'
+        ? {
+            project: createCourseProject({ id: 'published-canvas-controls' }),
+            assetFiles: {},
+            components: {},
+          }
+        : fixture()
+      sources.project.playback.controls = controls
+      const published = buildPublishedCourseV2Payload(sources)
+      const root = document.createElement('div')
+      document.body.appendChild(root)
+      const app = await startPublishedCourse(published, root)
+
+      expect(root.querySelector('.course-nav')).toBeNull()
+      expect(root.querySelector('[data-course-location-label]')).toBeNull()
+      if (controls === 'canvas') {
+        expect(root.querySelector('[data-controller-button-id]')).not.toBeNull()
+      }
+      expect(await app.navigate(sources.project.startLocationId)).toBe(true)
+      expect(app.currentLocationId).toBe(sources.project.startLocationId)
+
+      await app.destroy()
+      root.remove()
+    },
+  )
 
   it('runs a live Flow component and navigates the full mixed-surface payload', async () => {
     history.replaceState(null, '', '#')

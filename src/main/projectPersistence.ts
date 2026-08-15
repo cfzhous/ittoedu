@@ -244,6 +244,17 @@ export function recordRecentProject(filePath: string): Promise<void> {
   })
 }
 
+export function removeRecentProject(filePath: string): Promise<void> {
+  return withPersistenceLock(async () => {
+    const requestedKey = canonicalPath(path.resolve(filePath))
+    const existing = await readAndPruneRecentProjectsUnsafe()
+    const next = existing.filter(
+      (project) => canonicalPath(project.path) !== requestedKey,
+    )
+    if (next.length !== existing.length) await writeRecentProjectsUnsafe(next)
+  })
+}
+
 export function resolveRecentProjectPath(requestedPath: string): Promise<string> {
   return withPersistenceLock(async () => {
     const projects = await readAndPruneRecentProjectsUnsafe()

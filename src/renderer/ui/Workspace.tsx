@@ -133,11 +133,12 @@ import {
   type AuthoringCanvasTarget,
 } from '../authoring/aiSelectionReference'
 
-interface WorkspaceProps {
+export interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
   onAddVideo(x?: number, y?: number): void
   onSelectImageAsset(): Promise<ImportedImageAsset | null>
   slideAuthoring?: WorkspaceSlideAuthoringInput
+  courseLocationUnavailableReason?: string
   interactionDisabled?: boolean
 }
 
@@ -333,7 +334,27 @@ type CanvasAuthoringHit =
   | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
   | { kind: 'component'; target: Readonly<ComponentAuthoringTarget> }
 
-export function Workspace({
+export function Workspace(props: WorkspaceProps) {
+  if (props.courseLocationUnavailableReason) {
+    return (
+      <main className="workspace workspace--edit" aria-label="课件画布">
+        <div
+          className="workspace-course-location-gate"
+          role="status"
+          data-testid="workspace-course-location-gate"
+        >
+          <div className="runtime-preview-loading__panel">
+            <strong>当前内容暂不可编辑</strong>
+            <span>{props.courseLocationUnavailableReason}</span>
+          </div>
+        </div>
+      </main>
+    )
+  }
+  return <WorkspaceEditor {...props} />
+}
+
+function WorkspaceEditor({
   onAddImage,
   onAddVideo,
   onSelectImageAsset,

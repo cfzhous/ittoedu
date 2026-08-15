@@ -19,13 +19,18 @@ import type {
   SelectedImageBatchFile,
   SelectedMediaBatchFile,
 } from '../shared/ipcTypes'
-import type { AssetKind, ProjectDocument } from '../shared/projectTypes'
+import type { AssetKind } from '../shared/projectTypes'
 import type { CourseProjectDocument } from '../shared/courseProjectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
 import { buildStandaloneHtml } from './export/buildStandaloneHtml'
 import { buildWebPackageFromProjectAsync } from './export/buildWebPackage'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
+import {
+  buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseWebPackageAsync,
+} from './export/course/buildCoursePackages'
+import { buildCoursePptx } from './export/course/buildCoursePptx'
 import {
   SINGLE_HTML_HARD_LIMIT_BYTES,
   SINGLE_HTML_WARNING_BYTES,
@@ -42,12 +47,9 @@ import {
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
   isV9SlideVerticalSliceDirty,
+  type V9SlideVerticalSliceState,
 } from './course/v9SlideVerticalSlice'
 import { buildSlideEditorView } from './course/slideEditorView'
-import {
-  componentPackagesFromArchive,
-  componentPackagesToArchiveFiles,
-} from './components/componentPackageStore'
 import {
   componentPackageSha256,
   importComponentPackageAsync,
@@ -65,14 +67,14 @@ import {
   planMediaBatchImport,
   type MediaBatchLibraryFallback,
 } from './project/mediaBatch'
-import { openProjectArchiveAsync } from './project/projectArchive'
 import {
   createCourseProjectArchiveAsync,
+  importProjectV8ArchiveAsCourseProjectAsync,
   openCourseProjectArchiveAsync,
   UnsupportedCourseProjectVersionError,
+  type CourseProjectArchiveData,
 } from './project/courseProjectArchive'
 import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
-import { saveProjectAsync } from './project/saveProject'
 import {
   selectActiveScene,
   selectEditingNodes,
@@ -224,12 +226,13 @@ function isInteractiveControlTarget(target: EventTarget | null): boolean {
   )
 }
 
-interface V8RecoverySnapshot {
-  backend: 'v8'
-  project: ProjectDocument
-  assetFiles: Record<string, Uint8Array>
-  componentPackages: Record<string, ComponentPackageData>
-  projectPath: string | null
+function isActiveSlideEditorLocation(
+  session: V9SlideVerticalSliceState,
+): boolean {
+  return session.history.present.locations.some((location) =>
+    location.id === session.selection.locationId &&
+    location.kind === 'slide-scene',
+  )
 }
 
 interface V9RecoverySnapshot {
@@ -240,30 +243,18 @@ interface V9RecoverySnapshot {
   projectPath: string | null
 }
 
-type RecoverySnapshot = V8RecoverySnapshot | V9RecoverySnapshot
-
 function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
-  RecoverySnapshot,
+  V9RecoverySnapshot,
   Uint8Array
 > {
   return new RecoveryWriteCoordinator({
     delayMs: 1800,
     async build(snapshot, signal) {
-      if (snapshot.backend === 'v9') {
-        return createCourseProjectArchiveAsync({
-          project: snapshot.project,
-          assetFiles: snapshot.assetFiles,
-          componentFiles: snapshot.componentFiles,
-        }, { signal })
-      }
-      const archive = await saveProjectAsync({
+      return createCourseProjectArchiveAsync({
         project: snapshot.project,
         assetFiles: snapshot.assetFiles,
-        componentFiles: componentPackagesToArchiveFiles(
-          snapshot.componentPackages,
-        ),
-      }, new Date(), { signal })
-      return archive.bytes
+        componentFiles: snapshot.componentFiles,
+      }, { signal })
     },
     async write(bytes, snapshot) {
       if (!window.desktopAPI) throw new Error('桌面恢复服务不可用。')
@@ -319,7 +310,7 @@ export default function App() {
   const recoveryRevisionRef = useRef(0)
   const previousActiveDirtyRef = useRef(false)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
-    RecoverySnapshot,
+    V9RecoverySnapshot,
     Uint8Array
   > | null>(null)
   if (recoveryCoordinatorRef.current === null && window.desktopAPI) {
@@ -342,6 +333,10 @@ export default function App() {
   const activeScene = useEditorStore(selectActiveScene)
   const errorMessage = useEditorStore((state) => state.errorMessage)
   const statusMessage = useEditorStore((state) => state.statusMessage)
+  const recoveryCourseProject = v9SlideVerticalSlice?.history.present ?? null
+  const recoveryAssetFiles = v9SlideVerticalSlice?.assetFiles ?? null
+  const recoveryComponentFiles = v9SlideVerticalSlice?.componentFiles ?? null
+  const recoveryProjectPath = v9SlideVerticalSlice?.projectPath ?? null
   const v9BackendActive = v9SlideVerticalSlice !== null
   const activeDocumentDirty = v9SlideVerticalSlice === null
     ? dirty
@@ -365,11 +360,15 @@ export default function App() {
     : { error: 0, warning: 0, info: 0, total: 0, canExport: true }
   const v9CourseProject = v9SlideVerticalSlice?.history.present ?? null
   const v9SelectionLocationId = v9SlideVerticalSlice?.selection.locationId ?? null
-  const v9ActiveSlideContext = useMemo(() => {
+  const v9ActiveLocation = useMemo(() => {
     if (v9CourseProject === null || v9SelectionLocationId === null) return null
-    const location = v9CourseProject.locations.find(
+    return v9CourseProject.locations.find(
       (candidate) => candidate.id === v9SelectionLocationId,
-    )
+    ) ?? null
+  }, [v9CourseProject, v9SelectionLocationId])
+  const v9ActiveSlideContext = useMemo(() => {
+    if (v9CourseProject === null) return null
+    const location = v9ActiveLocation
     if (!location || location.kind !== 'slide-scene') return null
     const surface = v9CourseProject.surfaces.find(
       (candidate) => candidate.id === location.surfaceId,
@@ -379,17 +378,53 @@ export default function App() {
       (candidate) => candidate.id === location.sceneId,
     )
     return scene ? { location, surface, scene } : null
-  }, [v9CourseProject, v9SelectionLocationId])
+  }, [v9ActiveLocation, v9CourseProject])
+  const activeCourseEditorRoute = v9SlideVerticalSlice === null
+    ? 'legacy'
+    : v9ActiveSlideContext === null
+      ? 'unavailable'
+      : 'slide'
+  const v9CourseLocationUnavailableReason = activeCourseEditorRoute === 'unavailable'
+    ? v9ActiveLocation?.kind === 'flow-block'
+      ? '当前流程内容暂不能在编辑器中修改；工程仍可安全保存，现有内容不会改变。'
+      : v9ActiveLocation?.kind === 'spatial-camera'
+        ? '当前空间画布暂不能在编辑器中修改；工程仍可安全保存，现有内容不会改变。'
+        : '当前位置暂时无法编辑；工程仍可安全保存，现有内容不会改变。'
+    : undefined
   const activeDocumentLocationLabel = v9SlideVerticalSlice === null
     ? `场景 ${project.scenes.findIndex((scene) => scene.id === activeScene.id) + 1} / ${project.scenes.length}`
     : v9ActiveSlideContext
       ? `场景 ${v9ActiveSlideContext.surface.scenes.findIndex(
         (scene) => scene.id === v9ActiveSlideContext.scene.id,
       ) + 1} / ${v9ActiveSlideContext.surface.scenes.length}`
-      : '当前位置暂不支持幻灯片编辑'
+      : v9ActiveLocation?.label ?? '当前位置'
   const v9StatusBarView = useMemo(() => {
     if (v9SlideVerticalSlice === null) return null
     const courseProject = v9SlideVerticalSlice.history.present
+    if (v9ActiveSlideContext === null) {
+      const surface = v9ActiveLocation
+        ? courseProject.surfaces.find(
+            (candidate) => candidate.id === v9ActiveLocation.surfaceId,
+          )
+        : null
+      const itemCountLabel = surface?.type === 'flow'
+        ? `${surface.blocks.length} 个内容块`
+        : surface?.type === 'spatial-2d'
+          ? `${surface.world.layerItems.length} 个元素`
+          : '内容暂不可编辑'
+      const itemCount = surface?.type === 'flow'
+        ? surface.blocks.length
+        : surface?.type === 'spatial-2d'
+          ? surface.world.layerItems.length
+          : 0
+      return {
+        locationName: v9ActiveLocation?.label ?? '当前位置',
+        itemCountLabel,
+        selectionLabel: '当前内容只读',
+        largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
+          itemCount > RECOMMENDED_SCENE_NODES,
+      }
+    }
     const view = buildSlideEditorView({
       project: courseProject,
       locationId: v9SlideVerticalSlice.selection.locationId,
@@ -415,7 +450,7 @@ export default function App() {
         (editingGlobal ? courseProject.globalLayerItems.length : sceneLayerCount) >
           RECOMMENDED_SCENE_NODES,
     }
-  }, [v9SlideVerticalSlice])
+  }, [v9ActiveLocation, v9ActiveSlideContext, v9SlideVerticalSlice])
   const activeStatusBarView = v9StatusBarView ?? {
     locationName: editingScope === 'global' ? '全局层' : activeScene.name,
     itemCountLabel: editingScope === 'global'
@@ -524,6 +559,26 @@ export default function App() {
   ])
   const v9ScenePanelDocumentControl = useMemo<ScenePanelDocumentControl | undefined>(() => {
     if (v9SlideVerticalSlice === null) return undefined
+    if (v9CourseLocationUnavailableReason) {
+      const unavailable = () => undefined
+      return {
+        unavailableReason: v9CourseLocationUnavailableReason,
+        editingScope: 'scene',
+        globalElementCount: v9SlideVerticalSlice.history.present.globalLayerItems.length,
+        globalHasRuntime: v9SlideVerticalSlice.history.present.globalLayerItems.some(
+          (entry) => entry.item.kind === 'runtime',
+        ),
+        globalEditingDisabled: true,
+        scenes: [],
+        onAddScene: unavailable,
+        onActivateScene: unavailable,
+        onActivateGlobal: unavailable,
+        onRenameScene: unavailable,
+        onDeleteScene: unavailable,
+        onDuplicateScene: unavailable,
+        onReorderScenes: unavailable,
+      }
+    }
     const run = (command: () => void, fallback: string) => {
       if (lifecycleOperationInFlightRef.current) return
       try {
@@ -582,6 +637,7 @@ export default function App() {
     }
   }, [
     v9ActiveSlideContext?.scene.id,
+    v9CourseLocationUnavailableReason,
     v9ScenePanelBase,
     v9SlideVerticalSlice,
   ])
@@ -589,6 +645,25 @@ export default function App() {
     SceneStateStripDocumentControl | undefined
   >(() => {
     if (v9SlideVerticalSlice === null) return undefined
+    if (v9CourseLocationUnavailableReason) {
+      const unavailable = () => undefined
+      return {
+        unavailableReason: v9CourseLocationUnavailableReason,
+        editingScope: 'scene',
+        editorMode,
+        activeStateId: null,
+        states: [],
+        onSetEditorMode: unavailable,
+        onActivateState: unavailable,
+        onAddState: unavailable,
+        onDuplicateState: unavailable,
+        onRenameState: unavailable,
+        onSetInitialState: unavailable,
+        onSetThumbnailState: unavailable,
+        onClearState: unavailable,
+        onDeleteState: unavailable,
+      }
+    }
     const scene = v9ActiveSlideContext?.scene ?? null
     const presentation = scene?.presentation
     const states = (presentation?.states ?? []).map((state) => ({
@@ -656,17 +731,36 @@ export default function App() {
         useEditorStore.getState().deleteCoursePresentationState(stateId)
       }, '无法删除命名状态'),
     }
-  }, [editorMode, v9ActiveSlideContext?.scene, v9SlideVerticalSlice])
+  }, [
+    editorMode,
+    v9ActiveSlideContext?.scene,
+    v9CourseLocationUnavailableReason,
+    v9SlideVerticalSlice,
+  ])
   const v9WorkspaceSnapshot = useMemo(
-    () => v9SlideVerticalSlice === null
+    () => v9SlideVerticalSlice === null || v9ActiveSlideContext === null
       ? null
       : buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice),
-    [v9SlideVerticalSlice],
+    [v9ActiveSlideContext, v9SlideVerticalSlice],
   )
   const v9RightSidebarDocumentControl = useMemo<
     RightSidebarDocumentControl | undefined
   >(() => {
-    if (v9SlideVerticalSlice === null || v9WorkspaceSnapshot === null) return undefined
+    if (v9SlideVerticalSlice === null) return undefined
+    if (v9WorkspaceSnapshot === null || v9CourseLocationUnavailableReason) {
+      const reason = v9CourseLocationUnavailableReason ??
+        '当前位置暂时无法编辑；工程仍可安全保存，现有内容不会改变。'
+      return {
+        unavailableReasons: {
+          elements: reason,
+          components: reason,
+          layers: reason,
+          properties: reason,
+          automation: reason,
+          developer: reason,
+        },
+      }
+    }
     const run = (command: () => void, fallback: string) => {
       if (lifecycleOperationInFlightRef.current) return
       try {
@@ -829,6 +923,7 @@ export default function App() {
   }, [
     editorMode,
     v9ActiveSlideContext?.scene.name,
+    v9CourseLocationUnavailableReason,
     v9SlideVerticalSlice,
     v9WorkspaceSnapshot,
   ])
@@ -870,9 +965,6 @@ export default function App() {
 
   const setError = useEditorStore((state) => state.setError)
   const setStatus = useEditorStore((state) => state.setStatus)
-  const createNewProject = useEditorStore((state) => state.createNewProject)
-  const loadProject = useEditorStore((state) => state.loadProject)
-  const markSaved = useEditorStore((state) => state.markSaved)
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
   )
@@ -987,66 +1079,95 @@ export default function App() {
       await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      if (v9BackendActive) {
-        useEditorStore.getState().createNewCourseProject()
-        return
-      }
-      createNewProject()
+      useEditorStore.getState().createNewCourseProject()
     }, '新建课件失败，请重试。')
-  }, [clearRecoveryCopy, confirmDiscardIfNeeded, createNewProject, run, v9BackendActive])
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, run])
 
   const handleOpen = useCallback(() => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openProject()
       if (!file) return
-      if (v9BackendActive) {
-        const archive = await openCourseProjectArchiveAsync(file.bytes)
-        useEditorStore.getState().loadCourseProject(archive, file.path)
-        await clearRecoveryCopy().catch((error) => {
-          console.error('清理恢复数据失败', error)
+      let archive: CourseProjectArchiveData
+      try {
+        archive = await openCourseProjectArchiveAsync(file.bytes)
+      } catch (error) {
+        await desktopApi().removeRecentProject({ path: file.path }).catch((removeError) => {
+          console.error('移除不兼容的最近工程失败', removeError)
         })
-        await refreshRecentProjects()
-        return
+        await refreshRecentProjects().catch((refreshError) => {
+          console.error('刷新最近工程列表失败', refreshError)
+        })
+        throw error
       }
-      const archive = await openProjectArchiveAsync(file.bytes)
-      const packages = componentPackagesFromArchive(
-        archive.project,
-        archive.componentFiles,
-      )
-      loadProject(archive.project, file.path, archive.assetFiles, packages)
+      useEditorStore.getState().loadCourseProject(archive, file.path)
+      await desktopApi().confirmProjectOpened({ path: file.path }).catch((error) => {
+        console.error('最近工程列表更新失败', error)
+        useEditorStore.getState().setError('工程已经打开，但最近工程列表未能更新。')
+      })
       await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      await refreshRecentProjects()
+      await refreshRecentProjects().catch((error) => {
+        console.error('刷新最近工程列表失败', error)
+        useEditorStore.getState().setError('工程已经打开，但最近工程列表未能刷新。')
+      })
     }, '打开工程失败。请检查文件是否损坏后重试。')
-  }, [clearRecoveryCopy, confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run, v9BackendActive])
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, refreshRecentProjects, run])
+
+  const handleImportLegacy = useCallback(() => {
+    void run(async () => {
+      if (!(await confirmDiscardIfNeeded())) return
+      const file = await desktopApi().selectLegacyProject()
+      if (!file) return
+      const archive = await importProjectV8ArchiveAsCourseProjectAsync(file.bytes)
+      await clearRecoveryCopy().catch((error) => {
+        console.error('清理原恢复数据失败', error)
+      })
+      useEditorStore.getState().loadCourseProject(archive, null, { markDirty: true })
+      await desktopApi().removeRecentProject({ path: file.path }).catch((error) => {
+        console.error('移除旧版最近工程失败', error)
+      })
+      useEditorStore.getState().setStatus(
+        '已导入旧版工程；原文件未改写，请另存为新工程',
+      )
+      await refreshRecentProjects().catch((error) => {
+        console.error('刷新最近工程列表失败', error)
+        useEditorStore.getState().setError('旧版工程已经导入，但最近工程列表未能刷新。')
+      })
+    }, '旧版工程导入失败。请检查文件是否损坏后重试。')
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, refreshRecentProjects, run])
 
   const handleOpenRecent = useCallback((path: string) => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openRecentProject({ path })
-      if (v9BackendActive) {
-        const archive = await openCourseProjectArchiveAsync(file.bytes)
-        useEditorStore.getState().loadCourseProject(archive, file.path)
-        await clearRecoveryCopy().catch((error) => {
-          console.error('清理恢复数据失败', error)
+      let archive: CourseProjectArchiveData
+      try {
+        archive = await openCourseProjectArchiveAsync(file.bytes)
+      } catch (error) {
+        await desktopApi().removeRecentProject({ path: file.path }).catch((removeError) => {
+          console.error('移除不兼容的最近工程失败', removeError)
         })
-        await refreshRecentProjects()
-        return
+        await refreshRecentProjects().catch((refreshError) => {
+          console.error('刷新最近工程列表失败', refreshError)
+        })
+        throw error
       }
-      const archive = await openProjectArchiveAsync(file.bytes)
-      const packages = componentPackagesFromArchive(
-        archive.project,
-        archive.componentFiles,
-      )
-      loadProject(archive.project, file.path, archive.assetFiles, packages)
+      useEditorStore.getState().loadCourseProject(archive, file.path)
+      await desktopApi().confirmProjectOpened({ path: file.path }).catch((error) => {
+        console.error('最近工程列表更新失败', error)
+        useEditorStore.getState().setError('工程已经打开，但最近工程列表未能更新。')
+      })
       await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      await refreshRecentProjects()
+      await refreshRecentProjects().catch((error) => {
+        console.error('刷新最近工程列表失败', error)
+        useEditorStore.getState().setError('工程已经打开，但最近工程列表未能刷新。')
+      })
     }, '最近工程打开失败。文件可能已被移动，请使用“打开工程”重新选择。')
-  }, [clearRecoveryCopy, confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run, v9BackendActive])
+  }, [clearRecoveryCopy, confirmDiscardIfNeeded, refreshRecentProjects, run])
 
   const handleSave = useCallback(
     async (saveAs = false) => {
@@ -1055,65 +1176,26 @@ export default function App() {
       let savedCurrentRevision = false
       try {
         await run(async () => {
-          if (v9BackendActive) {
-            const state = useEditorStore.getState().courseSession
-            if (state === null) throw new Error('当前课件状态不可用')
-            const sessionId = state.sessionId
-            const savedSnapshot = captureV9SlideVerticalSliceArchive(state)
-            const bytes = await createCourseProjectArchiveAsync(savedSnapshot)
-            const result = await desktopApi().saveProject({
-              path: saveAs ? undefined : (state.projectPath ?? undefined),
-              suggestedName: `${savedSnapshot.project.title}.h5lesson`,
-              bytes,
-            })
-            if (result) {
-              savedCurrentRevision = useEditorStore.getState().completeCourseProjectSave(
-                sessionId,
-                savedSnapshot,
-                result.path,
-              )
-              if (savedCurrentRevision) {
-                await clearRecoveryCopy().catch((error) => {
-                  console.error('清理恢复数据失败', error)
-                })
-              }
-              await refreshRecentProjects()
-            }
-            return
-          }
           const state = useEditorStore.getState()
-          const savedProjectRevision = state.project
-          const savedAssetRevision = state.assetFiles
-          const savedComponentRevision = state.componentPackages
-          const saved = await saveProjectAsync({
-            project: state.project,
-            assetFiles: state.assetFiles,
-            componentFiles: componentPackagesToArchiveFiles(
-              state.componentPackages,
-            ),
-          })
+          const courseSession = state.courseSession
+          if (courseSession === null) throw new Error('当前课件状态不可用')
+          const sessionId = courseSession.sessionId
+          const savedSnapshot = captureV9SlideVerticalSliceArchive(courseSession)
+          const bytes = await createCourseProjectArchiveAsync(savedSnapshot)
           const result = await desktopApi().saveProject({
-            path: saveAs ? undefined : (state.projectPath ?? undefined),
-            suggestedName: `${state.project.title}.h5lesson`,
-            bytes: saved.bytes,
+            path: saveAs ? undefined : (courseSession.projectPath ?? undefined),
+            suggestedName: `${savedSnapshot.project.title}.h5lesson`,
+            bytes,
           })
           if (result) {
-            const current = useEditorStore.getState()
-            const revisionStillCurrent =
-              current.project === savedProjectRevision &&
-              current.assetFiles === savedAssetRevision &&
-              current.componentPackages === savedComponentRevision
-            if (revisionStillCurrent) {
-              markSaved(result.path, saved.project)
-              savedCurrentRevision = true
+            savedCurrentRevision = useEditorStore.getState().completeCourseProjectSave(
+              sessionId,
+              savedSnapshot,
+              result.path,
+            )
+            if (savedCurrentRevision) {
               await clearRecoveryCopy().catch((error) => {
                 console.error('清理恢复数据失败', error)
-              })
-            } else {
-              useEditorStore.setState({
-                projectPath: result.path,
-                dirty: true,
-                statusMessage: '已保存启动保存时的版本；之后的修改尚未保存',
               })
             }
             await refreshRecentProjects()
@@ -1124,7 +1206,7 @@ export default function App() {
       }
       return savedCurrentRevision
     },
-    [clearRecoveryCopy, markSaved, refreshRecentProjects, run, v9BackendActive],
+    [clearRecoveryCopy, refreshRecentProjects, run],
   )
 
   const selectAndImportImage = useCallback(
@@ -1470,6 +1552,14 @@ export default function App() {
 
   const buildHtml = useCallback(() => {
     const state = useEditorStore.getState()
+    const courseSession = state.courseSession
+    if (courseSession !== null) {
+      return buildPublishedCourseStandaloneHtml({
+        project: courseSession.history.present,
+        assetFiles: courseSession.assetFiles,
+        components: courseSession.componentPackages,
+      }, loadPlayerBundle())
+    }
     const payload = buildExportPayload({
       project: state.project,
       assetFiles: state.assetFiles,
@@ -1486,8 +1576,9 @@ export default function App() {
 
   const writeSingleHtml = useCallback(async (html: string) => {
     const state = useEditorStore.getState()
+    const title = state.courseSession?.history.present.title ?? state.project.title
     const result = await desktopApi().exportHtml({
-      suggestedName: `${state.project.title}.html`,
+      suggestedName: `${title}.html`,
       html,
     })
     if (result) state.setStatus(`单 HTML 已导出到 ${result.path}`)
@@ -1510,13 +1601,21 @@ export default function App() {
     void run(async () => {
       const state = useEditorStore.getState()
       state.setStatus('正在生成网页包…')
-      const bytes = await buildWebPackageFromProjectAsync({
-        project: state.project,
-        assetFiles: state.assetFiles,
-        components: state.componentPackages,
-      }, loadPlayerBundle())
+      const courseSession = state.courseSession
+      const bytes = courseSession === null
+        ? await buildWebPackageFromProjectAsync({
+          project: state.project,
+          assetFiles: state.assetFiles,
+          components: state.componentPackages,
+        }, loadPlayerBundle())
+        : await buildPublishedCourseWebPackageAsync({
+          project: courseSession.history.present,
+          assetFiles: courseSession.assetFiles,
+          components: courseSession.componentPackages,
+        }, loadPlayerBundle())
+      const title = courseSession?.history.present.title ?? state.project.title
       const result = await desktopApi().exportWebPackage({
-        suggestedName: `${state.project.title}-网页包.zip`,
+        suggestedName: `${title}-网页包.zip`,
         bytes,
       })
       if (result) state.setStatus(`网页包已导出到 ${result.path}`)
@@ -1527,6 +1626,27 @@ export default function App() {
     void run(async () => {
       const state = useEditorStore.getState()
       state.setStatus('正在生成可编辑 PPTX 对象…')
+      const courseSession = state.courseSession
+      if (courseSession !== null) {
+        const built = await buildCoursePptx(
+          courseSession.history.present,
+          courseSession.assetFiles,
+        )
+        const result = await desktopApi().exportBinary({
+          suggestedName: `${courseSession.history.present.title}.pptx`,
+          extension: 'pptx',
+          bytes: built.bytes,
+        })
+        if (result) {
+          const warningSummary = built.warnings.length > 0
+            ? `；${built.warnings.length} 项内容已按导出说明处理`
+            : ''
+          state.setStatus(
+            `PPTX 已导出 ${built.slideCount} 页到 ${result.path}${warningSummary}`,
+          )
+        }
+        return
+      }
       const payload = buildExportPayload({
         project: state.project,
         assetFiles: state.assetFiles,
@@ -1566,6 +1686,13 @@ export default function App() {
 
   const handleExport = useCallback((format: ExportFormat) => {
     const state = useEditorStore.getState()
+    if (state.courseSession !== null) {
+      if (format === 'single-html') handleExportHtml()
+      else if (format === 'web-package') handleExportWebPackage()
+      else if (format === 'pptx') handleExportPptx()
+      else state.setError('当前课件暂不能导出 PDF；其他导出格式仍可使用。')
+      return
+    }
     setExportPreflightReport(collectExportPreflight(
       state.project,
       format,
@@ -1574,7 +1701,7 @@ export default function App() {
         components: state.componentPackages,
       },
     ))
-  }, [])
+  }, [handleExportHtml, handleExportPptx, handleExportWebPackage])
 
   const continuePreflightExport = useCallback(() => {
     const report = exportPreflightReport
@@ -1697,34 +1824,30 @@ export default function App() {
       return
     }
     recoveryRevisionRef.current += 1
-    if (v9SlideVerticalSlice !== null) {
-      coordinator.schedule(recoveryRevisionRef.current, {
-        backend: 'v9',
-        project: v9SlideVerticalSlice.history.present,
-        assetFiles: v9SlideVerticalSlice.assetFiles,
-        componentFiles: v9SlideVerticalSlice.componentFiles,
-        projectPath: v9SlideVerticalSlice.projectPath,
-      })
+    if (
+      recoveryCourseProject === null ||
+      recoveryAssetFiles === null ||
+      recoveryComponentFiles === null
+    ) {
+      coordinator.cancel()
       return
     }
-    const state = useEditorStore.getState()
     coordinator.schedule(recoveryRevisionRef.current, {
-      backend: 'v8',
-      project: state.project,
-      assetFiles: state.assetFiles,
-      componentPackages: state.componentPackages,
-      projectPath: state.projectPath,
+      backend: 'v9',
+      project: recoveryCourseProject,
+      assetFiles: recoveryAssetFiles,
+      componentFiles: recoveryComponentFiles,
+      projectPath: recoveryProjectPath,
     })
   }, [
     activeDocumentDirty,
-    assetFiles,
     clearRecoveryCopy,
-    componentPackages,
-    project,
-    projectPath,
+    recoveryAssetFiles,
+    recoveryComponentFiles,
     recoveryDecisionComplete,
+    recoveryCourseProject,
+    recoveryProjectPath,
     setError,
-    v9SlideVerticalSlice,
   ])
 
   useEffect(() => () => {
@@ -1740,8 +1863,38 @@ export default function App() {
 
   useEffect(() => {
     if (!window.desktopAPI) return
-    return window.desktopAPI.onRequestSaveAndClose(() => handleSave(false))
-  }, [handleSave])
+    return window.desktopAPI.onRequestSaveAndClose(async (mode) => {
+      if (mode === 'discard') {
+        try {
+          await clearRecoveryCopy()
+          return true
+        } catch (error) {
+          console.error('关闭前清理恢复副本失败', error)
+          useEditorStore.getState().setError(
+            '暂时无法清理恢复副本，窗口仍保持打开；请稍后重试。',
+          )
+          const session = useEditorStore.getState().courseSession
+          const coordinator = recoveryCoordinatorRef.current
+          if (
+            session !== null &&
+            coordinator !== null &&
+            isV9SlideVerticalSliceDirty(session)
+          ) {
+            recoveryRevisionRef.current += 1
+            coordinator.schedule(recoveryRevisionRef.current, {
+              backend: 'v9',
+              project: session.history.present,
+              assetFiles: session.assetFiles,
+              componentFiles: session.componentFiles,
+              projectPath: session.projectPath,
+            })
+          }
+          return false
+        }
+      }
+      return handleSave(false)
+    })
+  }, [clearRecoveryCopy, handleSave])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1767,6 +1920,10 @@ export default function App() {
         event.preventDefault()
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
+          if (!isActiveSlideEditorLocation(state.courseSession)) {
+            state.setStatus('当前位置暂不支持选择元素')
+            return
+          }
           const snapshot = buildV9SlideWorkspaceSnapshot(state.courseSession)
           state.selectCourseLayers({
             nodeIds: snapshot.document.nodes
@@ -1797,6 +1954,10 @@ export default function App() {
         event.preventDefault()
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
+          if (!isActiveSlideEditorLocation(state.courseSession)) {
+            state.setStatus('当前位置暂不支持复制元素')
+            return
+          }
           const [layerItemId] = state.courseSession.selection.selectionIds
           if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
             state.duplicateCourseLayer(layerItemId)
@@ -1809,6 +1970,11 @@ export default function App() {
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
+          if (!isActiveSlideEditorLocation(state.courseSession)) {
+            event.preventDefault()
+            state.setStatus('当前位置暂不支持删除元素')
+            return
+          }
           const [layerItemId] = state.courseSession.selection.selectionIds
           if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
             event.preventDefault()
@@ -1836,6 +2002,7 @@ export default function App() {
         }[event.key]
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
+          if (!isActiveSlideEditorLocation(state.courseSession)) return
           if (movement && state.courseSession.selection.selectionIds.length > 0) {
             event.preventDefault()
             state.nudgeCourseLayers(movement[0], movement[1])
@@ -1849,6 +2016,7 @@ export default function App() {
       } else if (event.key === 'Escape') {
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
+          if (!isActiveSlideEditorLocation(state.courseSession)) return
           state.selectCourseLayers({ nodeIds: [], additive: false })
           return
         }
@@ -1874,14 +2042,18 @@ export default function App() {
             : v9SlideVerticalSlice.history.future.length > 0,
           locationLabel: activeDocumentLocationLabel,
           canInspectHealth: !v9BackendActive,
-          canPreview: !v9BackendActive,
-          canExport: !v9BackendActive,
+          canPreview: true,
+          canExport: true,
+          unavailableExports: v9BackendActive
+            ? { pdf: '当前课件暂不能导出 PDF' }
+            : undefined,
           onRename: renameActiveDocument,
           onUndo: undoActiveDocument,
           onRedo: redoActiveDocument,
         }}
         onNew={handleNew}
         onOpen={handleOpen}
+        onImportLegacy={handleImportLegacy}
         recentProjects={recentProjects}
         onOpenRecent={handleOpenRecent}
         onSave={(saveAs) => void handleSave(saveAs)}
@@ -1903,6 +2075,7 @@ export default function App() {
         <div className="editor-center">
           <Workspace
             slideAuthoring={v9SlideAuthoring}
+            courseLocationUnavailableReason={v9CourseLocationUnavailableReason}
             interactionDisabled={busy}
             onAddImage={v9BackendActive
               ? () => setStatus('图片添加暂不可用')
@@ -2046,7 +2219,7 @@ export default function App() {
       <ConfirmDialog
         open={Boolean(recoveryProject)}
         title="发现未完成的本地恢复副本"
-        message={recoveryProject ? `课件：${recoveryProject.projectName}\n保存时间：${new Date(recoveryProject.savedAt).toLocaleString('zh-CN')}\n\n恢复后请重新保存工程；如果这些修改已经不需要，可以丢弃副本。` : ''}
+        message={recoveryProject ? `课件：${recoveryProject.projectName}\n保存时间：${new Date(recoveryProject.savedAt).toLocaleString('zh-CN')}\n\n恢复后请重新保存工程。如果副本来自旧版，将导入为当前格式并要求另存，不会改写原工程。\n\n如果这些修改已经不需要，可以丢弃副本。` : ''}
         confirmLabel="恢复课件"
         cancelLabel="丢弃副本"
         onCancel={() => {
@@ -2060,15 +2233,10 @@ export default function App() {
         onConfirm={() => {
           if (!recoveryProject) return
           void run(async () => {
+            let archive: CourseProjectArchiveData
+            let importedLegacy = false
             try {
-              const archive = await openCourseProjectArchiveAsync(recoveryProject.bytes)
-              useEditorStore.getState().loadCourseProject(archive, null, {
-                markDirty: true,
-              })
-              await clearRecoveryCopy()
-              setRecoveryProject(null)
-              setRecoveryDecisionComplete(true)
-              return
+              archive = await openCourseProjectArchiveAsync(recoveryProject.bytes)
             } catch (error) {
               const cause = error instanceof UserFacingError ? error.cause : undefined
               if (
@@ -2077,18 +2245,31 @@ export default function App() {
               ) {
                 throw error
               }
+              archive = await importProjectV8ArchiveAsCourseProjectAsync(
+                recoveryProject.bytes,
+              )
+              importedLegacy = true
             }
-            const archive = await openProjectArchiveAsync(recoveryProject.bytes)
-            const packages = componentPackagesFromArchive(archive.project, archive.componentFiles)
-            useEditorStore.getState().clearCourseProjectSession()
-            loadProject(archive.project, null, archive.assetFiles, packages)
-            useEditorStore.setState({
-              dirty: true,
-              statusMessage: '已恢复未保存的课件，请尽快另存为工程文件',
+            let recoveryClearFailed = false
+            await clearRecoveryCopy().catch((error) => {
+              recoveryClearFailed = true
+              console.error('恢复前清理旧副本失败', error)
             })
-            await clearRecoveryCopy()
+            useEditorStore.getState().loadCourseProject(archive, null, {
+              markDirty: true,
+            })
+            if (importedLegacy) {
+              useEditorStore.getState().setStatus(
+                '已导入旧版恢复副本；原工程未改写，请另存为新工程',
+              )
+            }
             setRecoveryProject(null)
             setRecoveryDecisionComplete(true)
+            if (recoveryClearFailed) {
+              useEditorStore.getState().setError(
+                '课件已经恢复，但旧恢复副本未能清理；系统会重新生成当前恢复副本，请尽快保存工程。',
+              )
+            }
           }, '恢复课件失败。恢复副本可能已经损坏。')
         }}
       />

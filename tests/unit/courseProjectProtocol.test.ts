@@ -9,6 +9,7 @@ import {
   deriveCourseProjectAuthoringInventorySnapshot,
   getEffectiveLayerOrder,
   isCanonicalLayerOrder,
+  LegacyComponentPackageMigrationConflictError,
   migrateProjectV8ToCourseProjectV9,
   ProjectV8MigrationCompatibilityError,
   reindexLayerItems,
@@ -245,6 +246,47 @@ describe('Course Project V9 multi-surface protocol', () => {
       .toMatchObject({ locked: true })
   })
 
+  it('normalizes one embedded component version and rejects ambiguous versions without mutating input', () => {
+    const packageId = 'com.example.legacy-widget'
+    const metadata = (version: string) => ({
+      packageId,
+      version,
+      name: `Legacy widget ${version}`,
+      manifestPath: `components/${packageId}@${version}/manifest.json`,
+      runtimePath: `components/${packageId}@${version}/runtime.js`,
+      contentSha256: HASH,
+    })
+    const singleVersion = makeV8ProjectWithStableIds()
+    singleVersion.componentPackages[`${packageId}@4.0.0`] = metadata('4.0.0')
+    const before = structuredClone(singleVersion)
+
+    const migrated = migrateProjectV8ToCourseProjectV9(singleVersion)
+
+    expect(Object.keys(migrated.componentPackages)).toEqual([packageId])
+    expect(migrated.componentPackages[packageId]).toEqual(metadata('4.0.0'))
+    expect(singleVersion).toEqual(before)
+
+    const multipleVersions = makeV8ProjectWithStableIds()
+    multipleVersions.componentPackages[`${packageId}@4.0.0`] = metadata('4.0.0')
+    multipleVersions.componentPackages[`${packageId}@5.0.0`] = metadata('5.0.0')
+    const conflictingBefore = structuredClone(multipleVersions)
+
+    let migrationError: unknown
+    try {
+      migrateProjectV8ToCourseProjectV9(multipleVersions)
+    } catch (error) {
+      migrationError = error
+    }
+    expect(migrationError).toBeInstanceOf(LegacyComponentPackageMigrationConflictError)
+    expect(migrationError).toMatchObject({
+      packageId,
+      versions: ['4.0.0', '5.0.0'],
+    })
+    expect((migrationError as Error).message).toMatch(/旧工程.*多个版本/)
+    expect((migrationError as Error).message).not.toMatch(/\bV[89]\b/)
+    expect(multipleVersions).toEqual(conflictingBefore)
+  })
+
   it('preserves a single legacy Runtime plane and rejects ambiguous dual-plane migration', () => {
     const underlay = makeV8ProjectWithStableIds()
     underlay.scenes[0]!.runtime!.source = `CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){
@@ -286,7 +328,7 @@ describe('Course Project V9 multi-surface protocol', () => {
       ProjectV8MigrationCompatibilityError,
     )
     expect(() => migrateProjectV8ToCourseProjectV9(ambiguous)).toThrow(
-      /无法在不改变旧语义/,
+      /无法在不改变显示层级/,
     )
   })
 

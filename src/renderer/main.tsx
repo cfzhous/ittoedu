@@ -12,8 +12,11 @@ import { useEditorStore } from './store/editorStore'
 
 installRendererDiagnostics()
 
-if (resolveEditorStartupBackend(window.location.search) === V9_SLIDE_TEST_BACKEND) {
+const startupBackend = resolveEditorStartupBackend(window.location.search)
+if (startupBackend === V9_SLIDE_TEST_BACKEND) {
   useEditorStore.getState().activateV9SlideFixture()
+} else {
+  useEditorStore.getState().createNewCourseProject()
 }
 
 window.__COURSEWARE_EDITOR_DIRTY__ = false

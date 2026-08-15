@@ -155,6 +155,38 @@ afterEach(() => {
 })
 
 describe('ScenePanel document control port', () => {
+  it('gates an unavailable course location without mounting legacy scene controls', () => {
+    const callbacks = {
+      onAddScene: vi.fn(),
+      onActivateScene: vi.fn(),
+      onActivateGlobal: vi.fn(),
+      onRenameScene: vi.fn(),
+      onDeleteScene: vi.fn(),
+      onDuplicateScene: vi.fn(),
+      onReorderScenes: vi.fn(),
+    }
+
+    render(<ScenePanel documentControl={{
+      unavailableReason: '此类内容的场景编辑功能尚未开放。',
+      editingScope: 'scene',
+      globalElementCount: 2,
+      globalHasRuntime: false,
+      scenes: [],
+      ...callbacks,
+    }} />)
+
+    expect(screen.getByTestId('scene-panel-course-location-gate')).toHaveTextContent(
+      '此类内容的场景编辑功能尚未开放。',
+    )
+    expect(screen.queryByTestId('add-scene')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('global-layer-entry')).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/^scene-item-/)).not.toBeInTheDocument()
+    expect(Object.values(callbacks).every((callback) => callback.mock.calls.length === 0))
+      .toBe(true)
+    expect(legacyV8Sentinels.useStore).not.toHaveBeenCalled()
+    expect(legacyV8Sentinels.ensurePresentation).not.toHaveBeenCalled()
+  })
+
   it('renders and dispatches only the supplied V9 port without reading legacy helpers', () => {
     const callbacks = {
       onAddScene: vi.fn(),

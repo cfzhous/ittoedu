@@ -66,9 +66,16 @@ describe('V9 Slide native layer session commands', () => {
   it('adds text, formula and the requested shape with one history entry each', () => {
     const initial = createLayerSession()
     const text = addV9SlideTextLayer(initial, 180, 160, NOW)
+    const textId = text.selection.selectionIds[0]!
     const formula = addV9SlideFormulaLayer(text, 240, 220, NOW)
     const shape = addV9SlideShapeLayer(formula, 'diamond', 300, 280, NOW)
 
+    expect(sceneFor(text).layerItems.find((item) => item.layerItemId === textId)).toMatchObject({
+      label: '文本',
+      frame: { x: 180, y: 160 },
+      kind: 'native',
+      content: { nativeType: 'text', data: { text: '双击编辑文字' } },
+    })
     expect(shape.history.present.revision - initial.history.present.revision).toBe(3)
     expect(shape.history.past.length - initial.history.past.length).toBe(3)
     expect(shape.selection.selectionIds).toHaveLength(1)
@@ -79,6 +86,20 @@ describe('V9 Slide native layer session commands', () => {
       content: { nativeType: 'shape', data: { shapeType: 'diamond' } },
     })
     expect(courseProjectDocumentSchema.safeParse(shape.history.present).success).toBe(true)
+  })
+
+  it('uses the native 1280 by 720 centered text default when no position is supplied', () => {
+    const initial = createLayerSession()
+    const next = addV9SlideTextLayer(initial, undefined, undefined, NOW)
+    const textId = next.selection.selectionIds[0]!
+
+    expect(sceneFor(next).layerItems.find((item) => item.layerItemId === textId)).toMatchObject({
+      label: '文本',
+      frame: { x: 440, y: 320, width: 400, height: 80 },
+      kind: 'native',
+      content: { nativeType: 'text', data: { text: '双击编辑文字' } },
+    })
+    expect(courseProjectDocumentSchema.safeParse(next.history.present).success).toBe(true)
   })
 
   it('keeps hidden and locked rows selectable while refusing their canvas nudge', () => {

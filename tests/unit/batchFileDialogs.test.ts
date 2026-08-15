@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 
 import {
   batchCapacityIssue,
+  selectLegacyProjectFile,
   selectAudioFiles,
   selectComponentFiles,
   selectImageFiles,
@@ -35,6 +36,27 @@ afterEach(async () => {
 })
 
 describe('batch file dialogs', () => {
+  it('uses a dedicated legacy-project dialog without changing the source bytes', async () => {
+    const legacyPath = path.join(temporaryDirectory, 'legacy.h5lesson')
+    const sourceBytes = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3])
+    await fs.writeFile(legacyPath, sourceBytes)
+    electron.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [legacyPath],
+    })
+
+    const result = await selectLegacyProjectFile(windowStub)
+
+    expect(electron.showOpenDialog).toHaveBeenCalledWith(windowStub, {
+      title: '导入旧版工程',
+      filters: [{ name: '旧版课件工程', extensions: ['h5lesson'] }],
+      properties: ['openFile', 'dontAddToRecent'],
+    })
+    expect(result).toMatchObject({ path: legacyPath, name: 'legacy.h5lesson' })
+    expect(result?.bytes).toEqual(sourceBytes)
+    expect(new Uint8Array(await fs.readFile(legacyPath))).toEqual(sourceBytes)
+  })
+
   it('returns every valid image and an explainable rejection in one response', async () => {
     const validPath = path.join(temporaryDirectory, 'valid.png')
     const invalidPath = path.join(temporaryDirectory, 'broken.png')

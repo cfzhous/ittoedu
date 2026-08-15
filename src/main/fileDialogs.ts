@@ -88,6 +88,19 @@ async function rememberOpenedProject(value: string): Promise<void> {
   })
 }
 
+/** Records a project only after the renderer has accepted its current schema. */
+export async function confirmOpenedProjectFile(value: string): Promise<void> {
+  if (!isApprovedProjectPath(value)) {
+    throw new DesktopOperationError(
+      'PROJECT_PATH_NOT_APPROVED',
+      '无法记录最近工程',
+      '该工程路径不属于本次文件选择。',
+      '请使用“打开工程”重新选择文件。',
+    )
+  }
+  await rememberOpenedProject(value)
+}
+
 function isApprovedProjectPath(value: string): boolean {
   return approvedProjectPaths.has(canonicalPath(value))
 }
@@ -360,7 +373,42 @@ export async function openProjectFile(
     )
   }
 
-  await rememberOpenedProject(filePath)
+  // The renderer records this path only after the archive is accepted as the
+  // current project schema. A rejected legacy file must not pollute recents.
+  rememberProjectPath(filePath)
+  return { path: filePath, name: path.basename(filePath), bytes }
+}
+
+/**
+ * Selects a legacy project for explicit renderer-side migration. The source is
+ * deliberately not recorded as a recent current-format project.
+ */
+export async function selectLegacyProjectFile(
+  window: BrowserWindow,
+): Promise<OpenBinaryFileResult | null> {
+  const result = await dialog.showOpenDialog(window, {
+    title: '导入旧版工程',
+    filters: [{ name: '旧版课件工程', extensions: ['h5lesson'] }],
+    properties: ['openFile', 'dontAddToRecent'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+
+  const filePath = result.filePaths[0]
+  const bytes = await readFileWithLimit(
+    filePath,
+    MAX_PROJECT_BYTES,
+    '旧版工程导入失败',
+    'PROJECT_READ_FAILED',
+  )
+  if (!hasZipSignature(bytes)) {
+    throw new DesktopOperationError(
+      'PROJECT_ARCHIVE_INVALID',
+      '旧版工程导入失败',
+      '所选文件不是有效的课件工程，或文件已经损坏。',
+      '请重新选择 .h5lesson 文件，或从备份恢复该工程。',
+    )
+  }
+
   return { path: filePath, name: path.basename(filePath), bytes }
 }
 
@@ -417,7 +465,8 @@ export async function openRecentProjectFile(
     )
   }
 
-  await rememberOpenedProject(filePath)
+  // Refresh the recent timestamp only after renderer-side schema validation.
+  rememberProjectPath(filePath)
   return { path: filePath, name: path.basename(filePath), bytes }
 }
 

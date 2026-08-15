@@ -48,6 +48,7 @@ import {
 } from './courseStudioModel'
 import { componentPackagesFromArchive } from '../components/componentPackageStore'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
+import { createTextNode } from '../project/createProject'
 import {
   selectSlideEditorLayers,
   transformSelectedSlideNativeLayers,
@@ -60,13 +61,16 @@ import {
   type SlideEditorLayerView,
 } from './slideEditorView'
 
+export const V9_EDITOR_BACKEND = 'v9' as const
 export const V9_SLIDE_TEST_BACKEND = 'v9-slide-test' as const
 export const V9_SLIDE_TEST_QUERY = '?editor-backend=v9-slide-test' as const
 export const V9_SLIDE_TEST_TEXT_ID = 'v9-test-text' as const
 
 const FIXTURE_NOW = '2026-08-15T02:00:00.000Z'
 
-export type EditorStartupBackend = 'v8' | typeof V9_SLIDE_TEST_BACKEND
+export type EditorStartupBackend =
+  | typeof V9_EDITOR_BACKEND
+  | typeof V9_SLIDE_TEST_BACKEND
 
 export interface V9SlideVerticalSliceState {
   readonly sessionId: string
@@ -110,9 +114,11 @@ export interface V9SlideWorkspaceSnapshot {
   readonly selectedNodeIds: readonly string[]
 }
 
-/** The temporary backend is deliberately available through one exact test URL only. */
+/** Production is the default; one exact query keeps the isolated regression fixture. */
 export function resolveEditorStartupBackend(search: string): EditorStartupBackend {
-  return search === V9_SLIDE_TEST_QUERY ? V9_SLIDE_TEST_BACKEND : 'v8'
+  return search === V9_SLIDE_TEST_QUERY
+    ? V9_SLIDE_TEST_BACKEND
+    : V9_EDITOR_BACKEND
 }
 
 function createFixtureProject() {
@@ -224,6 +230,27 @@ export function createV9CourseEditorState(): V9SlideVerticalSliceState {
   }, null)
 }
 
+function selectCourseEditorLocation(
+  project: V9SlideVerticalSliceState['history']['present'],
+  locationId: string,
+  stateId: string | null,
+  selectionIds: readonly string[],
+): SlideEditorSelection {
+  const location = project.locations.find((candidate) => candidate.id === locationId)
+  if (!location) throw new Error('当前课程位置已失效')
+  if (location.kind === 'slide-scene') {
+    return selectSlideEditorLayers({ project, locationId, stateId, selectionIds })
+  }
+  if (selectionIds.length > 0) {
+    throw new Error('当前内容类型暂不支持画布选择')
+  }
+  return Object.freeze({
+    locationId,
+    stateId: null,
+    selectionIds: Object.freeze([]),
+  })
+}
+
 export function openV9SlideVerticalSliceState(
   archive: CourseProjectArchiveData,
   projectPath: string | null,
@@ -231,12 +258,12 @@ export function openV9SlideVerticalSliceState(
 ): V9SlideVerticalSliceState {
   const { project, assetFiles, componentFiles } = archive
   const history = createCourseHistory(project)
-  const selection = selectSlideEditorLayers({
+  const selection = selectCourseEditorLocation(
     project,
-    locationId: project.startLocationId,
-    stateId: null,
-    selectionIds: [],
-  })
+    project.startLocationId,
+    null,
+    [],
+  )
   const componentPackages = componentPackagesFromArchive(project, componentFiles)
   return freezeState(
     crypto.randomUUID(),
@@ -341,6 +368,10 @@ function selectableNativeLayers(
   state: V9SlideVerticalSliceState,
 ): Map<string, ReadonlyNativeLayer> {
   if (state.editingScope !== 'scene') return new Map()
+  const location = state.history.present.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (location?.kind !== 'slide-scene') return new Map()
   return new Map(activeSlideView(state).layers.flatMap((layer) => (
     layer.source === 'scene' &&
     layer.item.kind === 'native' &&
@@ -627,13 +658,29 @@ function addV9SlideNativeLayer(
   const { surface, scene } = activeSlideSceneContext(state)
   const id = `${input.nativeType}-${nanoid(10)}`
   const project = input.nativeType === 'text'
-    ? addSlideTextLayer(
-        state.history.present,
-        surface.id,
-        scene.id,
-        '双击编辑文字',
-        { id, x: input.x, y: input.y, stateId: state.selection.stateId, now },
-      )
+    ? (() => {
+        const node = createTextNode({
+          id,
+          name: '文本',
+          text: '双击编辑文字',
+          x: input.x,
+          y: input.y,
+        })
+        return addSlideTextLayer(
+          state.history.present,
+          surface.id,
+          scene.id,
+          node.text,
+          {
+            id,
+            x: node.x,
+            y: node.y,
+            label: node.name,
+            stateId: state.selection.stateId,
+            now,
+          },
+        )
+      })()
     : addNativeVisualLayer(state.history.present, {
         surfaceId: surface.id,
         sceneId: scene.id,
@@ -1595,19 +1642,19 @@ function selectionForHistory(
   history: CourseHistoryState,
 ): SlideEditorSelection {
   try {
-    return selectSlideEditorLayers({
-      project: history.present,
-      locationId: state.selection.locationId,
-      stateId: state.selection.stateId,
-      selectionIds: state.selection.selectionIds,
-    })
+    return selectCourseEditorLocation(
+      history.present,
+      state.selection.locationId,
+      state.selection.stateId,
+      state.selection.selectionIds,
+    )
   } catch {
-    return selectSlideEditorLayers({
-      project: history.present,
-      locationId: history.present.startLocationId,
-      stateId: null,
-      selectionIds: [],
-    })
+    return selectCourseEditorLocation(
+      history.present,
+      history.present.startLocationId,
+      null,
+      [],
+    )
   }
 }
 

@@ -75,10 +75,25 @@ export interface RecoveryProjectResult extends RecoveryProjectInput {
   savedAt: number
 }
 
+export type ClosePreparationMode = 'save' | 'discard'
+
+export interface ClosePreparationRequest {
+  requestId: string
+  mode: ClosePreparationMode
+}
+
+export interface ClosePreparationResult {
+  requestId: string
+  prepared: boolean
+}
+
 export interface DesktopAPI {
   openProject(): Promise<OpenBinaryFileResult | null>
+  confirmProjectOpened(input: { path: string }): Promise<void>
+  selectLegacyProject(): Promise<OpenBinaryFileResult | null>
   selectCourseAuthoringPatch(): Promise<OpenBinaryFileResult | null>
   listRecentProjects(): Promise<RecentProjectEntry[]>
+  removeRecentProject(input: { path: string }): Promise<void>
   openRecentProject(input: { path: string }): Promise<OpenBinaryFileResult>
   saveProject(input: SaveBinaryFileInput): Promise<SaveBinaryFileResult | null>
   writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
@@ -125,7 +140,9 @@ export interface DesktopAPI {
   setDirtyState(dirty: boolean): Promise<void>
   updateCurrentCourseSelection(input: CurrentCourseSelectionUpdate): Promise<void>
   onRequestSave(handler: () => void): () => void
-  onRequestSaveAndClose(handler: () => Promise<boolean>): () => void
+  onRequestSaveAndClose(
+    handler: (mode: ClosePreparationMode) => Promise<boolean>,
+  ): () => void
   reportDiagnostic(input: {
     source: 'renderer' | 'preview' | 'component'
     message: string
@@ -136,8 +153,11 @@ export interface DesktopAPI {
 
 export const IPC_CHANNELS = {
   openProject: 'project:open',
+  confirmProjectOpened: 'project:confirm-opened',
+  selectLegacyProject: 'project:select-legacy',
   selectCourseAuthoringPatch: 'project:select-authoring-patch',
   listRecentProjects: 'project:list-recent',
+  removeRecentProject: 'project:remove-recent',
   openRecentProject: 'project:open-recent',
   saveProject: 'project:save',
   writeRecoveryProject: 'project:write-recovery',

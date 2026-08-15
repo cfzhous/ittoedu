@@ -11,13 +11,21 @@ import {
   createCourseProjectArchive,
   createCourseProjectArchiveAsync,
   importProjectV8ArchiveAsCourseProject,
+  importProjectV8ArchiveAsCourseProjectAsync,
   migrateProjectV8ArchiveToCourseProjectV9,
   openCourseProjectArchive,
   openCourseProjectArchiveAsync,
 } from '@/renderer/project/courseProjectArchive'
+import {
+  isV9SlideVerticalSliceDirty,
+  openV9SlideVerticalSliceState,
+} from '@/renderer/course/v9SlideVerticalSlice'
 import { createProject } from '@/renderer/project/createProject'
 import { createProjectArchive } from '@/renderer/project/projectArchive'
-import { migrateProjectV8ToCourseProjectV9 } from '@/shared/courseProjectModel'
+import {
+  LegacyComponentPackageMigrationConflictError,
+  migrateProjectV8ToCourseProjectV9,
+} from '@/shared/courseProjectModel'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { ComponentManifest } from '@/shared/componentTypes'
 
@@ -85,13 +93,13 @@ function makeCourseProject(): CourseProjectDocument {
   return migrateProjectV8ToCourseProjectV9(v8)
 }
 
-function makeComponent() {
+function makeComponent(version = '4.0.0') {
   const manifest: ComponentManifest = {
     schemaVersion: 4,
     runtimeApiVersion: 4,
     id: 'com.example.archive-counter',
     name: '归档计数器',
-    version: '4.0.0',
+    version,
     description: '课程工程归档测试',
     entry: 'runtime.js',
     thumbnail: 'thumbnail.png',
@@ -327,7 +335,7 @@ describe('Course Project V9 archive', () => {
     }))).toThrow(/project\.json 校验失败/)
   })
 
-  it('never silently opens V8 and provides a deliberate V8-to-V9 migration', () => {
+  it('never silently opens V8 and provides a deliberate V8-to-V9 migration', async () => {
     const v8 = createProject({
       id: 'legacy-explicit',
       title: '显式迁移',
@@ -346,23 +354,97 @@ describe('Course Project V9 archive', () => {
       width: 1,
       height: 1,
     }
+    const component = makeComponent()
+    v8.componentPackages[component.key] = component.metadata
+    const sourceProject = structuredClone(v8)
     const v8Bytes = createProjectArchive({
       project: v8,
       assetFiles: { legacy: assetBytes },
-      componentFiles: {},
+      componentFiles: { [component.key]: component.files },
     }, { mtime: NOW })
+    const sourceBytes = v8Bytes.slice()
 
     expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/显式迁移/)
     const imported = importProjectV8ArchiveAsCourseProject(v8Bytes)
     expect(imported).toMatchObject({
       project: { schemaVersion: 9, id: 'legacy-explicit', revision: 0 },
     })
+    expect(Object.keys(imported.project.componentPackages)).toEqual([
+      component.metadata.packageId,
+    ])
+    expect(imported.project.componentPackages[component.metadata.packageId])
+      .toEqual(component.metadata)
     expect([...imported.assetFiles.legacy!]).toEqual([...assetBytes])
+    expect(Object.keys(imported.componentFiles)).toEqual([component.key])
+    expect(imported.componentFiles[component.key]).toEqual(component.files)
+
+    const importedAsync = await importProjectV8ArchiveAsCourseProjectAsync(v8Bytes)
+    const session = openV9SlideVerticalSliceState(importedAsync, null, {
+      markDirty: true,
+    })
+    expect(session.projectPath).toBeNull()
+    expect(isV9SlideVerticalSliceDirty(session)).toBe(true)
+    expect([...importedAsync.assetFiles.legacy!]).toEqual([...assetBytes])
+    expect(importedAsync.componentFiles[component.key]).toEqual(component.files)
+    expect(v8Bytes).toEqual(sourceBytes)
+    expect(v8).toEqual(sourceProject)
 
     const migratedBytes = migrateProjectV8ArchiveToCourseProjectV9(v8Bytes, { mtime: NOW })
     const reopened = openCourseProjectArchive(migratedBytes)
     expect(reopened.project.schemaVersion).toBe(9)
     expect(reopened.project.surfaces[0]).toMatchObject({ type: 'slide' })
     expect([...reopened.assetFiles.legacy!]).toEqual([...assetBytes])
+    expect(reopened.componentFiles[component.key]).toEqual(component.files)
+  })
+
+  it('rejects an old archive with multiple versions of one component without changing its data', async () => {
+    const v8 = createProject({
+      id: 'legacy-component-conflict',
+      title: '组件版本冲突',
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const version4 = makeComponent('4.0.0')
+    const version5 = makeComponent('5.0.0')
+    v8.componentPackages[version4.key] = version4.metadata
+    v8.componentPackages[version5.key] = version5.metadata
+    const componentFiles = {
+      [version4.key]: version4.files,
+      [version5.key]: version5.files,
+    }
+    const projectBefore = structuredClone(v8)
+    const componentFilesBefore = Object.fromEntries(
+      Object.entries(componentFiles).map(([packageKey, files]) => [
+        packageKey,
+        Object.fromEntries(
+          Object.entries(files).map(([path, bytes]) => [path, [...bytes]]),
+        ),
+      ]),
+    )
+    const v8Bytes = createProjectArchive({
+      project: v8,
+      assetFiles: {},
+      componentFiles,
+    }, { mtime: NOW })
+    const sourceBytes = v8Bytes.slice()
+
+    expect(() => importProjectV8ArchiveAsCourseProject(v8Bytes))
+      .toThrow(LegacyComponentPackageMigrationConflictError)
+    expect(() => importProjectV8ArchiveAsCourseProject(v8Bytes))
+      .toThrow(/旧工程.*多个版本/)
+    await expect(importProjectV8ArchiveAsCourseProjectAsync(v8Bytes))
+      .rejects.toBeInstanceOf(LegacyComponentPackageMigrationConflictError)
+
+    expect(v8Bytes).toEqual(sourceBytes)
+    expect(v8).toEqual(projectBefore)
+    expect(Object.fromEntries(
+      Object.entries(componentFiles).map(([packageKey, files]) => [
+        packageKey,
+        Object.fromEntries(
+          Object.entries(files).map(([path, bytes]) => [path, [...bytes]]),
+        ),
+      ]),
+    )).toEqual(componentFilesBefore)
   })
 })

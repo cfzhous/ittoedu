@@ -197,7 +197,6 @@ export class PublishedCourseApp {
     this.#currentLocationId = locationId
     this.#syncContainers(target.surfaceId)
     replaceUrlLocation(locationId)
-    this.#updateNavigationLabel()
     return true
   }
 
@@ -274,7 +273,6 @@ export class PublishedCourseApp {
     if (location) {
       this.#currentLocationId = location.id
       replaceUrlLocation(location.id)
-      this.#updateNavigationLabel()
     }
   }
 
@@ -367,7 +365,6 @@ export class PublishedCourseApp {
       await this.#player.mountSurface(surface.id, container)
     }
     shell.appendChild(stage)
-    shell.appendChild(this.#createNavigation())
     this.#root.appendChild(shell)
 
     const linked = locationFromUrl()
@@ -379,38 +376,10 @@ export class PublishedCourseApp {
     }
   }
 
-  #createNavigation(): HTMLElement {
-    const dom = this.#root.ownerDocument
-    const nav = dom.createElement('nav')
-    nav.className = 'course-nav'
-    nav.setAttribute('aria-label', '课件导航')
-    const previous = dom.createElement('button')
-    previous.type = 'button'
-    previous.textContent = '上一页'
-    previous.addEventListener('click', () => { void this.previous('presenter') })
-    const label = dom.createElement('output')
-    label.dataset.courseLocationLabel = 'true'
-    label.setAttribute('aria-live', 'polite')
-    const next = dom.createElement('button')
-    next.type = 'button'
-    next.textContent = '下一页'
-    next.addEventListener('click', () => { void this.next('presenter') })
-    nav.append(previous, label, next)
-    return nav
-  }
-
   #syncContainers(activeSurfaceId: string): void {
     for (const [surfaceId, container] of this.#surfaceContainers) {
       container.hidden = surfaceId !== activeSurfaceId
     }
-  }
-
-  #updateNavigationLabel(): void {
-    const output = this.#root.querySelector<HTMLOutputElement>('[data-course-location-label]')
-    if (!output) return
-    const index = this.#locationIndex()
-    const current = this.#currentLocationId ? this.#locationMap.get(this.#currentLocationId) : undefined
-    output.value = current ? `${index + 1} / ${this.#locations.length} · ${current.label}` : ''
   }
 
   #locationIndex(): number {
@@ -461,7 +430,6 @@ export class PublishedCourseApp {
     if (location) {
       this.#currentLocationId = location.id
       replaceUrlLocation(location.id)
-      this.#updateNavigationLabel()
     }
   }
 

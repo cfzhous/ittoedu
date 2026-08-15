@@ -16,6 +16,7 @@ import {
   BACKGROUND_E2E_WINDOW_ORIGIN,
   shouldShowApplicationWindows,
 } from './windowVisibility'
+import { requestRendererClosePreparation } from './rendererClosePreparation'
 
 export interface MainWindowResult {
   window: BrowserWindow
@@ -62,37 +63,6 @@ function confirmClose(window: BrowserWindow): 'save' | 'discard' | 'cancel' {
   if (choice === 0) return 'save'
   if (choice === 1) return 'discard'
   return 'cancel'
-}
-
-function requestRendererSaveBeforeClose(window: BrowserWindow): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (saved: boolean) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      ipcMain.removeListener(IPC_CHANNELS.saveAndCloseResult, onResult)
-      window.removeListener('closed', onClosed)
-      resolve(saved)
-    }
-    const onResult = (
-      event: Electron.IpcMainEvent,
-      saved: unknown,
-    ) => {
-      if (event.sender !== window.webContents) return
-      finish(saved === true)
-    }
-    const onClosed = () => finish(false)
-    const timeout = setTimeout(() => finish(false), 5 * 60_000)
-    ipcMain.on(IPC_CHANNELS.saveAndCloseResult, onResult)
-    window.once('closed', onClosed)
-    try {
-      window.webContents.send(IPC_CHANNELS.requestSaveAndClose)
-    } catch (error) {
-      console.error('发送关闭前保存请求失败', error)
-      finish(false)
-    }
-  })
 }
 
 export async function createMainWindow(
@@ -187,7 +157,14 @@ export async function createMainWindow(
       const dirty = rendererDirty.read ? rendererDirty.dirty : true
       const decision = dirty ? confirmClose(window) : 'discard'
       if (decision === 'cancel') return
-      if (decision === 'save' && !(await requestRendererSaveBeforeClose(window))) {
+      if (decision === 'save' && !(
+        await requestRendererClosePreparation(ipcMain, window, 'save')
+      )) {
+        return
+      }
+      if (dirty && decision === 'discard' && !(
+        await requestRendererClosePreparation(ipcMain, window, 'discard')
+      )) {
         return
       }
       if (dirty) {

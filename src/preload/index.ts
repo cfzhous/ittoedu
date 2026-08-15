@@ -1,12 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { DesktopAPI } from '../shared/ipcTypes'
+import type {
+  ClosePreparationRequest,
+  ClosePreparationResult,
+  DesktopAPI,
+} from '../shared/ipcTypes'
 
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
   openProject: 'project:open',
+  confirmProjectOpened: 'project:confirm-opened',
+  selectLegacyProject: 'project:select-legacy',
   selectCourseAuthoringPatch: 'project:select-authoring-patch',
   listRecentProjects: 'project:list-recent',
+  removeRecentProject: 'project:remove-recent',
   openRecentProject: 'project:open-recent',
   saveProject: 'project:save',
   writeRecoveryProject: 'project:write-recovery',
@@ -58,6 +65,18 @@ interface IpcFailure {
 
 type IpcEnvelope<T> = IpcSuccess<T> | IpcFailure
 
+function isClosePreparationRequest(
+  value: unknown,
+): value is ClosePreparationRequest {
+  if (typeof value !== 'object' || value === null) return false
+  const request = value as Record<string, unknown>
+  return (
+    typeof request.requestId === 'string' &&
+    request.requestId.length > 0 &&
+    (request.mode === 'save' || request.mode === 'discard')
+  )
+}
+
 function isDesktopErrorPayload(value: unknown): value is DesktopErrorPayload {
   if (typeof value !== 'object' || value === null) return false
   const payload = value as Record<string, unknown>
@@ -99,8 +118,11 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 const desktopAPI = Object.freeze<DesktopAPI>({
   openProject: () => invoke(IPC_CHANNELS.openProject),
+  confirmProjectOpened: (input) => invoke(IPC_CHANNELS.confirmProjectOpened, input),
+  selectLegacyProject: () => invoke(IPC_CHANNELS.selectLegacyProject),
   selectCourseAuthoringPatch: () => invoke(IPC_CHANNELS.selectCourseAuthoringPatch),
   listRecentProjects: () => invoke(IPC_CHANNELS.listRecentProjects),
+  removeRecentProject: (input) => invoke(IPC_CHANNELS.removeRecentProject, input),
   openRecentProject: (input) => invoke(IPC_CHANNELS.openRecentProject, input),
   saveProject: (input) => invoke(IPC_CHANNELS.saveProject, input),
   writeRecoveryProject: (input) => invoke(IPC_CHANNELS.writeRecoveryProject, input),
@@ -156,15 +178,29 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       throw new TypeError('关闭前保存处理器必须是函数。')
     }
 
-    const listener = (): void => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      requested: unknown,
+    ): void => {
+      if (!isClosePreparationRequest(requested)) {
+        console.error('收到了无效的关闭准备请求', requested)
+        return
+      }
+      const sendResult = (prepared: boolean): void => {
+        const result: ClosePreparationResult = {
+          requestId: requested.requestId,
+          prepared,
+        }
+        ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, result)
+      }
       void Promise.resolve()
-        .then(handler)
-        .then((saved) => {
-          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, saved === true)
+        .then(() => handler(requested.mode))
+        .then((prepared) => {
+          sendResult(prepared === true)
         })
         .catch((error) => {
           console.error('执行关闭前保存失败', error)
-          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, false)
+          sendResult(false)
         })
     }
     ipcRenderer.on(IPC_CHANNELS.requestSaveAndClose, listener)

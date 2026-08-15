@@ -20,6 +20,7 @@ import {
   selectV9SlideVerticalSlice,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
+  V9_EDITOR_BACKEND,
   V9_SLIDE_TEST_BACKEND,
   V9_SLIDE_TEST_QUERY,
   V9_SLIDE_TEST_TEXT_ID,
@@ -68,7 +69,7 @@ function stateWithShape() {
 }
 
 describe('test-only V9 Slide vertical slice', () => {
-  it('enables the V9 backend for one exact startup query only', () => {
+  it('uses production V9 by default and reserves one exact query for the fixture', () => {
     expect(resolveEditorStartupBackend(V9_SLIDE_TEST_QUERY)).toBe(V9_SLIDE_TEST_BACKEND)
     for (const search of [
       '',
@@ -78,7 +79,7 @@ describe('test-only V9 Slide vertical slice', () => {
       'editor-backend=v9-slide-test',
       '?editor-backend=V9-slide-test',
     ]) {
-      expect(resolveEditorStartupBackend(search)).toBe('v8')
+      expect(resolveEditorStartupBackend(search)).toBe(V9_EDITOR_BACKEND)
     }
   })
 

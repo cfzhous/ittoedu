@@ -13,6 +13,7 @@ import {
 } from './archivePath'
 import {
   openProjectArchive,
+  openProjectArchiveAsync,
 } from './projectArchive'
 
 const PROJECT_DOCUMENT_PATH = 'project.json'
@@ -89,14 +90,14 @@ function readCourseProject(bytes: Uint8Array): CourseProjectDocument {
     if (schemaVersion === 8) {
       throw new UserFacingError(
         '需要显式迁移旧工程',
-        '该文件是 Project V8，不会在打开时静默改写为 Course Project V9；请显式迁移。',
-        '请使用明确的 V8 → V9 迁移命令，并将结果另存为新文件。',
+        '该文件是旧版工程，不会在普通打开时静默改写；请通过“导入旧版工程”显式迁移。',
+        '导入后请另存为新文件，原工程不会被改写。',
         { cause },
       )
     }
     throw new UserFacingError(
       '课程工程版本不支持',
-      `该文件的格式版本为 ${schemaVersion ?? '未声明'}，当前只支持 Course Project V9。`,
+      `该文件的格式版本为 ${schemaVersion ?? '未声明'}，当前编辑器无法直接打开。`,
       '请使用对应版本的编辑器打开，或先执行受支持的显式迁移。',
       { cause },
     )
@@ -469,6 +470,19 @@ export function importProjectV8ArchiveAsCourseProject(
   bytes: Uint8Array,
 ): CourseProjectArchiveData {
   const legacy = openProjectArchive(bytes)
+  return {
+    project: migrateProjectV8ToCourseProjectV9(legacy.project),
+    assetFiles: legacy.assetFiles,
+    componentFiles: legacy.componentFiles,
+  }
+}
+
+/** Async deliberate legacy import boundary for the interactive editor. */
+export async function importProjectV8ArchiveAsCourseProjectAsync(
+  bytes: Uint8Array,
+  options: { signal?: AbortSignal } = {},
+): Promise<CourseProjectArchiveData> {
+  const legacy = await openProjectArchiveAsync(bytes, options)
   return {
     project: migrateProjectV8ToCourseProjectV9(legacy.project),
     assetFiles: legacy.assetFiles,

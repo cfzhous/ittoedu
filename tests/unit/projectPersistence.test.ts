@@ -26,6 +26,7 @@ import {
   MAX_RECOVERY_PROJECT_BYTES,
   readRecoveryProject,
   recordRecentProject,
+  removeRecentProject,
   writeRecoveryProject,
 } from '../../src/main/projectPersistence'
 
@@ -208,6 +209,21 @@ describe('projectPersistence', () => {
       ),
     ) as { projects: Array<{ path: string }> }
     expect(persisted.projects.map((entry) => entry.path)).toEqual([existingPath])
+  })
+
+  it('显式移除已经确认不兼容的最近工程', async () => {
+    const compatiblePath = path.join(testRoot, 'compatible.h5lesson')
+    const incompatiblePath = path.join(testRoot, 'incompatible.h5lesson')
+    await writeProjectFile(compatiblePath, 'compatible')
+    await writeProjectFile(incompatiblePath, 'incompatible')
+    await recordRecentProject(compatiblePath)
+    await recordRecentProject(incompatiblePath)
+
+    await removeRecentProject(incompatiblePath)
+
+    expect(await listRecentProjects()).toEqual([
+      expect.objectContaining({ path: compatiblePath }),
+    ])
   })
 
   it('最近工程打开只接受白名单路径，并在通过后校验和读取 ZIP', async () => {

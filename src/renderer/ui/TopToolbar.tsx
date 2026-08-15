@@ -34,12 +34,14 @@ interface TopToolbarProps {
     canInspectHealth: boolean
     canPreview: boolean
     canExport: boolean
+    unavailableExports?: Partial<Record<ExportFormat, string>>
     onRename(title: string): void
     onUndo(): void
     onRedo(): void
   }
   onNew(): void
   onOpen(): void
+  onImportLegacy(): void
   recentProjects: RecentProjectEntry[]
   onOpenRecent(path: string): void
   onSave(saveAs?: boolean): void
@@ -88,6 +90,7 @@ export function TopToolbar({
   documentControl,
   onNew,
   onOpen,
+  onImportLegacy,
   recentProjects,
   onOpenRecent,
   onSave,
@@ -120,6 +123,17 @@ export function TopToolbar({
   const canInspectHealth = documentControl?.canInspectHealth ?? true
   const canPreview = documentControl?.canPreview ?? true
   const canExport = documentControl?.canExport ?? true
+  const unavailableExports = documentControl?.unavailableExports
+  const healthLabel = !canInspectHealth
+    ? '工程检查暂不可用'
+    : healthSummary.total === 0
+      ? '工程检查：未发现问题'
+      : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`
+  const healthDetail = !canInspectHealth
+    ? '当前课件暂不能执行检查'
+    : healthSummary.total === 0
+      ? '未发现问题'
+      : `${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(projectTitle)
   useEffect(() => setTitleDraft(projectTitle), [projectTitle])
@@ -188,6 +202,18 @@ export function TopToolbar({
                 <small>{project.path}</small>
               </button>
             ))}
+            <button
+              type="button"
+              className="recent-projects__item"
+              disabled={busy}
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open')
+                onImportLegacy()
+              }}
+            >
+              <span>导入旧版工程</span>
+              <small>转换后另存，不改写原文件</small>
+            </button>
           </div>
         </details>}
         <ToolButton label="保存" title="保存（Ctrl+S）" disabled={busy} onClick={() => onSave(false)}>
@@ -243,9 +269,22 @@ export function TopToolbar({
             <button
               type="button"
               role="menuitem"
-              aria-label={healthSummary.total === 0
-                ? '工程检查：未发现问题'
-                : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
+              disabled={busy}
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open')
+                onImportLegacy()
+              }}
+            >
+              <Archive size={16} />
+              <span>
+                <strong>导入旧版工程</strong>
+                <small>转换后另存，不改写原文件</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              aria-label={healthLabel}
               disabled={busy || !canInspectHealth}
               onClick={(event) => {
                 event.currentTarget.closest('details')?.removeAttribute('open')
@@ -255,9 +294,7 @@ export function TopToolbar({
               <ShieldCheck size={16} />
               <span>
                 <strong>工程检查</strong>
-                <small>{healthSummary.total === 0
-                  ? '未发现问题'
-                  : `${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}</small>
+                <small>{healthDetail}</small>
               </span>
             </button>
             <div className="toolbar-more-menu__recent">
@@ -320,9 +357,7 @@ export function TopToolbar({
 
       {editorMode === 'professional' && <ToolButton
         label="工程检查"
-        title={healthSummary.total === 0
-          ? '工程检查：未发现问题'
-          : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
+        title={healthLabel}
         disabled={busy || !canInspectHealth}
         onClick={onOpenHealth}
       >
@@ -369,6 +404,8 @@ export function TopToolbar({
             role="menuitem"
             data-testid="export-single-html"
             className="export-menu__item"
+            disabled={Boolean(unavailableExports?.['single-html'])}
+            title={unavailableExports?.['single-html']}
             onClick={(event) => {
               event.currentTarget.closest('details')?.removeAttribute('open')
               onExport('single-html')
@@ -382,6 +419,8 @@ export function TopToolbar({
             role="menuitem"
             data-testid="export-web-package"
             className="export-menu__item"
+            disabled={Boolean(unavailableExports?.['web-package'])}
+            title={unavailableExports?.['web-package']}
             onClick={(event) => {
               event.currentTarget.closest('details')?.removeAttribute('open')
               onExport('web-package')
@@ -395,6 +434,8 @@ export function TopToolbar({
             role="menuitem"
             data-testid="export-pptx"
             className="export-menu__item"
+            disabled={Boolean(unavailableExports?.pptx)}
+            title={unavailableExports?.pptx}
             onClick={(event) => {
               event.currentTarget.closest('details')?.removeAttribute('open')
               onExport('pptx')
@@ -408,6 +449,8 @@ export function TopToolbar({
             role="menuitem"
             data-testid="export-pdf"
             className="export-menu__item"
+            disabled={Boolean(unavailableExports?.pdf)}
+            title={unavailableExports?.pdf}
             onClick={(event) => {
               event.currentTarget.closest('details')?.removeAttribute('open')
               onExport('pdf')

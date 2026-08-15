@@ -627,11 +627,11 @@ export function deleteCourseSurface(
 function createNativeTextLayer(
   id: string,
   text: string,
-  position: { x?: number; y?: number } = {},
+  position: { x?: number; y?: number; label?: string } = {},
 ): LayerItem {
   return sceneNodeToCourseLayerItem(createTextNode({
     id,
-    name: text || '文字',
+    name: position.label ?? (text || '文字'),
     text,
     x: position.x ?? 120,
     y: position.y ?? 120,
@@ -1266,6 +1266,7 @@ export function addSlideTextLayer(
     id?: string
     x?: number
     y?: number
+    label?: string
     stateId?: string | null
     now?: string
   } = {},

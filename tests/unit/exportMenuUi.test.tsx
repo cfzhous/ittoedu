@@ -21,8 +21,10 @@ function renderToolbar(
   onOpenHealth = vi.fn(),
   options: {
     onSave?: (saveAs?: boolean) => void
+    onImportLegacy?: () => void
     recentProjects?: RecentProjectEntry[]
     onOpenRecent?: (path: string) => void
+    onPreview?: () => void
     documentControl?: ComponentProps<typeof TopToolbar>['documentControl']
   } = {},
 ) {
@@ -32,12 +34,13 @@ function renderToolbar(
       documentControl={options.documentControl}
       onNew={() => undefined}
       onOpen={() => undefined}
+      onImportLegacy={options.onImportLegacy ?? (() => undefined)}
       recentProjects={options.recentProjects ?? []}
       onOpenRecent={options.onOpenRecent ?? (() => undefined)}
       onSave={options.onSave ?? (() => undefined)}
       healthSummary={{ error: 0, warning: 0, info: 0, total: 0, canExport: true }}
       onOpenHealth={onOpenHealth}
-      onPreview={() => undefined}
+      onPreview={options.onPreview ?? (() => undefined)}
       onExport={onExport}
     />,
   )
@@ -84,7 +87,7 @@ describe('unified export menu', () => {
     expect(screen.getByRole('button', { name: '在独立窗口整课预览' })).toBeDisabled()
     expect(screen.getByLabelText('导出课件')).toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(screen.getByTitle('更多工程操作'))
-    expect(screen.getByRole('menuitem', { name: '工程检查：未发现问题' })).toBeDisabled()
+    expect(screen.getByRole('menuitem', { name: '工程检查暂不可用' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）' }))
     expect(onRedo).toHaveBeenCalledOnce()
 
@@ -101,9 +104,11 @@ describe('unified export menu', () => {
   it('moves Save As, project health, and recent projects into More in simple mode', () => {
     const onOpenHealth = vi.fn()
     const onSave = vi.fn()
+    const onImportLegacy = vi.fn()
     const onOpenRecent = vi.fn()
     renderToolbar(vi.fn(), false, onOpenHealth, {
       onSave,
+      onImportLegacy,
       onOpenRecent,
       recentProjects: [{
         path: 'C:\\lessons\\rain.h5lesson',
@@ -123,6 +128,10 @@ describe('unified export menu', () => {
     expect(onSave).toHaveBeenCalledWith(true)
 
     fireEvent.click(screen.getByTitle('更多工程操作'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /导入旧版工程/ }))
+    expect(onImportLegacy).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByTitle('更多工程操作'))
     fireEvent.click(screen.getByRole('menuitem', {
       name: '工程检查：未发现问题',
     }))
@@ -134,10 +143,14 @@ describe('unified export menu', () => {
   })
 
   it('keeps advanced project controls directly visible in professional mode', () => {
+    const onImportLegacy = vi.fn()
     act(() => useEditorStore.getState().setEditorMode('professional'))
-    renderToolbar(vi.fn())
+    renderToolbar(vi.fn(), false, vi.fn(), { onImportLegacy })
 
     expect(screen.queryByTitle('更多工程操作')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTitle('打开最近工程'))
+    fireEvent.click(screen.getByRole('button', { name: /导入旧版工程/ }))
+    expect(onImportLegacy).toHaveBeenCalledOnce()
     expect(screen.getByRole('button', { name: '另存为' })).toBeInTheDocument()
     expect(screen.getByTitle('打开最近工程')).toBeInTheDocument()
     expect(screen.getByRole('button', {
@@ -173,6 +186,40 @@ describe('unified export menu', () => {
 
     fireEvent.click(screen.getByRole('menuitem', { name: /网页包/ }))
     expect(onExport).toHaveBeenCalledWith('web-package')
+  })
+
+  it('keeps available delivery formats usable while disabling only an unsupported format', () => {
+    const onExport = vi.fn<(format: ExportFormat) => void>()
+    const onPreview = vi.fn()
+    renderToolbar(onExport, false, vi.fn(), {
+      onPreview,
+      documentControl: {
+        title: '当前课件',
+        dirty: false,
+        canUndo: false,
+        canRedo: false,
+        locationLabel: '幻灯片 1 / 1',
+        canInspectHealth: false,
+        canPreview: true,
+        canExport: true,
+        unavailableExports: { pdf: '当前课件暂不能导出 PDF' },
+        onRename: vi.fn(),
+        onUndo: vi.fn(),
+        onRedo: vi.fn(),
+      },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '在独立窗口整课预览' }))
+    expect(onPreview).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByLabelText('导出课件'))
+    const html = screen.getByRole('menuitem', { name: /单 HTML/ })
+    const pdf = screen.getByRole('menuitem', { name: /^PDF/ })
+    expect(html).toBeEnabled()
+    expect(pdf).toBeDisabled()
+    expect(pdf).toHaveAttribute('title', '当前课件暂不能导出 PDF')
+    fireEvent.click(html)
+    expect(onExport).toHaveBeenCalledWith('single-html')
   })
 
   it('does not open while the editor is busy', () => {

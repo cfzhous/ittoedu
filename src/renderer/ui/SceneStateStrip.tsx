@@ -34,6 +34,8 @@ export interface SceneStateStripStateRow {
  * legacy editor Store and presentation materializer.
  */
 export interface SceneStateStripDocumentControl {
+  /** Explains why the current course location has no scene-state surface. */
+  readonly unavailableReason?: string
   readonly editingScope: SceneStateStripEditingScope
   readonly editorMode: SceneStateStripEditorMode
   readonly activeStateId: string | null
@@ -62,6 +64,20 @@ function countStateOverrides(state: ScenePresentationState): number {
 }
 
 export function SceneStateStrip({ documentControl }: SceneStateStripProps = {}) {
+  if (documentControl?.unavailableReason) {
+    return (
+      <section className="scene-state-strip" aria-label="场景状态">
+        <div
+          className="scene-state-strip__empty"
+          role="status"
+          data-testid="scene-state-strip-course-location-gate"
+        >
+          <strong>当前内容暂不可编辑</strong>
+          <span>{documentControl.unavailableReason}</span>
+        </div>
+      </section>
+    )
+  }
   if (documentControl) {
     return <SceneStateStripView documentControl={documentControl} />
   }

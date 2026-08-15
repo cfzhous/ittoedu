@@ -33,6 +33,43 @@ afterEach(() => {
 })
 
 describe('SceneStateStrip V9 document control', () => {
+  it('gates an unavailable course location without mounting state or legacy controls', () => {
+    const callbacks = {
+      onSetEditorMode: vi.fn(),
+      onActivateState: vi.fn(),
+      onAddState: vi.fn(),
+      onDuplicateState: vi.fn(),
+      onRenameState: vi.fn(),
+      onSetInitialState: vi.fn(),
+      onSetThumbnailState: vi.fn(),
+      onClearState: vi.fn(),
+      onDeleteState: vi.fn(),
+    }
+
+    render(<SceneStateStrip documentControl={{
+      unavailableReason: '此类内容暂不支持画面状态编辑。',
+      editingScope: 'scene',
+      editorMode: 'professional',
+      activeStateId: null,
+      states: [],
+      ...callbacks,
+    }} />)
+
+    expect(screen.getByTestId('scene-state-strip-course-location-gate'))
+      .toHaveTextContent('此类内容暂不支持画面状态编辑。')
+    expect(screen.queryByRole('list', { name: '当前场景状态列表' }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建场景状态' }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '管理状态' }))
+      .not.toBeInTheDocument()
+    expect(Object.values(callbacks).every((callback) => callback.mock.calls.length === 0))
+      .toBe(true)
+    expect(legacyV8Sentinels.useStore).not.toHaveBeenCalled()
+    expect(legacyV8Sentinels.selectActiveScene).not.toHaveBeenCalled()
+    expect(legacyV8Sentinels.ensurePresentation).not.toHaveBeenCalled()
+  })
+
   it('renders and operates exclusively through the narrow port', () => {
     const callbacks = {
       onSetEditorMode: vi.fn(),
