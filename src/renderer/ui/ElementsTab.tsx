@@ -10,19 +10,61 @@ import {
   Search,
   Sigma,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ShapeType } from '../../shared/projectTypes'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { createShapeNode } from '../project/createProject'
 import { useEditorStore } from '../store/editorStore'
 import { MediaTab } from './MediaTab'
 
-interface ElementsTabProps {
+interface LegacyElementsTabProps {
+  documentControl?: undefined
   onAddImage(x?: number, y?: number): void
   onAddVideo?(x?: number, y?: number): void
   onImportImage?(): void
   onImportAudio?(): void
   onImportVideo?(): void
+}
+
+export interface ElementsTabDocumentControl {
+  readonly editingScope: 'scene' | 'global'
+  readonly editorMode: 'simple' | 'professional'
+  /** Visible product-language reason used for media actions that are not wired yet. */
+  readonly mediaUnavailableReason: string
+  /** Visible product-language reason used for the global controller action. */
+  readonly controllerUnavailableReason: string
+  onAddText(x?: number, y?: number): void
+  onAddFormula(x?: number, y?: number): void
+  onAddShape(shapeType: ShapeType, x?: number, y?: number): void
+}
+
+interface ControlledElementsTabProps {
+  documentControl: ElementsTabDocumentControl
+  /** Legacy callbacks may still be present on the shell, but this path never invokes them. */
+  onAddImage?(x?: number, y?: number): void
+  onAddVideo?(x?: number, y?: number): void
+  onImportImage?(): void
+  onImportAudio?(): void
+  onImportVideo?(): void
+}
+
+export type ElementsTabProps = LegacyElementsTabProps | ControlledElementsTabProps
+
+interface ElementsTabViewProps {
+  readonly editingScope: 'scene' | 'global'
+  readonly editorMode: 'simple' | 'professional'
+  readonly assetSearchLabels: readonly string[]
+  readonly mediaUnavailableReason?: string
+  readonly controllerUnavailableReason?: string
+  readonly dragEnabled: boolean
+  onAddText(x?: number, y?: number): void
+  onAddFormula(x?: number, y?: number): void
+  onAddShape(shapeType: ShapeType, x?: number, y?: number): void
+  onAddImage?(x?: number, y?: number): void
+  onAddVideo?(x?: number, y?: number): void
+  onAddAudio?(): void
+  onAddController?(): void
+  renderMedia?(filterQuery: string): ReactNode
 }
 
 type AddCategory =
@@ -69,15 +111,33 @@ function ShapePreview({ type }: { type: ShapeType }) {
   return <canvas ref={canvasRef} className="shape-preview" width={84} height={52} aria-hidden="true" />
 }
 
-export function ElementsTab({
+export function ElementsTab(props: ElementsTabProps) {
+  if (props.documentControl) {
+    const control = props.documentControl
+    return (
+      <ElementsTabView
+        editingScope={control.editingScope}
+        editorMode={control.editorMode}
+        assetSearchLabels={[]}
+        mediaUnavailableReason={control.mediaUnavailableReason}
+        controllerUnavailableReason={control.controllerUnavailableReason}
+        dragEnabled={false}
+        onAddText={control.onAddText}
+        onAddFormula={control.onAddFormula}
+        onAddShape={control.onAddShape}
+      />
+    )
+  }
+  return <LegacyElementsTabAdapter {...props} />
+}
+
+function LegacyElementsTabAdapter({
   onAddImage,
   onAddVideo,
   onImportImage,
   onImportAudio,
   onImportVideo,
-}: ElementsTabProps) {
-  const [activeCategory, setActiveCategory] = useState<AddCategory>('common')
-  const [searchQuery, setSearchQuery] = useState('')
+}: LegacyElementsTabProps) {
   const addTextNode = useEditorStore((state) => state.addTextNode)
   const addFormulaNode = useEditorStore((state) => state.addFormulaNode)
   const addShapeNode = useEditorStore((state) => state.addShapeNode)
@@ -85,6 +145,62 @@ export function ElementsTab({
   const editorMode = useEditorStore((state) => state.editorMode)
   const editingScope = useEditorStore((state) => state.editingScope)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
+  const assetSearchLabels = [
+    ...Object.values(project.assets).map((asset) => (
+      `${asset.filename} ${asset.mimeType} ${asset.kind}`
+    )),
+    ...Object.values(project.media.audio.sounds).map((sound) => (
+      `${sound.name} 音频 声音`
+    )),
+  ]
+
+  return (
+    <ElementsTabView
+      editingScope={editingScope}
+      editorMode={editorMode}
+      assetSearchLabels={assetSearchLabels}
+      dragEnabled
+      onAddText={addTextNode}
+      onAddFormula={addFormulaNode}
+      onAddShape={addShapeNode}
+      onAddImage={onAddImage}
+      onAddVideo={onAddVideo}
+      onAddAudio={onImportAudio}
+      onAddController={ensureTeacherController}
+      renderMedia={onImportAudio && onImportVideo
+        ? (filterQuery) => (
+            <MediaTab
+              embedded
+              onImportImage={onImportImage}
+              showAdvancedAudioSettings={editorMode === 'professional'}
+              filterQuery={filterQuery}
+              onImportAudio={onImportAudio}
+              onImportVideo={onImportVideo}
+            />
+          )
+        : undefined}
+    />
+  )
+}
+
+function ElementsTabView({
+  editingScope,
+  editorMode,
+  assetSearchLabels,
+  mediaUnavailableReason,
+  controllerUnavailableReason,
+  dragEnabled,
+  onAddText,
+  onAddFormula,
+  onAddShape,
+  onAddImage,
+  onAddVideo,
+  onAddAudio,
+  onAddController,
+  renderMedia,
+}: ElementsTabViewProps) {
+  const [activeCategory, setActiveCategory] = useState<AddCategory>('common')
+  const [searchQuery, setSearchQuery] = useState('')
   const categories = editorMode === 'professional'
     ? PROFESSIONAL_ADD_CATEGORIES
     : SIMPLE_ADD_CATEGORIES
@@ -125,14 +241,7 @@ export function ElementsTab({
     ? visibleShapeGroups.length > 0
     : activeCategory === 'common'
   const shapeGroups = visibleShapeGroups
-  const assetSearchMatches = searching && (
-    Object.values(project.assets).some((asset) =>
-      matchesSearch(`${asset.filename} ${asset.mimeType} ${asset.kind}`),
-    ) ||
-    Object.values(project.media.audio.sounds).some((sound) =>
-      matchesSearch(`${sound.name} 音频 声音`),
-    )
-  )
+  const assetSearchMatches = searching && assetSearchLabels.some(matchesSearch)
   const showAssets = searching ? assetSearchMatches : activeCategory === 'media'
   const showControlsEmpty = editorMode === 'professional' &&
     activeCategory === 'controls' &&
@@ -193,7 +302,7 @@ export function ElementsTab({
           <>
           <div className="section-heading">
             <span>快速添加</span>
-            <span title="可单击添加，也可拖入画布">
+            <span title={dragEnabled ? '可单击添加，也可拖入画布' : '单击添加到画布'}>
               <MousePointerClick size={14} />
             </span>
           </div>
@@ -204,10 +313,13 @@ export function ElementsTab({
               type="button"
               aria-label="文本"
               className="element-card element-card--primary"
-              draggable
+              draggable={dragEnabled}
+              title={!dragEnabled ? '当前请单击添加到画布' : undefined}
               data-testid="add-text"
-              onDragStart={(event) => setDragData(event, 'text', '文本')}
-              onClick={() => addTextNode()}
+              onDragStart={dragEnabled
+                ? (event) => setDragData(event, 'text', '文本')
+                : undefined}
+              onClick={() => onAddText()}
             >
               <span className="element-icon">
                 <Type size={20} />
@@ -220,10 +332,13 @@ export function ElementsTab({
               type="button"
               aria-label="公式"
               className="element-card element-card--primary"
-              draggable
+              draggable={dragEnabled}
+              title={!dragEnabled ? '当前请单击添加到画布' : undefined}
               data-testid="add-formula"
-              onDragStart={(event) => setDragData(event, 'formula', '公式')}
-              onClick={() => addFormulaNode()}
+              onDragStart={dragEnabled
+                ? (event) => setDragData(event, 'formula', '公式')
+                : undefined}
+              onClick={() => onAddFormula()}
             >
               <span className="element-icon">
                 <Sigma size={20} />
@@ -236,10 +351,14 @@ export function ElementsTab({
               type="button"
               aria-label="图片"
               className="element-card element-card--primary"
-              draggable
+              draggable={Boolean(onAddImage)}
+              disabled={!onAddImage}
+              title={!onAddImage ? mediaUnavailableReason : undefined}
               data-testid="add-image"
-              onDragStart={(event) => setDragData(event, 'image', '图片')}
-              onClick={() => onAddImage()}
+              onDragStart={onAddImage
+                ? (event) => setDragData(event, 'image', '图片')
+                : undefined}
+              onClick={() => onAddImage?.()}
             >
               <span className="element-icon">
                 <ImageIcon size={20} />
@@ -253,21 +372,27 @@ export function ElementsTab({
               aria-label="视频"
               className="element-card element-card--primary"
               data-testid="add-video"
-              draggable
-              onDragStart={(event) => setDragData(event, 'video', '视频')}
+              draggable={Boolean(onAddVideo)}
+              disabled={!onAddVideo}
+              title={!onAddVideo ? mediaUnavailableReason : undefined}
+              onDragStart={onAddVideo
+                ? (event) => setDragData(event, 'video', '视频')
+                : undefined}
               onClick={() => onAddVideo?.()}
             >
               <span className="element-icon"><Video size={20} /></span>
               视频
             </button>
             )}
-            {showAudio && onImportAudio && (
+            {showAudio && (onAddAudio || mediaUnavailableReason) && (
               <button
                 type="button"
                 aria-label="声音"
                 className="element-card element-card--primary"
                 data-testid="import-audio"
-                onClick={onImportAudio}
+                disabled={!onAddAudio}
+                title={!onAddAudio ? mediaUnavailableReason : undefined}
+                onClick={onAddAudio}
               >
                 <span className="element-icon"><Music2 size={20} /></span>
                 声音
@@ -279,26 +404,35 @@ export function ElementsTab({
                 aria-label="教师控制器"
                 className="element-card element-card--primary"
                 data-testid="add-teacher-controller"
-                onClick={ensureTeacherController}
+                disabled={!onAddController}
+                title={!onAddController ? controllerUnavailableReason : undefined}
+                onClick={onAddController}
               >
                 <span className="element-icon"><SlidersHorizontal size={20} /></span>
                 教师控制器
               </button>
             )}
           </div>
+          {mediaUnavailableReason && (showImage || showVideo || showAudio) && (
+            <div className="empty-state add-category-empty" role="status">
+              {mediaUnavailableReason}
+            </div>
+          )}
+          {controllerUnavailableReason && showController && (
+            <div className="empty-state add-category-empty" role="status">
+              {controllerUnavailableReason}
+            </div>
+          )}
           </>
         )}
 
-          {showAssets && onImportAudio && onImportVideo && (
-            <MediaTab
-              embedded
-              onImportImage={onImportImage}
-              showAdvancedAudioSettings={editorMode === 'professional'}
-              filterQuery={searchQuery}
-              onImportAudio={onImportAudio}
-              onImportVideo={onImportVideo}
-            />
-          )}
+          {showAssets && (renderMedia
+            ? renderMedia(searchQuery)
+            : mediaUnavailableReason && (
+                <div className="empty-state add-category-empty" role="status">
+                  {mediaUnavailableReason}
+                </div>
+              ))}
 
           {showShapes && (
             <>
@@ -319,9 +453,11 @@ export function ElementsTab({
                       title={label}
                       aria-label={`添加${label}`}
                       data-testid={testId ?? `add-shape-${type}`}
-                      draggable
-                      onDragStart={(event) => setDragData(event, `shape:${type}`, label)}
-                      onClick={() => addShapeNode(type)}
+                      draggable={dragEnabled}
+                      onDragStart={dragEnabled
+                        ? (event) => setDragData(event, `shape:${type}`, label)
+                        : undefined}
+                      onClick={() => onAddShape(type)}
                     >
                       <ShapePreview type={type} />
                       <span>{label}</span>
@@ -336,7 +472,8 @@ export function ElementsTab({
 
           {showControlsEmpty && (
             <div className="empty-state add-category-empty">
-              教师控制器和全局元素需要在左侧切换到“全局层”后添加。
+              {controllerUnavailableReason ??
+                '教师控制器和全局元素需要在左侧切换到“全局层”后添加。'}
             </div>
           )}
       </>

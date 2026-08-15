@@ -1,5 +1,5 @@
-import { ElementsTab } from './ElementsTab'
-import { NodesTab } from './NodesTab'
+import { ElementsTab, type ElementsTabDocumentControl } from './ElementsTab'
+import { NodesTab, type NodesTabDocumentControl } from './NodesTab'
 import { PropertiesTab } from './PropertiesTab'
 import { AutomationTab } from './AutomationTab'
 import { DeveloperTab } from './DeveloperTab'
@@ -10,12 +10,21 @@ import type {
   ComponentCatalogSnapshot,
 } from '../../shared/componentCatalog'
 
+export interface RightSidebarDocumentControl {
+  readonly elements?: ElementsTabDocumentControl
+  readonly layers?: NodesTabDocumentControl
+  /** A missing controlled tab stays visible but mounts no legacy document editor. */
+  readonly unavailableReasons?: Partial<Record<SidebarTab, string>>
+}
+
 interface RightSidebarProps {
   /**
    * Keeps the original shell/tabs available while preventing an unsupported
    * document backend from mounting controls that would mutate another model.
+   * @deprecated Use `documentControl` for per-tab capability routing.
    */
   documentEditingUnavailableReason?: string
+  documentControl?: RightSidebarDocumentControl
   onAddImage(x?: number, y?: number): void
   onReplaceImage(): void
   onAddVideo(x?: number, y?: number): void
@@ -49,6 +58,7 @@ const professionalTabs: Array<{ id: SidebarTab; label: string }> = [
 
 export function RightSidebar({
   documentEditingUnavailableReason,
+  documentControl,
   onAddImage,
   onReplaceImage,
   onAddVideo,
@@ -66,6 +76,19 @@ export function RightSidebar({
   const editorMode = useEditorStore((state) => state.editorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const tabs = editorMode === 'professional' ? professionalTabs : simpleTabs
+  const controlledTabAvailable = documentControl
+    ? activeTab === 'elements'
+      ? Boolean(documentControl.elements)
+      : activeTab === 'layers'
+        ? Boolean(documentControl.layers)
+        : false
+    : false
+  const activeUnavailableReason = documentControl
+    ? controlledTabAvailable
+      ? undefined
+      : documentControl.unavailableReasons?.[activeTab] ??
+        '当前版本暂不支持此面板；现有内容不会改变。'
+    : documentEditingUnavailableReason
 
   return (
     <aside
@@ -75,7 +98,7 @@ export function RightSidebar({
           : ''
       }`}
       aria-label="编辑面板"
-      aria-disabled={documentEditingUnavailableReason ? true : undefined}
+      aria-disabled={activeUnavailableReason ? true : undefined}
     >
       <div
         className="sidebar-tabs"
@@ -98,19 +121,23 @@ export function RightSidebar({
         ))}
       </div>
       <div className="sidebar-content">
-        {documentEditingUnavailableReason ? (
+        {activeUnavailableReason ? (
           <div className="right-sidebar-capability-gate" role="status">
             <strong>{tabs.find((tab) => tab.id === activeTab)?.label ?? '编辑'}面板暂不可用</strong>
-            <p>{documentEditingUnavailableReason}</p>
+            <p>{activeUnavailableReason}</p>
           </div>
         ) : activeTab === 'elements' ? (
-          <ElementsTab
-            onAddImage={onAddImage}
-            onAddVideo={onAddVideo}
-            onImportImage={onImportImage}
-            onImportAudio={onImportAudio}
-            onImportVideo={onImportVideo}
-          />
+          documentControl?.elements ? (
+            <ElementsTab documentControl={documentControl.elements} />
+          ) : (
+            <ElementsTab
+              onAddImage={onAddImage}
+              onAddVideo={onAddVideo}
+              onImportImage={onImportImage}
+              onImportAudio={onImportAudio}
+              onImportVideo={onImportVideo}
+            />
+          )
         ) : activeTab === 'components' && editorMode === 'professional' ? (
           <ComponentsTab
             componentCatalog={componentCatalog}
@@ -121,7 +148,7 @@ export function RightSidebar({
             onReplaceComponent={onReplaceComponent}
           />
         ) : activeTab === 'layers' ? (
-          <NodesTab />
+          <NodesTab documentControl={documentControl?.layers} />
         ) : activeTab === 'properties' ? (
           <PropertiesTab onReplaceImage={onReplaceImage} />
         ) : activeTab === 'automation' && editorMode === 'professional' ? (

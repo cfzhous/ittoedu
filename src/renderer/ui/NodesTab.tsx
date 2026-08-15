@@ -51,9 +51,39 @@ const nodeIcon = {
   'external-component': Box,
 } as const
 
+export interface NodesTabDocumentControl {
+  readonly editingScope: 'scene' | 'global'
+  readonly scopeLabel: string
+  readonly nodes: readonly SceneNode[]
+  readonly selectedNodeIds: readonly string[]
+  /** Named states hide inherited items instead of deleting their stable base identity. */
+  readonly deletionMode?: 'delete' | 'hide-in-state'
+  /** Explains supported scene items that are intentionally omitted from this partial list. */
+  readonly omittedItemsReason?: string
+  /** Disables whole-list ordering until every effective item participates. */
+  readonly reorderUnavailableReason?: string
+  /** The owner decides whether an additive request extends, toggles, or replaces selection. */
+  onSelectNode(nodeId: string | null, additive: boolean): void
+  onDeleteNode(nodeId: string): void
+  onDuplicateNode(nodeId: string): void
+  onRenameNode(nodeId: string, name: string): void
+  onSetNodeVisible(nodeId: string, visible: boolean): void
+  onSetNodeLocked(nodeId: string, locked: boolean): void
+  onReorderNodes(nodeIds: readonly string[]): void
+}
+
+export interface NodesTabProps {
+  documentControl?: NodesTabDocumentControl
+}
+
+type NodesTabViewProps = NodesTabDocumentControl
+
 interface SortableNodeProps {
   node: SceneNode
   selected: boolean
+  deletionMode: 'delete' | 'hide-in-state'
+  reorderEnabled: boolean
+  reorderUnavailableReason?: string
   onSelect(additive: boolean): void
   onDelete(): void
   onDuplicate(): void
@@ -65,6 +95,9 @@ interface SortableNodeProps {
 function SortableNode({
   node,
   selected,
+  deletionMode,
+  reorderEnabled,
+  reorderUnavailableReason,
   onSelect,
   onDelete,
   onDuplicate,
@@ -77,7 +110,7 @@ function SortableNode({
   const [draftName, setDraftName] = useState(node.name)
   const selectTimerRef = useRef<number | null>(null)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: node.id })
+    useSortable({ id: node.id, disabled: !reorderEnabled })
 
   useEffect(() => setDraftName(node.name), [node.name])
   useEffect(() => () => {
@@ -90,6 +123,12 @@ function SortableNode({
     else setDraftName(node.name)
     setEditing(false)
   }
+  const alreadyHiddenInState = deletionMode === 'hide-in-state' && !node.visible
+  const deleteLabel = deletionMode === 'hide-in-state'
+    ? alreadyHiddenInState
+      ? `“${node.name}”已在当前状态隐藏`
+      : `从当前状态隐藏“${node.name}”`
+    : `删除“${node.name}”`
 
   return (
     <div
@@ -105,8 +144,9 @@ function SortableNode({
       <button
         type="button"
         className="drag-handle"
-        title="拖动调整前后层级"
+        title={reorderUnavailableReason ?? '拖动调整前后层级'}
         aria-label={`调整“${node.name}”层级`}
+        disabled={!reorderEnabled}
         {...attributes}
         {...listeners}
       >
@@ -198,17 +238,23 @@ function SortableNode({
       <button
         type="button"
         className="icon-button icon-button--danger"
-        title="删除节点"
-        aria-label={`删除“${node.name}”`}
+        title={deleteLabel}
+        aria-label={deleteLabel}
+        disabled={alreadyHiddenInState}
         onClick={onDelete}
       >
-        <Trash2 size={14} />
+        {deletionMode === 'hide-in-state' ? <EyeOff size={14} /> : <Trash2 size={14} />}
       </button>
     </div>
   )
 }
 
-export function NodesTab() {
+export function NodesTab({ documentControl }: NodesTabProps = {}) {
+  if (documentControl) return <NodesTabView {...documentControl} />
+  return <LegacyNodesTabAdapter />
+}
+
+function LegacyNodesTabAdapter() {
   const scene = useEditorStore(selectActiveScene)
   const nodes = useEditorStore(selectEditingNodes)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -219,18 +265,58 @@ export function NodesTab() {
   const duplicateNode = useEditorStore((state) => state.duplicateNode)
   const updateNode = useEditorStore((state) => state.updateNode)
   const reorderNodes = useEditorStore((state) => state.reorderNodes)
+
+  return (
+    <NodesTabView
+      editingScope={editingScope}
+      scopeLabel={editingScope === 'global' ? '全局元素' : scene.name}
+      nodes={nodes}
+      selectedNodeIds={selectedNodeIds}
+      onSelectNode={(nodeId, additive) => {
+        selectNode(nodeId, additive)
+        // Ctrl/Shift selection is an in-progress layer-list operation. Keep
+        // the list visible until the author explicitly opens Properties.
+        if (additive) setActiveTab('layers')
+      }}
+      onDeleteNode={deleteNode}
+      onDuplicateNode={duplicateNode}
+      onRenameNode={(nodeId, name) => updateNode(nodeId, { name })}
+      onSetNodeVisible={(nodeId, visible) => updateNode(nodeId, { visible })}
+      onSetNodeLocked={(nodeId, locked) => updateNode(nodeId, { locked })}
+      onReorderNodes={(nodeIds) => reorderNodes([...nodeIds])}
+    />
+  )
+}
+
+function NodesTabView({
+  editingScope,
+  scopeLabel,
+  nodes,
+  selectedNodeIds,
+  deletionMode = 'delete',
+  omittedItemsReason,
+  reorderUnavailableReason,
+  onSelectNode,
+  onDeleteNode,
+  onDuplicateNode,
+  onRenameNode,
+  onSetNodeVisible,
+  onSetNodeLocked,
+  onReorderNodes,
+}: NodesTabViewProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (reorderUnavailableReason) return
     if (!over || active.id === over.id) return
     const visualNodes = [...nodes].reverse()
     const oldIndex = visualNodes.findIndex((node) => node.id === active.id)
     const newIndex = visualNodes.findIndex((node) => node.id === over.id)
     if (oldIndex < 0 || newIndex < 0) return
-    reorderNodes(
+    onReorderNodes(
       arrayMove(visualNodes, oldIndex, newIndex)
         .reverse()
         .map((node) => node.id),
@@ -241,15 +327,24 @@ export function NodesTab() {
 
   return (
     <div className="nodes-tree" data-testid="nodes-tab">
-      <div className="tree-root" onClick={() => selectNode(null)}>
+      <div className="tree-root" onClick={() => onSelectNode(null, false)}>
         <ChevronDown size={14} />
         <Layers3 size={15} />
-        <span>{editingScope === 'global' ? '全局元素' : scene.name}</span>
+        <span>{scopeLabel}</span>
         {selectedNodeIds.length > 0 && <span className="tree-selection-count">已选 {selectedNodeIds.length}</span>}
       </div>
+      {omittedItemsReason && (
+        <div className="empty-state" role="status">
+          {omittedItemsReason}
+        </div>
+      )}
       {nodes.length === 0 ? (
         <div className="empty-state">
-          {editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
+          {omittedItemsReason
+            ? '当前幻灯片没有可在此编辑的元素'
+            : editingScope === 'global'
+              ? '全局层还没有组件'
+              : '当前场景还没有节点'}
           <br />
           从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
         </div>
@@ -270,28 +365,24 @@ export function NodesTab() {
                     key={node.id}
                     node={node}
                     selected={selectedNodeIds.includes(node.id)}
-                    onSelect={(additive) => {
-                      selectNode(node.id, additive)
-                      // Ctrl/Shift selection is an in-progress layer-list
-                      // operation. Keep the list visible until the author has
-                      // assembled the set, then let an explicit Properties
-                      // click open the multi-selection controls.
-                      if (additive) setActiveTab('layers')
-                    }}
-                    onDelete={() => deleteNode(node.id)}
-                    onDuplicate={() => duplicateNode(node.id)}
-                    onRename={(name) => updateNode(node.id, { name })}
-                    onToggleVisible={() => updateNode(node.id, { visible: !node.visible })}
-                    onToggleLocked={() => updateNode(node.id, { locked: !node.locked })}
+                    deletionMode={deletionMode}
+                    reorderEnabled={!reorderUnavailableReason}
+                    reorderUnavailableReason={reorderUnavailableReason}
+                    onSelect={(additive) => onSelectNode(node.id, additive)}
+                    onDelete={() => onDeleteNode(node.id)}
+                    onDuplicate={() => onDuplicateNode(node.id)}
+                    onRename={(name) => onRenameNode(node.id, name)}
+                    onToggleVisible={() => onSetNodeVisible(node.id, !node.visible)}
+                    onToggleLocked={() => onSetNodeLocked(node.id, !node.locked)}
                   />
                 ))}
               </div>
             </SortableContext>
           </DndContext>
           <div className="tree-order-note">
-            {editingScope === 'global'
+            {reorderUnavailableReason ?? (editingScope === 'global'
               ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
-              : '列表最上方就是画面最上层；拖动条目可改变层级。'}
+              : '列表最上方就是画面最上层；拖动条目可改变层级。')}
           </div>
         </>
       )}

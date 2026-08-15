@@ -68,17 +68,61 @@ describe('V9 ownership in the original editor Store', () => {
 
     store.selectCourseLayers({ nodeIds: [V9_SLIDE_TEST_TEXT_ID], additive: false })
     const selected = useEditorStore.getState().courseSession!
-    store.moveCourseLayers({
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 510, y: 370 }],
+    store.transformCourseLayers({
+      nodes: [{
+        nodeId: V9_SLIDE_TEST_TEXT_ID,
+        x: 510,
+        y: 370,
+        width: 400,
+        height: 80,
+        rotation: 0,
+      }],
     })
     const moved = useEditorStore.getState().courseSession!
 
     expect(selected.history).toBe(initial.history)
-    expect(selected.selection.selectionId).toBe(V9_SLIDE_TEST_TEXT_ID)
+    expect(selected.selection.selectionIds).toEqual([V9_SLIDE_TEST_TEXT_ID])
     expect(moved.history.present.revision).toBe(initial.history.present.revision + 1)
     expect(moved.history.past).toEqual([initial.history.present])
     expect(moved.history.future).toEqual([])
     expectLegacyTruthUnchanged(legacyBefore)
+  })
+
+  it('rejects stale selection and no-op transforms so the canvas can restore canonical state', () => {
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    const initial = useEditorStore.getState().courseSession!
+
+    expect(store.selectCourseLayers({ nodeIds: ['missing-layer'], additive: false })).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(initial)
+    expect(store.transformCourseLayers({
+      nodes: [{
+        nodeId: V9_SLIDE_TEST_TEXT_ID,
+        x: 440,
+        y: 320,
+        width: 400,
+        height: 80,
+        rotation: 0,
+      }],
+    })).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(initial)
+
+    expect(store.selectCourseLayers({
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID],
+      additive: false,
+    })).toBe(true)
+    const selected = useEditorStore.getState().courseSession!
+    expect(store.transformCourseLayers({
+      nodes: [{
+        nodeId: V9_SLIDE_TEST_TEXT_ID,
+        x: 440,
+        y: 320,
+        width: 400,
+        height: 80,
+        rotation: 0,
+      }],
+    })).toBe(false)
+    expect(useEditorStore.getState().courseSession).toBe(selected)
   })
 
   it('routes rename, undo and redo through only the V9 history', () => {
@@ -99,6 +143,34 @@ describe('V9 ownership in the original editor Store', () => {
 
     store.redoCourseProject()
     expect(useEditorStore.getState().courseSession!.history.present.title).toBe('新课件标题')
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
+  it('routes original element and layer actions through only the V9 history', () => {
+    const legacyBefore = captureLegacyTruth()
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    const initial = useEditorStore.getState().courseSession!
+
+    store.addCourseShapeLayer('diamond', 260, 180)
+    const added = useEditorStore.getState().courseSession!
+    const layerItemId = added.selection.selectionIds[0]!
+    store.updateCourseLayer(layerItemId, { label: '菱形提示', locked: true })
+    store.duplicateCourseLayer(layerItemId)
+    const duplicated = useEditorStore.getState().courseSession!
+    const duplicateId = duplicated.selection.selectionIds[0]!
+    const scene = duplicated.history.present.surfaces[0]
+    if (!scene || scene.type !== 'slide') throw new Error('expected slide')
+    store.reorderCourseLayers(
+      [...scene.scenes[0]!.layerItems.map((item) => item.layerItemId)].reverse(),
+    )
+    store.deleteCourseLayer(duplicateId)
+    const current = useEditorStore.getState().courseSession!
+
+    expect(current.history.present.revision - initial.history.present.revision).toBe(5)
+    expect(current.history.past.length - initial.history.past.length).toBe(5)
+    expect(JSON.stringify(current.history.present)).toContain('菱形提示')
+    expect(current.selection.selectionIds).toEqual([])
     expectLegacyTruthUnchanged(legacyBefore)
   })
 

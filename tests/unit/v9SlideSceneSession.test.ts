@@ -48,14 +48,14 @@ describe('V9 Slide scene session commands', () => {
 
     expect(global.history).toBe(initial.history)
     expect(global.editingScope).toBe('global')
-    expect(global.selection.selectionId).toBeNull()
+    expect(global.selection.selectionIds).toEqual([])
     expect(buildV9SlideWorkspaceSnapshot(global).document.nodes).toEqual([])
     expect(selectV9SlideVerticalSlice(global, {
       nodeIds: [V9_SLIDE_TEST_TEXT_ID], additive: false,
     })).toBe(global)
     expect(activated.history).toBe(initial.history)
     expect(activated.editingScope).toBe('scene')
-    expect(activated.selection).toMatchObject({ stateId: null, selectionId: null })
+    expect(activated.selection).toMatchObject({ stateId: null, selectionIds: [] })
   })
 
   it('commits each scene mutation through exactly one revision and supports undo/redo', () => {
@@ -67,7 +67,7 @@ describe('V9 Slide scene session commands', () => {
     expect(added.history.present.revision).toBe(initial.history.present.revision + 1)
     expect(added.history.past).toEqual([initial.history.present])
     expect(added.editingScope).toBe('scene')
-    expect(added.selection.selectionId).toBeNull()
+    expect(added.selection.selectionIds).toEqual([])
 
     const renamed = renameV9SlideScene(added, addedId, '新场景', NOW)
     expect(renamed.history.present.revision).toBe(added.history.present.revision + 1)
@@ -149,7 +149,7 @@ describe('V9 Slide scene Store actions', () => {
     store.setCourseEditingScope('global')
     let current = useEditorStore.getState().courseSession!
     expect(current.editingScope).toBe('global')
-    expect(current.selection.selectionId).toBeNull()
+    expect(current.selection.selectionIds).toEqual([])
     expect(current.history).toBe(initial.history)
 
     store.activateCourseScene(initialId)

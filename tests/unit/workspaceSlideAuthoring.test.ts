@@ -5,7 +5,7 @@ import {
   resolveWorkspaceSlideAuthoringInput,
   workspaceAuthoringActionAllowed,
   workspaceCanvasLabel,
-  workspaceMoveAllowed,
+  workspaceTransformAllowed,
   workspaceSelectionAllowed,
   workspaceSlidePreviewAssetFiles,
   workspaceSlidePreviewGenerationIdentity,
@@ -27,10 +27,10 @@ function input(
 ): {
   value: WorkspaceSlideAuthoringInput
   onSelectionChange: ReturnType<typeof vi.fn>
-  onMoveEnd: ReturnType<typeof vi.fn>
+  onTransformEnd: ReturnType<typeof vi.fn>
 } {
   const onSelectionChange = vi.fn(() => true)
-  const onMoveEnd = vi.fn(() => true)
+  const onTransformEnd = vi.fn(() => true)
   const document: SceneDocument = {
     id: `scene-${name}`,
     name,
@@ -59,9 +59,13 @@ function input(
     editingScope: 'scene' as const,
     unsupportedActionReason: 'V9 Player 尚未接入',
     onSelectionChange,
-    onMoveEnd,
+    onTransformEnd,
   })
-  return { value, onSelectionChange, onMoveEnd }
+  return { value, onSelectionChange, onTransformEnd }
+}
+
+function transform(nodeId: string, x: number, y: number) {
+  return { nodeId, x, y, width: 200, height: 80, rotation: 0 }
 }
 
 describe('Workspace Slide authoring input boundary', () => {
@@ -72,13 +76,13 @@ describe('Workspace Slide authoring input boundary', () => {
 
     expect(resolved).toBe(fallback.value)
     resolved.onSelectionChange({ nodeIds: ['node-a'], additive: true })
-    resolved.onMoveEnd({ nodes: [{ nodeId: 'node-a', x: 10, y: 20 }] })
+    resolved.onTransformEnd({ nodes: [transform('node-a', 10, 20)] })
     expect(fallback.onSelectionChange).toHaveBeenCalledWith({
       nodeIds: ['node-a'],
       additive: true,
     })
-    expect(fallback.onMoveEnd).toHaveBeenCalledWith({
-      nodes: [{ nodeId: 'node-a', x: 10, y: 20 }],
+    expect(fallback.onTransformEnd).toHaveBeenCalledWith({
+      nodes: [transform('node-a', 10, 20)],
     })
     expect(JSON.stringify(fallback.value)).toBe(before)
   })
@@ -96,11 +100,11 @@ describe('Workspace Slide authoring input boundary', () => {
     expect(resolved.selectedNodeIds).toBe(injected.value.selectedNodeIds)
 
     resolved.onSelectionChange({ nodeIds: ['node-injected'], additive: false })
-    resolved.onMoveEnd({ nodes: [{ nodeId: 'node-injected', x: 30, y: 40 }] })
+    resolved.onTransformEnd({ nodes: [transform('node-injected', 30, 40)] })
     expect(injected.onSelectionChange).toHaveBeenCalledTimes(1)
-    expect(injected.onMoveEnd).toHaveBeenCalledTimes(1)
+    expect(injected.onTransformEnd).toHaveBeenCalledTimes(1)
     expect(fallback.onSelectionChange).not.toHaveBeenCalled()
-    expect(fallback.onMoveEnd).not.toHaveBeenCalled()
+    expect(fallback.onTransformEnd).not.toHaveBeenCalled()
     expect(JSON.stringify(fallback.value)).toBe(fallbackBefore)
     expect(JSON.stringify(injected.value)).toBe(injectedBefore)
   })
@@ -130,12 +134,20 @@ describe('Workspace Slide authoring input boundary', () => {
   })
 
   it('keeps unsupported injected events away from V8 project/history', () => {
-    const injected = input('injected', [createTextNode({
-      id: 'v9-text',
-      text: 'V9',
-      x: 20,
-      y: 30,
-    })])
+    const injected = input('injected', [
+      createTextNode({
+        id: 'v9-text',
+        text: 'V9',
+        x: 20,
+        y: 30,
+      }),
+      createTextNode({
+        id: 'v9-text-2',
+        text: 'V9 second',
+        x: 220,
+        y: 130,
+      }),
+    ])
     const v8 = {
       project: { title: 'V8 untouched' },
       history: [] as string[],
@@ -146,9 +158,6 @@ describe('Workspace Slide authoring input boundary', () => {
       v8.history.push(action)
     }
     const unsupported = [
-      'resize',
-      'rotate',
-      'multi-transform',
       'text-edit',
       'formula-edit',
       'drop',
@@ -167,10 +176,10 @@ describe('Workspace Slide authoring input boundary', () => {
       nodeIds: ['v9-text', 'another'],
       additive: true,
     })).toBe(false)
-    expect(workspaceMoveAllowed(injected.value, {
+    expect(workspaceTransformAllowed(injected.value, {
       nodes: [
-        { nodeId: 'v9-text', x: 40, y: 50 },
-        { nodeId: 'another', x: 60, y: 70 },
+        transform('v9-text', 40, 50),
+        transform('another', 60, 70),
       ],
     })).toBe(false)
     expect(v8).toEqual(before)
@@ -179,15 +188,25 @@ describe('Workspace Slide authoring input boundary', () => {
       nodeIds: ['v9-text'],
       additive: false,
     })).toBe(true)
-    expect(workspaceMoveAllowed(injected.value, {
-      nodes: [{ nodeId: 'v9-text', x: 40, y: 50 }],
+    expect(workspaceTransformAllowed(injected.value, {
+      nodes: [transform('v9-text', 40, 50)],
+    })).toBe(true)
+    expect(workspaceSelectionAllowed(injected.value, {
+      nodeIds: ['v9-text', 'v9-text-2'],
+      additive: false,
+    })).toBe(true)
+    expect(workspaceTransformAllowed(injected.value, {
+      nodes: [
+        transform('v9-text', 40, 50),
+        transform('v9-text-2', 240, 150),
+      ],
     })).toBe(true)
     expect(workspaceSelectionAllowed(injected.value, {
       nodeIds: ['missing'],
       additive: false,
     })).toBe(false)
-    expect(workspaceMoveAllowed(injected.value, {
-      nodes: [{ nodeId: 'v9-text', x: Number.NaN, y: 50 }],
+    expect(workspaceTransformAllowed(injected.value, {
+      nodes: [transform('v9-text', Number.NaN, 50)],
     })).toBe(false)
     const locked: WorkspaceSlideAuthoringInput = {
       ...injected.value,
@@ -202,9 +221,9 @@ describe('Workspace Slide authoring input boundary', () => {
     expect(workspaceSelectionAllowed(locked, {
       nodeIds: ['v9-text'],
       additive: false,
-    })).toBe(false)
-    expect(workspaceMoveAllowed(locked, {
-      nodes: [{ nodeId: 'v9-text', x: 40, y: 50 }],
+    })).toBe(true)
+    expect(workspaceTransformAllowed(locked, {
+      nodes: [transform('v9-text', 40, 50)],
     })).toBe(false)
   })
 
@@ -212,9 +231,6 @@ describe('Workspace Slide authoring input boundary', () => {
     const fallback = input('fallback')
     const history: string[] = []
     const actions = [
-      'resize',
-      'rotate',
-      'multi-transform',
       'text-edit',
       'formula-edit',
       'drop',
@@ -233,14 +249,14 @@ describe('Workspace Slide authoring input boundary', () => {
       nodeIds: ['a', 'b'],
       additive: true,
     })).toBe(true)
-    expect(workspaceMoveAllowed(undefined, {
+    expect(workspaceTransformAllowed(undefined, {
       nodes: [
-        { nodeId: 'a', x: 1, y: 2 },
-        { nodeId: 'b', x: 3, y: 4 },
+        transform('a', 1, 2),
+        transform('b', 3, 4),
       ],
     })).toBe(true)
-    fallback.value.onMoveEnd({ nodes: [{ nodeId: 'a', x: 1, y: 2 }] })
-    expect(fallback.onMoveEnd).toHaveBeenCalledTimes(1)
+    fallback.value.onTransformEnd({ nodes: [transform('a', 1, 2)] })
+    expect(fallback.onTransformEnd).toHaveBeenCalledTimes(1)
   })
 
   it('keeps preview generation stable for frame/name changes and invalidates real boundaries', () => {

@@ -109,30 +109,39 @@ import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import {
   activateV9SlidePresentationState,
   activateV9SlideScene,
+  addV9SlideFormulaLayer,
   addV9SlidePresentationState,
   addV9SlideScene,
+  addV9SlideShapeLayer,
+  addV9SlideTextLayer,
   clearV9SlidePresentationStateOverrides,
   completeV9SlideVerticalSliceSave,
   createV9CourseEditorState,
   createV9SlideVerticalSliceState,
   deleteV9SlideScene,
+  deleteV9SlideLayer,
   deleteV9SlidePresentationState,
   duplicateV9SlidePresentationState,
   duplicateV9SlideScene,
+  duplicateV9SlideLayer,
   isV9SlideVerticalSliceDirty,
-  moveV9SlideVerticalSlice,
+  nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
   renameV9SlidePresentationState,
   renameV9SlideScene,
   renameV9SlideVerticalSlice,
   reorderV9SlideScenes,
+  reorderV9SlideLayers,
   selectV9SlideVerticalSlice,
   setInitialV9SlidePresentationState,
   setThumbnailV9SlidePresentationState,
   setV9SlideEditingScope,
+  transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
-  type V9SlideMoveInput,
+  updateV9SlideLayer,
+  type V9SlideLayerPatch,
+  type V9SlideTransformInput,
   type V9SlideSelectionInput,
   type V9SlideVerticalSliceState,
 } from '../course/v9SlideVerticalSlice'
@@ -254,8 +263,16 @@ export interface EditorState {
     options?: { markDirty?: boolean },
   ): void
   clearCourseProjectSession(): void
-  selectCourseLayers(input: V9SlideSelectionInput): void
-  moveCourseLayers(input: V9SlideMoveInput): void
+  selectCourseLayers(input: V9SlideSelectionInput): boolean
+  transformCourseLayers(input: V9SlideTransformInput): boolean
+  nudgeCourseLayers(dx: number, dy: number): void
+  addCourseTextLayer(x?: number, y?: number): void
+  addCourseFormulaLayer(x?: number, y?: number): void
+  addCourseShapeLayer(shapeType: ShapeType, x?: number, y?: number): void
+  updateCourseLayer(layerItemId: string, patch: V9SlideLayerPatch): void
+  deleteCourseLayer(layerItemId: string): void
+  duplicateCourseLayer(layerItemId: string): void
+  reorderCourseLayers(layerItemIds: readonly string[]): void
   setCourseEditingScope(scope: EditingScope): void
   activateCourseScene(sceneId: string): void
   addCourseScene(): void
@@ -1725,20 +1742,136 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     selectCourseLayers(input) {
+      let accepted = false
       set((state) => {
         if (state.courseSession === null) return state
         const courseSession = selectV9SlideVerticalSlice(state.courseSession, input)
+        accepted = courseSession !== state.courseSession || (
+          !input.additive &&
+          input.nodeIds.length === state.courseSession.selection.selectionIds.length &&
+          input.nodeIds.every(
+            (id, index) => id === state.courseSession!.selection.selectionIds[index],
+          )
+        ) || (input.additive && input.nodeIds.length === 0)
         return courseSession === state.courseSession ? state : { ...state, courseSession }
+      })
+      return accepted
+    },
+
+    transformCourseLayers(input) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = transformV9SlideVerticalSlice(state.courseSession, input)
+        accepted = courseSession !== state.courseSession
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已变换图层' }
+      })
+      return accepted
+    },
+
+    nudgeCourseLayers(dx, dy) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = nudgeV9SlideSelection(state.courseSession, dx, dy)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已微移图层' }
       })
     },
 
-    moveCourseLayers(input) {
+    addCourseTextLayer(x, y) {
       set((state) => {
         if (state.courseSession === null) return state
-        const courseSession = moveV9SlideVerticalSlice(state.courseSession, input)
+        const courseSession = addV9SlideTextLayer(state.courseSession, x, y)
+        return {
+          ...state,
+          courseSession,
+          activeTab: 'layers',
+          statusMessage: '已添加文字',
+        }
+      })
+    },
+
+    addCourseFormulaLayer(x, y) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = addV9SlideFormulaLayer(state.courseSession, x, y)
+        return {
+          ...state,
+          courseSession,
+          activeTab: 'layers',
+          statusMessage: '已添加公式',
+        }
+      })
+    },
+
+    addCourseShapeLayer(shapeType, x, y) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = addV9SlideShapeLayer(
+          state.courseSession,
+          shapeType,
+          x,
+          y,
+        )
+        return {
+          ...state,
+          courseSession,
+          activeTab: 'layers',
+          statusMessage: '已添加图形',
+        }
+      })
+    },
+
+    updateCourseLayer(layerItemId, patch) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = updateV9SlideLayer(state.courseSession, layerItemId, patch)
         return courseSession === state.courseSession
           ? state
-          : { ...state, courseSession, statusMessage: '已移动图层' }
+          : { ...state, courseSession, statusMessage: '元素已更新' }
+      })
+    },
+
+    deleteCourseLayer(layerItemId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const deletingFromNamedState = state.courseSession.selection.stateId !== null
+        const courseSession = deleteV9SlideLayer(state.courseSession, layerItemId)
+        return courseSession === state.courseSession
+          ? state
+          : {
+              ...state,
+              courseSession,
+              statusMessage: deletingFromNamedState
+                ? '已在当前状态隐藏，基础元素仍保留'
+                : '元素已删除',
+            }
+      })
+    },
+
+    duplicateCourseLayer(layerItemId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = duplicateV9SlideLayer(state.courseSession, layerItemId)
+        return {
+          ...state,
+          courseSession,
+          activeTab: 'layers',
+          statusMessage: '元素已复制',
+        }
+      })
+    },
+
+    reorderCourseLayers(layerItemIds) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = reorderV9SlideLayers(state.courseSession, layerItemIds)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '图层顺序已更新' }
       })
     },
 

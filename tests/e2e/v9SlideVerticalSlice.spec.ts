@@ -533,7 +533,7 @@ test('authors V9 scenes and presentation states through the original panels', as
     const sceneItems = editor.page.locator('.scene-item')
     await expect(sceneItems).toHaveCount(1)
     await expect(editor.page.getByTestId('global-layer-entry')).toBeDisabled()
-    await expect(editor.page.getByText('元素面板暂不可用')).toBeVisible()
+    await expect(editor.page.getByTestId('elements-tab')).toBeVisible()
 
     await editor.page.getByTestId('add-scene').click()
     await expect(sceneItems).toHaveCount(2)
@@ -553,6 +553,34 @@ test('authors V9 scenes and presentation states through the original panels', as
       name: '重命名场景“探究场景”',
     })).toBeVisible()
 
+    await editor.page.getByRole('tab', { name: '元素' }).click()
+    await editor.page.getByTestId('add-rectangle').click()
+    await expect(editor.page.getByTestId('nodes-tab')).toBeVisible()
+    await expect(editor.page.getByText('矩形', { exact: true })).toBeVisible()
+    await editor.page.getByText('矩形', { exact: true }).dblclick()
+    const layerNameInput = editor.page.getByRole('textbox', { name: '重命名“矩形”' })
+    await layerNameInput.fill('实验框')
+    await layerNameInput.press('Enter')
+    await expect(editor.page.getByText('实验框', { exact: true })).toBeVisible()
+    await editor.page.getByRole('button', { name: '隐藏“实验框”' }).click()
+    await expect(editor.page.getByRole('button', { name: '显示“实验框”' })).toBeVisible()
+    await editor.page.getByRole('button', { name: '显示“实验框”' }).click()
+    await editor.page.getByRole('button', { name: '锁定“实验框”' }).click()
+    await expect(editor.page.getByRole('button', { name: '解锁“实验框”' })).toBeVisible()
+    await editor.page.getByRole('button', { name: '解锁“实验框”' }).click()
+    await editor.page.getByRole('button', { name: '复制“实验框”' }).click()
+    await expect(editor.page.getByText('实验框 副本', { exact: true })).toBeVisible()
+    await editor.page.getByRole('button', { name: '删除“实验框 副本”' }).click()
+    await expect(editor.page.getByText('实验框 副本', { exact: true })).toHaveCount(0)
+    await editor.page.getByText('实验框', { exact: true }).click()
+    await expect(editor.page.getByText('已选 1', { exact: true })).toBeVisible()
+    await editor.page.keyboard.press('ArrowRight')
+
+    await editor.page.getByRole('tab', { name: '元素' }).click()
+    await editor.page.getByTestId('add-formula').click()
+    await expect(editor.page.getByTestId('nodes-tab')).toBeVisible()
+    await expect(editor.page.getByText('公式', { exact: true })).toBeVisible()
+
     await editor.page.getByRole('button', { name: '管理状态' }).click()
     await expect(editor.page.getByRole('button', { name: '新建场景状态' })).toBeVisible()
     await editor.page.getByRole('button', { name: '新建场景状态' }).click()
@@ -568,6 +596,17 @@ test('authors V9 scenes and presentation states through the original panels', as
     }).click()
     await expect(activeState).toContainText('缩略图')
     await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
+    await editor.page.getByRole('tab', { name: '图层' }).click()
+    await editor.page.getByRole('button', {
+      name: '从当前状态隐藏“实验框”',
+    }).click()
+    await expect(editor.page.getByRole('button', {
+      name: '“实验框”已在当前状态隐藏',
+    })).toBeDisabled()
+    await editor.page.getByRole('button', { name: '显示“实验框”' }).click()
+    await expect(editor.page.getByRole('button', {
+      name: '从当前状态隐藏“实验框”',
+    })).toBeEnabled()
 
     await patchProjectDialogs(editor.app, { save: sceneAuthoringProjectPath })
     await editor.page.keyboard.press('Control+s')
@@ -582,6 +621,19 @@ test('authors V9 scenes and presentation states through the original panels', as
     expect(surface.scenes).toHaveLength(2)
     const authoredScene = surface.scenes[1]!
     expect(authoredScene.name).toBe('探究场景')
+    const authoredShape = authoredScene.layerItems.find(
+      (item) => item.kind === 'native' && item.label === '实验框',
+    )
+    expect(authoredShape).toMatchObject({
+      frame: { x: 481 },
+      visible: true,
+      locked: false,
+      content: { nativeType: 'shape', data: { shapeType: 'rectangle' } },
+    })
+    expect(authoredScene.layerItems.some(
+      (item) => item.kind === 'native' && item.content.nativeType === 'formula',
+    )).toBe(true)
+    expect(authoredScene.layerItems.some((item) => item.label === '实验框 副本')).toBe(false)
     const feedback = authoredScene.presentation?.states.find((state) => state.name === '反馈态')
     expect(feedback).toBeDefined()
     expect(authoredScene.presentation?.thumbnailStateId).toBe(feedback?.id)
@@ -606,6 +658,9 @@ test('authors V9 scenes and presentation states through the original panels', as
     }).click()
     await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 2 / 2')
     await expect(editor.page.locator('.canvas-label')).toContainText('探究场景')
+    await editor.page.getByRole('tab', { name: '图层' }).click()
+    await expect(editor.page.getByText('实验框', { exact: true })).toBeVisible()
+    await expect(editor.page.getByText('公式', { exact: true })).toBeVisible()
     await expect(editor.page.getByText('反馈态', { exact: true }).first()).toBeVisible()
     await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
     await expect.poll(() => editor.page.evaluate(() => (

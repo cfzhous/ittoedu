@@ -332,7 +332,9 @@ export const layerItemSchema: z.ZodType<LayerItem> = z.discriminatedUnion('kind'
   }
 })
 
-function materializeNativeLayerItem(item: Extract<LayerItem, { kind: 'native' }>): SceneNode {
+export function materializeNativeLayerItem(
+  item: Extract<LayerItem, { kind: 'native' }>,
+): SceneNode {
   return {
     ...item.content.data,
     id: item.layerItemId,

@@ -85,7 +85,10 @@ import { ConfirmDialog } from './ui/ConfirmDialog'
 import { CopyableSummaryDialog } from './ui/CopyableSummaryDialog'
 import { ExportSizeWarningDialog } from './ui/ExportSizeWarningDialog'
 import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
-import { RightSidebar } from './ui/RightSidebar'
+import {
+  RightSidebar,
+  type RightSidebarDocumentControl,
+} from './ui/RightSidebar'
 import {
   ScenePanel,
   type ScenePanelDocumentControl,
@@ -383,7 +386,7 @@ export default function App() {
       ? `场景 ${v9ActiveSlideContext.surface.scenes.findIndex(
         (scene) => scene.id === v9ActiveSlideContext.scene.id,
       ) + 1} / ${v9ActiveSlideContext.surface.scenes.length}`
-      : '当前位置暂不支持 Slide 编辑'
+      : '当前位置暂不支持幻灯片编辑'
   const v9StatusBarView = useMemo(() => {
     if (v9SlideVerticalSlice === null) return null
     const courseProject = v9SlideVerticalSlice.history.present
@@ -393,22 +396,21 @@ export default function App() {
       stateId: v9SlideVerticalSlice.selection.stateId,
     })
     const sceneLayerCount = view.layers.filter((layer) => layer.source === 'scene').length
-    const selectedLayer = v9SlideVerticalSlice.selection.selectionId === null
-      ? null
-      : view.layers.find((layer) => (
-          layer.selectionId === v9SlideVerticalSlice.selection.selectionId
-        )) ?? null
+    const selectedIds = new Set(v9SlideVerticalSlice.selection.selectionIds)
+    const selectedLayers = view.layers.filter((layer) => selectedIds.has(layer.selectionId))
     const editingGlobal = v9SlideVerticalSlice.editingScope === 'global'
     return {
       locationName: editingGlobal ? '全局层' : view.sceneName,
       itemCountLabel: editingGlobal
         ? `${courseProject.globalLayerItems.length} 个全局元素`
         : `${sceneLayerCount} 个节点`,
-      selectionLabel: selectedLayer
-        ? `已选：${selectedLayer.item.label}`
-        : editingGlobal
-          ? '未选择全局元素'
-          : '未选择节点',
+      selectionLabel: selectedLayers.length > 1
+        ? `已选 ${selectedLayers.length} 个图层`
+        : selectedLayers[0]
+          ? `已选：${selectedLayers[0].item.label}`
+          : editingGlobal
+            ? '未选择全局元素'
+            : '未选择节点',
       largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
         (editingGlobal ? courseProject.globalLayerItems.length : sceneLayerCount) >
           RECOMMENDED_SCENE_NODES,
@@ -549,10 +551,10 @@ export default function App() {
         ),
       globalEditingDisabled: true,
       globalEditingUnavailableReason:
-        '全局层编辑暂不可用；控制器与全局元素将在完整作者能力中开放',
+        '当前版本暂不能编辑全局层；现有控制器和全局元素不会改变。',
       scenes: sceneRows,
       onAddScene: () => run(() => {
-        if (v9ScenePanelBase === null) throw new Error('当前位置不是 Slide 表面')
+        if (v9ScenePanelBase === null) throw new Error('当前位置不是幻灯片')
         useEditorStore.getState().addCourseScene()
       }, '无法新建场景'),
       onActivateScene: (sceneId) => run(() => {
@@ -562,7 +564,7 @@ export default function App() {
       }, '无法切换场景'),
       onActivateGlobal: () => run(() => {
         useEditorStore.getState().setStatus(
-          '全局层编辑暂不可用；控制器与全局元素将在完整作者能力中开放',
+          '当前版本暂不能编辑全局层；现有控制器和全局元素不会改变。',
         )
       }, '无法切换到全局层'),
       onRenameScene: (sceneId, name) => run(() => {
@@ -655,9 +657,121 @@ export default function App() {
       }, '无法删除命名状态'),
     }
   }, [editorMode, v9ActiveSlideContext?.scene, v9SlideVerticalSlice])
+  const v9WorkspaceSnapshot = useMemo(
+    () => v9SlideVerticalSlice === null
+      ? null
+      : buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice),
+    [v9SlideVerticalSlice],
+  )
+  const v9RightSidebarDocumentControl = useMemo<
+    RightSidebarDocumentControl | undefined
+  >(() => {
+    if (v9SlideVerticalSlice === null || v9WorkspaceSnapshot === null) return undefined
+    const run = (command: () => void, fallback: string) => {
+      if (lifecycleOperationInFlightRef.current) return
+      try {
+        command()
+      } catch (error) {
+        useEditorStore.getState().setError(readableError(error, fallback))
+      }
+    }
+    const view = buildSlideEditorView({
+      project: v9SlideVerticalSlice.history.present,
+      locationId: v9SlideVerticalSlice.selection.locationId,
+      stateId: v9SlideVerticalSlice.selection.stateId,
+    })
+    const sceneLayers = view.layers.filter((layer) => layer.source === 'scene')
+    const unsupportedSceneLayerCount = sceneLayers.filter((layer) => !(
+      layer.item.kind === 'native' &&
+      layer.item.content.nativeType !== 'teacher-controller'
+    )).length
+    const editingScene = v9SlideVerticalSlice.editingScope === 'scene'
+    return {
+      ...(editingScene
+        ? {
+            elements: {
+              editingScope: v9SlideVerticalSlice.editingScope,
+              editorMode,
+              mediaUnavailableReason: '当前版本暂不能从此面板添加图片、视频或声音。',
+              controllerUnavailableReason: '当前版本暂不能从此面板编辑教师控制器。',
+              onAddText: (x, y) => run(() => {
+                useEditorStore.getState().addCourseTextLayer(x, y)
+              }, '无法添加文字'),
+              onAddFormula: (x, y) => run(() => {
+                useEditorStore.getState().addCourseFormulaLayer(x, y)
+              }, '无法添加公式'),
+              onAddShape: (shapeType, x, y) => run(() => {
+                useEditorStore.getState().addCourseShapeLayer(shapeType, x, y)
+              }, '无法添加图形'),
+            },
+          }
+        : {}),
+      ...(editingScene
+        ? {
+            layers: {
+              editingScope: v9SlideVerticalSlice.editingScope,
+              scopeLabel: v9ActiveSlideContext?.scene.name ?? view.sceneName,
+              nodes: v9WorkspaceSnapshot.document.nodes,
+              selectedNodeIds: v9WorkspaceSnapshot.selectedNodeIds,
+              deletionMode: v9SlideVerticalSlice.selection.stateId === null
+                ? 'delete'
+                : 'hide-in-state',
+              omittedItemsReason: unsupportedSceneLayerCount > 0
+                ? `当前幻灯片还有 ${unsupportedSceneLayerCount} 个动态元素或控制器暂不在列表中；已显示的元素仍可编辑。`
+                : undefined,
+              reorderUnavailableReason: unsupportedSceneLayerCount > 0
+                ? '当前列表未包含幻灯片中的全部元素，暂不能调整整体层级。'
+                : undefined,
+              onSelectNode: (nodeId, additive) => run(() => {
+                const accepted = useEditorStore.getState().selectCourseLayers({
+                  nodeIds: nodeId === null ? [] : [nodeId],
+                  additive,
+                })
+                if (!accepted) throw new Error('当前元素无法选择')
+              }, '无法选择元素'),
+              onDeleteNode: (nodeId) => run(() => {
+                useEditorStore.getState().deleteCourseLayer(nodeId)
+              }, '无法删除元素'),
+              onDuplicateNode: (nodeId) => run(() => {
+                useEditorStore.getState().duplicateCourseLayer(nodeId)
+              }, '无法复制元素'),
+              onRenameNode: (nodeId, name) => run(() => {
+                useEditorStore.getState().updateCourseLayer(nodeId, { label: name })
+              }, '无法重命名元素'),
+              onSetNodeVisible: (nodeId, visible) => run(() => {
+                useEditorStore.getState().updateCourseLayer(nodeId, { visible })
+              }, '无法更改元素可见性'),
+              onSetNodeLocked: (nodeId, locked) => run(() => {
+                useEditorStore.getState().updateCourseLayer(nodeId, { locked })
+              }, '无法更改元素锁定状态'),
+              onReorderNodes: (nodeIds) => run(() => {
+                useEditorStore.getState().reorderCourseLayers(nodeIds)
+              }, '无法调整图层顺序'),
+            },
+          }
+        : {}),
+      unavailableReasons: {
+        elements: editingScene
+          ? undefined
+          : '请先回到场景，再添加文字、公式或图形。',
+        components: '当前版本暂不能在此编辑复用组件；现有内容不会改变。',
+        layers: !editingScene
+          ? '当前版本暂不能在此管理全局层；现有全局内容不会改变。'
+          : undefined,
+        properties: '当前版本暂不能在此编辑属性；现有内容不会改变。',
+        automation: '当前版本暂不能在此编辑互动与动画；现有内容不会改变。',
+        developer: '当前版本暂不能在此编辑动态内容；现有内容不会改变。',
+      },
+    }
+  }, [
+    editorMode,
+    v9ActiveSlideContext?.scene.name,
+    v9SlideVerticalSlice,
+    v9WorkspaceSnapshot,
+  ])
   const v9SlideAuthoring = useMemo<WorkspaceSlideAuthoringInput | undefined>(() => {
-    if (v9SlideVerticalSlice === null) return undefined
-    const snapshot = buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice)
+    if (v9SlideVerticalSlice === null || v9WorkspaceSnapshot === null) return undefined
+    const snapshot = v9WorkspaceSnapshot
     const stateName = v9SlideVerticalSlice.editingScope === 'global'
       ? '全局层'
       : v9SlideVerticalSlice.selection.stateId === null
@@ -682,16 +796,14 @@ export default function App() {
       unsupportedActionReason: '当前位置试运行暂不可用',
       onSelectionChange: (event) => {
         if (lifecycleOperationInFlightRef.current) return false
-        useEditorStore.getState().selectCourseLayers(event)
-        return true
+        return useEditorStore.getState().selectCourseLayers(event)
       },
-      onMoveEnd: (event) => {
+      onTransformEnd: (event) => {
         if (lifecycleOperationInFlightRef.current) return false
-        useEditorStore.getState().moveCourseLayers(event)
-        return true
+        return useEditorStore.getState().transformCourseLayers(event)
       },
     }
-  }, [v9SlideVerticalSlice])
+  }, [v9ActiveSlideContext?.scene, v9SlideVerticalSlice, v9WorkspaceSnapshot])
 
   const setError = useEditorStore((state) => state.setError)
   const setStatus = useEditorStore((state) => state.setStatus)
@@ -1592,7 +1704,13 @@ export default function App() {
         event.preventDefault()
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
-          state.setStatus('多选暂不可用')
+          const snapshot = buildV9SlideWorkspaceSnapshot(state.courseSession)
+          state.selectCourseLayers({
+            nodeIds: snapshot.document.nodes
+              .filter((node) => node.visible)
+              .map((node) => node.id),
+            additive: false,
+          })
           return
         }
         state.selectNodes(selectEditingNodes(state).map((node) => node.id))
@@ -1616,16 +1734,25 @@ export default function App() {
         event.preventDefault()
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
-          state.setStatus('图层复制暂不可用')
+          const [layerItemId] = state.courseSession.selection.selectionIds
+          if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
+            state.duplicateCourseLayer(layerItemId)
+          } else if (state.courseSession.selection.selectionIds.length > 1) {
+            state.setStatus('请一次选择一个元素后复制')
+          }
           return
         }
         state.duplicateSelectedNodes()
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
-          if (state.courseSession.selection.selectionId !== null) {
+          const [layerItemId] = state.courseSession.selection.selectionIds
+          if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
             event.preventDefault()
-            state.setStatus('图层删除暂不可用')
+            state.deleteCourseLayer(layerItemId)
+          } else if (state.courseSession.selection.selectionIds.length > 1) {
+            event.preventDefault()
+            state.setStatus('请一次选择一个元素后删除或隐藏')
           }
           return
         }
@@ -1646,9 +1773,9 @@ export default function App() {
         }[event.key]
         const state = useEditorStore.getState()
         if (state.courseSession !== null) {
-          if (movement && state.courseSession.selection.selectionId !== null) {
+          if (movement && state.courseSession.selection.selectionIds.length > 0) {
             event.preventDefault()
-            state.setStatus('键盘微移暂不可用')
+            state.nudgeCourseLayers(movement[0], movement[1])
           }
           return
         }
@@ -1730,9 +1857,7 @@ export default function App() {
           <SceneStateStrip documentControl={v9SceneStateStripDocumentControl} />
         </div>
         <RightSidebar
-          documentEditingUnavailableReason={v9BackendActive
-            ? '元素、图层、属性与互动编辑暂不可用；当前工程不会被误改。'
-            : undefined}
+          documentControl={v9RightSidebarDocumentControl}
           onAddImage={(x, y) =>
             void selectAndImportImage('add', { x, y })
           }

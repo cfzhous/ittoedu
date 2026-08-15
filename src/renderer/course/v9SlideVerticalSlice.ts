@@ -1,9 +1,20 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
+import { nanoid } from 'nanoid'
 import type {
+  LayerItem,
+  LayerItemOverride,
   NativeLayerItem,
 } from '../../shared/courseProjectTypes'
-import type { SceneDocument, TextNode } from '../../shared/projectTypes'
+import type { SceneDocument, ShapeType } from '../../shared/projectTypes'
+import { materializeNativeLayerItem } from '../../shared/courseProjectSchema'
 import {
+  isNodeMotionAction,
+  isVideoInteractionAction,
+  type InteractionRule,
+} from '../../shared/interactionTypes'
+import {
+  addNativeVisualLayer,
+  addSlideTextLayer,
   addSlidePresentationState,
   addSlideScene,
   clearSlidePresentationStateOverrides,
@@ -18,6 +29,7 @@ import {
   renameSlidePresentationState,
   renameSlideScene,
   reorderSlideScenes,
+  reserveTopAuthoringOrder,
   setInitialSlidePresentationState,
   setThumbnailSlidePresentationState,
   type CourseHistoryState,
@@ -27,9 +39,10 @@ import {
 import { componentPackagesFromArchive } from '../components/componentPackageStore'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import {
-  moveSelectedSlideText,
-  selectSlideEditorLayer,
+  selectSlideEditorLayers,
+  transformSelectedSlideNativeLayers,
   type SlideEditorSelection,
+  type SlideEditorTransformInput,
 } from './slideEditorCommands'
 import {
   buildSlideEditorView,
@@ -64,12 +77,12 @@ export interface V9SlideSelectionInput {
   readonly additive: boolean
 }
 
-export interface V9SlideMoveInput {
-  readonly nodes: readonly {
-    readonly nodeId: string
-    readonly x: number
-    readonly y: number
-  }[]
+export type V9SlideTransformInput = SlideEditorTransformInput
+
+export interface V9SlideLayerPatch {
+  readonly label?: string
+  readonly visible?: boolean
+  readonly locked?: boolean
 }
 
 export interface V9SlideWorkspaceSnapshot {
@@ -92,14 +105,14 @@ function createFixtureProject() {
   return updateCourseProject(initial, (draft) => {
     const location = draft.locations.find((candidate) => candidate.id === draft.startLocationId)
     if (!location || location.kind !== 'slide-scene') {
-      throw new Error('V9 Slide 纵切 fixture 缺少初始场景位置')
+      throw new Error('测试课件缺少初始场景位置')
     }
     const surface = draft.surfaces.find((candidate) => candidate.id === location.surfaceId)
     if (!surface || surface.type !== 'slide') {
-      throw new Error('V9 Slide 纵切 fixture 缺少初始 Slide 表面')
+      throw new Error('测试课件缺少初始幻灯片')
     }
     const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
-    if (!scene) throw new Error('V9 Slide 纵切 fixture 缺少初始场景')
+    if (!scene) throw new Error('测试课件缺少初始场景')
     scene.layerItems.push({
       layerItemId: V9_SLIDE_TEST_TEXT_ID,
       label: 'V9 可移动文字',
@@ -199,11 +212,11 @@ export function openV9SlideVerticalSliceState(
 ): V9SlideVerticalSliceState {
   const { project, assetFiles, componentFiles } = archive
   const history = createCourseHistory(project)
-  const selection = selectSlideEditorLayer({
+  const selection = selectSlideEditorLayers({
     project,
     locationId: project.startLocationId,
     stateId: null,
-    selectionId: null,
+    selectionIds: [],
   })
   const componentPackages = componentPackagesFromArchive(project, componentFiles)
   return freezeState(
@@ -287,61 +300,42 @@ export function renameV9SlideVerticalSlice(
   )
 }
 
-type ReadonlyNativeTextContent = Extract<
-  DeepReadonly<NativeLayerItem>['content'],
-  { readonly nativeType: 'text' }
->
-
-type ReadonlyTextLayer = Omit<SlideEditorLayerView, 'item'> & {
-  readonly item: Omit<DeepReadonly<NativeLayerItem>, 'content'> & {
-    readonly content: ReadonlyNativeTextContent
-  }
+type ReadonlyNativeLayer = Omit<SlideEditorLayerView, 'item'> & {
+  readonly item: DeepReadonly<NativeLayerItem>
 }
 
-function editableTextLayer(
-  state: V9SlideVerticalSliceState,
-  selectionId: string,
-): ReadonlyTextLayer | undefined {
-  if (state.editingScope !== 'scene') return undefined
-  const view = buildSlideEditorView({
+function nativeNodeFromLayer(layer: ReadonlyNativeLayer) {
+  return materializeNativeLayerItem(
+    structuredClone(layer.item) as NativeLayerItem,
+  )
+}
+
+function activeSlideView(state: V9SlideVerticalSliceState) {
+  return buildSlideEditorView({
     project: state.history.present,
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
   })
-  const layer = view.layers.find((candidate) => candidate.selectionId === selectionId)
-  if (
-    !layer ||
-    layer.source !== 'scene' ||
-    !layer.effectiveVisible ||
-    layer.item.locked ||
-    layer.item.kind !== 'native' ||
-    layer.item.content.nativeType !== 'text'
-  ) {
-    return undefined
-  }
-  return layer as ReadonlyTextLayer
 }
 
-function textNodeFromLayer(layer: ReadonlyTextLayer): TextNode {
-  const { item } = layer
-  const { data } = item.content
-  return {
-    id: item.layerItemId,
-    name: item.label,
-    type: 'text',
-    x: item.frame.x,
-    y: item.frame.y,
-    width: item.frame.width,
-    height: item.frame.height,
-    rotation: item.rotation,
-    opacity: item.opacity,
-    visible: layer.effectiveVisible,
-    locked: item.locked,
-    playbackInitialVisibility: item.playbackInitialVisibility,
-    text: data.text,
-    runs: data.runs.map((run) => ({ ...run, style: { ...run.style } })),
-    style: { ...data.style },
-  }
+function selectableNativeLayers(
+  state: V9SlideVerticalSliceState,
+): Map<string, ReadonlyNativeLayer> {
+  if (state.editingScope !== 'scene') return new Map()
+  return new Map(activeSlideView(state).layers.flatMap((layer) => (
+    layer.source === 'scene' &&
+    layer.item.kind === 'native' &&
+    layer.item.content.nativeType !== 'teacher-controller'
+      ? [[layer.selectionId, layer as ReadonlyNativeLayer] as const]
+      : []
+  )))
+}
+
+function sameSelection(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
 export function buildV9SlideWorkspaceSnapshot(
@@ -356,16 +350,14 @@ export function buildV9SlideWorkspaceSnapshot(
     if (
       layer.source !== 'scene' ||
       layer.item.kind !== 'native' ||
-      layer.item.content.nativeType !== 'text'
+      layer.item.content.nativeType === 'teacher-controller'
     ) {
       return []
     }
-    return [textNodeFromLayer(layer as ReadonlyTextLayer)]
+    return [nativeNodeFromLayer(layer as ReadonlyNativeLayer)]
   })
-  const selectedNodeIds = state.selection.selectionId !== null &&
-    nodes.some((node) => node.id === state.selection.selectionId)
-    ? [state.selection.selectionId]
-    : []
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  const selectedNodeIds = state.selection.selectionIds.filter((id) => nodeIds.has(id))
   return {
     document: {
       id: view.sceneId,
@@ -386,57 +378,61 @@ export function selectV9SlideVerticalSlice(
   state: V9SlideVerticalSliceState,
   input: V9SlideSelectionInput,
 ): V9SlideVerticalSliceState {
-  if (input.nodeIds.length === 0) {
-    if (input.additive || state.selection.selectionId === null) return state
-    return freezeState(state.sessionId, state.history, selectSlideEditorLayer({
-      project: state.history.present,
-      locationId: state.selection.locationId,
-      stateId: state.selection.stateId,
-      selectionId: null,
-    }), state.editingScope, state.savedSnapshot, state.projectPath, state.assetFiles, state.componentFiles, state.componentPackages)
+  if (new Set(input.nodeIds).size !== input.nodeIds.length) return state
+  const selectable = selectableNativeLayers(state)
+  if (input.nodeIds.some((nodeId) => !selectable.has(nodeId))) return state
+  let nextSelectionIds: string[]
+  if (input.additive) {
+    nextSelectionIds = [...state.selection.selectionIds]
+    for (const nodeId of input.nodeIds) {
+      const index = nextSelectionIds.indexOf(nodeId)
+      if (index >= 0) nextSelectionIds.splice(index, 1)
+      else nextSelectionIds.push(nodeId)
+    }
+  } else {
+    nextSelectionIds = [...input.nodeIds]
   }
-  if (input.nodeIds.length !== 1) return state
-  const selectionId = input.nodeIds[0]!
-  if (!editableTextLayer(state, selectionId)) return state
-  const nextSelectionId = input.additive && state.selection.selectionId === selectionId
-    ? null
-    : selectionId
-  if (nextSelectionId === state.selection.selectionId) return state
-  return freezeState(state.sessionId, state.history, selectSlideEditorLayer({
+  if (sameSelection(nextSelectionIds, state.selection.selectionIds)) return state
+  return freezeState(state.sessionId, state.history, selectSlideEditorLayers({
     project: state.history.present,
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
-    selectionId: nextSelectionId,
+    selectionIds: nextSelectionIds,
   }), state.editingScope, state.savedSnapshot, state.projectPath, state.assetFiles, state.componentFiles, state.componentPackages)
 }
 
-export function moveV9SlideVerticalSlice(
+export function transformV9SlideVerticalSlice(
   state: V9SlideVerticalSliceState,
-  input: V9SlideMoveInput,
+  input: V9SlideTransformInput,
   now?: string,
 ): V9SlideVerticalSliceState {
-  if (input.nodes.length !== 1) return state
-  const [{ nodeId, x, y }] = input.nodes
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return state
-  const layer = editableTextLayer(state, nodeId)
-  if (!layer) return state
-  const selection = state.selection.selectionId === nodeId
-    ? state.selection
-    : selectSlideEditorLayer({
-        project: state.history.present,
-        locationId: state.selection.locationId,
-        stateId: state.selection.stateId,
-        selectionId: nodeId,
-      })
-  const history = moveSelectedSlideText(state.history, selection, {
-    x: x - layer.item.frame.x,
-    y: y - layer.item.frame.y,
-  }, now)
-  if (history === state.history && selection === state.selection) return state
+  if (input.nodes.length === 0 || new Set(input.nodes.map((node) => node.nodeId)).size !== input.nodes.length) {
+    return state
+  }
+  const selectable = selectableNativeLayers(state)
+  const selectedIds = new Set(state.selection.selectionIds)
+  const valid = input.nodes.every((node) => {
+    const layer = selectable.get(node.nodeId)
+    return Boolean(
+      layer &&
+      layer.effectiveVisible &&
+      !layer.item.locked &&
+      selectedIds.has(node.nodeId) &&
+      Number.isFinite(node.x) &&
+      Number.isFinite(node.y) &&
+      Number.isFinite(node.width) && node.width > 0 &&
+      Number.isFinite(node.height) && node.height > 0 &&
+      Number.isFinite(node.rotation) &&
+      node.rotation >= -36_000 && node.rotation <= 36_000,
+    )
+  })
+  if (!valid) return state
+  const history = transformSelectedSlideNativeLayers(state.history, state.selection, input, now)
+  if (history === state.history) return state
   return freezeState(
     state.sessionId,
     history,
-    selection,
+    state.selection,
     state.editingScope,
     state.savedSnapshot,
     state.projectPath,
@@ -446,6 +442,510 @@ export function moveV9SlideVerticalSlice(
   )
 }
 
+export function nudgeV9SlideSelection(
+  state: V9SlideVerticalSliceState,
+  dx: number,
+  dy: number,
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return state
+  const selectable = selectableNativeLayers(state)
+  const nodes = state.selection.selectionIds.flatMap((nodeId) => {
+    const layer = selectable.get(nodeId)
+    if (!layer || !layer.effectiveVisible || layer.item.locked) return []
+    return [{
+      nodeId,
+      x: layer.item.frame.x + dx,
+      y: layer.item.frame.y + dy,
+      width: layer.item.frame.width,
+      height: layer.item.frame.height,
+      rotation: layer.item.rotation,
+    }]
+  })
+  return nodes.length === 0 ? state : transformV9SlideVerticalSlice(state, { nodes }, now)
+}
+
+function selectionAfterLayerCommand(
+  state: V9SlideVerticalSliceState,
+  project: V9SlideVerticalSliceState['history']['present'],
+  selectionIds: readonly string[],
+): SlideEditorSelection {
+  return selectSlideEditorLayers({
+    project,
+    locationId: state.selection.locationId,
+    stateId: state.selection.stateId,
+    selectionIds,
+  })
+}
+
+function activeSceneNativeLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): ReadonlyNativeLayer {
+  if (state.editingScope !== 'scene') throw new Error('请先切换到场景层')
+  const layer = activeSlideView(state).layers.find(
+    (candidate) => candidate.selectionId === layerItemId,
+  )
+  if (
+    !layer ||
+    layer.source !== 'scene' ||
+    layer.item.kind !== 'native' ||
+    layer.item.content.nativeType === 'teacher-controller'
+  ) {
+    throw new Error('找不到当前场景中的元素')
+  }
+  return layer as ReadonlyNativeLayer
+}
+
+function deleteEmptyOverride(
+  overrides: Record<string, LayerItemOverride>,
+  layerItemId: string,
+): void {
+  if (Object.keys(overrides[layerItemId] ?? {}).length === 0) {
+    delete overrides[layerItemId]
+  }
+}
+
+function removeNodeReferencesFromInteractions(
+  interactions: InteractionRule[],
+  nodeId: string,
+): InteractionRule[] {
+  const removedActionIds = new Set<string>()
+  let remaining = interactions.flatMap((rule) => {
+    if ('nodeId' in rule.trigger && rule.trigger.nodeId === nodeId) {
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      return []
+    }
+    rule.actions = rule.actions.filter((step) => {
+      const action = step.action
+      const remove = (isVideoInteractionAction(action) || isNodeMotionAction(action)) &&
+        action.nodeId === nodeId
+      if (remove) removedActionIds.add(step.id)
+      return !remove
+    })
+    if (rule.actions.length === 0) return []
+    rule.actions[0]!.start = 'after-previous'
+    return [rule]
+  })
+  let removedDependent = true
+  while (removedDependent) {
+    removedDependent = false
+    remaining = remaining.flatMap((rule) => {
+      if (
+        rule.trigger.type !== 'animation.completed' ||
+        !removedActionIds.has(rule.trigger.actionId)
+      ) return [rule]
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      removedDependent = true
+      return []
+    })
+  }
+  return remaining
+}
+
+function duplicateNodeInteractionGraph(
+  interactions: InteractionRule[],
+  sourceNodeId: string,
+  duplicateNodeId: string,
+): InteractionRule[] {
+  const selected: InteractionRule[] = interactions.filter(
+    (rule) => 'nodeId' in rule.trigger && rule.trigger.nodeId === sourceNodeId,
+  )
+  const selectedIds = new Set(selected.map((rule) => rule.id))
+  const actionIds = new Set(selected.flatMap((rule) => rule.actions.map((step) => step.id)))
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const rule of interactions) {
+      if (
+        selectedIds.has(rule.id) ||
+        rule.trigger.type !== 'animation.completed' ||
+        !actionIds.has(rule.trigger.actionId)
+      ) continue
+      selected.push(rule)
+      selectedIds.add(rule.id)
+      rule.actions.forEach((step) => actionIds.add(step.id))
+      changed = true
+    }
+  }
+  const actionIdMap = new Map(
+    selected.flatMap((rule) => rule.actions).map((step) => [
+      step.id,
+      `action-${nanoid(10)}`,
+    ]),
+  )
+  return selected.map((source) => {
+    const rule = structuredClone(source)
+    rule.id = `rule-${nanoid(10)}`
+    if ('nodeId' in rule.trigger && rule.trigger.nodeId === sourceNodeId) {
+      rule.trigger.nodeId = duplicateNodeId
+    } else if (rule.trigger.type === 'animation.completed') {
+      rule.trigger.actionId = actionIdMap.get(rule.trigger.actionId) ?? rule.trigger.actionId
+    }
+    rule.actions.forEach((step) => {
+      step.id = actionIdMap.get(step.id) ?? `action-${nanoid(10)}`
+      const action = step.action
+      if (
+        (isVideoInteractionAction(action) || isNodeMotionAction(action)) &&
+        action.nodeId === sourceNodeId
+      ) action.nodeId = duplicateNodeId
+    })
+    return rule
+  })
+}
+
+function addV9SlideNativeLayer(
+  state: V9SlideVerticalSliceState,
+  input: {
+    readonly nativeType: 'text' | 'formula' | 'shape'
+    readonly shapeType?: ShapeType
+    readonly x?: number
+    readonly y?: number
+  },
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (state.editingScope !== 'scene') throw new Error('请先切换到场景层')
+  const { surface, scene } = activeSlideSceneContext(state)
+  const id = `${input.nativeType}-${nanoid(10)}`
+  const project = input.nativeType === 'text'
+    ? addSlideTextLayer(
+        state.history.present,
+        surface.id,
+        scene.id,
+        '双击编辑文字',
+        { id, x: input.x, y: input.y, stateId: state.selection.stateId, now },
+      )
+    : addNativeVisualLayer(state.history.present, {
+        surfaceId: surface.id,
+        sceneId: scene.id,
+        nativeType: input.nativeType,
+        shapeType: input.shapeType,
+        stateId: state.selection.stateId,
+        id,
+        x: input.x,
+        y: input.y,
+        now,
+      })
+  return commitV9SlideDocument(
+    state,
+    project,
+    selectionAfterLayerCommand(state, project, [id]),
+    'scene',
+  )
+}
+
+export function addV9SlideTextLayer(
+  state: V9SlideVerticalSliceState,
+  x?: number,
+  y?: number,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return addV9SlideNativeLayer(state, { nativeType: 'text', x, y }, now)
+}
+
+export function addV9SlideFormulaLayer(
+  state: V9SlideVerticalSliceState,
+  x?: number,
+  y?: number,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return addV9SlideNativeLayer(state, { nativeType: 'formula', x, y }, now)
+}
+
+export function addV9SlideShapeLayer(
+  state: V9SlideVerticalSliceState,
+  shapeType: ShapeType,
+  x?: number,
+  y?: number,
+  now?: string,
+): V9SlideVerticalSliceState {
+  return addV9SlideNativeLayer(state, { nativeType: 'shape', shapeType, x, y }, now)
+}
+
+export function updateV9SlideLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+  patch: V9SlideLayerPatch,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = activeSceneNativeLayer(state, layerItemId)
+  const normalizedLabel = patch.label?.trim().slice(0, 200)
+  const nextPatch: V9SlideLayerPatch = {
+    ...(normalizedLabel ? { label: normalizedLabel } : {}),
+    ...(patch.visible === undefined ? {} : { visible: patch.visible }),
+    ...(patch.locked === undefined ? {} : { locked: patch.locked }),
+  }
+  const changed = (nextPatch.label !== undefined && nextPatch.label !== layer.item.label) ||
+    (nextPatch.visible !== undefined && nextPatch.visible !== layer.item.visible) ||
+    (nextPatch.locked !== undefined && nextPatch.locked !== layer.item.locked)
+  if (!changed) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    const base = draftScene?.layerItems.find((item) => item.layerItemId === layerItemId)
+    if (!draftScene || !base || base.kind !== 'native') throw new Error('当前元素已失效')
+    const presentationState = state.selection.stateId === null
+      ? undefined
+      : draftScene.presentation?.states.find(
+          (candidate) => candidate.id === state.selection.stateId,
+        )
+    if (state.selection.stateId !== null && !presentationState) {
+      throw new Error('当前命名状态已失效')
+    }
+    if (!presentationState) {
+      if (nextPatch.label !== undefined) base.label = nextPatch.label
+      if (nextPatch.visible !== undefined) base.visible = nextPatch.visible
+      if (nextPatch.locked !== undefined) base.locked = nextPatch.locked
+      return
+    }
+    const override = presentationState.layerItemOverrides[layerItemId] ?? {}
+    for (const key of ['label', 'visible', 'locked'] as const) {
+      const value = nextPatch[key]
+      if (value === undefined) continue
+      if (value === base[key]) delete override[key]
+      else override[key] = value as never
+    }
+    presentationState.layerItemOverrides[layerItemId] = override
+    deleteEmptyOverride(presentationState.layerItemOverrides, layerItemId)
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+export function deleteV9SlideLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = activeSceneNativeLayer(state, layerItemId)
+  const remainingSelection = state.selection.selectionIds.filter((id) => id !== layerItemId)
+  if (state.selection.stateId !== null && !layer.item.visible) {
+    if (remainingSelection.length === state.selection.selectionIds.length) return state
+    return freezeState(
+      state.sessionId,
+      state.history,
+      selectionAfterLayerCommand(state, state.history.present, remainingSelection),
+      state.editingScope,
+      state.savedSnapshot,
+      state.projectPath,
+      state.assetFiles,
+      state.componentFiles,
+      state.componentPackages,
+    )
+  }
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    if (!draftScene) throw new Error('当前场景已失效')
+    if (state.selection.stateId !== null) {
+      const presentationState = draftScene.presentation?.states.find(
+        (candidate) => candidate.id === state.selection.stateId,
+      )
+      if (!presentationState) throw new Error('当前命名状态已失效')
+      const base = draftScene.layerItems.find((item) => item.layerItemId === layerItemId)
+      if (!base) throw new Error('当前元素已失效')
+      const override = {
+        ...presentationState.layerItemOverrides[layerItemId],
+      }
+      if (base.visible) override.visible = false
+      else delete override.visible
+      presentationState.layerItemOverrides[layerItemId] = override
+      deleteEmptyOverride(presentationState.layerItemOverrides, layerItemId)
+      return
+    }
+    const index = draftScene.layerItems.findIndex((item) => item.layerItemId === layerItemId)
+    if (index < 0) throw new Error('当前元素已失效')
+    draftScene.layerItems.splice(index, 1)
+    draftScene.presentation?.states.forEach((presentationState) => {
+      delete presentationState.layerItemOverrides[layerItemId]
+      if (presentationState.layerItemOrder) {
+        presentationState.layerItemOrder = presentationState.layerItemOrder.filter(
+          (id) => id !== layerItemId,
+        )
+        if (presentationState.layerItemOrder.length === 0) {
+          delete presentationState.layerItemOrder
+        }
+      }
+    })
+    draftScene.interactions = removeNodeReferencesFromInteractions(
+      draftScene.interactions,
+      layerItemId,
+    )
+    const remainingItems: LayerItem[] = draft.globalLayerItems.map((entry) => entry.item)
+    draft.surfaces.forEach((candidateSurface) => {
+      remainingItems.push(
+        ...candidateSurface.surfaceLayerItems.map((entry) => entry.item),
+        ...(candidateSurface.type === 'slide'
+          ? candidateSurface.scenes.flatMap((candidateScene) => candidateScene.layerItems)
+          : candidateSurface.type === 'spatial-2d'
+            ? candidateSurface.world.layerItems
+            : []),
+      )
+    })
+    const layerIdStillExists = remainingItems.some(
+      (item) => item.layerItemId === layerItemId,
+    )
+    if (!layerIdStillExists) {
+      draft.globalInteractions = removeNodeReferencesFromInteractions(
+        draft.globalInteractions,
+        layerItemId,
+      )
+      draft.surfaces.forEach((candidateSurface) => {
+        if (candidateSurface.type !== 'slide') return
+        candidateSurface.scenes.forEach((candidateScene) => {
+          if (candidateScene === draftScene) return
+          candidateScene.interactions = removeNodeReferencesFromInteractions(
+            candidateScene.interactions,
+            layerItemId,
+          )
+        })
+      })
+    }
+    const currentSceneRuntimeItems = draftScene.layerItems.filter(
+      (item) => item.kind === 'runtime',
+    )
+    const runtimeItems = layerIdStillExists ? currentSceneRuntimeItems : remainingItems
+    runtimeItems.forEach((item) => {
+      if (item.kind !== 'runtime') return
+      const bindings = item.runtime.nodeBindings
+      if (!bindings) return
+      for (const [binding, targetId] of Object.entries(bindings)) {
+        if (targetId === layerItemId) delete bindings[binding]
+      }
+    })
+  }, now)
+  return commitV9SlideDocument(
+    state,
+    project,
+    selectionAfterLayerCommand(state, project, remainingSelection),
+  )
+}
+
+export function duplicateV9SlideLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = activeSceneNativeLayer(state, layerItemId)
+  const { surface, scene } = activeSlideSceneContext(state)
+  const duplicateId = `${layer.item.content.nativeType}-${nanoid(10)}`
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    const source = draftScene?.layerItems.find((item) => item.layerItemId === layerItemId)
+    if (!draftScene || !source || source.kind !== 'native') throw new Error('当前元素已失效')
+    const duplicate = structuredClone(
+      state.selection.stateId === null ? source : layer.item,
+    ) as NativeLayerItem
+    duplicate.layerItemId = duplicateId
+    duplicate.label = `${layer.item.label} 副本`.slice(0, 200)
+    duplicate.frame.x += 24
+    duplicate.frame.y += 24
+    duplicate.locked = false
+    duplicate.order = reserveTopAuthoringOrder(draft, draftSurface.id, draftScene.id)
+    if (state.selection.stateId !== null) duplicate.visible = false
+    draftScene.layerItems.push(duplicate)
+    draftScene.layerItems.sort((left, right) => left.order - right.order)
+    if (state.selection.stateId === null) {
+      draftScene.presentation?.states.forEach((presentationState) => {
+        const sourceOverride = presentationState.layerItemOverrides[layerItemId]
+        if (sourceOverride) {
+          const duplicateOverride = structuredClone(sourceOverride)
+          if (duplicateOverride.frame?.x !== undefined) duplicateOverride.frame.x += 24
+          if (duplicateOverride.frame?.y !== undefined) duplicateOverride.frame.y += 24
+          if (duplicateOverride.label !== undefined) {
+            duplicateOverride.label = `${duplicateOverride.label} 副本`.slice(0, 200)
+          }
+          delete duplicateOverride.locked
+          delete duplicateOverride.order
+          if (Object.keys(duplicateOverride.frame ?? {}).length === 0) {
+            delete duplicateOverride.frame
+          }
+          if (Object.keys(duplicateOverride).length > 0) {
+            presentationState.layerItemOverrides[duplicateId] = duplicateOverride
+          }
+        }
+        if (presentationState.layerItemOrder?.includes(layerItemId)) {
+          const order = [...presentationState.layerItemOrder]
+          order.splice(order.indexOf(layerItemId) + 1, 0, duplicateId)
+          presentationState.layerItemOrder = order
+        }
+      })
+    } else {
+      const presentationState = draftScene.presentation?.states.find(
+        (candidate) => candidate.id === state.selection.stateId,
+      )
+      if (!presentationState) throw new Error('当前命名状态已失效')
+      if (layer.item.visible) {
+        presentationState.layerItemOverrides[duplicateId] = { visible: true }
+      }
+    }
+    draftScene.interactions.push(...duplicateNodeInteractionGraph(
+      draftScene.interactions,
+      layerItemId,
+      duplicateId,
+    ))
+  }, now)
+  return commitV9SlideDocument(
+    state,
+    project,
+    selectionAfterLayerCommand(state, project, [duplicateId]),
+  )
+}
+
+export function reorderV9SlideLayers(
+  state: V9SlideVerticalSliceState,
+  layerItemIds: readonly string[],
+  now?: string,
+): V9SlideVerticalSliceState {
+  if (state.editingScope !== 'scene') throw new Error('请先切换到场景层')
+  const viewIds = activeSlideView(state).layers
+    .filter((layer) => layer.source === 'scene')
+    .map((layer) => layer.selectionId)
+  if (
+    layerItemIds.length !== viewIds.length ||
+    new Set(layerItemIds).size !== layerItemIds.length ||
+    layerItemIds.some((id) => !viewIds.includes(id))
+  ) throw new Error('图层顺序必须包含当前场景的全部元素')
+  if (sameSelection(layerItemIds, viewIds)) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+    if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+    const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+    if (!draftScene) throw new Error('当前场景已失效')
+    if (state.selection.stateId !== null) {
+      const presentationState = draftScene.presentation?.states.find(
+        (candidate) => candidate.id === state.selection.stateId,
+      )
+      if (!presentationState) throw new Error('当前命名状态已失效')
+      for (const [id, override] of Object.entries(presentationState.layerItemOverrides)) {
+        delete override.order
+        deleteEmptyOverride(presentationState.layerItemOverrides, id)
+      }
+      const baseIds = [...draftScene.layerItems]
+        .sort((left, right) => left.order - right.order)
+        .map((item) => item.layerItemId)
+      if (sameSelection(layerItemIds, baseIds)) delete presentationState.layerItemOrder
+      else presentationState.layerItemOrder = [...layerItemIds]
+      return
+    }
+    const orderSlots = draftScene.layerItems.map((item) => item.order).sort((a, b) => a - b)
+    const byId = new Map(draftScene.layerItems.map((item) => [item.layerItemId, item]))
+    layerItemIds.forEach((id, index) => {
+      const item = byId.get(id)
+      if (!item) throw new Error('当前元素已失效')
+      item.order = orderSlots[index]!
+    })
+    draftScene.layerItems.sort((left, right) => left.order - right.order)
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
 function slideSurfaceForScene(
   project: V9SlideVerticalSliceState['history']['present'],
   sceneId: string,
@@ -453,7 +953,7 @@ function slideSurfaceForScene(
   const surface = project.surfaces.find((candidate) =>
     candidate.type === 'slide' && candidate.scenes.some((scene) => scene.id === sceneId),
   )
-  if (!surface || surface.type !== 'slide') throw new Error(`找不到 Slide 场景：${sceneId}`)
+  if (!surface || surface.type !== 'slide') throw new Error('找不到对应的幻灯片')
   return surface
 }
 
@@ -462,12 +962,12 @@ function activeSlideSurface(state: V9SlideVerticalSliceState) {
     (candidate) => candidate.id === state.selection.locationId,
   )
   if (!location || location.kind !== 'slide-scene') {
-    throw new Error('当前位置不是 Slide 场景')
+    throw new Error('当前位置不是幻灯片')
   }
   const surface = state.history.present.surfaces.find(
     (candidate) => candidate.id === location.surfaceId,
   )
-  if (!surface || surface.type !== 'slide') throw new Error('当前 Slide 表面已失效')
+  if (!surface || surface.type !== 'slide') throw new Error('当前幻灯片已失效')
   return surface
 }
 
@@ -486,12 +986,12 @@ function baseSelectionForScene(
     candidate.surfaceId === surface.id &&
     candidate.sceneId === sceneId,
   )
-  if (!location) throw new Error(`Slide 场景缺少位置：${sceneId}`)
-  return selectSlideEditorLayer({
+  if (!location) throw new Error('当前幻灯片缺少课程位置')
+  return selectSlideEditorLayers({
     project,
     locationId: location.id,
     stateId: null,
-    selectionId: null,
+    selectionIds: [],
   })
 }
 
@@ -518,12 +1018,12 @@ export function setV9SlideEditingScope(
   state: V9SlideVerticalSliceState,
   editingScope: V9SlideEditingScope,
 ): V9SlideVerticalSliceState {
-  if (state.editingScope === editingScope && state.selection.selectionId === null) return state
-  const selection = selectSlideEditorLayer({
+  if (state.editingScope === editingScope && state.selection.selectionIds.length === 0) return state
+  const selection = selectSlideEditorLayers({
     project: state.history.present,
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
-    selectionId: null,
+    selectionIds: [],
   })
   return freezeState(
     state.sessionId,
@@ -547,7 +1047,7 @@ export function activateV9SlideScene(
     state.editingScope === 'scene' &&
     state.selection.locationId === selection.locationId &&
     state.selection.stateId === null &&
-    state.selection.selectionId === null
+    state.selection.selectionIds.length === 0
   ) {
     return state
   }
@@ -572,9 +1072,9 @@ export function addV9SlideScene(
   const priorIds = new Set(surface.scenes.map((scene) => scene.id))
   const project = addSlideScene(state.history.present, surface.id, { now })
   const nextSurface = project.surfaces.find((candidate) => candidate.id === surface.id)
-  if (!nextSurface || nextSurface.type !== 'slide') throw new Error('新建场景后 Slide 表面已失效')
+  if (!nextSurface || nextSurface.type !== 'slide') throw new Error('新建后当前幻灯片集已失效')
   const added = nextSurface.scenes.find((scene) => !priorIds.has(scene.id))
-  if (!added) throw new Error('新建 Slide 场景失败')
+  if (!added) throw new Error('新建幻灯片失败')
   return commitV9SlideDocument(state, project, baseSelectionForScene(project, added.id), 'scene')
 }
 
@@ -616,9 +1116,9 @@ export function duplicateV9SlideScene(
   const priorIds = new Set(surface.scenes.map((scene) => scene.id))
   const project = duplicateSlideScene(state.history.present, surface.id, sceneId, { now })
   const nextSurface = project.surfaces.find((candidate) => candidate.id === surface.id)
-  if (!nextSurface || nextSurface.type !== 'slide') throw new Error('复制场景后 Slide 表面已失效')
+  if (!nextSurface || nextSurface.type !== 'slide') throw new Error('复制后当前幻灯片集已失效')
   const duplicate = nextSurface.scenes.find((scene) => !priorIds.has(scene.id))
-  if (!duplicate) throw new Error('复制 Slide 场景失败')
+  if (!duplicate) throw new Error('复制幻灯片失败')
   return commitV9SlideDocument(state, project, baseSelectionForScene(project, duplicate.id), 'scene')
 }
 
@@ -630,7 +1130,7 @@ export function deleteV9SlideScene(
   const surface = slideSurfaceForScene(state.history.present, sceneId)
   const index = surface.scenes.findIndex((scene) => scene.id === sceneId)
   const fallback = surface.scenes[index - 1] ?? surface.scenes[index + 1]
-  if (!fallback) throw new Error('Slide 表面至少需要一个场景')
+  if (!fallback) throw new Error('课件至少需要一张幻灯片')
   const activeLocation = state.history.present.locations.find(
     (candidate) => candidate.id === state.selection.locationId,
   )
@@ -642,18 +1142,18 @@ export function deleteV9SlideScene(
   }
   let selection: SlideEditorSelection
   try {
-    selection = selectSlideEditorLayer({
+    selection = selectSlideEditorLayers({
       project,
       locationId: state.selection.locationId,
       stateId: state.selection.stateId,
-      selectionId: state.selection.selectionId,
+      selectionIds: state.selection.selectionIds,
     })
   } catch {
-    selection = selectSlideEditorLayer({
+    selection = selectSlideEditorLayers({
       project,
       locationId: state.selection.locationId,
       stateId: state.selection.stateId,
-      selectionId: null,
+      selectionIds: [],
     })
   }
   return commitV9SlideDocument(state, project, selection, state.editingScope)
@@ -664,14 +1164,14 @@ function activeSlideSceneContext(state: V9SlideVerticalSliceState) {
     (candidate) => candidate.id === state.selection.locationId,
   )
   if (!location || location.kind !== 'slide-scene') {
-    throw new Error('当前位置不是 Slide 场景')
+    throw new Error('当前位置不是幻灯片')
   }
   const surface = state.history.present.surfaces.find(
     (candidate) => candidate.id === location.surfaceId,
   )
-  if (!surface || surface.type !== 'slide') throw new Error('当前 Slide 表面已失效')
+  if (!surface || surface.type !== 'slide') throw new Error('当前幻灯片已失效')
   const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
-  if (!scene) throw new Error('当前 Slide 场景已失效')
+  if (!scene) throw new Error('当前幻灯片已失效')
   return { location, surface, scene }
 }
 
@@ -680,11 +1180,11 @@ function presentationSelection(
   project: V9SlideVerticalSliceState['history']['present'],
   stateId: string | null,
 ): SlideEditorSelection {
-  return selectSlideEditorLayer({
+  return selectSlideEditorLayers({
     project,
     locationId: state.selection.locationId,
     stateId,
-    selectionId: null,
+    selectionIds: [],
   })
 }
 
@@ -694,13 +1194,13 @@ export function activateV9SlidePresentationState(
 ): V9SlideVerticalSliceState {
   const { scene } = activeSlideSceneContext(state)
   if (stateId !== null && !scene.presentation?.states.some((candidate) => candidate.id === stateId)) {
-    throw new Error(`找不到命名状态：${stateId}`)
+    throw new Error('当前命名状态已失效')
   }
   const selection = presentationSelection(state, state.history.present, stateId)
   if (
     state.editingScope === 'scene' &&
     state.selection.stateId === selection.stateId &&
-    state.selection.selectionId === null
+    state.selection.selectionIds.length === 0
   ) {
     return state
   }
@@ -736,7 +1236,7 @@ export function addV9SlidePresentationState(
     ? nextSurface.scenes.find((candidate) => candidate.id === scene.id)
     : undefined
   const added = nextScene?.presentation?.states.find((candidate) => !priorIds.has(candidate.id))
-  if (!added) throw new Error('新建 Slide 命名状态失败')
+  if (!added) throw new Error('新建命名状态失败')
   return commitV9SlideDocument(
     state,
     project,
@@ -764,7 +1264,7 @@ export function duplicateV9SlidePresentationState(
     ? nextSurface.scenes.find((candidate) => candidate.id === scene.id)
     : undefined
   const duplicate = nextScene?.presentation?.states.find((candidate) => !priorIds.has(candidate.id))
-  if (!duplicate) throw new Error('复制 Slide 命名状态失败')
+  if (!duplicate) throw new Error('复制命名状态失败')
   return commitV9SlideDocument(
     state,
     project,
@@ -781,7 +1281,7 @@ export function renameV9SlidePresentationState(
 ): V9SlideVerticalSliceState {
   const { surface, scene } = activeSlideSceneContext(state)
   const current = scene.presentation?.states.find((candidate) => candidate.id === stateId)
-  if (!current) throw new Error(`找不到命名状态：${stateId}`)
+  if (!current) throw new Error('当前命名状态已失效')
   const normalized = name.trim().slice(0, 120)
   if (!normalized || normalized === current.name) return state
   const project = renameSlidePresentationState(
@@ -823,7 +1323,7 @@ export function clearV9SlidePresentationStateOverrides(
 ): V9SlideVerticalSliceState {
   const { surface, scene } = activeSlideSceneContext(state)
   const current = scene.presentation?.states.find((candidate) => candidate.id === stateId)
-  if (!current) throw new Error(`找不到命名状态：${stateId}`)
+  if (!current) throw new Error('当前命名状态已失效')
   if (
     Object.keys(current.layerItemOverrides).length === 0 &&
     current.layerItemOrder === undefined &&
@@ -845,10 +1345,10 @@ export function deleteV9SlidePresentationState(
 ): V9SlideVerticalSliceState {
   const { surface, scene } = activeSlideSceneContext(state)
   if (!scene.presentation?.states.some((candidate) => candidate.id === stateId)) {
-    throw new Error(`找不到命名状态：${stateId}`)
+    throw new Error('当前命名状态已失效')
   }
   if (scene.presentation.states.length <= 1) {
-    throw new Error('Slide 场景至少需要一个命名状态')
+    throw new Error('幻灯片至少需要一个命名状态')
   }
   const project = deleteSlidePresentationState(
     state.history.present, surface.id, scene.id, stateId, now,
@@ -857,14 +1357,14 @@ export function deleteV9SlidePresentationState(
   const nextScene = nextSurface?.type === 'slide'
     ? nextSurface.scenes.find((candidate) => candidate.id === scene.id)
     : undefined
-  if (!nextScene?.presentation) throw new Error('删除状态后 Slide presentation 已失效')
+  if (!nextScene?.presentation) throw new Error('删除后当前幻灯片状态已失效')
   const selection = state.selection.stateId === stateId
     ? presentationSelection(state, project, nextScene.presentation.initialStateId)
-    : selectSlideEditorLayer({
+    : selectSlideEditorLayers({
         project,
         locationId: state.selection.locationId,
         stateId: state.selection.stateId,
-        selectionId: state.selection.selectionId,
+        selectionIds: state.selection.selectionIds,
       })
   return commitV9SlideDocument(
     state,
@@ -879,18 +1379,18 @@ function selectionForHistory(
   history: CourseHistoryState,
 ): SlideEditorSelection {
   try {
-    return selectSlideEditorLayer({
+    return selectSlideEditorLayers({
       project: history.present,
       locationId: state.selection.locationId,
       stateId: state.selection.stateId,
-      selectionId: state.selection.selectionId,
+      selectionIds: state.selection.selectionIds,
     })
   } catch {
-    return selectSlideEditorLayer({
+    return selectSlideEditorLayers({
       project: history.present,
       locationId: history.present.startLocationId,
       stateId: null,
-      selectionId: null,
+      selectionIds: [],
     })
   }
 }

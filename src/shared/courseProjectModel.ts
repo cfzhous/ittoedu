@@ -469,7 +469,15 @@ function nodeData(node: Exclude<SceneNode, { type: 'external-component' }>): Nat
   } as NativeElementContent
 }
 
-function migrateNode(node: SceneNode, order: number): LayerItem {
+/**
+ * Converts one editor-native node into the canonical Course Project layer
+ * representation. This is a neutral shape conversion: callers do not need to
+ * construct a legacy project merely to create a V9 layer item.
+ */
+export function sceneNodeToCourseLayerItem(
+  node: SceneNode,
+  order = 0,
+): LayerItem {
   const base = nodeBase(node, order)
   if (node.type === 'external-component') {
     return {
@@ -485,6 +493,8 @@ function migrateNode(node: SceneNode, order: number): LayerItem {
     content: nodeData(node),
   }
 }
+
+const migrateNode = sceneNodeToCourseLayerItem
 
 function migrateRuntime(
   runtime: NonNullable<ProjectDocument['globalRuntime']>,

@@ -1,8 +1,10 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
-import type { ProjectDocument, SceneDocument } from '../../shared/projectTypes'
+import type { ProjectDocument, SceneDocument, SceneNode } from '../../shared/projectTypes'
+import { renderTextNodeCanvas } from '../../shared/textLayout'
 import type {
+  NodeTransformEndEvent,
   NodeSelectionEvent,
-  NodesMoveEndEvent,
+  NodesTransformEndEvent,
 } from '../phaser/EditorPhaserBridge'
 
 export const WORKSPACE_SLIDE_PREVIEW_STATE_ID = 'state_workspace_preview'
@@ -18,7 +20,7 @@ export interface WorkspaceSlidePreviewResources {
 /**
  * Ephemeral read/callback seam for the existing Workspace canvas. Workspace
  * never persists or mutates the supplied document; the owning backend handles
- * every selection and completed move.
+ * every selection and completed transform.
  */
 export interface WorkspaceSlideAuthoringInput {
   /** Changes whenever a V9 document is opened/reopened, even if IDs repeat. */
@@ -35,14 +37,61 @@ export interface WorkspaceSlideAuthoringInput {
   readonly unsupportedActionReason: string
   /** `false` rejects a gesture that raced with a lifecycle boundary. */
   readonly onSelectionChange: (event: Readonly<NodeSelectionEvent>) => boolean
-  readonly onMoveEnd: (event: Readonly<NodesMoveEndEvent>) => boolean
+  readonly onTransformEnd: (event: Readonly<NodesTransformEndEvent>) => boolean
+}
+
+function withDirectionAwareTextAutoSize(
+  node: SceneNode | undefined,
+  patch: Partial<Pick<SceneNode, 'x' | 'y' | 'width' | 'height' | 'rotation'>>,
+): typeof patch {
+  const sizeChanged = node !== undefined && (
+    (patch.width !== undefined && patch.width !== node.width) ||
+    (patch.height !== undefined && patch.height !== node.height)
+  )
+  if (
+    node?.type !== 'text' ||
+    node.style.overflow !== 'auto-height' ||
+    !sizeChanged
+  ) {
+    return patch
+  }
+  const candidate = { ...node, ...patch }
+  const rendered = renderTextNodeCanvas(candidate, candidate.width)
+  return {
+    ...patch,
+    width: rendered.width,
+    height: rendered.height,
+  }
+}
+
+export function completeWorkspaceTransformEvent(
+  document: SceneDocument,
+  patches: readonly (
+    Pick<NodeTransformEndEvent, 'nodeId'> &
+    Partial<Omit<NodeTransformEndEvent, 'nodeId'>>
+  )[],
+): NodesTransformEndEvent | null {
+  const nodes = patches.map((patch): NodeTransformEndEvent | null => {
+    const node = document.nodes.find((candidate) => candidate.id === patch.nodeId)
+    if (!node) return null
+    const normalized = withDirectionAwareTextAutoSize(node, patch)
+    const candidate = { ...node, ...normalized }
+    return {
+      nodeId: node.id,
+      x: candidate.x,
+      y: candidate.y,
+      width: candidate.width,
+      height: candidate.height,
+      rotation: candidate.rotation,
+    }
+  })
+  return nodes.every((node): node is NodeTransformEndEvent => node !== null)
+    ? { nodes }
+    : null
 }
 
 export type UnsupportedWorkspaceAuthoringAction =
   | 'run-current-location'
-  | 'resize'
-  | 'rotate'
-  | 'multi-transform'
   | 'text-edit'
   | 'formula-edit'
   | 'drop'
@@ -63,33 +112,46 @@ export function workspaceAuthoringActionAllowed(
   return !injected
 }
 
-/** V9 currently supports an empty/single selection, but never a selection set. */
+/** V9 accepts the complete visible Native selection, including locked items. */
 export function workspaceSelectionAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
   event: Readonly<NodeSelectionEvent>,
 ): boolean {
   if (!injected) return true
   if (event.nodeIds.length === 0) return true
-  if (event.nodeIds.length !== 1) return false
-  const node = injected.document.nodes.find(
-    (candidate) => candidate.id === event.nodeIds[0],
-  )
-  return node?.type === 'text' && node.visible && !node.locked
+  if (new Set(event.nodeIds).size !== event.nodeIds.length) return false
+  const nodesById = new Map(injected.document.nodes.map((node) => [node.id, node]))
+  return event.nodeIds.every((nodeId) => {
+    const node = nodesById.get(nodeId)
+    return Boolean(node && node.type !== 'external-component' && node.visible)
+  })
 }
 
-/** The first V9 vertical slice intentionally supports only one native text move. */
-export function workspaceMoveAllowed(
+/** Validates one complete Native transform before it reaches the V9 command. */
+export function workspaceTransformAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
-  event: Readonly<NodesMoveEndEvent>,
+  event: Readonly<NodesTransformEndEvent>,
 ): boolean {
   if (!injected) return true
-  if (event.nodes.length !== 1) return false
-  const move = event.nodes[0]
-  if (!move || !Number.isFinite(move.x) || !Number.isFinite(move.y)) return false
-  const node = injected.document.nodes.find(
-    (candidate) => candidate.id === move.nodeId,
-  )
-  return node?.type === 'text' && node.visible && !node.locked
+  if (event.nodes.length === 0) return false
+  const nodeIds = event.nodes.map((node) => node.nodeId)
+  if (new Set(nodeIds).size !== nodeIds.length) return false
+  const nodesById = new Map(injected.document.nodes.map((node) => [node.id, node]))
+  return event.nodes.every((transform) => {
+    const node = nodesById.get(transform.nodeId)
+    return Boolean(
+      node &&
+      node.type !== 'external-component' &&
+      node.visible &&
+      !node.locked &&
+      Number.isFinite(transform.x) &&
+      Number.isFinite(transform.y) &&
+      Number.isFinite(transform.width) && transform.width > 0 &&
+      Number.isFinite(transform.height) && transform.height > 0 &&
+      Number.isFinite(transform.rotation) &&
+      transform.rotation >= -36_000 && transform.rotation <= 36_000
+    )
+  })
 }
 
 export function workspaceCanvasLabel(

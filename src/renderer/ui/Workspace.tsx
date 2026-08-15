@@ -49,6 +49,9 @@ import {
   type PlayerInspectionModeMessage,
 } from '../../shared/playerInspectionProtocol'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
+import type {
+  NodeTransformEndEvent,
+} from '../phaser/EditorPhaserBridge'
 import { onElementAnimationPreviewRequested } from '../phaser/elementAnimationPreviewBus'
 import {
   selectActiveScene,
@@ -60,12 +63,13 @@ import { TextEditOverlay } from './TextEditOverlay'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { FormulaEditDialog } from './FormulaEditDialog'
 import {
+  completeWorkspaceTransformEvent,
   createWorkspaceSlidePreviewProject,
   resolveWorkspaceSlideAuthoringInput,
   workspaceAuthoringActionAllowed,
   workspaceCanvasLabel,
-  workspaceMoveAllowed,
   workspaceSelectionAllowed,
+  workspaceTransformAllowed,
   workspaceSlidePreviewAssetFiles,
   workspaceSlidePreviewGenerationIdentity,
   workspaceSlidePreviewSceneId,
@@ -150,25 +154,6 @@ function nodesEqual(
   next: SceneDocument['nodes'][number],
 ) {
   return JSON.stringify(previous) === JSON.stringify(next)
-}
-
-function withDirectionAwareTextAutoSize(
-  node: SceneNode | undefined,
-  patch: Partial<Pick<SceneNode, 'x' | 'y' | 'width' | 'height' | 'rotation'>>,
-): typeof patch {
-  if (node?.type !== 'text' || node.style.overflow !== 'auto-height') {
-    return patch
-  }
-  const candidate = {
-    ...node,
-    ...patch,
-  }
-  const rendered = renderTextNodeCanvas(candidate, candidate.width)
-  return {
-    ...patch,
-    width: rendered.width,
-    height: rendered.height,
-  }
 }
 
 function pointInsideRotatedBounds(
@@ -1535,15 +1520,10 @@ export function Workspace({
       store.selectNodes([...merged])
       return true
     },
-    onMoveEnd: ({ nodes }) => {
+    onTransformEnd: ({ nodes }) => {
       const store = useEditorStore.getState()
-      if (nodes.length === 1) {
-        const [{ nodeId, x, y }] = nodes
-        store.updateNode(nodeId, { x, y })
-        return true
-      }
       store.updateNodes(
-        nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
+        nodes.map(({ nodeId, ...patch }) => ({ nodeId, patch })),
       )
       return true
     },
@@ -2304,6 +2284,22 @@ export function Workspace({
       handle.bridge.selectNodes([...injected.selectedNodeIds])
     }
 
+    const commitCompletedTransform = (
+      patches: readonly (Pick<NodeTransformEndEvent, 'nodeId'> & Partial<Omit<NodeTransformEndEvent, 'nodeId'>>)[],
+      unsupportedMessage: string,
+    ) => {
+      const active = activeSlideAuthoringRef.current
+      const event = completeWorkspaceTransformEvent(active.document, patches)
+      const nodeIds = patches.map((patch) => patch.nodeId)
+      const injected = slideAuthoringInputRef.current
+      if (!event || !workspaceTransformAllowed(injected, event)) {
+        restoreInjectedNodes(nodeIds)
+        if (injected) reportUnsupportedInjectedAction(unsupportedMessage)
+        return
+      }
+      if (!active.onTransformEnd(event)) restoreInjectedNodes(nodeIds)
+    }
+
     const unsubscribers = [
       handle.bridge.onNodeSelected((event) => {
         if (interactionDisabledRef.current) {
@@ -2325,40 +2321,20 @@ export function Workspace({
           restoreInjectedNodes(nodes.map((node) => node.nodeId))
           return
         }
+        const active = activeSlideAuthoringRef.current
+        const event = completeWorkspaceTransformEvent(active.document, nodes)
         const injected = slideAuthoringInputRef.current
-        if (injected) {
-          if (!workspaceMoveAllowed(injected, { nodes })) return
-          const [{ nodeId, x, y, width, height, rotation }] = nodes
-          const current = injected.document.nodes.find(
-            (node) => node.id === nodeId && node.type === 'text',
-          )
-          if (
-            !current ||
-            width !== current.width ||
-            height !== current.height ||
-            rotation !== current.rotation
-          ) return
-          queueAuthoringNodePatch(
-            injected.editingScope,
-            { ...current, x, y },
-          )
+        if (!event || !workspaceTransformAllowed(injected, event)) {
+          restoreInjectedNodes(nodes.map((node) => node.nodeId))
           return
         }
-        const store = useEditorStore.getState()
-        if (store.canvasMode !== 'edit') return
-        const currentById = new Map(
-          selectEditingNodes(store).map((node) => [node.id, node]),
-        )
-        for (const { nodeId, ...patch } of nodes) {
+        const currentById = new Map(active.document.nodes.map((node) => [node.id, node]))
+        for (const { nodeId, ...patch } of event.nodes) {
           const current = currentById.get(nodeId)
           if (!current) continue
-          const normalizedPatch = withDirectionAwareTextAutoSize(
-            current,
-            patch,
-          )
           queueAuthoringNodePatch(
-            store.editingScope,
-            { ...current, ...normalizedPatch } as SceneNode,
+            active.editingScope,
+            { ...current, ...patch } as SceneNode,
           )
         }
       }),
@@ -2367,55 +2343,23 @@ export function Workspace({
           restoreInjectedNodes([event.nodeId])
           return
         }
-        const injected = slideAuthoringInputRef.current
-        const moveEvent = { nodes: [event] }
-        if (!workspaceMoveAllowed(injected, moveEvent)) {
-          restoreInjectedNodes([event.nodeId])
-          reportUnsupportedInjectedAction('当前元素移动暂不可用')
-          return
-        }
-        if (!activeSlideAuthoringRef.current.onMoveEnd(moveEvent)) {
-          restoreInjectedNodes([event.nodeId])
-        }
+        commitCompletedTransform([event], '当前元素移动暂不可用')
       }),
       handle.bridge.onNodesMoveEnd((event) => {
         if (interactionDisabledRef.current) {
           restoreInjectedNodes(event.nodes.map((node) => node.nodeId))
           return
         }
-        const injected = slideAuthoringInputRef.current
-        if (!workspaceMoveAllowed(injected, event)) {
-          restoreInjectedNodes(event.nodes.map((node) => node.nodeId))
-          reportUnsupportedInjectedAction('多元素移动暂不可用')
-          return
-        }
-        if (!activeSlideAuthoringRef.current.onMoveEnd(event)) {
-          restoreInjectedNodes(event.nodes.map((node) => node.nodeId))
-        }
+        commitCompletedTransform(event.nodes, '多元素移动暂不可用')
       }),
       handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) => {
         if (interactionDisabledRef.current) {
           restoreInjectedNodes([nodeId])
           return
         }
-        if (!workspaceAuthoringActionAllowed(
-          slideAuthoringInputRef.current,
-          'resize',
-        )) {
-          restoreInjectedNodes([nodeId])
-          reportUnsupportedInjectedAction('缩放元素暂不可用')
-          return
-        }
-        const store = useEditorStore.getState()
-        const node = selectEditingNodes(store).find(
-          (item) => item.id === nodeId,
-        )
-        store.updateNode(
-          nodeId,
-          withDirectionAwareTextAutoSize(
-            node,
-            { x, y, width, height },
-          ),
+        commitCompletedTransform(
+          [{ nodeId, x, y, width, height }],
+          '缩放元素暂不可用',
         )
       }),
       handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) => {
@@ -2423,42 +2367,14 @@ export function Workspace({
           restoreInjectedNodes([nodeId])
           return
         }
-        if (!workspaceAuthoringActionAllowed(
-          slideAuthoringInputRef.current,
-          'rotate',
-        )) {
-          restoreInjectedNodes([nodeId])
-          reportUnsupportedInjectedAction('旋转元素暂不可用')
-          return
-        }
-        useEditorStore.getState().updateNode(nodeId, { rotation })
+        commitCompletedTransform([{ nodeId, rotation }], '旋转元素暂不可用')
       }),
       handle.bridge.onNodesTransformEnd(({ nodes }) => {
         if (interactionDisabledRef.current) {
           restoreInjectedNodes(nodes.map((node) => node.nodeId))
           return
         }
-        if (!workspaceAuthoringActionAllowed(
-          slideAuthoringInputRef.current,
-          'multi-transform',
-        )) {
-          restoreInjectedNodes(nodes.map((node) => node.nodeId))
-          reportUnsupportedInjectedAction('多元素变换暂不可用')
-          return
-        }
-        const store = useEditorStore.getState()
-        const currentById = new Map(
-          selectEditingNodes(store).map((node) => [node.id, node]),
-        )
-        store.updateNodes(
-          nodes.map(({ nodeId, ...patch }) => ({
-            nodeId,
-            patch: withDirectionAwareTextAutoSize(
-              currentById.get(nodeId),
-              patch,
-            ),
-          })),
-        )
+        commitCompletedTransform(nodes, '多元素变换暂不可用')
       }),
       handle.bridge.onTextDoubleClick((nodeId) => {
         if (interactionDisabledRef.current) return

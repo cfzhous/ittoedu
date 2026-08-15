@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { useEditorStore } from '@/renderer/store/editorStore'
+import { addNativeVisualLayer } from '@/renderer/course/courseStudioModel'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
@@ -11,12 +12,13 @@ import {
   completeV9SlideVerticalSliceSave,
   createV9SlideVerticalSliceState,
   isV9SlideVerticalSliceDirty,
-  moveV9SlideVerticalSlice,
+  nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
   renameV9SlideVerticalSlice,
   resolveEditorStartupBackend,
   selectV9SlideVerticalSlice,
+  transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
   V9_SLIDE_TEST_BACKEND,
   V9_SLIDE_TEST_QUERY,
@@ -24,6 +26,46 @@ import {
 } from '@/renderer/course/v9SlideVerticalSlice'
 
 const MOVE_NOW = '2026-08-15T02:05:00.000Z'
+
+function textTransform(x: number, y: number) {
+  return {
+    nodeId: V9_SLIDE_TEST_TEXT_ID,
+    x,
+    y,
+    width: 400,
+    height: 80,
+    rotation: 0,
+  }
+}
+
+function selectFixtureText(state: ReturnType<typeof createV9SlideVerticalSliceState>) {
+  return selectV9SlideVerticalSlice(state, {
+    nodeIds: [V9_SLIDE_TEST_TEXT_ID],
+    additive: false,
+  })
+}
+
+function stateWithShape() {
+  const initial = createV9SlideVerticalSliceState()
+  const location = initial.history.present.locations.find(
+    (candidate) => candidate.id === initial.selection.locationId,
+  )
+  if (!location || location.kind !== 'slide-scene') throw new Error('expected Slide location')
+  const project = addNativeVisualLayer(initial.history.present, {
+    surfaceId: location.surfaceId,
+    sceneId: location.sceneId,
+    nativeType: 'shape',
+    shapeType: 'ellipse',
+    id: 'v9-test-shape',
+    x: 80,
+    y: 90,
+  })
+  return openV9SlideVerticalSliceState({
+    project,
+    assetFiles: {},
+    componentFiles: {},
+  }, null)
+}
 
 describe('test-only V9 Slide vertical slice', () => {
   it('enables the V9 backend for one exact startup query only', () => {
@@ -54,7 +96,7 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(state.selection).toMatchObject({
       locationId: state.history.present.startLocationId,
       stateId: null,
-      selectionId: null,
+      selectionIds: [],
     })
     expect(snapshot.selectedNodeIds).toEqual([])
     expect(snapshot.componentPackages).toEqual({})
@@ -71,7 +113,79 @@ describe('test-only V9 Slide vertical slice', () => {
     })
   })
 
-  it('selects and moves through V9 history exactly once without writing the V8 Store', () => {
+  it('projects non-text scene Native layers and commits a multi-transform atomically', () => {
+    const initial = stateWithShape()
+    const snapshot = buildV9SlideWorkspaceSnapshot(initial)
+    expect(snapshot.document.nodes.map(({ id, type }) => [id, type])).toEqual(
+      expect.arrayContaining([
+        [V9_SLIDE_TEST_TEXT_ID, 'text'],
+        ['v9-test-shape', 'shape'],
+      ]),
+    )
+    const selected = selectV9SlideVerticalSlice(initial, {
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID, 'v9-test-shape'],
+      additive: false,
+    })
+    const transformed = transformV9SlideVerticalSlice(selected, {
+      nodes: snapshot.document.nodes.map((node) => ({
+        nodeId: node.id,
+        x: node.x + (node.id === V9_SLIDE_TEST_TEXT_ID ? 10 : 11),
+        y: node.y + (node.id === V9_SLIDE_TEST_TEXT_ID ? 20 : 21),
+        width: node.width + 30,
+        height: node.height + 40,
+        rotation: node.rotation + 15,
+      })),
+    }, MOVE_NOW)
+    const transformedSnapshot = buildV9SlideWorkspaceSnapshot(transformed)
+
+    expect(transformed.selection.selectionIds).toEqual([
+      V9_SLIDE_TEST_TEXT_ID,
+      'v9-test-shape',
+    ])
+    expect(transformed.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(transformed.history.past).toEqual([initial.history.present])
+    expect(transformedSnapshot.document.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: V9_SLIDE_TEST_TEXT_ID, x: 450, y: 340, width: 430, height: 120, rotation: 15 }),
+      expect.objectContaining({ id: 'v9-test-shape', x: 91, y: 111, rotation: 15 }),
+    ]))
+  })
+
+  it('allows selecting locked Native layers while keyboard nudge transforms only unlocked selection', () => {
+    const unlocked = stateWithShape()
+    const project = structuredClone(unlocked.history.present)
+    const location = project.locations.find((candidate) => candidate.id === project.startLocationId)
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected Slide location')
+    const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+    if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+    const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+    const shape = scene?.layerItems.find((candidate) => candidate.layerItemId === 'v9-test-shape')
+    if (!shape) throw new Error('expected shape layer')
+    shape.locked = true
+    const initial = openV9SlideVerticalSliceState({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    const selected = selectV9SlideVerticalSlice(initial, {
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID, 'v9-test-shape'],
+      additive: false,
+    })
+    const nudged = nudgeV9SlideSelection(selected, 3, -2, MOVE_NOW)
+    const snapshot = buildV9SlideWorkspaceSnapshot(nudged)
+
+    expect(selected.selection.selectionIds).toEqual([
+      V9_SLIDE_TEST_TEXT_ID,
+      'v9-test-shape',
+    ])
+    expect(nudged.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(nudged.history.past).toEqual([initial.history.present])
+    expect(snapshot.document.nodes.find(({ id }) => id === V9_SLIDE_TEST_TEXT_ID))
+      .toMatchObject({ x: 443, y: 318 })
+    expect(snapshot.document.nodes.find(({ id }) => id === 'v9-test-shape'))
+      .toMatchObject({ x: 80, y: 90, locked: true })
+  })
+
+  it('selects and transforms through V9 history exactly once without writing the V8 Store', () => {
     const v8ProjectBefore = structuredClone(useEditorStore.getState().project)
     const initial = createV9SlideVerticalSliceState()
     const initialProject = structuredClone(initial.history.present)
@@ -80,14 +194,14 @@ describe('test-only V9 Slide vertical slice', () => {
       nodeIds: [V9_SLIDE_TEST_TEXT_ID],
       additive: false,
     })
-    const moved = moveV9SlideVerticalSlice(selected, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 540, y: 387 }],
+    const moved = transformV9SlideVerticalSlice(selected, {
+      nodes: [textTransform(540, 387)],
     }, MOVE_NOW)
     const movedSnapshot = buildV9SlideWorkspaceSnapshot(moved)
 
     expect(selected.history).toBe(initial.history)
-    expect(selected.selection.selectionId).toBe(V9_SLIDE_TEST_TEXT_ID)
-    expect(moved.selection.selectionId).toBe(V9_SLIDE_TEST_TEXT_ID)
+    expect(selected.selection.selectionIds).toEqual([V9_SLIDE_TEST_TEXT_ID])
+    expect(moved.selection.selectionIds).toEqual([V9_SLIDE_TEST_TEXT_ID])
     expect(moved.history.present.revision).toBe(selected.history.present.revision + 1)
     expect(moved.history.past).toEqual([selected.history.present])
     expect(moved.history.future).toEqual([])
@@ -98,8 +212,9 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(useEditorStore.getState().project).toEqual(v8ProjectBefore)
   })
 
-  it('keeps unknown, multi-node and non-finite bridge input as strict no-ops', () => {
+  it('keeps unknown, duplicate and invalid transform input as strict no-ops', () => {
     const state = createV9SlideVerticalSliceState()
+    const selected = selectFixtureText(state)
     expect(selectV9SlideVerticalSlice(state, {
       nodeIds: ['missing-node'], additive: false,
     })).toBe(state)
@@ -109,21 +224,24 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(selectV9SlideVerticalSlice(state, {
       nodeIds: [], additive: true,
     })).toBe(state)
-    expect(moveV9SlideVerticalSlice(state, {
-      nodes: [{ nodeId: 'missing-node', x: 1, y: 2 }],
-    })).toBe(state)
-    expect(moveV9SlideVerticalSlice(state, {
+    expect(transformV9SlideVerticalSlice(selected, {
+      nodes: [{ ...textTransform(1, 2), nodeId: 'missing-node' }],
+    })).toBe(selected)
+    expect(transformV9SlideVerticalSlice(selected, {
       nodes: [
-        { nodeId: V9_SLIDE_TEST_TEXT_ID, x: 1, y: 2 },
-        { nodeId: 'missing-node', x: 3, y: 4 },
+        textTransform(1, 2),
+        { ...textTransform(3, 4), nodeId: 'missing-node' },
       ],
-    })).toBe(state)
-    expect(moveV9SlideVerticalSlice(state, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: Number.NaN, y: 2 }],
-    })).toBe(state)
-    expect(moveV9SlideVerticalSlice(state, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 1, y: Number.POSITIVE_INFINITY }],
-    })).toBe(state)
+    })).toBe(selected)
+    expect(transformV9SlideVerticalSlice(selected, {
+      nodes: [textTransform(Number.NaN, 2)],
+    })).toBe(selected)
+    expect(transformV9SlideVerticalSlice(selected, {
+      nodes: [{ ...textTransform(1, 2), width: 0 }],
+    })).toBe(selected)
+    expect(transformV9SlideVerticalSlice(selected, {
+      nodes: [textTransform(1, 2), textTransform(3, 4)],
+    })).toBe(selected)
   })
 
   it('uses additive selection as a stable single-ID toggle', () => {
@@ -134,15 +252,16 @@ describe('test-only V9 Slide vertical slice', () => {
     const cleared = selectV9SlideVerticalSlice(selected, {
       nodeIds: [V9_SLIDE_TEST_TEXT_ID], additive: true,
     })
-    expect(selected.selection.selectionId).toBe(V9_SLIDE_TEST_TEXT_ID)
-    expect(cleared.selection.selectionId).toBeNull()
+    expect(selected.selection.selectionIds).toEqual([V9_SLIDE_TEST_TEXT_ID])
+    expect(cleared.selection.selectionIds).toEqual([])
     expect(cleared.history).toBe(state.history)
   })
 
   it('tracks dirty state by saved project identity across undo, redo and save', () => {
     const initial = createV9SlideVerticalSliceState()
-    const moved = moveV9SlideVerticalSlice(initial, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 540, y: 387 }],
+    const selected = selectFixtureText(initial)
+    const moved = transformV9SlideVerticalSlice(selected, {
+      nodes: [textTransform(540, 387)],
     }, MOVE_NOW)
     const undone = undoV9SlideVerticalSlice(moved)
     const redone = redoV9SlideVerticalSlice(undone)
@@ -183,12 +302,13 @@ describe('test-only V9 Slide vertical slice', () => {
 
   it('updates the path but stays dirty when an older captured snapshot finishes saving', () => {
     const initial = createV9SlideVerticalSliceState()
-    const firstEdit = moveV9SlideVerticalSlice(initial, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 500, y: 360 }],
+    const selected = selectFixtureText(initial)
+    const firstEdit = transformV9SlideVerticalSlice(selected, {
+      nodes: [textTransform(500, 360)],
     }, MOVE_NOW)
     const captured = captureV9SlideVerticalSliceArchive(firstEdit)
-    const secondEdit = moveV9SlideVerticalSlice(firstEdit, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 530, y: 390 }],
+    const secondEdit = transformV9SlideVerticalSlice(firstEdit, {
+      nodes: [textTransform(530, 390)],
     }, '2026-08-15T02:06:00.000Z')
     const completed = completeV9SlideVerticalSliceSave(
       secondEdit,
@@ -220,8 +340,9 @@ describe('test-only V9 Slide vertical slice', () => {
 
   it('reopens a schemaVersion 9 archive with the exact text frame and stable ID', () => {
     const initial = createV9SlideVerticalSliceState()
-    const moved = moveV9SlideVerticalSlice(initial, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 515.5, y: 366.25 }],
+    const selected = selectFixtureText(initial)
+    const moved = transformV9SlideVerticalSlice(selected, {
+      nodes: [textTransform(515.5, 366.25)],
     }, MOVE_NOW)
     const bytes = createCourseProjectArchive({
       project: moved.history.present,

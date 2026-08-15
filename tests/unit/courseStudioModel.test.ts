@@ -194,6 +194,7 @@ describe('Course Studio product model', () => {
     project = addNativeVisualLayer(project, {
       surfaceId: 'spatial-visuals',
       nativeType: 'shape',
+      shapeType: 'diamond',
       id: 'shape-editable',
       x: 80,
       y: 120,
@@ -205,8 +206,42 @@ describe('Course Studio product model', () => {
       item.layerItemId === 'formula-editable' && item.kind === 'native' && item.content.nativeType === 'formula'
     ))).toBe(true)
     expect(spatial?.type === 'spatial-2d' && spatial.world.layerItems.some((item) => (
-      item.layerItemId === 'shape-editable' && item.kind === 'native' && item.content.nativeType === 'shape' && item.frame.x === 80
+      item.layerItemId === 'shape-editable' &&
+      item.kind === 'native' &&
+      item.content.nativeType === 'shape' &&
+      item.content.data.shapeType === 'diamond' &&
+      item.frame.x === 80
     ))).toBe(true)
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+  })
+
+  it('adds a new native layer to one named state without leaking into the base frame', () => {
+    let project = createCourseProject({ id: 'course-state-insert', now: NOW })
+    const slide = project.surfaces[0]
+    if (slide?.type !== 'slide') throw new Error('expected slide')
+    const sceneId = slide.scenes[0]!.id
+    project = saveSlidePresentationState(project, slide.id, sceneId, {
+      id: 'state-reveal',
+      name: '揭示答案',
+      layerItemOverrides: {},
+    }, NOW)
+    project = addSlideTextLayer(project, slide.id, sceneId, '只在答案态出现', {
+      id: 'state-only-text',
+      stateId: 'state-reveal',
+      x: 320,
+      y: 240,
+      now: NOW,
+    })
+
+    const current = project.surfaces[0]
+    if (current?.type !== 'slide') throw new Error('expected slide')
+    const scene = current.scenes[0]!
+    expect(scene.layerItems.find((item) => item.layerItemId === 'state-only-text')).toMatchObject({
+      frame: { x: 320, y: 240 },
+      visible: false,
+    })
+    expect(scene.presentation?.states.find((state) => state.id === 'state-reveal')
+      ?.layerItemOverrides['state-only-text']).toEqual({ visible: true })
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
   })
 

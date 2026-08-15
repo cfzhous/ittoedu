@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import {
   deriveCourseProjectAuthoringInventorySnapshot,
-  migrateProjectV8ToCourseProjectV9,
+  sceneNodeToCourseLayerItem,
 } from '../../shared/courseProjectModel'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -16,11 +16,14 @@ import {
   type SlidePresentationState,
   type SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import type { SceneNode, TeacherControllerButton } from '../../shared/projectTypes'
+import type {
+  SceneNode,
+  ShapeType,
+  TeacherControllerButton,
+} from '../../shared/projectTypes'
 import {
   createFormulaNode,
   createImageNode,
-  createProject,
   createShapeNode,
   createTextNode,
 } from '../project/createProject'
@@ -621,29 +624,34 @@ export function deleteCourseSurface(
   }, now)
 }
 
-function migrateSingleNativeNode(node: SceneNode): LayerItem {
-  const legacy = createProject({
-    id: stableId('scratch'),
-    includeDefaultController: false,
-    controls: 'none',
-  })
-  legacy.scenes[0]!.nodes = [node]
-  const migrated = migrateProjectV8ToCourseProjectV9(legacy)
-  const surface = migrated.surfaces[0]
-  if (surface?.type !== 'slide') throw new Error('无法创建文字图层')
-  const item = surface.scenes[0]?.layerItems[0]
-  if (!item) throw new Error('无法创建文字图层')
-  return item
-}
-
-function createNativeTextLayer(id: string, text: string): LayerItem {
-  return migrateSingleNativeNode(createTextNode({
+function createNativeTextLayer(
+  id: string,
+  text: string,
+  position: { x?: number; y?: number } = {},
+): LayerItem {
+  return sceneNodeToCourseLayerItem(createTextNode({
     id,
     name: text || '文字',
     text,
-    x: 120,
-    y: 120,
+    x: position.x ?? 120,
+    y: position.y ?? 120,
   }))
+}
+
+function appendSlideLayerForPresentation(
+  scene: SlideSceneDocument,
+  item: LayerItem,
+  stateId: string | null | undefined,
+): void {
+  if (stateId) {
+    const presentationState = scene.presentation?.states.find(
+      (candidate) => candidate.id === stateId,
+    )
+    if (!presentationState) throw new Error(`找不到命名状态：${stateId}`)
+    item.visible = false
+    presentationState.layerItemOverrides[item.layerItemId] = { visible: true }
+  }
+  scene.layerItems.push(item)
 }
 
 export function addSlideScene(
@@ -1254,16 +1262,22 @@ export function addSlideTextLayer(
   surfaceId: string,
   sceneId: string,
   text = '双击编辑文字',
-  options: { id?: string; now?: string } = {},
+  options: {
+    id?: string
+    x?: number
+    y?: number
+    stateId?: string | null
+    now?: string
+  } = {},
 ): CourseProjectDocument {
-  const item = createNativeTextLayer(stableId('text', options.id), text)
+  const item = createNativeTextLayer(stableId('text', options.id), text, options)
   return cloneAndCommit(project, (draft) => {
     const surface = draft.surfaces.find((candidate) => candidate.id === surfaceId)
     if (!surface || surface.type !== 'slide') throw new Error('目标不是 Slide 表面')
     const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
     if (!scene) throw new Error(`找不到场景：${sceneId}`)
     item.order = reserveTopAuthoringOrder(draft, surface.id, scene.id)
-    scene.layerItems.push(item)
+    appendSlideLayerForPresentation(scene, item, options.stateId)
     sortAllLayerLists(draft)
   }, options.now)
 }
@@ -1292,6 +1306,8 @@ export function addNativeVisualLayer(
     surfaceId: string
     sceneId?: string
     nativeType: 'formula' | 'shape'
+    shapeType?: ShapeType
+    stateId?: string | null
     id?: string
     x?: number
     y?: number
@@ -1301,8 +1317,12 @@ export function addNativeVisualLayer(
   const id = stableId(input.nativeType, input.id)
   const node = input.nativeType === 'formula'
     ? createFormulaNode({ id, x: input.x, y: input.y, accessibleText: 'x 的平方加二分之一' })
-    : createShapeNode('rounded-rectangle', { id, x: input.x, y: input.y })
-  const item = migrateSingleNativeNode(node)
+    : createShapeNode(input.shapeType ?? 'rounded-rectangle', {
+        id,
+        x: input.x,
+        y: input.y,
+      })
+  const item = sceneNodeToCourseLayerItem(node)
   return cloneAndCommit(project, (draft) => {
     const surface = draft.surfaces.find((candidate) => candidate.id === input.surfaceId)
     if (!surface) throw new Error(`找不到表面：${input.surfaceId}`)
@@ -1310,7 +1330,10 @@ export function addNativeVisualLayer(
     if (surface.type === 'slide') {
       const scene = surface.scenes.find((candidate) => candidate.id === input.sceneId)
       if (!scene) throw new Error(`找不到场景：${input.sceneId ?? ''}`)
-      items = scene.layerItems
+      item.order = reserveTopAuthoringOrder(draft, surface.id, input.sceneId)
+      appendSlideLayerForPresentation(scene, item, input.stateId)
+      sortAllLayerLists(draft)
+      return
     } else if (surface.type === 'spatial-2d') {
       items = surface.world.layerItems
     } else {
@@ -1337,7 +1360,7 @@ export function addImageLayer(
   },
 ): CourseProjectDocument {
   if (!project.assets[input.assetId]) throw new Error(`找不到素材：${input.assetId}`)
-  const item = migrateSingleNativeNode(createImageNode({
+  const item = sceneNodeToCourseLayerItem(createImageNode({
     id: stableId('image', input.id),
     name: '图片',
     assetId: input.assetId,
@@ -1992,7 +2015,7 @@ function sortAllLayerLists(project: CourseProjectDocument): void {
   })
 }
 
-function reserveTopAuthoringOrder(
+export function reserveTopAuthoringOrder(
   project: CourseProjectDocument,
   surfaceId: string,
   sceneId?: string,

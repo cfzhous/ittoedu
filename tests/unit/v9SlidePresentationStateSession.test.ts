@@ -8,7 +8,7 @@ import {
   createV9SlideVerticalSliceState,
   deleteV9SlidePresentationState,
   duplicateV9SlidePresentationState,
-  moveV9SlideVerticalSlice,
+  transformV9SlideVerticalSlice,
   redoV9SlideVerticalSlice,
   renameV9SlidePresentationState,
   selectV9SlideVerticalSlice,
@@ -38,7 +38,7 @@ describe('V9 Slide presentation-state session commands', () => {
     })
     const activatedBase = activateV9SlidePresentationState(selected, null)
     expect(activatedBase.history).toBe(initial.history)
-    expect(activatedBase.selection).toMatchObject({ stateId: null, selectionId: null })
+    expect(activatedBase.selection).toMatchObject({ stateId: null, selectionIds: [] })
     expect(activatedBase.editingScope).toBe('scene')
 
     const added = addV9SlidePresentationState(activatedBase, '展开', NOW)
@@ -61,8 +61,15 @@ describe('V9 Slide presentation-state session commands', () => {
     const selectedText = selectV9SlideVerticalSlice(thumbnailMarked, {
       nodeIds: [V9_SLIDE_TEST_TEXT_ID], additive: false,
     })
-    const moved = moveV9SlideVerticalSlice(selectedText, {
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 500, y: 360 }],
+    const moved = transformV9SlideVerticalSlice(selectedText, {
+      nodes: [{
+        nodeId: V9_SLIDE_TEST_TEXT_ID,
+        x: 500,
+        y: 360,
+        width: 400,
+        height: 80,
+        rotation: 0,
+      }],
     }, NOW)
     expect(sceneOf(moved).presentation!.states.find((state) => state.id === duplicateId)!
       .layerItemOverrides[V9_SLIDE_TEST_TEXT_ID]).toBeDefined()
@@ -138,8 +145,15 @@ describe('V9 Slide presentation-state Store actions', () => {
     store.setInitialCoursePresentationState(duplicateId)
     store.setThumbnailCoursePresentationState(duplicateId)
     store.selectCourseLayers({ nodeIds: [V9_SLIDE_TEST_TEXT_ID], additive: false })
-    store.moveCourseLayers({
-      nodes: [{ nodeId: V9_SLIDE_TEST_TEXT_ID, x: 520, y: 380 }],
+    store.transformCourseLayers({
+      nodes: [{
+        nodeId: V9_SLIDE_TEST_TEXT_ID,
+        x: 520,
+        y: 380,
+        width: 400,
+        height: 80,
+        rotation: 0,
+      }],
     })
     store.clearCoursePresentationStateOverrides(duplicateId)
     store.deleteCoursePresentationState(duplicateId)
