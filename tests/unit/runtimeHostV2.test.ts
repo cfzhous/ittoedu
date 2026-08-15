@@ -130,7 +130,7 @@ function createHost(
   authoring?: RuntimeHostOptions['authoring'],
   onAssessmentEvaluated?: RuntimeHostOptions['onAssessmentEvaluated'],
   onActionRecorded?: RuntimeHostOptions['onActionRecorded'],
-): { host: RuntimeHost; testEnvironment: TestEnvironment; registry: RuntimeRegistry } {
+): { host: RuntimeHost; testEnvironment: TestEnvironment; registry: RuntimeRegistry; events: CourseEventBus } {
   const registry = new RuntimeRegistry()
   const events = new CourseEventBus()
   const courseState = new CourseStateStore()
@@ -159,7 +159,7 @@ function createHost(
     ...(onAssessmentEvaluated ? { onAssessmentEvaluated } : {}),
     ...(onActionRecorded ? { onActionRecorded } : {}),
   }
-  return { host: new RuntimeHost(options), testEnvironment, registry }
+  return { host: new RuntimeHost(options), testEnvironment, registry, events }
 }
 
 function capturedContext(): Record<string, unknown> {
@@ -305,6 +305,83 @@ describe('RuntimeHost API 2', () => {
       registry.dispose()
     },
   )
+
+  it('事件消息路由：运行时 emit 携带作用域元数据，scoped 事件随宿主释放', () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create(ctx) {
+          window.__runtimeHostContext = ctx
+          return { destroy() {} }
+        }
+      })
+    `
+    const { host, registry, events } = createHost(runtime(2, 'dom', source))
+    const context = capturedContext() as {
+      emit(eventName: string, payload?: unknown): void
+      events: {
+        on(eventName: string, listener: (payload: unknown) => void): () => void
+      }
+    }
+    const routed: unknown[] = []
+    const disposer = events.on('runtime:event', (detail) => { routed.push(detail) })
+    context.emit('custom-event', { value: 7 })
+
+    expect(routed).toEqual([{
+      scope: 'scene',
+      sceneId: 'scene-one',
+      eventName: 'custom-event',
+      payload: { value: 7 },
+    }])
+
+    const received: unknown[] = []
+    context.events.on('runtime:ping', (payload) => received.push(payload))
+    events.emit('runtime:ping', 'pong')
+    expect(received).toEqual(['pong'])
+
+    host.destroy()
+    disposer()
+    expect(events.listenerCount()).toBe(0)
+    registry.dispose()
+  })
+
+  it('资源访问与文字读取只暴露已声明的绑定，缺失键报错', () => {
+    const source = `
+      CoursewareRuntime.define({
+        runtimeApiVersion: 2,
+        create(ctx) {
+          window.__runtimeHostContext = ctx
+          return { destroy() {} }
+        }
+      })
+    `
+    const documentRuntime = runtime(2, 'dom', source)
+    documentRuntime.content = { values: { title: '标题', 'a/b': '斜杠' } }
+    documentRuntime.assets = { hero: { assetId: 'asset-hero' } }
+    const { host, registry } = createHost(documentRuntime)
+    const context = capturedContext() as {
+      content: {
+        get(key: string): string
+        all(): Record<string, string>
+      }
+      assets: {
+        url(bindingKey: string): string
+        projectUrl(assetId: string): string
+      }
+    }
+
+    expect(context.content.get('title')).toBe('标题')
+    expect(context.content.get('a/b')).toBe('斜杠')
+    expect(context.content.all()).toEqual({ title: '标题', 'a/b': '斜杠' })
+    expect(Object.isFrozen(context.content.all())).toBe(true)
+    expect(() => context.content.get('missing')).toThrow('不存在')
+    expect(context.assets.url('hero')).toBe('asset://asset-hero')
+    expect(context.assets.projectUrl('asset-other')).toBe('asset://asset-other')
+    expect(() => context.assets.url('missing')).toThrow('不存在')
+
+    host.destroy()
+    registry.dispose()
+  })
 
   it('公开调用 Capability Index 登记的离线判定器并拒绝伪造 ID', () => {
     const onAssessmentEvaluated = vi.fn()

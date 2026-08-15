@@ -525,20 +525,31 @@ class EditorSurfaceRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
       assetKeys: () => Object.keys(this.#item.runtime.assets),
       reportHit: context.reportHit,
     }, this.#mode)
-    this.#instance = this.#definition.create({
-      runtimeApiVersion: 3, mode: this.#mode,
-      width: this.#item.frame.width, height: this.#item.frame.height,
-      content: { get: (key) => { const value = this.#item.runtime.content.values[key]; if (value === undefined) throw new Error(`Unknown content key ${key}`); return value }, all: () => Object.freeze({ ...this.#item.runtime.content.values }) },
-      assets: { url: (key) => { const id = this.#item.runtime.assets[key]?.assetId; return id ? this.environment.resolveProjectAsset(id) ?? '' : '' }, projectUrl: (id) => this.environment.resolveProjectAsset(id) ?? '' },
-      courseState: courseStatePort(this.environment.courseState),
-      presentation: presentationPort(context.surfaceId, this.environment.navigation),
-      actions: actionPort(this.environment.navigation, 'runtime'),
-      events: this.environment.events,
-      capture: { waitUntil: (promise) => this.#capturePromises.push(Promise.resolve(promise)) },
-      dom: { root: context.container }, authoring: this.#authoring,
-      emit: (name, payload) => this.environment.events.emit(name, payload),
-    })
-    if (!this.#instance || typeof this.#instance.destroy !== 'function') throw new Error(`Surface Runtime ${this.#item.layerItemId} 返回无效生命周期`)
+    try {
+      this.#instance = this.#definition.create({
+        runtimeApiVersion: 3, mode: this.#mode,
+        width: this.#item.frame.width, height: this.#item.frame.height,
+        content: { get: (key) => { const value = this.#item.runtime.content.values[key]; if (value === undefined) throw new Error(`Unknown content key ${key}`); return value }, all: () => Object.freeze({ ...this.#item.runtime.content.values }) },
+        assets: { url: (key) => { const id = this.#item.runtime.assets[key]?.assetId; return id ? this.environment.resolveProjectAsset(id) ?? '' : '' }, projectUrl: (id) => this.environment.resolveProjectAsset(id) ?? '' },
+        courseState: courseStatePort(this.environment.courseState),
+        presentation: presentationPort(context.surfaceId, this.environment.navigation),
+        actions: actionPort(this.environment.navigation, 'runtime'),
+        events: this.environment.events,
+        capture: { waitUntil: (promise) => this.#capturePromises.push(Promise.resolve(promise)) },
+        dom: { root: context.container }, authoring: this.#authoring,
+        emit: (name, payload) => this.environment.events.emit(name, payload),
+      })
+    } catch (cause) {
+      this.#authoring.destroy()
+      this.#authoring = null
+      this.#capturePromises.length = 0
+      throw cause
+    }
+    if (!this.#instance || typeof this.#instance.destroy !== 'function') {
+      this.#authoring.destroy()
+      this.#authoring = null
+      throw new Error(`Surface Runtime ${this.#item.layerItemId} 返回无效生命周期`)
+    }
     if (checkpoint?.available) {
       if (this.#instance.restoreAuthoringCheckpoint) {
         this.#instance.restoreAuthoringCheckpoint(cloneFiniteJsonCheckpoint(checkpoint.value))
@@ -619,6 +630,10 @@ class EditorLegacyRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
       await this.#mountPhaserRuntime(context)
       return
     }
+    this.#mountDomRuntime(context)
+  }
+
+  #mountDomRuntime(context: SlideItemMountContext<RuntimeLayerItem>): void {
     this.#mode = context.mode
     const underlay = context.container.ownerDocument.createElement('div')
     const overlay = context.container.ownerDocument.createElement('div')
@@ -662,22 +677,22 @@ class EditorLegacyRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
     if (this.#mode === 'inspect') this.#instance.suspend?.()
   }
   async update(item: RuntimeLayerItem): Promise<void> {
-    const mustRemount = this.#phaserStage && (
-      item.runtime.source !== this.#item.runtime.source ||
-      item.runtime.renderMode !== this.#item.runtime.renderMode ||
-      item.runtime.enabled !== this.#item.runtime.enabled ||
-      JSON.stringify(item.runtime.content) !== JSON.stringify(this.#item.runtime.content) ||
-      JSON.stringify(item.runtime.assets) !== JSON.stringify(this.#item.runtime.assets) ||
-      JSON.stringify(item.runtime.nodeBindings) !== JSON.stringify(this.#item.runtime.nodeBindings)
-    )
+    const executableChanged = this.#item.runtime.source !== item.runtime.source ||
+      this.#item.runtime.renderMode !== item.runtime.renderMode ||
+      this.#item.runtime.enabled !== item.runtime.enabled ||
+      JSON.stringify(this.#item.runtime.content) !== JSON.stringify(item.runtime.content) ||
+      JSON.stringify(this.#item.runtime.assets) !== JSON.stringify(item.runtime.assets) ||
+      JSON.stringify(this.#item.runtime.nodeBindings) !== JSON.stringify(item.runtime.nodeBindings)
     this.#item = structuredClone(item)
     if (this.#context) this.#context = { ...this.#context, item }
-    if (mustRemount && this.#context) {
-      this.#cleanupPhaserRuntime()
-      this.#overlay?.destroy()
-      this.#overlay = null
+    if (executableChanged && this.#context) {
+      this.#cleanupCurrent()
       this.#context.container.replaceChildren()
-      await this.#mountPhaserRuntime(this.#context)
+      if (this.#item.runtime.renderMode !== 'dom') {
+        await this.#mountPhaserRuntime(this.#context)
+      } else {
+        this.#mountDomRuntime(this.#context)
+      }
       return
     }
     this.#instance?.resize?.(item.frame.width, item.frame.height)
@@ -735,12 +750,16 @@ class EditorLegacyRuntimeHost implements SlideItemHost<RuntimeLayerItem> {
     if (this.#phaserStage) return { format: 'html', content: this.#phaserStage.captureHtml() }
   }
   destroy(): void {
+    this.#cleanupCurrent()
+    this.#localState.clear()
+    this.#context = null
+  }
+
+  #cleanupCurrent(): void {
     this.#instance?.destroy(); this.#instance = null
     this.#authoring?.destroy(); this.#authoring = null
     this.#overlay?.destroy(); this.#overlay = null
     this.#cleanupPhaserRuntime()
-    this.#localState.clear()
-    this.#context = null
   }
 
   async #mountPhaserRuntime(context: SlideItemMountContext<RuntimeLayerItem>): Promise<void> {
