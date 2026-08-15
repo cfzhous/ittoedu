@@ -149,6 +149,42 @@ async function resizeContent(
   }))).toEqual({ width, height })
 }
 
+async function expectFrozenEditorChromeInsideViewport(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => {
+    const selectors = [
+      '.app-shell',
+      '.scene-state-strip',
+      '.canvas-view-controls',
+      '.status-bar',
+    ]
+    return Object.fromEntries(selectors.map((selector) => {
+      const element = document.querySelector<HTMLElement>(selector)
+      if (!element) return [selector, false]
+      const rect = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return [selector, (
+        rect.top >= -0.5 &&
+        rect.bottom <= innerHeight + 0.5 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden'
+      )]
+    }))
+  })).toEqual({
+    '.app-shell': true,
+    '.scene-state-strip': true,
+    '.canvas-view-controls': true,
+    '.status-bar': true,
+  })
+}
+
+async function expectInspectionEscapePlaneUnmounted(page: Page): Promise<void> {
+  await expect(
+    page.frameLocator('.runtime-preview-frame')
+      .getByTestId('teacher-escape-controls'),
+  ).toHaveCount(0)
+}
+
 function readTextFrame(path: string): {
   revision: number
   x: number
@@ -282,9 +318,16 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
   let lastSavedFrame: ReturnType<typeof readTextFrame> | null = null
   try {
     await resizeContent(editor.app, editor.page, 1366, 768)
+    await expectFrozenEditorChromeInsideViewport(editor.page)
+    await expectInspectionEscapePlaneUnmounted(editor.page)
     await expect.poll(() => editor.page.title()).not.toContain(' * - ')
     await expect(editor.page.getByRole('button', { name: '重命名课件' })).toContainText('V9 Slide 纵切测试')
     await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 1 / 1')
+    const initialStatusBar = editor.page.locator('.status-bar')
+    await expect(initialStatusBar).toContainText('场景 1')
+    await expect(initialStatusBar).toContainText('1 个节点')
+    await expect(initialStatusBar).toContainText('未选择节点')
+    await expect(initialStatusBar).toContainText('尚未保存')
     await expect(editor.page.getByRole('button', { name: '在独立窗口整课预览' })).toBeDisabled()
     await expect(editor.page.getByLabel('导出课件')).toHaveAttribute('aria-disabled', 'true')
     const undoButton = editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' })
@@ -302,6 +345,7 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(true)
     await expect(undoButton).toBeEnabled()
+    await expect(initialStatusBar).toContainText('已选：V9 可移动文字')
     await expect.poll(() => editor.page.evaluate(async () => Boolean(
       await window.desktopAPI?.readRecoveryProject()
     )), { timeout: 8_000 }).toBe(true)
@@ -346,6 +390,7 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
+    await expect(initialStatusBar).toContainText('工程已命名')
     await expect.poll(() => editor.page.evaluate(async () => Boolean(
       await window.desktopAPI?.readRecoveryProject()
     )), { timeout: 5_000 }).toBe(false)
@@ -365,8 +410,32 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
     const statusBar = editor.page.locator('.status-bar')
     await expect(statusBar).toContainText('正在处理…')
     await expect(statusBar).not.toContainText('正在处理…')
+    await expect(statusBar).toContainText('场景 1')
+    await expect(statusBar).toContainText('1 个节点')
+    await expect(statusBar).toContainText('未选择节点')
+    await expect(statusBar).toContainText('工程已命名')
     await expect.poll(() => editor.page.title()).not.toContain(' * - ')
     await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)
+    await expectFrozenEditorChromeInsideViewport(editor.page)
+    await expectInspectionEscapePlaneUnmounted(editor.page)
+
+    const runCurrentLocation = editor.page.getByRole('button', {
+      name: '当前位置试运行',
+      exact: true,
+    })
+    const editCanvas = editor.page.getByRole('button', {
+      name: '编辑状态',
+      exact: true,
+    })
+    await runCurrentLocation.click()
+    await expect(runCurrentLocation).toHaveAttribute('aria-pressed', 'true')
+    await expect(
+      editor.page.frameLocator('.runtime-preview-frame')
+        .getByTestId('teacher-escape-controls'),
+    ).toBeVisible()
+    await editCanvas.click()
+    await expect(editCanvas).toHaveAttribute('aria-pressed', 'true')
+    await expectInspectionEscapePlaneUnmounted(editor.page)
 
     await editor.page.screenshot({ path: screenshotPath, fullPage: false, scale: 'css' })
 

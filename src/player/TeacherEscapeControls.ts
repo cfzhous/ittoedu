@@ -188,6 +188,24 @@ export class TeacherEscapeControls {
     this.refresh()
   }
 
+  /**
+   * Inspection reuses the live playback Player so its exact frame can be
+   * edited. Physically detach this delivery-only escape plane while that
+   * frame is inspected, then restore the same controls when playback resumes.
+   */
+  setMounted(mounted: boolean): void {
+    if (this.destroyed) return
+    this.clearConfirmation()
+    if (mounted) {
+      if (this.root.parentElement !== this.options.stage) {
+        this.options.stage.append(this.root)
+      }
+      this.refresh()
+    } else {
+      this.root.remove()
+    }
+  }
+
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true

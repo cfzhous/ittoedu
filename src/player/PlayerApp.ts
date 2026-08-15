@@ -614,7 +614,9 @@ export class PlayerApp {
     this.stage.classList.toggle('lesson-stage--inspection', enabled)
     this.inputShield.hidden = !enabled
     this.inputShield.style.pointerEvents = enabled ? 'auto' : 'none'
+    this.teacherEscapeControls?.setMounted(!enabled)
     if (enabled) {
+      this.scenePicker?.close()
       this.runtimeKernel.setCourseStateFrozen(true)
       this.inspectionPausedAnimations = this.stage
         .getAnimations({ subtree: true })

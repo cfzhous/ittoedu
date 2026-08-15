@@ -43,6 +43,7 @@ import {
   captureV9SlideVerticalSliceArchive,
   isV9SlideVerticalSliceDirty,
 } from './course/v9SlideVerticalSlice'
+import { buildSlideEditorView } from './course/slideEditorView'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -358,6 +359,45 @@ export default function App() {
         )
         return `场景 ${index + 1} / ${v9SlideVerticalSlice.history.present.locations.length}`
       })()
+  const v9StatusBarView = useMemo(() => {
+    if (v9SlideVerticalSlice === null) return null
+    const courseProject = v9SlideVerticalSlice.history.present
+    const view = buildSlideEditorView({
+      project: courseProject,
+      locationId: v9SlideVerticalSlice.selection.locationId,
+      stateId: v9SlideVerticalSlice.selection.stateId,
+    })
+    const sceneLayerCount = view.layers.filter((layer) => layer.source === 'scene').length
+    const selectedLayer = v9SlideVerticalSlice.selection.selectionId === null
+      ? null
+      : view.layers.find((layer) => (
+          layer.selectionId === v9SlideVerticalSlice.selection.selectionId
+        )) ?? null
+    return {
+      locationName: view.sceneName,
+      itemCountLabel: `${sceneLayerCount} 个节点`,
+      selectionLabel: selectedLayer
+        ? `已选：${selectedLayer.item.label}`
+        : '未选择节点',
+      largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
+        sceneLayerCount > RECOMMENDED_SCENE_NODES,
+    }
+  }, [v9SlideVerticalSlice])
+  const activeStatusBarView = v9StatusBarView ?? {
+    locationName: editingScope === 'global' ? '全局层' : activeScene.name,
+    itemCountLabel: editingScope === 'global'
+      ? `${editingNodes.length} 个全局元素`
+      : `${activeScene.nodes.length} 个节点`,
+    selectionLabel: selectedNodeIds.length > 1
+      ? `已选 ${selectedNodeIds.length} 个图层`
+      : selectedNode
+        ? `已选：${selectedNode.name}`
+        : editingScope === 'global'
+          ? '未选择全局元素'
+          : '未选择节点',
+    largeProject: project.scenes.length > RECOMMENDED_PROJECT_SCENES ||
+      activeScene.nodes.length > RECOMMENDED_SCENE_NODES,
+  }
   const v9SlideAuthoring = useMemo<WorkspaceSlideAuthoringInput | undefined>(() => {
     if (v9SlideVerticalSlice === null) return undefined
     const snapshot = buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice)
@@ -1384,11 +1424,10 @@ export default function App() {
         <span className="status-dot" />
         <span>{busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
         <span className="status-bar__spacer" />
-        <span>{editingScope === 'global' ? '全局层' : activeScene.name}</span>
+        <span>{activeStatusBarView.locationName}</span>
         <span>·</span>
-        <span>{editingScope === 'global' ? `${editingNodes.length} 个全局元素` : `${activeScene.nodes.length} 个节点`}</span>
-        {(project.scenes.length > RECOMMENDED_PROJECT_SCENES ||
-          activeScene.nodes.length > RECOMMENDED_SCENE_NODES) && (
+        <span>{activeStatusBarView.itemCountLabel}</span>
+        {activeStatusBarView.largeProject && (
           <>
             <span>·</span>
             <span className="status-bar__warning" title="大型课件建议使用网页包导出，以减少启动和内存压力">
@@ -1397,7 +1436,7 @@ export default function App() {
           </>
         )}
         <span>·</span>
-        <span>{selectedNodeIds.length > 1 ? `已选 ${selectedNodeIds.length} 个图层` : selectedNode ? `已选：${selectedNode.name}` : editingScope === 'global' ? '未选择全局元素' : '未选择节点'}</span>
+        <span>{activeStatusBarView.selectionLabel}</span>
         <span>·</span>
         <span>{activeDocumentPath ? '工程已命名' : '尚未保存'}</span>
       </footer>

@@ -426,6 +426,36 @@ describe('PlayerApp fixed renderer planes', () => {
     authoringPlayer.destroy()
   })
 
+  it('编辑检查态卸载逃生控制面，切回试运行时恢复', () => {
+    const root = document.createElement('div')
+    const player = new PlayerApp({
+      project: createProject(),
+      assets: {},
+      components: {},
+    }, root, {
+      mode: 'preview',
+      onRuntimeAuthoringTargetsChanged: vi.fn(),
+      onComponentAuthoringTargetsChanged: vi.fn(),
+    })
+    const stage = root.querySelector<HTMLElement>('.lesson-stage')!
+    Object.defineProperty(stage, 'getAnimations', {
+      configurable: true,
+      value: () => [],
+    })
+
+    expect(root.querySelector('[data-testid="teacher-escape-controls"]'))
+      .not.toBeNull()
+
+    expect(player.setInspectionMode(true)).toBe(true)
+    expect(root.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
+
+    expect(player.setInspectionMode(false)).toBe(true)
+    expect(root.querySelector('[data-testid="teacher-escape-controls"]'))
+      .not.toBeNull()
+
+    player.destroy()
+  })
+
   it('教师逃生翻页的第二次确认会显式传入 navigation guard bypass', () => {
     const root = document.createElement('div')
     const project = createProject()
