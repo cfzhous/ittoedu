@@ -331,7 +331,7 @@ function ControlledPropertyColorInput({
   return (
     <div className="form-field">
       <label htmlFor={`${id}-controlled-text`}>{label}</label>
-      <div className="color-control">
+      <div className="color-control color-control--controlled">
         <input
           className="color-swatch"
           id={`${id}-controlled-picker`}
@@ -2028,7 +2028,7 @@ function ControlledPropertiesTab({
       <div className="properties-scroll" data-testid="properties-tab">
         <ControlledPropertiesGate
           title="元素属性"
-          reason="请先在画布或图层面板中选择一个文字、公式或图形元素。"
+          reason="请先在画布或图层面板中选择一个元素。"
           testId="controlled-properties-empty-gate"
         />
       </div>

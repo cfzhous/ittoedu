@@ -239,7 +239,9 @@ describe('PropertiesTab document control', () => {
       target: { value: '#345678' },
     })
     expect(onUpdateNode).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: '应用填充色' }))
+    const applyFill = screen.getByRole('button', { name: '应用填充色' })
+    expect(applyFill.parentElement).toHaveClass('color-control--controlled')
+    fireEvent.click(applyFill)
     expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
       layerItemId: shape.id,
     }), { shapeType: 'ellipse' })

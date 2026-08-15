@@ -582,6 +582,16 @@ test('authors V9 scenes and presentation states through the original panels', as
     await shapeWidth.fill('360')
     await shapeWidth.press('Enter')
     const shapeFill = editor.page.getByLabel('填充色', { exact: true })
+    const applyShapeFill = editor.page.getByRole('button', { name: '应用填充色' })
+    const [shapeFillBox, applyShapeFillBox] = await Promise.all([
+      shapeFill.boundingBox(),
+      applyShapeFill.boundingBox(),
+    ])
+    expect(shapeFillBox).not.toBeNull()
+    expect(applyShapeFillBox).not.toBeNull()
+    expect(Math.abs(applyShapeFillBox!.y - shapeFillBox!.y)).toBeLessThan(2)
+    expect(applyShapeFillBox!.x).toBeGreaterThan(shapeFillBox!.x + shapeFillBox!.width - 1)
+    expect(applyShapeFillBox!.width).toBeGreaterThan(40)
     const originalFill = await shapeFill.inputValue()
     await editor.page.getByLabel('填充色选择器').evaluate((input: HTMLInputElement) => {
       const setValue = Object.getOwnPropertyDescriptor(
@@ -592,7 +602,7 @@ test('authors V9 scenes and presentation states through the original panels', as
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.dispatchEvent(new Event('change', { bubbles: true }))
     })
-    await editor.page.getByRole('button', { name: '应用填充色' }).click()
+    await applyShapeFill.click()
     await expect(shapeFill).toHaveValue('#123456')
     await editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
     await expect(shapeFill).toHaveValue(originalFill)

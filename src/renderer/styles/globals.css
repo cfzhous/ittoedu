@@ -3335,6 +3335,10 @@ button:disabled {
   gap: 7px;
 }
 
+.color-control--controlled {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+}
+
 .color-swatch {
   width: 34px;
   height: 32px;
