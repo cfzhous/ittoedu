@@ -133,6 +133,8 @@ ProductApp.tsx 最终只能渲染同一个原 App。Flow 和 Spatial 可以在�
 | 教师控制器 | 全局层中的真实作者对象；可编辑、可恢复；编辑态按钮不执行，试运行中正确导航和收展 |
 | 底部状态 | 状态、选择、缩放、dirty 与错误可见；普通错误不暴露内部 ID/API 方法名 |
 
+以上冻结区域必须在 1280×720、1366×768、1920×1080 三档窗口和简洁/专业两种模式中留在可视区；侧栏内容只能在自身滚动，不得以 min-content 撑高 App 壳并把场景状态条、画布视图控件或底部状态栏挤出窗口。
+
 教师概念映射必须保持：
 
 - Slide scene 显示为“幻灯片”，不显示 Surface/Scene。
@@ -303,6 +305,7 @@ M1 已完成并通过：
 - 原顶栏、左栏、状态条、右栏和 Workspace 切到 V9 只读 View/command。
 - 默认产品不再依赖 V8 Store 创建或保存新工程。
 - V8 只保留显式导入迁移入口。
+- 三档窗口下简洁/专业模式均不发生壳层纵向溢出；场景状态条、画布缩放/fit/平移控件和底部状态栏始终可见可用。
 - 保存重开和原壳代表路径通过。
 
 ### M3 — GATE-S：完整 Slide 作者闭环
@@ -315,6 +318,8 @@ M1 已完成并通过：
 - 命名状态、状态覆盖、初始状态、切换和持久化。
 - Runtime/Component 载体与公开 authoring target 进入统一图层。
 - 互动、媒体和教师控制器可编辑并在隔离 Player 运行。
+- Slide `scene.interactions` 的 Native 命中、条件和 action 在隔离 Player 与最小 Published V2 Slide 纵切中真实执行；基础点击/状态切换不得依赖 Runtime 绕行。
+- 编辑态 AuthoringInspectHost 只显示工程内的作者控制器，不挂载 TeacherEscapeControls 或任何额外播放导航。
 - 一个代表性 Slide 教师路径与一次阶段汇总通过。
 
 ### M4 — Player、Runtime、Component 与课程逻辑闭环
@@ -324,6 +329,7 @@ M1 已完成并通过：
 - Component API 4 package、props、preset、作者目标和 hot update。
 - 开发区可编辑普通模块，不在构建脚本中手写巨型动态字符串。
 - 课程 location/state/guard/controller 与试运行闭环。
+- 建立 Slide/Flow/Spatial 共用的教师控制器运行合同；M4 先以 Slide 验证前后导航、`collapsible/defaultCollapsed`、session-only 移动、目录、重播、静音和全屏，Flow/Spatial 分别在 M5/M6 接入，跨表面行为在 M7 验证。
 - capture、checkpoint 和恢复不写回 Project。
 
 ### M5 — Flow
@@ -338,6 +344,7 @@ M1 已完成并通过：
 
 - Spatial pan/zoom、选择、变换、关系、镜头、路径和小地图。
 - Native/Runtime/Component/控制器统一图层。
+- Spatial 的全局教师控制器使用 viewport/session 坐标，不进入 world camera transform，不随世界平移或缩放。
 - 状态、互动、Player、保存重开和导出。
 - 代表性 Spatial 教师路径通过。
 - M5 与 M6 只有满足第 3 节内部并行条件时才可并行，否则串行。
@@ -348,6 +355,7 @@ M1 已完成并通过：
 - 跨表面 location/state/guard/controller。
 - 完全关闭重开后课程状态和引用一致。
 - Published Course V2 真实整课 Player。
+- Published HTML/网页包尊重 `playback.controls: canvas | none`，不注入已废弃的外层 `.course-nav`/“上一页·下一页”底栏。
 - HTML、网页包、PDF、PPTX、DOCX 五类导出至少各完成一次真实样例。
 - Runtime 2/3 和 Component 4 兼容路径保持。
 - 一个代表性 Mixed 教师路径与一次阶段汇总通过。
@@ -380,7 +388,7 @@ M1 已完成并通过：
 | Spatial model | world、relations、camera、path 与唯一 viewport 常量 |
 | Mixed model | location、course state、guard 与跨表面 action 一致 |
 | History/file | V9 history、dirty、archive new/open/save/reopen 完整；V8 只走显式迁移 |
-| Publish | Published V2 producer/schema/label/assets 同时闭合，不能只改 producer 或 consumer |
+| Publish | Published V2 producer/schema/label/assets/interaction consumer 同时闭合，不能只写 payload 而不执行；不生成 legacy 外层底栏 |
 
 #### 原 UI 数据切换
 
@@ -391,7 +399,7 @@ M1 已完成并通过：
 | SceneStateStrip | 基础/命名状态、initial/thumbnail 与原交互不变 |
 | RightSidebar/tabs | 简洁/专业、元素、图层、属性、互动、开发继续使用原组件 |
 | Properties | 原控件设计不重写；公共选择与提交边界写 V9 command |
-| Workspace | 原 stageViewportTransform、Phaser bridge、选择、命中和变换手感继续工作 |
+| Workspace | 原 stageViewportTransform、可见缩放/fit/平移控件、Phaser bridge、选择、命中和变换手感继续工作 |
 | App lifecycle | new/open/recent/save/save-as/dirty/recovery/title/current location 全走 V9 |
 | Backend switch | 正式产品启动后只运行 V9；开发 flag 和临时兼容 facade 在无消费者后删除 |
 
@@ -422,8 +430,8 @@ M1 已完成并通过：
 | 能力组 | 必须成立 |
 |---|---|
 | Player lifecycle | 从当前 location/state 新建隔离 Published Player；停止、restart、连续运行无泄漏 |
-| 编辑隔离 | 运行不改变 Project、history、selection、viewport；编辑 Host 不切 playback |
-| 控制器运行 | 导航、收展、目录、静音、全屏在 Player 正确工作 |
+| 编辑隔离 | 运行不改变 Project、history、selection、viewport；编辑 Host 不切 playback，不出现 TeacherEscapeControls/额外导航 |
+| 控制器运行 | 跨表面导航、收展、session-only 移动、目录、重播、静音、全屏在 Player 正确工作 |
 | Snapshot | 默认不回写；显式保存时只写结构化可作者状态，一次事务；不支持动态状态用中文说明 |
 | DeveloperTab | 继续使用原 DeveloperTab，选择来自 V9，保留 Runtime/Object/Rules/Component 区域 |
 | Runtime | API 2/3 source 校验、编辑、撤销、content、assets、fallback、错误、作者预览和公开地址 |
@@ -453,7 +461,7 @@ M1 已完成并通过：
 | 关系 | relation、label、普通/箭头连线 |
 | 镜头 | 首页、镜头新增/定位/重命名/排序/删除 |
 | 路径 | 教学路径、小地图和语义缩放 |
-| 统一层 | global/surface/world 图层与教师控制器 |
+| 统一层 | global/surface/world 图层与教师控制器；统一 order 不得混淆 viewport 与 world camera 坐标空间 |
 | Player/export | location/camera 一致的隔离 Player；HTML/PDF/PPTX 的 effective layer 与静态排除规则一致 |
 
 #### Mixed、质量与清理
@@ -466,7 +474,7 @@ M1 已完成并通过：
 | Whole-course | 整课隔离 Player 与 restart |
 | Export | HTML、网页包、PDF、PPTX、DOCX；capture 不污染编辑 Project 或运行会话 |
 | Behavior | 原高价值行为全部 keep 或有明确 replacement；不得静默删除 |
-| Visual | 原壳结构、字体、状态条、控制器和三档布局在 M8 机械通过 |
+| Visual | 原壳结构、字体、状态条、控制器和三档布局在简洁/专业模式均机械通过；不得有壳层纵向溢出或冻结控件落到可视区外 |
 | Samples | 至少一份覆盖 Slide/Flow/Spatial/Mixed 的真实课例完成构建、保存重开、Player 与五类导出 |
 | Reachability | 原 App 唯一正式入口；CourseStudio 失败前端和替代测试按可达性簇删除 |
 | Legacy | V8 默认编辑真相源和 Published V1 临时路径删除；显式 V8 导入与 Runtime 2/3 兼容保留 |
