@@ -4,8 +4,8 @@
 > DATE: 2026-08-15
 > ROLE: 本仓库唯一长期开发计划
 > EXECUTION_MODE: 并行 Agent 集群（唯一协调者 + 多执行者 + 单一集成主线）
-> CURRENT_STAGE: M3 / 完成 Slide 作者闭环
-> CURRENT_PRODUCT_CHECKPOINT: b6d1787875339fff8ba03d80cfbf80187c009caa
+> CURRENT_STAGE: M4 / Player、Runtime、Component 与课程逻辑
+> CURRENT_PRODUCT_CHECKPOINT: 6361641
 > CURRENT_PLAN_CHECKPOINT: 8b4513c
 > BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485
 > V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d
@@ -122,6 +122,7 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 | M2-E–M2-H | `b010947` … `cc8c6c4` | 场景 Native、Properties、默认 V9、导出、全局控制器和工程检查 |
 | M2 | `cc8c6c4` | 默认 V9 单写生命周期及原壳主要区域 Gate |
 | M3-A | `b6d1787` | surface Native 作者闭环、共享显示、统一顺序、陈旧目标拒绝和保存重开 |
+| M3 | `6361641` | 完整 Slide 作者闭环：media/text/背景作者链、原子 IME 事务、互动/开发 UI 接 V9、动态作者目标入统一图层、一次手势一次 history、M3 Gate 全证据通过 |
 
 产品 accepted cursor 仍是 M1。反重写 diff 基线固定为 `BASE_COMMIT`，不能随阶段移动。
 
@@ -135,6 +136,17 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 - 编辑态只显示工程内教师控制器；全局控制器可选择、缩放下移动、Undo/Redo、保存重开。
 - Published V2 已移除废弃的画布外 `.course-nav` 底栏。
 - App 壳在 1280×720、1366×768、1920×1080 三档视口贴合窗口；新增元素后无壳层跳动、页面滚动或底部黑区。
+
+### 3.4 M3 Gate 已通过（2026-08-15，`6361641`）
+
+- image/video 插入、素材引用、稳定选择、通用属性、场景背景颜色/素材与保存重开成立（T-IMG）。
+- text 画布编辑/富文本/IME 事务一次编辑一次 history，session 绑定 authoring 引用、任何文档变更即失效防串写（T-TEXT）。
+- formula/shape/media 属性与 Workspace 视觉同步；resize/rotate/多选/方向键一次手势一次 history，scene/surface/global 与命名状态一致（T-GEST）。
+- Runtime/Component 作者目标进入统一图层：稳定 authoringAddress、编辑态与 Phaser proxy 共用同一 V9 只读事实、不投影成假 Native（T-RTGT）。
+- Interaction/Automation/Developer/Components 四 Tab 接 V9 command；可达按钮真实执行或明确禁用，不静默写 V8（T-IUI）。
+- Published Slide 会话生命周期统一：真实 await 异步 action、失败停链并报教师安全错误、scene/presentation exit/enter 事件、video 媒体事件、WAAPI motion（T-PSES）。
+- Runtime API 2/3 编辑宿主链（create 失败清理、API 2 dom 重挂、API 3 capture/checkpoint 屏障）与 Component API 4 全链（多版本显式拒绝、props/hot update 不重建无关实例、fallback/thumbnail/实跑职责分离）成立（T-RT/T-COMP）。
+- L3 证据：M3 定向测试、typecheck、受影响 build、代表性 Electron（几何三档 + 试运行 3 条）、`npm test`、preservation 门禁全部通过。
 
 ### 3.3 已关闭 P1：新增元素后壳层上弹并露出底部黑区
 
@@ -177,20 +189,20 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 
 | ID | 目标（口径见从属计划） | 供给 | 依赖 | owns | 状态 |
 |---|---|---|---|---|---|
-| T-IMG | image/video 插入、素材引用、稳定选择、通用属性、保存重开；场景背景颜色与背景素材（M3-B3.1/2） | M3 | 无 | 媒体作者链与对应测试 | pending |
-| T-TEXT | text 正文/富文本/IME 事务，一次编辑一次 history（M3-B3.3） | M3 | 无 | 文本编辑链与对应测试 | pending |
-| T-RTGT | Runtime/Component 作者目标进入统一图层（M3-B4） | M3 | 无 | authoring host、hit/address 映射、Nodes/Properties 窄边界 | pending |
-| T-IUI | 原 Interaction/Automation/Developer/Components 逐项接 V9（M3-B5） | M3 | 无 | 右栏四个 Tab 与对应 commands | pending |
-| T-PSES ★ | Published Slide 会话生命周期统一（M4-A） | M4 | 无（M3-B1/B2 已集成） | `src/player/**` Slide 会话链 | pending |
-| T-RT ★ | Runtime API 2/3 全链（M4-C） | M4 | 无 | Runtime host 链与对应测试 | pending |
-| T-COMP ★ | Component API 4 全链（M4-D） | M4 | 无 | Component host 链与对应测试 | pending |
+| T-IMG | image/video 插入、素材引用、稳定选择、通用属性、保存重开；场景背景颜色与背景素材（M3-B3.1/2） | M3 | 无 | 媒体作者链与对应测试 | integrated |
+| T-TEXT | text 正文/富文本/IME 事务，一次编辑一次 history（M3-B3.3） | M3 | 无 | 文本编辑链与对应测试 | integrated |
+| T-RTGT | Runtime/Component 作者目标进入统一图层（M3-B4） | M3 | 无 | authoring host、hit/address 映射、Nodes/Properties 窄边界 | integrated |
+| T-IUI | 原 Interaction/Automation/Developer/Components 逐项接 V9（M3-B5） | M3 | 无 | 右栏四个 Tab 与对应 commands | integrated |
+| T-GEST | formula/shape/media 属性视觉同步；resize/rotate/多选/方向键跨 scope/state 一次手势一次 history（M3-B3.4/5） | M3 | T-IMG、T-TEXT | 手势/属性同步链与对应测试 | integrated |
+| T-PSES ★ | Published Slide 会话生命周期统一（M4-A） | M4 | 无（M3-B1/B2 已集成） | `src/player/**` Slide 会话链 | integrated |
+| T-RT ★ | Runtime API 2/3 全链（M4-C） | M4 | 无 | Runtime host 链与对应测试 | integrated |
+| T-COMP ★ | Component API 4 全链（M4-D） | M4 | 无 | Component host 链与对应测试 | integrated |
 
 依赖队列（条件满足后由协调者派发）：
 
 | ID | 目标 | 供给 | 依赖 | 状态 |
 |---|---|---|---|---|
-| T-GEST | formula/shape/media 属性视觉同步；resize/rotate/多选/方向键跨 scope/state 一次手势一次 history（M3-B3.4/5） | M3 | T-IMG、T-TEXT 集成 | pending |
-| T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | pending |
+| T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | dispatched |
 | T-CSTATE | 课程状态与恢复（M4-E） | M4 | T-PSES、T-CTRL | pending |
 
 M3 Gate 后协调者按同一规范拆 M5/M6 任务板：M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
@@ -201,7 +213,7 @@ M3 Gate 后协调者按同一规范拆 M5/M6 任务板：M5 与 M6 默认并行�
 
 ## 5. 里程碑完成定义
 
-### M3 — 完整 Slide 作者闭环
+### M3 — 完整 Slide 作者闭环（Gate 通过，2026-08-15，`6361641`）
 
 供给任务：T-IMG、T-TEXT、T-GEST、T-RTGT、T-IUI（M3-B0/B1/B2 已集成）。
 

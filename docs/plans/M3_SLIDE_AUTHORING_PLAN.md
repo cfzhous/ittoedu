@@ -2,7 +2,7 @@
 
 > PARENT: [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md)
 > BASELINE: product `b6d1787875339fff8ba03d80cfbf80187c009caa`
-> STATUS: active
+> STATUS: closed（Gate 通过于 2026-08-15，最终 SHA `6361641`；供给任务 T-IMG/T-TEXT/T-GEST/T-RTGT/T-IUI 全部 integrated）
 > OUTCOME: 原壳内完成可编辑、可运行、可保存重开的 Slide 作者链
 
 本文件只细化 M3。若与根计划、源码或 Schema 冲突，以根计划规定的事实优先级为准。

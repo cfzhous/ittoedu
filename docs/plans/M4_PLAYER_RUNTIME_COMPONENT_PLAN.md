@@ -1,8 +1,8 @@
 # M4：Player、Runtime、Component 与课程逻辑
 
 > PARENT: [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md)
-> PREREQUISITE: 见根计划 §4.5 任务板（T-PSES/T-RT/T-COMP 与 M3 在途任务前置并行；M4 Gate 判定仍在 M3 Gate 之后）
-> STATUS: pending
+> PREREQUISITE: 见根计划 §4.5 任务板（T-PSES/T-RT/T-COMP 已 integrated；T-CTRL dispatched；T-CSTATE pending）
+> STATUS: active
 > OUTCOME: 编辑 snapshot、课程运行会话和动态载体具有完整且单一的运行合同
 
 本文件只细化 M4，不重新定义 M3 的作者 UI 或 M5/M6 的表面编辑器。

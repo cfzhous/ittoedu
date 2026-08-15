@@ -132,16 +132,15 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前为 M3，恢复于产品检查点 `b6d1787`。
+当前为 M4，恢复于产品检查点 `6361641`（M3 Gate 已于 2026-08-15 通过）。
 
-壳层上弹/底部黑区 P1 已关闭（2026-08-15）：`ProductApp.tsx` 的匿名包装 `div` 曾断开 `#root` → `.app-shell` 的 100% 高度链，使壳退化为内容高度并在视口底部露出窗口背景；修复为 ProductApp 直接渲染原 App，几何断言在 `v9SlideVerticalSlice` Electron 路径常驻。
+M3 已成立（`6361641`）：media/text/背景作者链与原子 IME 事务、互动/开发 UI 接 V9、Runtime/Component 作者目标入统一图层、一次手势一次 history、Published Slide 会话生命周期与异步 action await、Runtime API 2/3 与 Component API 4 全链；L3 证据（定向测试、typecheck、build、代表性 Electron、npm test、preservation）全通过。
 
-随后依次是：
+M4 依次推进：
 
-1. Published Slide 执行基础 `scene.interactions`。
-2. 独立当前位置试运行。
-3. image/video、背景、文字事务与剩余 Native。
-4. Runtime/Component 作者目标和原互动/开发 UI。
+1. 教师控制器运行合同（T-CTRL，依赖 T-PSES 已集成，派发中）。
+2. 课程状态与恢复（T-CSTATE，依赖 T-PSES + T-CTRL）。
+3. M4 Gate：代表性双场景 Slide 状态互动、导航、目录、收展、session 移动、重播、重启、静音、全屏、Runtime 2/3、Component 4、销毁重建。
 
 ## 7. 关键不变量
 
