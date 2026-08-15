@@ -19,6 +19,7 @@ import {
   type ComponentSlideItemHostFactory,
   type RuntimeSlideItemHostFactory,
   type SlideInspectionMode,
+  type SlideInteractionSession,
   type SlideLayerHit,
 } from '../slide/SlideSurfaceHost'
 import {
@@ -58,6 +59,12 @@ export interface FlowLayerHit {
   targetKind?: 'text' | 'asset'
 }
 
+export interface FlowBlockHit {
+  surfaceId: string
+  blockId: string
+  field?: string
+}
+
 export interface FlowScopedLayerHostOptions {
   componentHostFactory?: ComponentSlideItemHostFactory
   runtimeHostFactory?: RuntimeSlideItemHostFactory
@@ -78,7 +85,23 @@ export interface FlowScopedLayerHostOptions {
   playbackControls?: 'canvas' | 'none'
   /** Course session mute seed (`project.media.audio.defaultMuted`). */
   initialMuted?: boolean
+  /**
+   * Published playback interaction session. When omitted the Flow overlay stays
+   * inert: it renders and reports hits but never executes interaction rules.
+   * Authoring inspect hosts and capture paths must omit it.
+   */
+  interactions?: SlideInteractionSession
   onLayerHit?(hit: FlowLayerHit): void
+}
+
+/**
+ * Flow surface host options. The Flow semantic article and the shared overlay
+ * compositor receive the same option object; the scoped layer host only reads
+ * the overlay subset.
+ */
+export interface FlowSurfaceHostOptions extends FlowScopedLayerHostOptions {
+  renderComponent?: FlowRenderOptions['renderComponent']
+  onBlockHit?(hit: FlowBlockHit): void
 }
 
 export interface FlowStaticLayerEntry {
@@ -137,6 +160,7 @@ export class FlowScopedLayerHost {
       executeTeacherControllerAction: options.executeTeacherControllerAction,
       playbackControls: options.playbackControls,
       initialMuted: options.initialMuted,
+      interactions: options.interactions,
       onLayerHit: (hit) => {
         if (hit.source === 'scene') return
         options.onLayerHit?.({
@@ -534,23 +558,30 @@ export class FlowSurfaceHost implements SurfaceHost {
   #renderComponent?: FlowRenderOptions['renderComponent']
   #renderedComponents: FlowRenderedComponent[] = []
   #mode: SlideInspectionMode = 'playback'
+  #onBlockHit?: FlowSurfaceHostOptions['onBlockHit']
   #domPlayback = new DomPlaybackFreeze()
   #queue: Promise<void> = Promise.resolve()
 
   constructor(
     flow: FlowSurfaceDocument,
-    options: Pick<FlowRenderOptions, 'renderComponent'> & FlowScopedLayerHostOptions = {},
+    options: FlowSurfaceHostOptions = {},
   ) {
     this.id = flow.id
     this.#initial = cloneFlowDocument(flow)
     this.#current = cloneFlowDocument(flow)
     this.#renderComponent = options.renderComponent
     this.#mode = options.inspectionMode ?? 'playback'
+    this.#onBlockHit = options.onBlockHit
     this.#scopedLayers = new FlowScopedLayerHost(flow, options)
   }
 
   get document(): FlowSurfaceDocument {
     return cloneFlowDocument(this.#current)
+  }
+
+  /** Stable authoring address for a semantic Flow block in this surface. */
+  flowAuthoringAddress(blockId: string): string {
+    return `surface:${this.id}/block:${blockId}`
   }
 
   async updateDocument(flow: FlowSurfaceDocument): Promise<void> {
@@ -691,6 +722,7 @@ export class FlowSurfaceHost implements SurfaceHost {
       },
     })
     next.hidden = false
+    next.addEventListener('click', this.#handleBlockClick)
     this.#article?.remove()
     root.insertBefore(next, this.#overlayMount)
     this.#article = next
@@ -700,6 +732,52 @@ export class FlowSurfaceHost implements SurfaceHost {
       else void component.suspend?.()
     }
     this.#syncDomPlayback()
+  }
+
+  #handleBlockClick = (event: Event): void => {
+    if (!this.#onBlockHit) return
+    const view = this.#article?.ownerDocument.defaultView
+    const target = event.target
+    if (!view || !target || !(target instanceof view.Element)) return
+    const blockElement = target.closest<HTMLElement>('[data-flow-block-id]')
+    if (!blockElement || !this.#article?.contains(blockElement)) return
+    const blockId = blockElement.dataset.flowBlockId
+    if (!blockId) return
+    const field = this.#flowBlockHitField(target, blockElement)
+    this.#onBlockHit({
+      surfaceId: this.id,
+      blockId,
+      ...(field ? { field } : {}),
+    })
+  }
+
+  #flowBlockHitField(target: Element, blockElement: HTMLElement): string | undefined {
+    // List items are the only granular block targets with a stable item id in
+    // the live semantic DOM; report their authored array index as the field.
+    const listItem = target.closest<HTMLElement>('[data-flow-list-item-id]')
+    if (listItem && blockElement.contains(listItem)) {
+      const index = Array.from(blockElement.querySelectorAll<HTMLElement>('[data-flow-list-item-id]'))
+        .indexOf(listItem)
+      if (index >= 0) return `items.${index}`
+    }
+
+    // Table header/cell targets map back to the exact model path used by Flow
+    // search and property editing.
+    const cell = target.closest<HTMLElement>('th,td')
+    if (!cell || !blockElement.contains(cell)) return undefined
+    if (cell.tagName === 'TH') {
+      const index = Array.from(blockElement.querySelectorAll<HTMLElement>('thead th')).indexOf(cell)
+      return index >= 0 ? `columns.${index}` : undefined
+    }
+
+    const row = cell.closest<HTMLElement>('tr')
+    if (!row) return undefined
+    const rowIndex = Array.from(blockElement.querySelectorAll<HTMLElement>('tbody tr')).indexOf(row)
+    if (rowIndex < 0) return undefined
+    const cellIndex = Array.from(row.children).indexOf(cell)
+    if (cellIndex < 0) return undefined
+    const columnId = blockElement.querySelectorAll<HTMLElement>('thead th')[cellIndex]?.dataset.flowColumnId
+    return columnId ? `rows.${rowIndex}.${columnId}` : `rows.${rowIndex}.${cellIndex}`
   }
 
   #syncDomPlayback(): void {
