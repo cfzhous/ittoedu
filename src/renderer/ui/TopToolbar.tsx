@@ -60,7 +60,7 @@ type TopToolbarProps = TopToolbarBaseProps & (
   | { documentControl?: undefined }
 )
 
-export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf'
+export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
 
 interface ToolButtonProps {
   label: string
@@ -468,6 +468,21 @@ function TopToolbarView({
             <FileText size={18} />
             <span><strong>PDF</strong><small>静态页面，互动组件将静态化</small></span>
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-docx"
+            className="export-menu__item"
+            disabled={Boolean(unavailableExports?.docx)}
+            title={unavailableExports?.docx}
+            onClick={(event) => {
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('docx')
+            }}
+          >
+            <FileText size={18} />
+            <span><strong>DOCX 讲义</strong><small>Flow 内容导出为可编辑 Word 文档</small></span>
+          </button>
         </div>
       </details>
     </header>
@@ -502,6 +517,9 @@ function LegacyTopToolbar(props: TopToolbarBaseProps) {
         canInspectHealth: true,
         canPreview: true,
         canExport: true,
+        unavailableExports: {
+          docx: '请先切换到 Flow 讲义位置',
+        },
         onRename: renameProject,
         onUndo: undo,
         onRedo: redo,

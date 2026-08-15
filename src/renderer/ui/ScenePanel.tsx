@@ -26,6 +26,12 @@ import {
   type SceneThumbnailRenderModel,
 } from './SceneThumbnail'
 import { hasUnrepresentedRuntime } from './sceneThumbnailComposition'
+import type { FlowEditorView } from '../course/flowEditorView'
+import { FlowOutlinePanel } from './FlowOutlinePanel'
+import {
+  SpatialCameraPanel,
+  type SpatialCameraPanelProps,
+} from './SpatialCameraPanel'
 
 export interface ScenePanelSceneRow {
   id: string
@@ -40,6 +46,18 @@ export interface ScenePanelSceneRow {
  * Narrow document/control boundary shared by the original panel UI and the V9
  * editor backend. It contains no ProjectDocument or editor-store operations.
  */
+export interface ScenePanelFlowDocumentControl {
+  readonly surfaceTitle: string
+  readonly flowView: FlowEditorView
+  readonly selectedBlockId?: string | null
+  readonly onSelectBlock: (blockId: string) => void
+  readonly onAddSurface?: () => void
+}
+
+export interface ScenePanelSpatialDocumentControl extends SpatialCameraPanelProps {
+  readonly onAddSurface?: () => void
+}
+
 export interface ScenePanelDocumentControl {
   /** Explains why the current course location has no scene-authoring surface. */
   unavailableReason?: string
@@ -406,9 +424,79 @@ export function LegacyScenePanelAdapter() {
 
 export function ScenePanel({
   documentControl,
+  flowDocumentControl,
+  spatialDocumentControl,
 }: {
   documentControl?: ScenePanelDocumentControl
+  flowDocumentControl?: ScenePanelFlowDocumentControl
+  spatialDocumentControl?: ScenePanelSpatialDocumentControl
 } = {}) {
+  if (flowDocumentControl) {
+    return (
+      <aside className="panel scene-panel" aria-label="Flow 讲义导航">
+        <div className="panel-header">
+          <h2 className="panel-title">Flow 讲义</h2>
+          {flowDocumentControl.onAddSurface && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={flowDocumentControl.onAddSurface}
+              data-testid="add-flow-surface"
+            >
+              <Plus size={14} />
+              添加 Flow 讲义
+            </button>
+          )}
+        </div>
+        <div
+          className="scene-panel-surface-title"
+          data-testid="scene-panel-surface-title"
+        >
+          {flowDocumentControl.surfaceTitle}
+        </div>
+        <div className="scene-panel-flow-outline" data-testid="scene-panel-flow-outline">
+          <FlowOutlinePanel
+            view={flowDocumentControl.flowView}
+            selectedBlockId={flowDocumentControl.selectedBlockId}
+            onSelectBlock={flowDocumentControl.onSelectBlock}
+          />
+        </div>
+      </aside>
+    )
+  }
+  if (spatialDocumentControl) {
+    const {
+      onAddSurface,
+      ...cameraPanelProps
+    } = spatialDocumentControl
+    return (
+      <aside className="panel scene-panel" aria-label="Spatial 空间导航">
+        <div className="panel-header">
+          <h2 className="panel-title">Spatial 空间</h2>
+          {onAddSurface && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={onAddSurface}
+              data-testid="add-spatial-surface"
+            >
+              <Plus size={14} />
+              添加 Spatial 空间
+            </button>
+          )}
+        </div>
+        <div
+          className="scene-panel-surface-title"
+          data-testid="scene-panel-surface-title"
+        >
+          {spatialDocumentControl.surfaceTitle}
+        </div>
+        <div className="scene-panel-spatial-frames" data-testid="scene-panel-spatial-frames">
+          <SpatialCameraPanel {...cameraPanelProps} />
+        </div>
+      </aside>
+    )
+  }
   if (documentControl?.unavailableReason) {
     return (
       <aside className="panel scene-panel" aria-label="场景列表">

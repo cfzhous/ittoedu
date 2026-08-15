@@ -1,3 +1,4 @@
+import { Shapes, Sigma, Type } from 'lucide-react'
 import { ElementsTab, type ElementsTabDocumentControl } from './ElementsTab'
 import { NodesTab, type NodesTabDocumentControl } from './NodesTab'
 import {
@@ -12,6 +13,26 @@ import type {
   AvailableComponentCatalogPackage,
   ComponentCatalogSnapshot,
 } from '../../shared/componentCatalog'
+import {
+  FlowElementsTab,
+  type FlowElementsTabProps,
+} from './FlowElementsTab'
+import {
+  FlowPropertiesTab,
+  type FlowPropertiesTabProps,
+} from './FlowPropertiesTab'
+import {
+  SpatialLayerInspector,
+  type SpatialLayerInspectorProps,
+} from './SpatialLayerInspector'
+import {
+  SpatialCameraPanel,
+  type SpatialCameraPanelProps,
+} from './SpatialCameraPanel'
+import {
+  SpatialPathEditor,
+  type SpatialPathEditorProps,
+} from './SpatialPathEditor'
 
 export interface RightSidebarDocumentControl {
   readonly elements?: ElementsTabDocumentControl
@@ -25,6 +46,27 @@ export interface RightSidebarDocumentControl {
   readonly unavailableReasons?: Partial<Record<SidebarTab, string>>
 }
 
+export interface RightSidebarFlowDocumentControl {
+  readonly elements: FlowElementsTabProps
+  readonly properties: FlowPropertiesTabProps
+}
+
+export interface RightSidebarSpatialElementsControl {
+  onAddText(): void
+  onAddShape(): void
+  onAddFormula(): void
+  readonly disabledReason?: string
+}
+
+export interface RightSidebarSpatialDocumentControl {
+  readonly elements: RightSidebarSpatialElementsControl
+  readonly layers: SpatialLayerInspectorProps
+  readonly properties: {
+    readonly camera: SpatialCameraPanelProps
+    readonly paths: SpatialPathEditorProps
+  }
+}
+
 interface RightSidebarProps {
   /**
    * Keeps the original shell/tabs available while preventing an unsupported
@@ -33,6 +75,8 @@ interface RightSidebarProps {
    */
   documentEditingUnavailableReason?: string
   documentControl?: RightSidebarDocumentControl
+  flowDocumentControl?: RightSidebarFlowDocumentControl
+  spatialDocumentControl?: RightSidebarSpatialDocumentControl
   onAddImage(x?: number, y?: number): void
   onReplaceImage(): void
   onAddVideo(x?: number, y?: number): void
@@ -64,9 +108,70 @@ const professionalTabs: Array<{ id: SidebarTab; label: string }> = [
   { id: 'developer', label: '开发' },
 ]
 
+function SpatialElementsPanel({
+  control,
+}: {
+  control: RightSidebarSpatialElementsControl
+}) {
+  const disabled = Boolean(control.disabledReason)
+  return (
+    <div className="elements-scroll" data-testid="spatial-elements-tab" aria-disabled={disabled}>
+      <div className="section-heading section-heading--spaced">
+        <span>Spatial 内容</span>
+        <Type size={14} aria-hidden="true" />
+      </div>
+      {control.disabledReason && (
+        <div className="empty-state add-category-empty" role="status" data-testid="spatial-elements-disabled-reason">
+          {control.disabledReason}
+        </div>
+      )}
+      <div className="element-grid" role="group" aria-label="Spatial 内容类型">
+        <button
+          type="button"
+          className="element-card"
+          aria-label="文字"
+          data-testid="add-spatial-text"
+          disabled={disabled}
+          title={disabled ? control.disabledReason : '插入空间文字'}
+          onClick={control.onAddText}
+        >
+          <span className="element-icon"><Type size={20} aria-hidden="true" /></span>
+          文字
+        </button>
+        <button
+          type="button"
+          className="element-card"
+          aria-label="图形"
+          data-testid="add-spatial-shape"
+          disabled={disabled}
+          title={disabled ? control.disabledReason : '插入空间图形'}
+          onClick={control.onAddShape}
+        >
+          <span className="element-icon"><Shapes size={20} aria-hidden="true" /></span>
+          图形
+        </button>
+        <button
+          type="button"
+          className="element-card"
+          aria-label="公式"
+          data-testid="add-spatial-formula"
+          disabled={disabled}
+          title={disabled ? control.disabledReason : '插入空间公式'}
+          onClick={control.onAddFormula}
+        >
+          <span className="element-icon"><Sigma size={20} aria-hidden="true" /></span>
+          公式
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function RightSidebar({
   documentEditingUnavailableReason,
   documentControl,
+  flowDocumentControl,
+  spatialDocumentControl,
   onAddImage,
   onReplaceImage,
   onAddVideo,
@@ -84,27 +189,39 @@ export function RightSidebar({
   const editorMode = useEditorStore((state) => state.editorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const tabs = editorMode === 'professional' ? professionalTabs : simpleTabs
-  const controlledTabAvailable = documentControl
-    ? activeTab === 'elements'
-      ? Boolean(documentControl.elements)
-      : activeTab === 'layers'
-        ? Boolean(documentControl.layers)
-        : activeTab === 'properties'
-          ? Boolean(documentControl.properties)
-          : activeTab === 'components'
-            ? Boolean(documentControl.components)
-            : activeTab === 'automation'
-              ? Boolean(documentControl.automation)
-              : activeTab === 'developer'
-                ? Boolean(documentControl.developer)
-                : false
-    : false
-  const activeUnavailableReason = documentControl
+  const controlledTabAvailable = flowDocumentControl
+    ? activeTab === 'elements' || activeTab === 'properties'
+    : spatialDocumentControl
+      ? activeTab === 'elements' || activeTab === 'layers' || activeTab === 'properties'
+      : documentControl
+        ? activeTab === 'elements'
+          ? Boolean(documentControl.elements)
+          : activeTab === 'layers'
+            ? Boolean(documentControl.layers)
+            : activeTab === 'properties'
+              ? Boolean(documentControl.properties)
+              : activeTab === 'components'
+                ? Boolean(documentControl.components)
+                : activeTab === 'automation'
+                  ? Boolean(documentControl.automation)
+                  : activeTab === 'developer'
+                    ? Boolean(documentControl.developer)
+                    : false
+        : false
+  const activeUnavailableReason = flowDocumentControl
     ? controlledTabAvailable
       ? undefined
-      : documentControl.unavailableReasons?.[activeTab] ??
-        '当前版本暂不支持此面板；现有内容不会改变。'
-    : documentEditingUnavailableReason
+      : 'Flow 讲义暂不提供此面板；现有内容不会改变。'
+    : spatialDocumentControl
+      ? controlledTabAvailable
+        ? undefined
+        : '空间画布暂不提供此面板；现有内容不会改变。'
+      : documentControl
+        ? controlledTabAvailable
+          ? undefined
+          : documentControl.unavailableReasons?.[activeTab] ??
+            '当前版本暂不支持此面板；现有内容不会改变。'
+        : documentEditingUnavailableReason
 
   return (
     <aside
@@ -145,6 +262,23 @@ export function RightSidebar({
             <strong>{tabs.find((tab) => tab.id === activeTab)?.label ?? '编辑'}面板暂不可用</strong>
             <p>{activeUnavailableReason}</p>
           </div>
+        ) : flowDocumentControl ? (
+          activeTab === 'elements' ? (
+            <FlowElementsTab {...flowDocumentControl.elements} />
+          ) : activeTab === 'properties' ? (
+            <FlowPropertiesTab {...flowDocumentControl.properties} />
+          ) : null
+        ) : spatialDocumentControl ? (
+          activeTab === 'elements' ? (
+            <SpatialElementsPanel control={spatialDocumentControl.elements} />
+          ) : activeTab === 'layers' ? (
+            <SpatialLayerInspector {...spatialDocumentControl.layers} />
+          ) : activeTab === 'properties' ? (
+            <>
+              <SpatialCameraPanel {...spatialDocumentControl.properties.camera} />
+              <SpatialPathEditor {...spatialDocumentControl.properties.paths} />
+            </>
+          ) : null
         ) : activeTab === 'elements' ? (
           documentControl?.elements ? (
             <ElementsTab documentControl={documentControl.elements} />

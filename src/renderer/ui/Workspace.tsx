@@ -141,12 +141,36 @@ import {
   type AuthoringCanvasTarget,
 } from '../authoring/aiSelectionReference'
 import type { V9SlideLayerTarget } from '../course/v9SlideVerticalSlice'
+import type { FlowEditorView } from '../course/flowEditorView'
+import type { SpatialSurfaceDocument } from '../../shared/courseProjectTypes'
+import { FlowWorkspace } from './FlowWorkspace'
+import {
+  SpatialWorkspace,
+  type SpatialWorkspaceItemTransform,
+} from './SpatialWorkspace'
+
+export interface WorkspaceFlowAuthoringInput {
+  readonly view: FlowEditorView
+  readonly selectedBlockId?: string | null
+  readonly onSelectBlock?: (blockId: string) => void
+}
+
+export interface WorkspaceSpatialAuthoringInput {
+  readonly spatial: SpatialSurfaceDocument
+  readonly viewportSize: { width: number; height: number }
+  readonly selectedLayerItemIds?: readonly string[]
+  readonly interactionDisabled?: boolean
+  readonly onSelect: (ids: readonly string[]) => void
+  readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
+}
 
 export interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
   onAddVideo(x?: number, y?: number): void
   onSelectImageAsset(): Promise<ImportedImageAsset | null>
   slideAuthoring?: WorkspaceSlideAuthoringInput
+  flowAuthoring?: WorkspaceFlowAuthoringInput
+  spatialAuthoring?: WorkspaceSpatialAuthoringInput
   courseLocationUnavailableReason?: string
   interactionDisabled?: boolean
 }
@@ -356,6 +380,35 @@ export function Workspace(props: WorkspaceProps) {
             <strong>当前内容暂不可编辑</strong>
             <span>{props.courseLocationUnavailableReason}</span>
           </div>
+        </div>
+      </main>
+    )
+  }
+  if (props.flowAuthoring) {
+    return (
+      <main className="workspace workspace--edit" aria-label="Flow 讲义画布">
+        <div className="workspace-flow-authoring" data-testid="workspace-flow-authoring">
+          <FlowWorkspace
+            view={props.flowAuthoring.view}
+            selectedBlockId={props.flowAuthoring.selectedBlockId}
+            onSelectBlock={props.flowAuthoring.onSelectBlock}
+          />
+        </div>
+      </main>
+    )
+  }
+  if (props.spatialAuthoring) {
+    return (
+      <main className="workspace workspace--edit" aria-label="Spatial 空间画布">
+        <div className="workspace-spatial-authoring" data-testid="workspace-spatial-authoring">
+          <SpatialWorkspace
+            spatial={props.spatialAuthoring.spatial}
+            viewportSize={props.spatialAuthoring.viewportSize}
+            selectedLayerItemIds={props.spatialAuthoring.selectedLayerItemIds}
+            interactionDisabled={props.spatialAuthoring.interactionDisabled}
+            onSelect={props.spatialAuthoring.onSelect}
+            onTransformEnd={props.spatialAuthoring.onTransformEnd}
+          />
         </div>
       </main>
     )

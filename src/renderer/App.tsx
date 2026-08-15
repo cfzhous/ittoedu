@@ -20,12 +20,19 @@ import type {
   SelectedMediaBatchFile,
 } from '../shared/ipcTypes'
 import type { AssetKind, AssetMeta } from '../shared/projectTypes'
-import type { CourseProjectDocument } from '../shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  FlowBlock,
+} from '../shared/courseProjectTypes'
+import { getEffectiveCourseLayerOrder } from '../shared/courseProjectModel'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
+import { bytesToDataUrl } from './export/base64'
 import { buildExportPayload } from './export/buildExportPayload'
 import { buildStandaloneHtml } from './export/buildStandaloneHtml'
 import { buildWebPackageFromProjectAsync } from './export/buildWebPackage'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
+import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
+import { buildFlowDocx, type FlowDocxLayerEntry } from './export/course/flowDocx'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageAsync,
@@ -57,6 +64,9 @@ import {
   type CourseProjectHealthCheckResult,
 } from './course/courseProjectHealthCheck'
 import { buildSlideEditorView } from './course/slideEditorView'
+import { buildFlowEditorView } from './course/flowEditorView'
+import { buildSpatialEditorView } from './course/spatialEditorView'
+import type { FlowEditorBlockInput } from './course/flowEditorCommands'
 import {
   v9InteractionSceneDocument,
   v9InteractionSounds,
@@ -102,10 +112,14 @@ import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import {
   RightSidebar,
   type RightSidebarDocumentControl,
+  type RightSidebarFlowDocumentControl,
+  type RightSidebarSpatialDocumentControl,
 } from './ui/RightSidebar'
 import {
   ScenePanel,
   type ScenePanelDocumentControl,
+  type ScenePanelFlowDocumentControl,
+  type ScenePanelSpatialDocumentControl,
 } from './ui/ScenePanel'
 import {
   buildCourseSceneThumbnailRenderModel,
@@ -116,7 +130,14 @@ import {
 } from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
+import type {
+  WorkspaceFlowAuthoringInput,
+  WorkspaceSpatialAuthoringInput,
+} from './ui/Workspace'
 import type { WorkspaceSlideAuthoringInput } from './ui/workspaceSlideAuthoring'
+import type { SpatialCameraPanelProps } from './ui/SpatialCameraPanel'
+import type { SpatialLayerInspectorProps } from './ui/SpatialLayerInspector'
+import type { SpatialPathEditorProps } from './ui/SpatialPathEditor'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
 import { planCatalogBatchJoin } from './components/componentLibraryModel'
@@ -429,17 +450,45 @@ export default function App() {
     )
     return scene ? { location, surface, scene } : null
   }, [v9ActiveLocation, v9CourseProject])
+  const v9FlowEditorView = useMemo(() => {
+    if (v9CourseProject === null) return null
+    const location = v9ActiveLocation
+    if (!location || location.kind !== 'flow-block') return null
+    try {
+      return buildFlowEditorView({
+        project: v9CourseProject,
+        locationId: location.id,
+      })
+    } catch (error) {
+      console.error(error)
+      return null
+    }
+  }, [v9ActiveLocation, v9CourseProject])
+  const v9SpatialEditorView = useMemo(() => {
+    if (v9CourseProject === null) return null
+    const location = v9ActiveLocation
+    if (!location || location.kind !== 'spatial-camera') return null
+    try {
+      return buildSpatialEditorView({
+        project: v9CourseProject,
+        locationId: location.id,
+      })
+    } catch (error) {
+      console.error(error)
+      return null
+    }
+  }, [v9ActiveLocation, v9CourseProject])
   const activeCourseEditorRoute = v9SlideVerticalSlice === null
     ? 'legacy'
-    : v9ActiveSlideContext === null
-      ? 'unavailable'
-      : 'slide'
+    : v9ActiveSlideContext !== null
+      ? 'slide'
+      : v9FlowEditorView !== null
+        ? 'flow'
+        : v9SpatialEditorView !== null
+          ? 'spatial'
+          : 'unavailable'
   const v9CourseLocationUnavailableReason = activeCourseEditorRoute === 'unavailable'
-    ? v9ActiveLocation?.kind === 'flow-block'
-      ? '当前流程内容暂不能在编辑器中修改；工程仍可安全保存，现有内容不会改变。'
-      : v9ActiveLocation?.kind === 'spatial-camera'
-        ? '当前空间画布暂不能在编辑器中修改；工程仍可安全保存，现有内容不会改变。'
-        : '当前位置暂时无法编辑；工程仍可安全保存，现有内容不会改变。'
+    ? '当前位置暂时无法编辑；工程仍可安全保存，现有内容不会改变。'
     : undefined
   const activeDocumentLocationLabel = v9SlideVerticalSlice === null
     ? `场景 ${project.scenes.findIndex((scene) => scene.id === activeScene.id) + 1} / ${project.scenes.length}`
@@ -457,6 +506,43 @@ export default function App() {
             (candidate) => candidate.id === v9ActiveLocation.surfaceId,
           )
         : null
+      if (v9FlowEditorView !== null) {
+        const selectedBlock = v9FlowEditorView.blocks.find(
+          (block) => block.blockId === v9FlowEditorView.activeBlockId,
+        )
+        const itemCount = surface?.type === 'flow' ? surface.blocks.length : 0
+        return {
+          locationName: v9ActiveLocation?.label ?? v9FlowEditorView.surfaceTitle,
+          itemCountLabel: `${itemCount} 个内容块`,
+          selectionLabel: selectedBlock
+            ? `已选：${selectedBlock.label}`
+            : '未选择内容块',
+          largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
+            itemCount > RECOMMENDED_SCENE_NODES,
+        }
+      }
+      if (v9SpatialEditorView !== null) {
+        const selectedIds = v9SlideVerticalSlice.selection.spatialLayerItemIds ?? []
+        const selectedLayer = selectedIds.length === 1
+          ? v9SpatialEditorView.layers.find(
+              (layer) => layer.selectionId === selectedIds[0],
+            )
+          : null
+        const itemCount = surface?.type === 'spatial-2d'
+          ? surface.world.layerItems.length
+          : v9SpatialEditorView.layers.length
+        return {
+          locationName: v9ActiveLocation?.label ?? v9SpatialEditorView.surfaceTitle,
+          itemCountLabel: `${itemCount} 个元素`,
+          selectionLabel: selectedIds.length > 1
+            ? `已选 ${selectedIds.length} 个元素`
+            : selectedLayer
+              ? `已选：${selectedLayer.item.label}`
+              : '未选择空间元素',
+          largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
+            itemCount > RECOMMENDED_SCENE_NODES,
+        }
+      }
       const itemCountLabel = surface?.type === 'flow'
         ? `${surface.blocks.length} 个内容块`
         : surface?.type === 'spatial-2d'
@@ -513,7 +599,13 @@ export default function App() {
       largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
         scopeLayerCount > RECOMMENDED_SCENE_NODES,
     }
-  }, [v9ActiveLocation, v9ActiveSlideContext, v9SlideVerticalSlice])
+  }, [
+    v9ActiveLocation,
+    v9ActiveSlideContext,
+    v9FlowEditorView,
+    v9SlideVerticalSlice,
+    v9SpatialEditorView,
+  ])
   const activeStatusBarView = v9StatusBarView ?? {
     locationName: editingScope === 'global' ? '全局层' : activeScene.name,
     itemCountLabel: editingScope === 'global'
@@ -839,6 +931,15 @@ export default function App() {
     },
     [setError],
   )
+
+  const runCourseCommand = useCallback((command: () => void, fallback: string) => {
+    if (lifecycleOperationInFlightRef.current) return
+    try {
+      command()
+    } catch (error) {
+      useEditorStore.getState().setError(readableError(error, fallback))
+    }
+  }, [])
 
   const reportBatchOutcome = useCallback((input: {
     label: string
@@ -1337,6 +1438,309 @@ export default function App() {
       },
     }
   }, [v9ActiveSlideContext?.scene, v9SlideVerticalSlice, v9WorkspaceSnapshot])
+
+  const v9FlowDocumentControl = useMemo<RightSidebarFlowDocumentControl | undefined>(() => {
+    if (v9SlideVerticalSlice === null || v9FlowEditorView === null) return undefined
+    const project = v9SlideVerticalSlice.history.present
+    const selectedBlockView = v9FlowEditorView.blocks.find(
+      (block) => block.blockId === v9FlowEditorView.activeBlockId,
+    )
+    const selectedBlock = selectedBlockView?.block ?? null
+    const selectedSectionId = selectedBlock?.type === 'section'
+      ? selectedBlock.id
+      : undefined
+    return {
+      elements: {
+        onInsert: (request) => runCourseCommand(() => {
+          useEditorStore.getState().insertCourseFlowBlock(
+            request as FlowEditorBlockInput,
+          )
+        }, '无法插入 Flow 内容块'),
+        onInsertNested: (sectionId, request) => runCourseCommand(() => {
+          const section = v9FlowEditorView.blocks.find(
+            (block) => block.blockId === sectionId,
+          )?.block
+          if (!section || section.type !== 'section') {
+            throw new Error('找不到当前分节，请重新选择')
+          }
+          useEditorStore.getState().insertCourseFlowBlock(
+            request as FlowEditorBlockInput,
+            {
+              parentId: sectionId,
+              index: section.blocks.length,
+            },
+          )
+        }, '无法插入 Flow 内容块'),
+        nestedSectionId: selectedSectionId,
+      },
+      properties: {
+        block: selectedBlock
+          ? (structuredClone(selectedBlock) as FlowBlock)
+          : null,
+        assets: Object.values(project.assets)
+          .filter((asset) => asset.kind === 'image')
+          .map((asset) => ({ id: asset.id, label: asset.filename })),
+        componentPackages: Object.values(project.componentPackages).map(
+          (embedded) => ({
+            packageId: embedded.packageId,
+            version: embedded.version,
+          }),
+        ),
+        onPatch: (blockId, patch) => runCourseCommand(() => {
+          useEditorStore.getState().updateCourseFlowBlock(blockId, patch)
+        }, '无法更新 Flow 内容块'),
+      },
+    }
+  }, [runCourseCommand, v9FlowEditorView, v9SlideVerticalSlice])
+
+  const v9SpatialCameraPanelProps = useMemo<SpatialCameraPanelProps | null>(() => {
+    if (v9SlideVerticalSlice === null || v9SpatialEditorView === null) return null
+    const project = v9SlideVerticalSlice.history.present
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === v9SpatialEditorView.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') return null
+    const sessionCamera = surface.camera.home
+    const frameLocation = (frameId: string) => project.locations.find(
+      (location) =>
+        location.kind === 'spatial-camera' &&
+        location.surfaceId === surface.id &&
+        location.cameraFrameId === frameId,
+    )
+    return {
+      surfaceTitle: surface.title,
+      frames: surface.camera.frames,
+      home: surface.camera.home,
+      sessionCamera,
+      activeCameraFrameId: v9SpatialEditorView.activeCameraFrameId,
+      worldLayerItems: surface.world.layerItems,
+      semanticZoomRules: surface.semanticZoom,
+      onAddFrame: () => runCourseCommand(() => {
+        useEditorStore.getState().addCourseSpatialCameraFrame(sessionCamera)
+      }, '无法添加空间镜头画面'),
+      onRenameFrame: (frameId, name) => runCourseCommand(() => {
+        useEditorStore.getState().renameCourseSpatialCameraFrame(frameId, name)
+      }, '无法重命名镜头画面'),
+      onReorderFrame: (frameId, toIndex) => runCourseCommand(() => {
+        const currentIds = surface.camera.frames.map((frame) => frame.id)
+        const fromIndex = currentIds.indexOf(frameId)
+        if (
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          toIndex >= currentIds.length ||
+          fromIndex === toIndex
+        ) {
+          if (fromIndex < 0) throw new Error('镜头画面已失效，请刷新后重试')
+          if (toIndex < 0 || toIndex >= currentIds.length) {
+            throw new Error('镜头位置已变化，请刷新后重试')
+          }
+          return
+        }
+        const nextIds = [...currentIds]
+        const [movedId] = nextIds.splice(fromIndex, 1)
+        if (!movedId) throw new Error('镜头画面已失效，请刷新后重试')
+        nextIds.splice(toIndex, 0, movedId)
+        useEditorStore.getState().reorderCourseSpatialCameraFrames(nextIds)
+      }, '无法调整镜头顺序'),
+      onDeleteFrame: (frameId) => runCourseCommand(() => {
+        useEditorStore.getState().deleteCourseSpatialCameraFrame(frameId)
+      }, '无法删除镜头画面'),
+      onSetHome: () => runCourseCommand(() => {
+        useEditorStore.getState().setCourseSpatialCameraHome(sessionCamera)
+      }, '无法设置首页镜头'),
+      onActivateFrame: (frameId) => runCourseCommand(() => {
+        const location = frameLocation(frameId)
+        if (!location) throw new Error('找不到对应的空间镜头位置')
+        useEditorStore.getState().selectCourseLocation(location.id)
+      }, '无法切换镜头画面'),
+      onAddSemanticZoomRule: (rule) => runCourseCommand(() => {
+        useEditorStore.getState().addCourseSpatialSemanticZoomRule(rule)
+      }, '无法添加语义缩放规则'),
+      onUpdateSemanticZoomRule: (ruleId, patch) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseSpatialSemanticZoomRule(
+          ruleId,
+          patch,
+        )
+      }, '无法更新语义缩放规则'),
+      onDeleteSemanticZoomRule: (ruleId) => runCourseCommand(() => {
+        useEditorStore.getState().deleteCourseSpatialSemanticZoomRule(ruleId)
+      }, '无法删除语义缩放规则'),
+    }
+  }, [runCourseCommand, v9SlideVerticalSlice, v9SpatialEditorView])
+
+  const v9SpatialLayerInspectorProps = useMemo<SpatialLayerInspectorProps | null>(() => {
+    if (v9SlideVerticalSlice === null || v9SpatialEditorView === null) return null
+    const selectedId = v9SlideVerticalSlice.selection.spatialLayerItemIds?.[0]
+    const selectedLayer = selectedId
+      ? v9SpatialEditorView.layers.find(
+          (layer) => layer.selectionId === selectedId,
+        ) ?? null
+      : null
+    const item = selectedLayer?.item ?? null
+    return {
+      layer: item
+        ? {
+            layerItemId: item.layerItemId,
+            label: item.label,
+            visible: item.visible,
+            locked: item.locked,
+            x: item.frame.x,
+            y: item.frame.y,
+            width: item.frame.width,
+            height: item.frame.height,
+            rotation: item.rotation,
+            opacity: item.opacity,
+          }
+        : null,
+      onPatch: (patch) => runCourseCommand(() => {
+        if (!selectedId) throw new Error('请先选择一个空间图层')
+        useEditorStore.getState().updateCourseSpatialLayer({
+          ...patch,
+          layerItemId: selectedId,
+        })
+      }, '无法更新空间图层'),
+    }
+  }, [runCourseCommand, v9SlideVerticalSlice, v9SpatialEditorView])
+
+  const v9SpatialPathEditorProps = useMemo<SpatialPathEditorProps | null>(() => {
+    if (v9SlideVerticalSlice === null || v9SpatialEditorView === null) return null
+    const project = v9SlideVerticalSlice.history.present
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === v9SpatialEditorView.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') return null
+    return {
+      surfaceTitle: surface.title,
+      worldLayerItems: surface.world.layerItems,
+      paths: surface.world.paths ?? [],
+      relations: surface.world.relations ?? [],
+      onAddPath: (input) => runCourseCommand(() => {
+        useEditorStore.getState().addCourseSpatialPath({
+          surfaceId: surface.id,
+          name: input.name,
+          layerItemIds: input.layerItemIds,
+          style: input.style,
+        })
+      }, '无法添加空间路径'),
+      onRenamePath: (pathId, name) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseSpatialPath(pathId, { name })
+      }, '无法重命名空间路径'),
+      onUpdatePathStyle: (pathId, style) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseSpatialPath(pathId, { style })
+      }, '无法更新空间路径样式'),
+      onDeletePath: (pathId) => runCourseCommand(() => {
+        useEditorStore.getState().deleteCourseSpatialPath(pathId)
+      }, '无法删除空间路径'),
+      onAddRelation: (input) => runCourseCommand(() => {
+        useEditorStore.getState().addCourseSpatialRelation({
+          surfaceId: surface.id,
+          sourceLayerItemId: input.sourceLayerItemId,
+          targetLayerItemId: input.targetLayerItemId,
+          kind: input.kind,
+          label: input.label,
+        })
+      }, '无法添加空间关系连线'),
+      onUpdateRelationLabel: (relationId, label) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseSpatialRelation(relationId, { label })
+      }, '无法更新关系标签'),
+      onUpdateRelationKind: (relationId, kind) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseSpatialRelation(relationId, { kind })
+      }, '无法更新关系类型'),
+      onDeleteRelation: (relationId) => runCourseCommand(() => {
+        useEditorStore.getState().deleteCourseSpatialRelation(relationId)
+      }, '无法删除空间关系连线'),
+    }
+  }, [runCourseCommand, v9SlideVerticalSlice, v9SpatialEditorView])
+
+  const v9SpatialDocumentControl = useMemo<RightSidebarSpatialDocumentControl | undefined>(() => {
+    if (
+      v9SpatialCameraPanelProps === null ||
+      v9SpatialLayerInspectorProps === null ||
+      v9SpatialPathEditorProps === null
+    ) return undefined
+    return {
+      elements: {
+        onAddText: () => runCourseCommand(() => {
+          useEditorStore.getState().addCourseSpatialTextLayer()
+        }, '无法添加空间文字'),
+        onAddShape: () => runCourseCommand(() => {
+          useEditorStore.getState().addCourseSpatialShapeLayer()
+        }, '无法添加空间图形'),
+        onAddFormula: () => runCourseCommand(() => {
+          useEditorStore.getState().addCourseSpatialFormulaLayer()
+        }, '无法添加空间公式'),
+      },
+      layers: v9SpatialLayerInspectorProps,
+      properties: {
+        camera: v9SpatialCameraPanelProps,
+        paths: v9SpatialPathEditorProps,
+      },
+    }
+  }, [
+    runCourseCommand,
+    v9SpatialCameraPanelProps,
+    v9SpatialLayerInspectorProps,
+    v9SpatialPathEditorProps,
+  ])
+
+  const v9ScenePanelFlowDocumentControl = useMemo<ScenePanelFlowDocumentControl | undefined>(() => {
+    if (v9FlowEditorView === null) return undefined
+    return {
+      surfaceTitle: v9FlowEditorView.surfaceTitle,
+      flowView: v9FlowEditorView,
+      selectedBlockId: v9FlowEditorView.activeBlockId,
+      onSelectBlock: (blockId) => runCourseCommand(() => {
+        useEditorStore.getState().selectCourseFlowBlock(blockId)
+      }, '无法切换 Flow 内容块'),
+      onAddSurface: () => runCourseCommand(() => {
+        useEditorStore.getState().addCourseSurface('flow')
+      }, '无法新建 Flow 讲义'),
+    }
+  }, [runCourseCommand, v9FlowEditorView])
+
+  const v9ScenePanelSpatialDocumentControl = useMemo<ScenePanelSpatialDocumentControl | undefined>(() => {
+    if (v9SpatialCameraPanelProps === null) return undefined
+    return {
+      ...v9SpatialCameraPanelProps,
+      onAddSurface: () => runCourseCommand(() => {
+        useEditorStore.getState().addCourseSurface('spatial-2d')
+      }, '无法新建 Spatial 空间'),
+    }
+  }, [runCourseCommand, v9SpatialCameraPanelProps])
+
+  const v9FlowAuthoring = useMemo<WorkspaceFlowAuthoringInput | undefined>(() => {
+    if (v9FlowEditorView === null) return undefined
+    return {
+      view: v9FlowEditorView,
+      selectedBlockId: v9FlowEditorView.activeBlockId,
+      onSelectBlock: (blockId) => runCourseCommand(() => {
+        useEditorStore.getState().selectCourseFlowBlock(blockId)
+      }, '无法切换 Flow 内容块'),
+    }
+  }, [runCourseCommand, v9FlowEditorView])
+
+  const v9SpatialAuthoring = useMemo<WorkspaceSpatialAuthoringInput | undefined>(() => {
+    if (v9SlideVerticalSlice === null || v9SpatialEditorView === null) return undefined
+    const project = v9SlideVerticalSlice.history.present
+    const surface = project.surfaces.find(
+      (candidate) => candidate.id === v9SpatialEditorView.surfaceId,
+    )
+    if (!surface || surface.type !== 'spatial-2d') return undefined
+    return {
+      spatial: surface,
+      viewportSize: { width: 1280, height: 720 },
+      selectedLayerItemIds: v9SlideVerticalSlice.selection.spatialLayerItemIds,
+      interactionDisabled: busy,
+      onSelect: (ids) => runCourseCommand(() => {
+        useEditorStore.getState().selectCourseSpatialLayers(ids)
+      }, '无法选择空间图层'),
+      onTransformEnd: (transforms) => runCourseCommand(() => {
+        useEditorStore.getState().transformCourseSpatialLayers({
+          nodes: transforms,
+        })
+      }, '无法变换空间图层'),
+    }
+  }, [busy, runCourseCommand, v9SlideVerticalSlice, v9SpatialEditorView])
 
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
@@ -2048,6 +2452,34 @@ export default function App() {
     void run(async () => {
       const state = useEditorStore.getState()
       state.setStatus('正在渲染 PDF 页面…')
+      const courseSession = state.courseSession
+      if (courseSession !== null) {
+        const project = courseSession.history.present
+        const resolveAsset = (assetId: string) => {
+          const meta = project.assets[assetId]
+          const bytes = courseSession.assetFiles[assetId]
+          return meta && bytes ? bytesToDataUrl(bytes, meta.mimeType) : undefined
+        }
+        const built = await buildCoursePrintArtifacts(project, { resolveAsset })
+        if (!built.artifact) {
+          const details = built.failures
+            .map((failure) => `${failure.sourceId}：${failure.error.message}`)
+            .join('\n')
+          throw new Error(details || '没有可导出的页面')
+        }
+        const result = await desktopApi().exportPdf({
+          suggestedName: `${project.title}.pdf`,
+          html: built.artifact.html,
+        })
+        if (result) {
+          const noteCount = built.artifact.warnings.length + built.failures.length
+          const notes = noteCount > 0
+            ? `；${noteCount} 项内容已按导出说明处理`
+            : ''
+          state.setStatus(`PDF 已导出到 ${result.path}${notes}`)
+        }
+        return
+      }
       const payload = buildExportPayload({
         project: state.project,
         assetFiles: state.assetFiles,
@@ -2062,13 +2494,76 @@ export default function App() {
     }, 'PDF 导出失败。请减少大图片数量后重试。')
   }, [run])
 
+  const handleExportDocx = useCallback(() => {
+    void run(async () => {
+      const state = useEditorStore.getState()
+      const courseSession = state.courseSession
+      if (courseSession === null) {
+        throw new Error('DOCX 讲义仅适用于 Flow 讲义位置')
+      }
+      const project = courseSession.history.present
+      const location = project.locations.find(
+        (candidate) => candidate.id === courseSession.selection.locationId,
+      )
+      const surface = location
+        ? project.surfaces.find(
+            (candidate) => candidate.id === location.surfaceId,
+          )
+        : undefined
+      if (
+        !location ||
+        location.kind !== 'flow-block' ||
+        !surface ||
+        surface.type !== 'flow'
+      ) {
+        throw new Error('请先切换到 Flow 讲义位置')
+      }
+      const effectiveLayerItems = getEffectiveCourseLayerOrder({
+        project,
+        surfaceId: surface.id,
+        locationId: location.id,
+      }).filter((entry): entry is FlowDocxLayerEntry => (
+        entry.source === 'global' || entry.source === 'surface'
+      ))
+      const resolveAsset = (assetId: string) => {
+        const meta = project.assets[assetId]
+        const bytes = courseSession.assetFiles[assetId]
+        return meta && bytes
+          ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
+          : undefined
+      }
+      const built = buildFlowDocx(surface, {
+        locationId: location.id,
+        effectiveLayerItems,
+        resolveAsset,
+      })
+      const result = await desktopApi().exportBinary({
+        suggestedName: `${project.title}.docx`,
+        extension: 'docx',
+        bytes: built.bytes,
+      })
+      if (result) {
+        const noteSummary = built.warnings.length > 0
+          ? `；${built.warnings.length} 项内容已按导出说明处理`
+          : ''
+        state.setStatus(`DOCX 讲义已导出到 ${result.path}${noteSummary}`)
+      }
+    }, 'DOCX 导出失败。请切换到 Flow 讲义位置后重试。')
+  }, [run])
+
   const handleExport = useCallback((format: ExportFormat) => {
     const state = useEditorStore.getState()
     if (state.courseSession !== null) {
       if (format === 'single-html') handleExportHtml()
       else if (format === 'web-package') handleExportWebPackage()
       else if (format === 'pptx') handleExportPptx()
-      else state.setError('当前课件暂不能导出 PDF；其他导出格式仍可使用。')
+      else if (format === 'pdf') handleExportPdf()
+      else if (format === 'docx') handleExportDocx()
+      else state.setError('当前课件暂不能导出该格式；其他导出格式仍可使用。')
+      return
+    }
+    if (format === 'docx') {
+      state.setError('DOCX 讲义仅适用于 Flow 讲义位置')
       return
     }
     setExportPreflightReport(collectExportPreflight(
@@ -2079,7 +2574,13 @@ export default function App() {
         components: state.componentPackages,
       },
     ))
-  }, [handleExportHtml, handleExportPptx, handleExportWebPackage])
+  }, [
+    handleExportDocx,
+    handleExportHtml,
+    handleExportPdf,
+    handleExportPptx,
+    handleExportWebPackage,
+  ])
 
   const continuePreflightExport = useCallback(() => {
     const report = exportPreflightReport
@@ -2446,7 +2947,9 @@ export default function App() {
           canPreview: true,
           canExport: true,
           unavailableExports: v9BackendActive
-            ? { pdf: '当前课件暂不能导出 PDF' }
+            ? activeCourseEditorRoute === 'flow'
+              ? undefined
+              : { docx: '请先切换到 Flow 讲义位置' }
             : undefined,
           onRename: renameActiveDocument,
           onUndo: undoActiveDocument,
@@ -2473,10 +2976,20 @@ export default function App() {
         aria-busy={busy}
         inert={busy ? true : undefined}
       >
-        <ScenePanel documentControl={v9ScenePanelDocumentControl} />
+        <ScenePanel
+          documentControl={
+            v9ScenePanelFlowDocumentControl || v9ScenePanelSpatialDocumentControl
+              ? undefined
+              : v9ScenePanelDocumentControl
+          }
+          flowDocumentControl={v9ScenePanelFlowDocumentControl}
+          spatialDocumentControl={v9ScenePanelSpatialDocumentControl}
+        />
         <div className="editor-center">
           <Workspace
             slideAuthoring={v9SlideAuthoring}
+            flowAuthoring={v9FlowAuthoring}
+            spatialAuthoring={v9SpatialAuthoring}
             courseLocationUnavailableReason={v9CourseLocationUnavailableReason}
             interactionDisabled={busy}
             onAddImage={v9BackendActive
@@ -2495,7 +3008,13 @@ export default function App() {
           <SceneStateStrip documentControl={v9SceneStateStripDocumentControl} />
         </div>
         <RightSidebar
-          documentControl={v9RightSidebarDocumentControl}
+          documentControl={
+            v9FlowDocumentControl || v9SpatialDocumentControl
+              ? undefined
+              : v9RightSidebarDocumentControl
+          }
+          flowDocumentControl={v9FlowDocumentControl}
+          spatialDocumentControl={v9SpatialDocumentControl}
           onAddImage={(x, y) =>
             void selectAndImportImage('add', { x, y })
           }
