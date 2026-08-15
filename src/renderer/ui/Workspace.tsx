@@ -70,6 +70,7 @@ import {
   workspaceAuthoringActionAllowed,
   workspaceCanvasLabel,
   workspaceSelectionAllowed,
+  workspaceTextEditTargetNode,
   workspaceTransformAllowed,
   workspaceSlidePreviewAssetFiles,
   workspaceSlideCarrierScope,
@@ -436,6 +437,17 @@ function WorkspaceEditor({
     useState<Readonly<ComponentTextEditSession> | null>(null)
   const [activeFormulaEditSession, setActiveFormulaEditSession] =
     useState<Readonly<FormulaEditSession> | null>(null)
+  /**
+   * Live V9 canvas text transaction. `node` is the scope snapshot captured
+   * when the session opened; it stays read-only until the single commit.
+   * `authoring` is the exact document the session belongs to: any V9 document
+   * change (scene/state/scope switch or external commit) invalidates it.
+   */
+  const [v9TextEditSession, setV9TextEditSession] = useState<{
+    readonly nodeId: string
+    readonly node: TextNode
+    readonly authoring: WorkspaceSlideAuthoringInput
+  } | null>(null)
   const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
     useState<string | null>(null)
   const [replacingComponentAssetTargetId, setReplacingComponentAssetTargetId] =
@@ -1636,6 +1648,10 @@ function WorkspaceEditor({
       )
       return true
     },
+    // The legacy V8 backend owns its own text session; it never consumes a
+    // seam text commit. Rejecting keeps the invariant that only the V9 backend
+    // writes through this seam.
+    onTextEditCommit: () => false,
   }), [
     activePresentationStateId,
     assetFiles,
@@ -2498,6 +2514,16 @@ function WorkspaceEditor({
         setActiveFormulaEditSession(null)
         setActiveComponentTextSession(null)
         setActiveRuntimeTextSession(null)
+        const injected = slideAuthoringInputRef.current
+        if (injected) {
+          const node = workspaceTextEditTargetNode(injected, nodeId)
+          if (!node || node.type !== 'text') {
+            reportUnsupportedInjectedAction('文字编辑暂不可用')
+            return
+          }
+          setV9TextEditSession({ nodeId, node, authoring: injected })
+          return
+        }
         useEditorStore.getState().selectNode(nodeId)
         useEditorStore.getState().beginTextEdit(nodeId, 'canvas')
       }),
@@ -2695,14 +2721,25 @@ function WorkspaceEditor({
 
   useEffect(() => {
     if (hasInjectedSlideAuthoring) {
-      gameRef.current?.bridge.setTextEditing(null)
+      gameRef.current?.bridge.setTextEditing(v9TextEditSession?.nodeId ?? null)
       return
     }
     gameRef.current?.bridge.setTextEditing(editingTextNodeId)
     if (!editingTextNodeId && selectedNode?.type === 'text') {
       gameRef.current?.bridge.applyNode(selectedNode)
     }
-  }, [editingTextNodeId, hasInjectedSlideAuthoring, selectedNode])
+  }, [editingTextNodeId, hasInjectedSlideAuthoring, selectedNode, v9TextEditSession])
+
+  // A V9 text session belongs to exactly one injected authoring document.
+  // Any V9 document change (reopen, scene/state/scope switch, external
+  // commit) replaces the `slideAuthoring` reference and invalidates it.
+  useEffect(() => {
+    if (!v9TextEditSession) return
+    if (slideAuthoring !== v9TextEditSession.authoring) {
+      gameRef.current?.bridge.setTextEditing(null)
+      setV9TextEditSession(null)
+    }
+  }, [slideAuthoring, v9TextEditSession])
 
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault()
@@ -3281,6 +3318,45 @@ function WorkspaceEditor({
               gameRef.current?.bridge.applyNode(restoredNode)
             }
             gameRef.current?.bridge.setTextEditing(null)
+          }}
+        />
+      )}
+      {!interactionDisabled && canvasMode === 'edit' && v9TextEditSession && canvas && workspaceRef.current && (
+        <TextEditOverlay
+          key={`v9:${v9TextEditSession.nodeId}`}
+          node={v9TextEditSession.node}
+          workspace={workspaceRef.current}
+          canvas={canvas}
+          onPreview={() => {
+            // V9 keeps the whole session local: nothing reaches the document
+            // or history until the single commit, so previews are no-ops.
+          }}
+          onCommit={(text, runs) => {
+            const session = v9TextEditSession
+            const injected = slideAuthoringInputRef.current
+            gameRef.current?.bridge.setTextEditing(null)
+            setV9TextEditSession(null)
+            if (interactionDisabledRef.current || !session) return
+            if (!injected?.onTextEditCommit) {
+              reportUnsupportedInjectedAction('文字编辑暂不可用')
+              return
+            }
+            const accepted = injected.onTextEditCommit({
+              nodeId: session.nodeId,
+              text,
+              runs,
+            })
+            if (!accepted) {
+              useEditorStore.getState().setStatus('文字目标已变化，未写入修改')
+            }
+          }}
+          onCancel={() => {
+            const session = v9TextEditSession
+            gameRef.current?.bridge.setTextEditing(null)
+            setV9TextEditSession(null)
+            if (session) {
+              useEditorStore.getState().setStatus('已取消文字编辑')
+            }
           }}
         />
       )}

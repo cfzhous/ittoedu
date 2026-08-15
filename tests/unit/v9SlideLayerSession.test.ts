@@ -6,6 +6,7 @@ import {
   createCourseProject,
   updateCourseProject,
 } from '@/renderer/course/courseStudioModel'
+import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
 import {
   addV9SlideFormulaLayer,
@@ -16,6 +17,7 @@ import {
   clearV9SlideNativeNodeOverride,
   deleteV9SlideLayer,
   duplicateV9SlideLayer,
+  isV9SlideVerticalSliceDirty,
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   reorderV9SlideLayers,
@@ -205,6 +207,74 @@ describe('V9 Slide native layer session commands', () => {
     })
     expect(shape.history.present.revision).toBe(initial.history.present.revision + 2)
     expect(courseProjectDocumentSchema.safeParse(shape.history.present).success).toBe(true)
+  })
+
+  it('commits one canvas text session as exactly one history entry with runs preserved', () => {
+    const initial = createLayerSession()
+    const runs = [
+      { start: 0, end: 2, style: { bold: true } },
+      { start: 5, end: 7, style: { color: '#dc2626' } },
+    ]
+    const updated = updateV9SlideNativeNode(initial, 'layer-text-a', {
+      text: 'V9 富文本内容',
+      runs,
+    }, NOW)
+    const view = buildSlideEditorView({
+      project: updated.history.present,
+      locationId: updated.selection.locationId,
+      stateId: updated.selection.stateId,
+    })
+    const item = view.layers.find((layer) => layer.selectionId === 'layer-text-a')?.item
+
+    expect(updated.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(updated.history.past.length).toBe(initial.history.past.length + 1)
+    expect(item).toMatchObject({
+      content: { data: { text: 'V9 富文本内容', runs } },
+    })
+    expect(courseProjectDocumentSchema.safeParse(updated.history.present).success).toBe(true)
+  })
+
+  it('stores a named-state text+runs commit as one sparse override and one revision', () => {
+    const named = addV9SlidePresentationState(createLayerSession(), '文字态', NOW)
+    const runs = [{ start: 0, end: 3, style: { underline: true } }]
+    const updated = updateV9SlideNativeNode(named, 'layer-text-a', {
+      text: '状态文字',
+      runs,
+    }, NOW)
+    const scene = sceneFor(updated)
+    const override = scene.presentation?.states.find(
+      (state) => state.id === updated.selection.stateId,
+    )?.layerItemOverrides['layer-text-a']
+    const view = buildSlideEditorView({
+      project: updated.history.present,
+      locationId: updated.selection.locationId,
+      stateId: updated.selection.stateId,
+    })
+    const effective = view.layers.find(
+      (layer) => layer.selectionId === 'layer-text-a',
+    )?.item
+
+    expect(override).toEqual({
+      nativeData: { text: '状态文字', runs },
+    })
+    expect(effective).toMatchObject({
+      content: { data: { text: '状态文字', runs } },
+    })
+    expect(updated.history.present.revision).toBe(named.history.present.revision + 1)
+    expect(updated.history.past.length).toBe(named.history.past.length + 1)
+    expect(courseProjectDocumentSchema.safeParse(updated.history.present).success).toBe(true)
+  })
+
+  it('treats an unchanged text session commit as a zero-revision no-op', () => {
+    const initial = createLayerSession()
+    const updated = updateV9SlideNativeNode(initial, 'layer-text-a', {
+      text: '第一层',
+      runs: [],
+    }, NOW)
+
+    expect(updated).toBe(initial)
+    expect(updated.history).toBe(initial.history)
+    expect(updated.history.present.revision).toBe(initial.history.present.revision)
   })
 
   it('stores named-state property edits as deeply sparse valid overrides', () => {
@@ -493,5 +563,39 @@ describe('V9 Slide native layer session commands', () => {
     expect(view.layers.find((layer) => layer.selectionId === 'layer-text-a')?.item.visible)
       .toBe(false)
     expect(deleted.selection.selectionIds).toEqual([])
+  })
+
+  it('round-trips a committed text+runs session through save and reopen', () => {
+    const initial = createLayerSession()
+    const runs = [
+      { start: 0, end: 2, style: { bold: true } },
+      { start: 5, end: 7, style: { color: '#dc2626' } },
+    ]
+    const committed = updateV9SlideNativeNode(initial, 'layer-text-a', {
+      text: '保存重开富文本',
+      runs,
+    }, NOW)
+    const bytes = createCourseProjectArchive({
+      project: committed.history.present,
+      assetFiles: {},
+      componentFiles: {},
+    }, { mtime: NOW })
+    const opened = openCourseProjectArchive(bytes)
+    const reopened = openV9SlideVerticalSliceState(
+      opened,
+      'C:\\courseware\\text-roundtrip.h5lesson',
+    )
+    const view = buildSlideEditorView({
+      project: reopened.history.present,
+      locationId: reopened.selection.locationId,
+      stateId: reopened.selection.stateId,
+    })
+    const item = view.layers.find((layer) => layer.selectionId === 'layer-text-a')?.item
+
+    expect(item).toMatchObject({
+      content: { data: { text: '保存重开富文本', runs } },
+    })
+    expect(courseProjectDocumentSchema.safeParse(reopened.history.present).success).toBe(true)
+    expect(isV9SlideVerticalSliceDirty(reopened)).toBe(false)
   })
 })

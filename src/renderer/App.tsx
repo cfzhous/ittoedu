@@ -1067,6 +1067,18 @@ export default function App() {
         if (lifecycleOperationInFlightRef.current) return false
         return useEditorStore.getState().transformCourseLayers(event)
       },
+      onTextEditCommit: (event) => {
+        if (lifecycleOperationInFlightRef.current) return false
+        const session = useEditorStore.getState().courseSession
+        if (session === null) return false
+        return useEditorStore.getState().commitCourseTextEdit({
+          sessionId: session.sessionId,
+          locationId: session.selection.locationId,
+          stateId: session.selection.stateId,
+          editingScope: session.editingScope,
+          layerItemId: event.nodeId,
+        }, event.text, [...event.runs])
+      },
     }
   }, [v9ActiveSlideContext?.scene, v9SlideVerticalSlice, v9WorkspaceSnapshot])
 
