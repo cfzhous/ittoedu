@@ -142,26 +142,25 @@ function writeUnavailableLocationArchive(
   }, { mtime: new Date(NOW) }))
 }
 
-async function expectUnavailableLocation(
+async function expectEditableMultiSurface(
   editor: EditorHandle,
-  expectedText: string,
+  kind: 'flow-block' | 'spatial-camera',
 ): Promise<void> {
-  await expect(editor.page.getByTestId('scene-panel-course-location-gate'))
-    .toContainText(expectedText)
-  await expect(editor.page.getByTestId('workspace-course-location-gate'))
-    .toContainText(expectedText)
-  await expect(editor.page.getByTestId('scene-state-strip-course-location-gate'))
-    .toContainText(expectedText)
-  await expect(editor.page.locator(
-    '.right-sidebar > .sidebar-content > .right-sidebar-capability-gate',
-  ))
-    .toContainText(expectedText)
+  if (kind === 'flow-block') {
+    await expect(editor.page.locator('.flow-editor-surface')).toHaveCount(1)
+    await expect(editor.page.getByTestId('scene-panel-flow-outline')).toHaveCount(1)
+    await expect(editor.page.getByTestId('add-flow-surface')).toHaveCount(1)
+  } else {
+    await expect(editor.page.getByTestId('spatial-workspace')).toHaveCount(1)
+    await expect(editor.page.getByTestId('scene-panel-spatial-frames')).toHaveCount(1)
+    await expect(editor.page.getByTestId('add-spatial-surface')).toHaveCount(1)
+  }
   await expect(editor.page.getByTestId('canvas-stage')).toHaveCount(0)
   await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)
+  await expect(editor.page.getByTestId('workspace-course-location-gate')).toHaveCount(0)
+  await expect(editor.page.getByTestId('scene-state-strip-course-location-gate')).toHaveCount(0)
   await expect(editor.page.getByTestId('add-scene')).toHaveCount(0)
   await expect(editor.page.getByTestId('global-layer-entry')).toHaveCount(0)
-  await expect(editor.page.getByLabel('当前场景状态列表')).toHaveCount(0)
-  await expect(editor.page.getByLabel('新建场景状态')).toHaveCount(0)
   await expect(editor.page.locator('.app-crash')).toHaveCount(0)
 }
 
@@ -256,7 +255,10 @@ test('starts on production V9, rejects normal legacy open, imports explicitly, a
     expect(publishedPptx['[Content_Types].xml']).toBeDefined()
     expect(publishedPptx['ppt/slides/slide1.xml']).toBeDefined()
     await editor.page.getByLabel('导出课件').click()
-    await expect(editor.page.getByTestId('export-pdf')).toBeDisabled()
+    // V9 print artifacts now supply the production PDF path; DOCX remains a
+    // Flow-position export and is disabled while the current location is Slide.
+    await expect(editor.page.getByTestId('export-pdf')).toBeEnabled()
+    await expect(editor.page.getByTestId('export-docx')).toBeDisabled()
     await editor.page.keyboard.press('Escape')
 
     await openProject(editor, legacyPath)
@@ -348,17 +350,17 @@ test('starts on production V9, rejects normal legacy open, imports explicitly, a
   }
 })
 
-test('keeps Flow and Spatial start locations inside explicit read-only gates', async () => {
+test('opens Flow and Spatial start locations in their production authoring workspaces', async () => {
   test.slow()
   const editor = await launchEditor(surfaceProfile, { waitForCanvas: true })
   try {
     for (const input of [
-      { path: flowPath, kind: 'flow-block' as const, text: '当前流程内容暂不能' },
-      { path: spatialPath, kind: 'spatial-camera' as const, text: '当前空间画布暂不能' },
+      { path: flowPath, kind: 'flow-block' as const },
+      { path: spatialPath, kind: 'spatial-camera' as const },
     ]) {
       const before = openCourseProjectArchive(readFileSync(input.path))
       await openProject(editor, input.path)
-      await expectUnavailableLocation(editor, input.text)
+      await expectEditableMultiSurface(editor, input.kind)
       const confirmedByOpen = (await editor.page.evaluate(
         () => window.desktopAPI?.listRecentProjects(),
       ))?.find((entry) => entry.path === input.path)
@@ -384,7 +386,7 @@ test('keeps Flow and Spatial start locations inside explicit read-only gates', a
         await editor.page.getByRole('button', { name: '专业', exact: true }).click()
         await editor.page.getByTitle('打开最近工程').click()
         await editor.page.getByTitle(input.path).click()
-        await expectUnavailableLocation(editor, input.text)
+        await expectEditableMultiSurface(editor, input.kind)
         const reopenedRecent = (await editor.page.evaluate(
           () => window.desktopAPI?.listRecentProjects(),
         ))?.find((entry) => entry.path === input.path)
@@ -395,7 +397,7 @@ test('keeps Flow and Spatial start locations inside explicit read-only gates', a
       }
 
       await openProject(editor, input.path)
-      await expectUnavailableLocation(editor, input.text)
+      await expectEditableMultiSurface(editor, input.kind)
     }
     expect(editor.pageErrors).toEqual([])
     expect(editor.consoleErrors).toEqual([])
