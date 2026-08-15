@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  createWorkspaceSlidePreviewProject,
   resolveWorkspaceSlideAuthoringInput,
   type WorkspaceSlideAuthoringInput,
 } from '@/renderer/ui/workspaceSlideAuthoring'
+import { createProject, createTextNode } from '@/renderer/project/createProject'
 import type { SceneDocument } from '@/shared/projectTypes'
 
-function input(name: string): {
+function input(
+  name: string,
+  nodes: SceneDocument['nodes'] = [],
+): {
   value: WorkspaceSlideAuthoringInput
   onSelectionChange: ReturnType<typeof vi.fn>
   onMoveEnd: ReturnType<typeof vi.fn>
@@ -16,7 +21,7 @@ function input(name: string): {
     id: `scene-${name}`,
     name,
     backgroundColor: '#ffffff',
-    nodes: [],
+    nodes,
     interactions: [],
   }
   const value = Object.freeze({
@@ -68,5 +73,44 @@ describe('Workspace Slide authoring input boundary', () => {
     expect(fallback.onMoveEnd).not.toHaveBeenCalled()
     expect(JSON.stringify(fallback.value)).toBe(fallbackBefore)
     expect(JSON.stringify(injected.value)).toBe(injectedBefore)
+  })
+
+  it('projects the injected scene into a read-only Player payload', () => {
+    const project = createProject({
+      id: 'v8-shell-project',
+      now: '2026-08-15T03:00:00.000Z',
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const sceneId = project.scenes[0]!.id
+    const text = createTextNode({
+      id: 'v9-text',
+      text: 'V9 可见文字',
+      x: 440,
+      y: 320,
+    })
+    const injected = input('injected', [text])
+    const before = structuredClone(project)
+
+    const preview = createWorkspaceSlidePreviewProject(
+      project,
+      sceneId,
+      injected.value,
+    )
+
+    expect(preview).not.toBe(project)
+    expect(preview.scenes[0]).toMatchObject({
+      id: sceneId,
+      nodes: [{ id: 'v9-text', text: 'V9 可见文字', x: 440, y: 320 }],
+    })
+    expect(preview.scenes[0]!.nodes[0]).not.toBe(text)
+    expect(preview.globalLayer).toBe(project.globalLayer)
+    expect(project).toEqual(before)
+    expect(createWorkspaceSlidePreviewProject(project, sceneId, undefined)).toBe(project)
+    expect(() => createWorkspaceSlidePreviewProject(
+      project,
+      'missing-scene',
+      injected.value,
+    )).toThrow('Player 预览场景不存在')
   })
 })

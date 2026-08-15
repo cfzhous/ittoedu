@@ -1,10 +1,15 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
-import type { NativeLayerItem } from '../../shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  NativeLayerItem,
+} from '../../shared/courseProjectTypes'
 import type { SceneDocument, TextNode } from '../../shared/projectTypes'
 import {
   createCourseHistory,
   createCourseProject,
+  redoCourseHistory,
   type CourseHistoryState,
+  undoCourseHistory,
   updateCourseProject,
 } from './courseStudioModel'
 import {
@@ -30,6 +35,8 @@ export type EditorStartupBackend = 'v8' | typeof V9_SLIDE_TEST_BACKEND
 export interface V9SlideVerticalSliceState {
   readonly history: CourseHistoryState
   readonly selection: SlideEditorSelection
+  readonly savedProject: CourseProjectDocument
+  readonly projectPath: string | null
 }
 
 export interface V9SlideSelectionInput {
@@ -126,12 +133,21 @@ function createFixtureProject() {
 function freezeState(
   history: CourseHistoryState,
   selection: SlideEditorSelection,
+  savedProject: CourseProjectDocument,
+  projectPath: string | null,
 ): V9SlideVerticalSliceState {
-  return Object.freeze({ history, selection })
+  return Object.freeze({ history, selection, savedProject, projectPath })
 }
 
 export function createV9SlideVerticalSliceState(): V9SlideVerticalSliceState {
   const project = createFixtureProject()
+  return openV9SlideVerticalSliceState(project, null)
+}
+
+export function openV9SlideVerticalSliceState(
+  project: CourseProjectDocument,
+  projectPath: string | null,
+): V9SlideVerticalSliceState {
   const history = createCourseHistory(project)
   const selection = selectSlideEditorLayer({
     project,
@@ -139,7 +155,28 @@ export function createV9SlideVerticalSliceState(): V9SlideVerticalSliceState {
     stateId: null,
     selectionId: null,
   })
-  return freezeState(history, selection)
+  return freezeState(history, selection, project, projectPath)
+}
+
+export function isV9SlideVerticalSliceDirty(
+  state: V9SlideVerticalSliceState,
+): boolean {
+  return state.history.present !== state.savedProject
+}
+
+export function completeV9SlideVerticalSliceSave(
+  state: V9SlideVerticalSliceState,
+  savedProject: CourseProjectDocument,
+  projectPath: string,
+): V9SlideVerticalSliceState {
+  const belongsToHistory = state.history.present === savedProject ||
+    state.history.past.includes(savedProject) ||
+    state.history.future.includes(savedProject)
+  if (!belongsToHistory) {
+    throw new Error('保存结果不属于当前 V9 Slide 纵切工程')
+  }
+  if (state.savedProject === savedProject && state.projectPath === projectPath) return state
+  return freezeState(state.history, state.selection, savedProject, projectPath)
 }
 
 type ReadonlyNativeTextContent = Extract<
@@ -247,7 +284,7 @@ export function selectV9SlideVerticalSlice(
       locationId: state.selection.locationId,
       stateId: state.selection.stateId,
       selectionId: null,
-    }))
+    }), state.savedProject, state.projectPath)
   }
   if (input.nodeIds.length !== 1) return state
   const selectionId = input.nodeIds[0]!
@@ -261,7 +298,7 @@ export function selectV9SlideVerticalSlice(
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
     selectionId: nextSelectionId,
-  }))
+  }), state.savedProject, state.projectPath)
 }
 
 export function moveV9SlideVerticalSlice(
@@ -287,5 +324,52 @@ export function moveV9SlideVerticalSlice(
     y: y - layer.item.frame.y,
   }, now)
   if (history === state.history && selection === state.selection) return state
-  return freezeState(history, selection)
+  return freezeState(history, selection, state.savedProject, state.projectPath)
+}
+
+function selectionForHistory(
+  state: V9SlideVerticalSliceState,
+  history: CourseHistoryState,
+): SlideEditorSelection {
+  try {
+    return selectSlideEditorLayer({
+      project: history.present,
+      locationId: state.selection.locationId,
+      stateId: state.selection.stateId,
+      selectionId: state.selection.selectionId,
+    })
+  } catch {
+    return selectSlideEditorLayer({
+      project: history.present,
+      locationId: history.present.startLocationId,
+      stateId: null,
+      selectionId: null,
+    })
+  }
+}
+
+export function undoV9SlideVerticalSlice(
+  state: V9SlideVerticalSliceState,
+): V9SlideVerticalSliceState {
+  const history = undoCourseHistory(state.history)
+  if (history === state.history) return state
+  return freezeState(
+    history,
+    selectionForHistory(state, history),
+    state.savedProject,
+    state.projectPath,
+  )
+}
+
+export function redoV9SlideVerticalSlice(
+  state: V9SlideVerticalSliceState,
+): V9SlideVerticalSliceState {
+  const history = redoCourseHistory(state.history)
+  if (history === state.history) return state
+  return freezeState(
+    history,
+    selectionForHistory(state, history),
+    state.savedProject,
+    state.projectPath,
+  )
 }

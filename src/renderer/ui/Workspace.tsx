@@ -60,6 +60,7 @@ import { TextEditOverlay } from './TextEditOverlay'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { FormulaEditDialog } from './FormulaEditDialog'
 import {
+  createWorkspaceSlidePreviewProject,
   resolveWorkspaceSlideAuthoringInput,
   type WorkspaceSlideAuthoringInput,
 } from './workspaceSlideAuthoring'
@@ -349,6 +350,9 @@ export function Workspace({
   const gameHostRef = useRef<HTMLDivElement>(null)
   const gameRef = useRef<EditorGameHandle | null>(null)
   const runtimeFrameRef = useRef<HTMLIFrameElement>(null)
+  const slideAuthoringInputRef = useRef(slideAuthoring)
+  slideAuthoringInputRef.current = slideAuthoring
+  const slideAuthoringDocumentId = slideAuthoring?.document.id ?? null
   const lastParentFocusRef = useRef<HTMLElement | null>(null)
   const authoringFocusRecoveryTimerRef = useRef<number | null>(null)
   const retiredPreviewResourcesRef = useRef(new Set<{
@@ -537,6 +541,7 @@ export function Workspace({
     componentPackages,
     previewRebuildKey,
     previewRetryRevision,
+    slideAuthoringDocumentId,
   ])
   const authoringCanvasInteractive = isAuthoringCanvasInteractive({
     canvasMode,
@@ -779,10 +784,11 @@ export function Workspace({
   const postAuthoringPatch = useCallback((patch: PlayerAuthoringPatch) => {
     const init = previewInitRef.current
     const target = runtimeFrameRef.current?.contentWindow
+    // Playback hosts become authorable after the inspection handshake; the
+    // ready signal, not their startup mode, is the capability boundary.
     if (
       !target ||
       !init ||
-      init.hostMode !== 'authoring' ||
       !authoringReadyRef.current
     ) {
       if (init && authoringSnapshotBarrierRef.current) {
@@ -965,13 +971,19 @@ export function Workspace({
     try {
       const editorState = useEditorStore.getState()
       const initialScene = selectActiveScene(editorState)
+      const injectedSlideAuthoring = slideAuthoringInputRef.current
+      const previewProject = createWorkspaceSlidePreviewProject(
+        project,
+        initialScene.id,
+        injectedSlideAuthoring,
+      )
       const hostMode: PlayerHostMode = 'playback'
       const initialStateId = editorState.activePresentationStateId ??
         ensureScenePresentation(initialScene).initialStateId
       payloadResources = createRuntimePreviewPayloadResources({
-        project,
+        project: previewProject,
         assetFiles,
-        components: componentPackages,
+        components: injectedSlideAuthoring?.componentPackages ?? componentPackages,
       })
       const payload = payloadResources.payload
       const playerBundle = loadPlayerBundle()
@@ -1056,6 +1068,7 @@ export function Workspace({
     previewRebuildKey,
     previewRetryRevision,
     retirePreviewResources,
+    slideAuthoringDocumentId,
   ])
 
   useEffect(() => () => revokeRetiredPreviewResources(), [
@@ -2051,6 +2064,26 @@ export function Workspace({
     findCanvas()
     const observer = new MutationObserver(findCanvas)
     observer.observe(host, { childList: true })
+    // Scale.NONE leaves bounds tracking to the host. Hidden Electron windows
+    // may throttle Phaser's polling while ancestor layout still moves.
+    const refreshPointerBounds = () => {
+      const rect = handle.game.canvas.getBoundingClientRect()
+      const bounds = handle.game.scale.canvasBounds
+      if (
+        Math.abs(rect.left - bounds.left) > 0.25 ||
+        Math.abs(rect.top - bounds.top) > 0.25 ||
+        Math.abs(rect.width - bounds.width) > 0.25 ||
+        Math.abs(rect.height - bounds.height) > 0.25
+      ) {
+        handle.game.scale.refresh()
+      }
+    }
+    host.addEventListener('mousemove', refreshPointerBounds, true)
+    host.addEventListener('mousedown', refreshPointerBounds, true)
+    host.addEventListener('touchstart', refreshPointerBounds, {
+      capture: true,
+      passive: true,
+    })
 
     const unsubscribers = [
       handle.bridge.onNodeSelected((event) =>
@@ -2142,6 +2175,9 @@ export function Workspace({
 
     return () => {
       observer.disconnect()
+      host.removeEventListener('mousemove', refreshPointerBounds, true)
+      host.removeEventListener('mousedown', refreshPointerBounds, true)
+      host.removeEventListener('touchstart', refreshPointerBounds, true)
       unsubscribers.forEach((unsubscribe) => unsubscribe())
       handle.destroy()
       gameRef.current = null
