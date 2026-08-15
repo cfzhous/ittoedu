@@ -406,7 +406,14 @@ export class PublishedCourseApp {
         runtimeHostFactory: this.#dynamicHosts.runtimeHost,
         globalLayerItems: structuredClone(this.project.globalLayerItems),
         initialLocationId: firstLocation?.id,
-        onTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
+        // Single owner: the course location pipeline executes every
+        // teacher-controller action (guards, cross-surface navigation, mute,
+        // fullscreen and the scene picker). The Spatial host delegates to
+        // this executor and never falls back to a second local handler, so
+        // one user action can never be executed twice.
+        executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
+        playbackControls: this.project.playback.controls,
+        initialMuted: this.#muted,
       })
       this.#spatialHosts.set(surface.id, spatial)
       return spatial
