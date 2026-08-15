@@ -75,7 +75,9 @@ import type {
   TextOverflowMode,
   VerticalAlign,
   WritingMode,
+  SoundDefinition,
 } from '../../shared/projectTypes'
+import type { InteractionRule } from '../../shared/interactionTypes'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import type {
   RuntimeDocument,
@@ -1933,11 +1935,30 @@ export interface PropertiesTabDocumentControl {
   readonly controllerUnavailableReason: string
   /** Present only when the owner can edit the scene background from this tab. */
   readonly background?: PropertiesTabBackgroundControl
+  /** Optional V9-backed click-rule editor shown below the common properties. */
+  readonly interaction?: PropertiesInteractionControl
   onUpdateNode(
     target: PropertiesTabDocumentTarget,
     patch: DeepPartial<SceneNode>,
   ): boolean
   onClearOverride(target: PropertiesTabDocumentTarget): boolean
+}
+
+export interface PropertiesInteractionControl {
+  /** Read-only V8-shaped scene document consumed by the interaction editor. */
+  readonly scene: SceneDocument
+  readonly sourceScope: 'scene' | 'global'
+  readonly sourceNodes: readonly SceneNode[]
+  readonly sourceRules: readonly InteractionRule[]
+  readonly activeStateId: string | null
+  readonly scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
+  readonly sounds: Readonly<Record<string, SoundDefinition>>
+  onAddRule(rule: InteractionRule): void
+  onUpdateRule(
+    ruleId: string,
+    patch: Partial<Omit<InteractionRule, 'id'>>,
+  ): void
+  onDeleteRule(ruleId: string): void
 }
 
 export interface PropertiesTabDocumentTarget {
@@ -2090,6 +2111,7 @@ function ControlledPropertiesTab({
     richTextUnavailableReason,
     mediaUnavailableReason,
     controllerUnavailableReason,
+    interaction,
     onUpdateNode,
     onClearOverride,
   } = documentControl
@@ -2242,6 +2264,21 @@ function ControlledPropertiesTab({
         )}
         {unsupported}
       </div>
+      {interaction && editingScope === 'scene' && (
+        <InteractionEditor
+          scene={interaction.scene}
+          selectedNode={node}
+          sourceScope={interaction.sourceScope}
+          sourceNodes={interaction.sourceNodes}
+          sourceRules={interaction.sourceRules}
+          activeStateId={interaction.activeStateId}
+          scenes={interaction.scenes}
+          sounds={interaction.sounds}
+          onAddRule={interaction.onAddRule}
+          onUpdateRule={interaction.onUpdateRule}
+          onDeleteRule={interaction.onDeleteRule}
+        />
+      )}
     </div>
   )
 }

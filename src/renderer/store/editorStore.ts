@@ -109,7 +109,10 @@ import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import {
   activateV9SlidePresentationState,
   activateV9SlideScene,
+  addV9SlideComponentLayer,
+  addV9SlideComponentPackages,
   addV9SlideFormulaLayer,
+  addV9SlideInteractionRule,
   addV9SlidePresentationState,
   addV9SlideScene,
   addV9SlideShapeLayer,
@@ -119,9 +122,12 @@ import {
   completeV9SlideVerticalSliceSave,
   createV9CourseEditorState,
   createV9SlideVerticalSliceState,
+  deleteV9SlideComponentPackage,
   deleteV9SlideScene,
   deleteV9SlideLayer,
   deleteV9SlidePresentationState,
+  deleteV9SlideInteractionRule,
+  duplicateV9SlideInteractionRule,
   duplicateV9SlidePresentationState,
   duplicateV9SlideScene,
   duplicateV9SlideLayer,
@@ -129,12 +135,14 @@ import {
   clearV9SlideSceneBackgroundOverride,
   importV9SlideAssets,
   isV9SlideVerticalSliceDirty,
+  moveV9SlideInteractionRule,
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
   renameV9SlidePresentationState,
   renameV9SlideScene,
   renameV9SlideVerticalSlice,
+  replaceV9SlideNativeNode,
   reorderV9SlideScenes,
   reorderV9SlideLayers,
   selectV9SlideVerticalSlice,
@@ -145,14 +153,18 @@ import {
   setV9SlideSceneBackgroundColor,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
+  updateV9SlideInteractionRule,
   updateV9SlideLayer,
+  updateV9SlideMotionTargets,
   updateV9SlideNativeNode,
+  updateV9SlideRuntime,
   type V9SlideLayerPatch,
   type V9SlideEditingScope,
   type V9SlideLayerOrderTarget,
   type V9SlideLayerTarget,
   type V9SlideNativeNodePatch,
   type V9SlideNativeNodeTarget,
+  type V9SlideRuntimePatch,
   type V9SlideTransformInput,
   type V9SlideSelectionInput,
   type V9SlideVerticalSliceState,
@@ -346,6 +358,25 @@ export interface EditorState {
     snapshot: CourseProjectArchiveData,
     path: string,
   ): boolean
+  addCourseInteractionRule(rule: InteractionRule): boolean
+  updateCourseInteractionRule(
+    ruleId: string,
+    patch: Partial<Omit<InteractionRule, 'id'>>,
+  ): boolean
+  deleteCourseInteractionRule(ruleId: string): boolean
+  duplicateCourseInteractionRule(ruleId: string): boolean
+  moveCourseInteractionRule(ruleId: string, direction: -1 | 1): boolean
+  prepareCourseMotionTargets(nodeIds: readonly string[]): boolean
+  replaceCourseObjectJson(target: V9SlideLayerTarget, node: SceneNode): boolean
+  updateCourseRuntime(patch: V9SlideRuntimePatch): boolean
+  addCourseComponentLayer(
+    packageId: string,
+    x?: number,
+    y?: number,
+    presetId?: string,
+  ): boolean
+  importCourseComponentPackages(packageData: ComponentPackageData[]): boolean
+  deleteCourseComponentPackage(packageId: string): boolean
 
   createNewProject(): void
   loadProject(
@@ -2360,6 +2391,195 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
       })
       return savedCurrentRevision
+    },
+
+    addCourseInteractionRule(rule) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = addV9SlideInteractionRule(state.courseSession, rule)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '互动规则已添加' }
+      })
+      return accepted
+    },
+
+    updateCourseInteractionRule(ruleId, patch) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = updateV9SlideInteractionRule(
+          state.courseSession,
+          ruleId,
+          patch,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '互动规则已更新' }
+      })
+      return accepted
+    },
+
+    deleteCourseInteractionRule(ruleId) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = deleteV9SlideInteractionRule(
+          state.courseSession,
+          ruleId,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '互动规则已删除' }
+      })
+      return accepted
+    },
+
+    duplicateCourseInteractionRule(ruleId) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = duplicateV9SlideInteractionRule(
+          state.courseSession,
+          ruleId,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '互动规则已复制' }
+      })
+      return accepted
+    },
+
+    moveCourseInteractionRule(ruleId, direction) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = moveV9SlideInteractionRule(
+          state.courseSession,
+          ruleId,
+          direction,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '互动规则顺序已更新' }
+      })
+      return accepted
+    },
+
+    prepareCourseMotionTargets(nodeIds) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = updateV9SlideMotionTargets(
+          state.courseSession,
+          nodeIds,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已准备入场动画目标' }
+      })
+      return accepted
+    },
+
+    replaceCourseObjectJson(target, node) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = replaceV9SlideNativeNode(
+          state.courseSession,
+          target.layerItemId,
+          node,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '对象 JSON 已更新' }
+      })
+      return accepted
+    },
+
+    updateCourseRuntime(patch) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = updateV9SlideRuntime(state.courseSession, patch)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '运行时已更新' }
+      })
+      return accepted
+    },
+
+    addCourseComponentLayer(packageId, x, y, presetId) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = addV9SlideComponentLayer(
+          state.courseSession,
+          packageId,
+          x,
+          y,
+          presetId,
+        )
+        return {
+          ...state,
+          courseSession,
+          statusMessage: '组件已添加到当前层',
+        }
+      })
+      return accepted
+    },
+
+    importCourseComponentPackages(packageData) {
+      if (packageData.length === 0) return true
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = addV9SlideComponentPackages(
+          state.courseSession,
+          packageData,
+        )
+        return {
+          ...state,
+          courseSession,
+          activeTab: state.editorMode === 'professional' ? 'components' : state.activeTab,
+          statusMessage: packageData.length === 1
+            ? `已将组件“${packageData[0]!.manifest.name}”加入工程`
+            : `已将 ${packageData.length} 个组件加入工程`,
+        }
+      })
+      return accepted
+    },
+
+    deleteCourseComponentPackage(packageId) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        accepted = true
+        const courseSession = deleteV9SlideComponentPackage(
+          state.courseSession,
+          packageId,
+        )
+        return {
+          ...state,
+          courseSession,
+          statusMessage: '未使用组件包已删除',
+        }
+      })
+      return accepted
     },
 
     createNewProject() {

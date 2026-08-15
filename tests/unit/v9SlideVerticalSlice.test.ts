@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { InteractionRule } from '@/shared/interactionTypes'
+import type { ComponentPackageData } from '@/shared/componentTypes'
+import type { LayerItem } from '@/shared/courseProjectTypes'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import {
   addNativeVisualLayer,
@@ -10,20 +13,29 @@ import {
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import {
+  addV9SlideComponentLayer,
+  addV9SlideComponentPackages,
+  addV9SlideInteractionRule,
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
   completeV9SlideVerticalSliceSave,
   createV9SlideVerticalSliceState,
+  deleteV9SlideComponentPackage,
+  deleteV9SlideInteractionRule,
   isV9SlideVerticalSliceDirty,
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
   renameV9SlideVerticalSlice,
+  replaceV9SlideNativeNode,
   resolveEditorStartupBackend,
   selectV9SlideVerticalSlice,
   setV9SlideEditingScope,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
+  updateV9SlideInteractionRule,
+  updateV9SlideMotionTargets,
+  updateV9SlideRuntime,
   V9_EDITOR_BACKEND,
   V9_SLIDE_TEST_BACKEND,
   V9_SLIDE_TEST_QUERY,
@@ -561,3 +573,230 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(reopened.project.assets.diagram).toEqual(project.assets.diagram)
   })
 })
+
+describe('V9 interaction / runtime / component authoring commands', () => {
+  it('adds and updates a scene interaction rule with one history entry each', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const rule: InteractionRule = {
+      id: 'interaction_enter',
+      name: '进入场景',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [],
+      actions: [{
+        id: 'action_enter',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'scene.next' },
+      }],
+    }
+    const added = addV9SlideInteractionRule(initial, rule)
+    expect(added.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(added.history.past).toEqual([initial.history.present])
+    const scene = v9ActiveScene(added.history.present, added.selection.locationId)
+    expect(scene.interactions).toHaveLength(1)
+    expect(scene.interactions[0]).toMatchObject({ id: 'interaction_enter' })
+
+    const updated = updateV9SlideInteractionRule(added, 'interaction_enter', {
+      enabled: false,
+    })
+    expect(updated.history.present.revision).toBe(added.history.present.revision + 1)
+    expect(v9ActiveScene(updated.history.present, updated.selection.locationId)
+      .interactions[0]!.enabled).toBe(false)
+
+    const deleted = deleteV9SlideInteractionRule(updated, 'interaction_enter')
+    expect(v9ActiveScene(deleted.history.present, deleted.selection.locationId)
+      .interactions).toHaveLength(0)
+  })
+
+  it('supports global-scope interaction rules through the editing scope', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const global = setV9SlideEditingScope(initial, 'global')
+    const added = addV9SlideInteractionRule(global, {
+      id: 'global_rule',
+      name: '全局规则',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [],
+      actions: [{
+        id: 'global_action',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'scene.next' },
+      }],
+    })
+    expect(added.history.present.globalInteractions).toHaveLength(1)
+    expect(added.history.present.revision).toBe(global.history.present.revision + 1)
+  })
+
+  it('prepares motion targets for the selected scene text in one history entry', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const prepared = updateV9SlideMotionTargets(initial, [V9_SLIDE_TEST_TEXT_ID])
+    expect(prepared.history.present.revision).toBe(initial.history.present.revision + 1)
+    const scene = v9ActiveScene(prepared.history.present, prepared.selection.locationId)
+    const text = scene.layerItems.find((item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID)
+    expect(text?.playbackInitialVisibility).toBe('hidden')
+  })
+
+  it('replaces the full native object JSON while keeping id and type immutable', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const scene = v9ActiveScene(initial.history.present, initial.selection.locationId)
+    const text = scene.layerItems.find((item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID)
+    if (!text || text.kind !== 'native') throw new Error('missing fixture text')
+    const replaced = replaceV9SlideNativeNode(initial, V9_SLIDE_TEST_TEXT_ID, {
+      ...(materializeTextForTest(text)),
+      name: '改名后的文字',
+    })
+    expect(replaced.history.present.revision).toBe(initial.history.present.revision + 1)
+    const nextScene = v9ActiveScene(replaced.history.present, replaced.selection.locationId)
+    const nextText = nextScene.layerItems.find((item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID)
+    expect(nextText?.label).toBe('改名后的文字')
+    expect(() => replaceV9SlideNativeNode(initial, V9_SLIDE_TEST_TEXT_ID, {
+      ...(materializeTextForTest(text)),
+      id: 'other-id',
+    })).toThrow(/ID 不可修改/)
+  })
+
+  it('embeds component packages and inserts one instance in one history entry each', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const packageData = componentPackageFixture('com.example.quiz')
+    const embedded = addV9SlideComponentPackages(initial, [packageData])
+    expect(embedded.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(embedded.componentPackages['com.example.quiz']).toBe(packageData)
+    expect(embedded.history.present.componentPackages['com.example.quiz']).toMatchObject({
+      packageId: 'com.example.quiz',
+      version: '1.0.0',
+    })
+
+    const inserted = addV9SlideComponentLayer(embedded, 'com.example.quiz', 40, 50)
+    expect(inserted.history.present.revision).toBe(embedded.history.present.revision + 1)
+    const scene = v9ActiveScene(inserted.history.present, inserted.selection.locationId)
+    const item = scene.layerItems.find((candidate) => candidate.kind === 'component')
+    expect(item?.kind === 'component' ? item.component.packageId : '').toBe('com.example.quiz')
+    expect(item?.kind === 'component' ? item.frame.x : null).toBe(40)
+  })
+
+  it('deletes an unused component package and rejects deleting used ones', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const embedded = addV9SlideComponentPackages(initial, [componentPackageFixture('com.example.quiz')])
+    const inserted = addV9SlideComponentLayer(embedded, 'com.example.quiz')
+    expect(() => deleteV9SlideComponentPackage(inserted, 'com.example.quiz'))
+      .toThrow(/仍被 1 个实例引用/)
+    const removed = deleteV9SlideComponentPackage(embedded, 'com.example.quiz')
+    expect(removed.history.present.revision).toBe(embedded.history.present.revision + 1)
+    expect(removed.componentPackages['com.example.quiz']).toBeUndefined()
+    expect(removed.history.present.componentPackages['com.example.quiz']).toBeUndefined()
+  })
+
+  it('updates the scoped runtime source and enabled flag through one command', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const project = updateCourseProject(initial.history.present, (draft) => {
+      const location = draft.locations.find((candidate) => candidate.id === draft.startLocationId)
+      if (!location || location.kind !== 'slide-scene') return
+      const surface = draft.surfaces.find((candidate) => candidate.id === location.surfaceId)
+      if (!surface || surface.type !== 'slide') return
+      const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+      scene?.layerItems.push({
+        layerItemId: 'runtime_v1',
+        label: '场景运行时',
+        frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+        order: 10,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        kind: 'runtime',
+        runtime: {
+          protocol: 'legacy-runtime-v2',
+          runtimeApiVersion: 2,
+          enabled: true,
+          renderMode: 'phaser',
+          source: 'CoursewareRuntime.define({runtimeApiVersion: 2, create(){return {destroy(){}}}})',
+          content: { values: { title: '原始标题' } },
+          assets: {},
+        },
+      })
+    })
+    const state = openV9SlideVerticalSliceState({ project, assetFiles: {}, componentFiles: {} }, null)
+    const updated = updateV9SlideRuntime(state, { source: 'CoursewareRuntime.define({runtimeApiVersion: 2, create(ctx){return {destroy(){}}}})', enabled: false })
+    expect(updated.history.present.revision).toBe(state.history.present.revision + 1)
+    const scene = v9ActiveScene(updated.history.present, updated.selection.locationId)
+    const runtime = scene.layerItems.find((item) => item.layerItemId === 'runtime_v1')
+    if (!runtime || runtime.kind !== 'runtime') throw new Error('missing runtime')
+    expect(runtime.runtime.enabled).toBe(false)
+    expect(runtime.runtime.source).toContain('create(ctx)')
+
+    const contentUpdated = updateV9SlideRuntime(updated, {
+      contentValues: { title: '新标题' },
+    })
+    const nextScene = v9ActiveScene(contentUpdated.history.present, contentUpdated.selection.locationId)
+    const nextRuntime = nextScene.layerItems.find((item) => item.layerItemId === 'runtime_v1')
+    if (!nextRuntime || nextRuntime.kind !== 'runtime') throw new Error('missing runtime')
+    expect(nextRuntime.runtime.content.values.title).toBe('新标题')
+  })
+})
+
+function v9ActiveScene(
+  project: ReturnType<typeof createV9SlideVerticalSliceState>['history']['present'],
+  locationId: string,
+) {
+  const location = project.locations.find((candidate) => candidate.id === locationId)
+  if (!location || location.kind !== 'slide-scene') throw new Error('expected Slide location')
+  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  if (!scene) throw new Error('missing scene')
+  return scene
+}
+
+function materializeTextForTest(item: LayerItem) {
+  if (item.kind !== 'native' || item.content.nativeType !== 'text') {
+    throw new Error('expected native text item')
+  }
+  return {
+    id: item.layerItemId,
+    name: item.label,
+    type: 'text' as const,
+    x: item.frame.x,
+    y: item.frame.y,
+    width: item.frame.width,
+    height: item.frame.height,
+    rotation: item.rotation,
+    opacity: item.opacity,
+    visible: item.visible,
+    playbackInitialVisibility: item.playbackInitialVisibility,
+    locked: item.locked,
+    text: item.content.data.text,
+    runs: item.content.data.runs,
+    style: item.content.data.style,
+  }
+}
+
+function componentPackageFixture(id: string): ComponentPackageData {
+  const manifest = {
+    schemaVersion: 4 as const,
+    runtimeApiVersion: 4 as const,
+    id,
+    name: '测试组件',
+    version: '1.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 320, height: 180 },
+    minSize: { width: 16, height: 16 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: {},
+    supportedScopes: ['scene', 'global'] as Array<'scene' | 'global'>,
+    renderMode: 'phaser' as const,
+  }
+  const runtimeSource = `window.CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:4,create(){return{destroy(){}}}})`
+  return {
+    manifest,
+    runtimeSource,
+    files: {
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
+    },
+  }
+}

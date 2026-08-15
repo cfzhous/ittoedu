@@ -1,5 +1,15 @@
 import { useMemo } from 'react'
 import { collectProjectDiagnostics } from '../../shared/projectDiagnostics'
+import type { InteractionRule } from '../../shared/interactionTypes'
+import {
+  buildV9SlideWorkspaceSnapshot,
+  type V9SlideVerticalSliceState,
+} from '../course/v9SlideVerticalSlice'
+import {
+  v9InteractionSceneDocument,
+  v9InteractionSounds,
+  v9SlideScenes,
+} from '../course/slideInteractionView'
 import {
   useEditorStore,
   selectActiveScene,
@@ -7,7 +17,24 @@ import {
 } from '../store/editorStore'
 import { SceneAutomationEditor } from './InteractionEditor'
 
+function v9AutomationSceneContext(
+  session: V9SlideVerticalSliceState,
+): { sceneName: string; interactions: readonly InteractionRule[] } | null {
+  const project = session.history.present
+  const location = project.locations.find(
+    (candidate) => candidate.id === session.selection.locationId,
+  )
+  if (!location || location.kind !== 'slide-scene') return null
+  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (!surface || surface.type !== 'slide') return null
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  return scene
+    ? { sceneName: scene.name, interactions: scene.interactions }
+    : null
+}
+
 export function AutomationTab() {
+  const courseSession = useEditorStore((state) => state.courseSession)
   const scene = useEditorStore(selectActiveScene)
   const editingNodes = useEditorStore(selectEditingNodes)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -49,6 +76,22 @@ export function AutomationTab() {
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
   const updateNodes = useEditorStore((state) => state.updateNodes)
+  const addCourseRule = useEditorStore((state) => state.addCourseInteractionRule)
+  const updateCourseRule = useEditorStore(
+    (state) => state.updateCourseInteractionRule,
+  )
+  const deleteCourseRule = useEditorStore(
+    (state) => state.deleteCourseInteractionRule,
+  )
+  const duplicateCourseRule = useEditorStore(
+    (state) => state.duplicateCourseInteractionRule,
+  )
+  const moveCourseRule = useEditorStore(
+    (state) => state.moveCourseInteractionRule,
+  )
+  const prepareCourseMotionTargets = useEditorStore(
+    (state) => state.prepareCourseMotionTargets,
+  )
   const diagnostics = useMemo(
     () => collectProjectDiagnostics(project).filter(
       (diagnostic) => diagnostic.sceneId === scene.id,
@@ -70,6 +113,21 @@ export function AutomationTab() {
       patch: { playbackInitialVisibility: 'hidden' as const },
     })))
   }
+
+  if (courseSession !== null) {
+    return (
+      <V9AutomationTab
+        onOpenClickRules={() => setActiveTab('properties')}
+        onPrepareMotionTargets={prepareCourseMotionTargets}
+        onAddRule={addCourseRule}
+        onUpdateRule={updateCourseRule}
+        onDeleteRule={deleteCourseRule}
+        onDuplicateRule={duplicateCourseRule}
+        onMoveRule={moveCourseRule}
+      />
+    )
+  }
+
   const sharedProps = {
     selectedNodeId,
     sourceNodes: editingNodes,
@@ -153,6 +211,88 @@ export function AutomationTab() {
         onMoveRule={(ruleId, direction) => {
           moveInteractionRule(scene.id, ruleId, direction)
         }}
+      />
+    </div>
+  )
+}
+
+interface V9AutomationTabProps {
+  onOpenClickRules(): void
+  onPrepareMotionTargets(nodeIds: readonly string[]): void
+  onAddRule(rule: InteractionRule): void
+  onUpdateRule(
+    ruleId: string,
+    patch: Partial<Omit<InteractionRule, 'id'>>,
+  ): void
+  onDeleteRule(ruleId: string): void
+  onDuplicateRule(ruleId: string): void
+  onMoveRule(ruleId: string, direction: -1 | 1): void
+}
+
+function V9AutomationTab({
+  onOpenClickRules,
+  onPrepareMotionTargets,
+  onAddRule,
+  onUpdateRule,
+  onDeleteRule,
+  onDuplicateRule,
+  onMoveRule,
+}: V9AutomationTabProps) {
+  const courseSession = useEditorStore((state) => state.courseSession)
+  const snapshot = useMemo(
+    () => courseSession === null
+      ? null
+      : buildV9SlideWorkspaceSnapshot(courseSession),
+    [courseSession],
+  )
+  const context = useMemo(
+    () => courseSession === null
+      ? null
+      : v9AutomationSceneContext(courseSession),
+    [courseSession],
+  )
+  if (courseSession === null || snapshot === null || context === null) return null
+
+  const project = courseSession.history.present
+  const editingScope = courseSession.editingScope
+  const sourceScope = editingScope === 'global' ? 'global' : 'scene'
+  const rules = sourceScope === 'global'
+    ? project.globalInteractions
+    : context.interactions
+  const scenes = v9SlideScenes(project)
+  const sounds = v9InteractionSounds(project)
+  const activeScene = scenes.find((candidate) => candidate.id === snapshot.document.id)
+  const sceneDocument = v9InteractionSceneDocument(
+    snapshot.document.id,
+    context.sceneName,
+    snapshot.document.nodes,
+    [...context.interactions],
+    activeScene?.presentation,
+  )
+  const selectedNodeId = courseSession.selection.selectionIds.at(-1) ?? null
+
+  return (
+    <div className="properties-scroll" data-testid="automation-tab">
+      <section className="property-section interaction-overview">
+        <h2>互动与动画</h2>
+        <p>先从模板开始，再用“当—如果—就”微调。这里不重复显示元素单击规则。</p>
+      </section>
+      <SceneAutomationEditor
+        scene={sceneDocument}
+        sourceScope={sourceScope}
+        sourceNodes={snapshot.document.nodes}
+        sourceRules={[...rules]}
+        selectedNodeId={selectedNodeId}
+        activeStateId={courseSession.selection.stateId}
+        scenes={scenes}
+        sounds={sounds}
+        onOpenClickRules={onOpenClickRules}
+        onPrepareMotionTargets={(nodeIds) => onPrepareMotionTargets(nodeIds)}
+        onAddRule={onAddRule}
+        onUpdateRule={onUpdateRule}
+        onDeleteRule={onDeleteRule}
+        onDuplicateRule={onDuplicateRule}
+        onMoveRule={onMoveRule}
       />
     </div>
   )
