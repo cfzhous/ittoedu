@@ -13,7 +13,7 @@
 
 1. 阅读 [`AGENTS.md`](AGENTS.md)。
 2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品合同、当前恢复点、并行任务板（§4.5）和验证预算。
-3. 协调者继续阅读当前阶段 [`docs/plans/M3_SLIDE_AUTHORING_PLAN.md`](docs/plans/M3_SLIDE_AUTHORING_PLAN.md)；执行者只读自己的任务行与对应阶段计划小节。
+3. 协调者继续阅读当前阶段 [`docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md`](docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md)；执行者只读自己的任务行与对应阶段计划小节。
 4. 运行 `git status --short`，保留所有不属于当前任务的修改和未跟踪文件。
 5. 从本文件“改什么看哪里”进入相关源码，不先遍历全仓库。
 6. 修改前确认当前源码，而不是照搬索引中的示例或 donor 路径。
