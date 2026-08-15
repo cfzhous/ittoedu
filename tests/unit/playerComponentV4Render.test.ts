@@ -198,6 +198,7 @@ function renderComponent(
   const registry = {
     get: vi.fn(() => definition),
     getLoadError: vi.fn(() => undefined),
+    getInstalledVersion: vi.fn(() => component.manifest.version),
   }
   const payload = {
     project: {
@@ -502,6 +503,7 @@ describe('Player Component API 4 renderer capabilities', () => {
       registry: {
         get: vi.fn(() => failure === 'registration' ? undefined : definition),
         getLoadError: vi.fn(() => undefined),
+        getInstalledVersion: vi.fn(() => component.manifest.version),
       } as never,
       actions: {
         goToScene: () => false,

@@ -205,7 +205,7 @@ describe('ComponentsTab project component management', () => {
 
       const manager = screen.getByTestId(`component-package-${PACKAGE_ID}`)
       expect(manager).toHaveTextContent('v1.0.0')
-      expect(manager).toHaveTextContent('场景 1 · 全局 0')
+      expect(manager).toHaveTextContent('场景 1 · 共用 0 · 全局 0')
       fireEvent.click(screen.getByLabelText('管理可管理组件'))
       expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
 
