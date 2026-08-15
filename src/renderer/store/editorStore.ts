@@ -107,15 +107,30 @@ import {
 } from '../components/importComponentPackage'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
 import {
+  activateV9SlidePresentationState,
+  activateV9SlideScene,
+  addV9SlidePresentationState,
+  addV9SlideScene,
+  clearV9SlidePresentationStateOverrides,
   completeV9SlideVerticalSliceSave,
   createV9CourseEditorState,
   createV9SlideVerticalSliceState,
+  deleteV9SlideScene,
+  deleteV9SlidePresentationState,
+  duplicateV9SlidePresentationState,
+  duplicateV9SlideScene,
   isV9SlideVerticalSliceDirty,
   moveV9SlideVerticalSlice,
   openV9SlideVerticalSliceState,
   redoV9SlideVerticalSlice,
+  renameV9SlidePresentationState,
+  renameV9SlideScene,
   renameV9SlideVerticalSlice,
+  reorderV9SlideScenes,
   selectV9SlideVerticalSlice,
+  setInitialV9SlidePresentationState,
+  setThumbnailV9SlidePresentationState,
+  setV9SlideEditingScope,
   undoV9SlideVerticalSlice,
   type V9SlideMoveInput,
   type V9SlideSelectionInput,
@@ -241,6 +256,21 @@ export interface EditorState {
   clearCourseProjectSession(): void
   selectCourseLayers(input: V9SlideSelectionInput): void
   moveCourseLayers(input: V9SlideMoveInput): void
+  setCourseEditingScope(scope: EditingScope): void
+  activateCourseScene(sceneId: string): void
+  addCourseScene(): void
+  renameCourseScene(sceneId: string, name: string): void
+  reorderCourseScenes(sceneIds: readonly string[]): void
+  duplicateCourseScene(sceneId: string): void
+  deleteCourseScene(sceneId: string): void
+  activateCoursePresentationState(stateId: string | null): void
+  addCoursePresentationState(name?: string): void
+  duplicateCoursePresentationState(stateId: string): void
+  renameCoursePresentationState(stateId: string, name: string): void
+  setInitialCoursePresentationState(stateId: string): void
+  setThumbnailCoursePresentationState(stateId: string): void
+  clearCoursePresentationStateOverrides(stateId: string): void
+  deleteCoursePresentationState(stateId: string): void
   renameCourseProject(title: string): void
   undoCourseProject(): void
   redoCourseProject(): void
@@ -1712,6 +1742,174 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     },
 
+    setCourseEditingScope(scope) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = setV9SlideEditingScope(state.courseSession, scope)
+        return courseSession === state.courseSession
+          ? state
+          : {
+              ...state,
+              courseSession,
+              statusMessage: scope === 'global'
+                ? '正在编辑全局层'
+                : '正在编辑当前场景',
+            }
+      })
+    },
+
+    activateCourseScene(sceneId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = activateV9SlideScene(state.courseSession, sceneId)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已切换场景' }
+      })
+    },
+
+    addCourseScene() {
+      set((state) => {
+        if (state.courseSession === null) return state
+        return {
+          ...state,
+          courseSession: addV9SlideScene(state.courseSession),
+          statusMessage: '已新建场景',
+        }
+      })
+    },
+
+    renameCourseScene(sceneId, name) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = renameV9SlideScene(state.courseSession, sceneId, name)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '场景已重命名' }
+      })
+    },
+
+    reorderCourseScenes(sceneIds) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = reorderV9SlideScenes(state.courseSession, sceneIds)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '场景顺序已更新' }
+      })
+    },
+
+    duplicateCourseScene(sceneId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        return {
+          ...state,
+          courseSession: duplicateV9SlideScene(state.courseSession, sceneId),
+          statusMessage: '场景已复制',
+        }
+      })
+    },
+
+    deleteCourseScene(sceneId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        return {
+          ...state,
+          courseSession: deleteV9SlideScene(state.courseSession, sceneId),
+          statusMessage: '场景已删除',
+        }
+      })
+    },
+
+    activateCoursePresentationState(stateId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = activateV9SlidePresentationState(state.courseSession, stateId)
+        return courseSession === state.courseSession
+          ? state
+          : {
+              ...state,
+              courseSession,
+              statusMessage: stateId === null
+                ? '正在编辑场景基础'
+                : '已切换命名状态',
+            }
+      })
+    },
+
+    addCoursePresentationState(name) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        return {
+          ...state,
+          courseSession: addV9SlidePresentationState(state.courseSession, name),
+          statusMessage: '已新建命名状态',
+        }
+      })
+    },
+
+    duplicateCoursePresentationState(stateId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        return {
+          ...state,
+          courseSession: duplicateV9SlidePresentationState(state.courseSession, stateId),
+          statusMessage: '命名状态已复制',
+        }
+      })
+    },
+
+    renameCoursePresentationState(stateId, name) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = renameV9SlidePresentationState(state.courseSession, stateId, name)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '命名状态已重命名' }
+      })
+    },
+
+    setInitialCoursePresentationState(stateId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = setInitialV9SlidePresentationState(state.courseSession, stateId)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已设为运行时初始状态' }
+      })
+    },
+
+    setThumbnailCoursePresentationState(stateId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = setThumbnailV9SlidePresentationState(state.courseSession, stateId)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '已设为场景缩略图状态' }
+      })
+    },
+
+    clearCoursePresentationStateOverrides(stateId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = clearV9SlidePresentationStateOverrides(state.courseSession, stateId)
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '当前状态已恢复为基础场景' }
+      })
+    },
+
+    deleteCoursePresentationState(stateId) {
+      set((state) => {
+        if (state.courseSession === null) return state
+        return {
+          ...state,
+          courseSession: deleteV9SlidePresentationState(state.courseSession, stateId),
+          statusMessage: '命名状态已删除',
+        }
+      })
+    },
+
     renameCourseProject(title) {
       set((state) => {
         if (state.courseSession === null) return state
@@ -1873,24 +2071,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     setEditorMode(editorMode) {
       persistEditorMode(editorMode)
-      set((state) => ({
-        ...commitTextEditSessionState(state),
-        editorMode,
-        activeTab: editorMode === 'simple' &&
-          (state.activeTab === 'components' || state.activeTab === 'automation' || state.activeTab === 'developer')
-          ? 'properties'
-          : state.activeTab,
-        statusMessage: editorMode === 'simple'
-          ? '已切换到简洁模式'
-          : '已切换到专业模式',
-      }))
+      set((state) => {
+        const prepared = state.courseSession === null
+          ? commitTextEditSessionState(state)
+          : state
+        return {
+          ...prepared,
+          editorMode,
+          activeTab: editorMode === 'simple' &&
+            (state.activeTab === 'components' || state.activeTab === 'automation' || state.activeTab === 'developer')
+            ? 'properties'
+            : state.activeTab,
+          statusMessage: editorMode === 'simple'
+            ? '已切换到简洁模式'
+            : '已切换到专业模式',
+        }
+      })
     },
 
     setActiveTab(activeTab) {
-      set((state) => ({
-        ...commitTextEditSessionState(state),
-        activeTab,
-      }))
+      set((state) => {
+        const prepared = state.courseSession === null
+          ? commitTextEditSessionState(state)
+          : state
+        return { ...prepared, activeTab }
+      })
     },
     setStatus(statusMessage) {
       set({ statusMessage })

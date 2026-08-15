@@ -167,4 +167,32 @@ describe('V9 ownership in the original editor Store', () => {
     expect(isV9SlideVerticalSliceDirty(current)).toBe(false)
     expectLegacyTruthUnchanged(legacyBefore)
   })
+
+  it('changes V9 shell preferences without committing a hidden V8 text draft', () => {
+    const store = useEditorStore.getState()
+    store.addTextNode()
+    const text = useEditorStore.getState().project.scenes[0]!.nodes.find(
+      (node) => node.type === 'text',
+    )
+    if (!text || text.type !== 'text') throw new Error('expected legacy text node')
+    store.beginTextEdit(text.id, 'properties')
+    store.updateTextEditDraft(text.id, '尚未提交的 V8 草稿', text.runs)
+    const before = useEditorStore.getState()
+    const legacyProject = before.project
+    const legacyHistory = before.history
+    const legacyDirty = before.dirty
+    const textEditSession = before.textEditSession
+
+    store.activateV9SlideFixture()
+    store.setEditorMode(before.editorMode === 'simple' ? 'professional' : 'simple')
+    store.setActiveTab('layers')
+    const after = useEditorStore.getState()
+
+    expect(after.project).toBe(legacyProject)
+    expect(after.history).toBe(legacyHistory)
+    expect(after.dirty).toBe(legacyDirty)
+    expect(after.textEditSession).toBe(textEditSession)
+    expect(after.courseSession).not.toBeNull()
+    expect(after.activeTab).toBe('layers')
+  })
 })

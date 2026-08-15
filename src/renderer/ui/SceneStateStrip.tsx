@@ -15,6 +15,44 @@ import { ConfirmDialog } from './ConfirmDialog'
 
 type PendingAction = 'delete' | 'reset' | null
 
+export type SceneStateStripEditingScope = 'scene' | 'global'
+export type SceneStateStripEditorMode = 'simple' | 'professional'
+
+export interface SceneStateStripStateRow {
+  readonly id: string
+  readonly name: string
+  readonly overrideCount: number
+  readonly incomingCount: number
+  readonly scopedCount: number
+  readonly initial: boolean
+  readonly thumbnail: boolean
+}
+
+/**
+ * Narrow document-control port shared by the legacy V8 adapter and the V9
+ * course session. Supplying this port keeps the strip independent from the
+ * legacy editor Store and presentation materializer.
+ */
+export interface SceneStateStripDocumentControl {
+  readonly editingScope: SceneStateStripEditingScope
+  readonly editorMode: SceneStateStripEditorMode
+  readonly activeStateId: string | null
+  readonly states: readonly SceneStateStripStateRow[]
+  onSetEditorMode(mode: SceneStateStripEditorMode): void
+  onActivateState(stateId: string | null): void
+  onAddState(): void
+  onDuplicateState(stateId: string): void
+  onRenameState(stateId: string, name: string): void
+  onSetInitialState(stateId: string): void
+  onSetThumbnailState(stateId: string): void
+  onClearState(stateId: string): void
+  onDeleteState(stateId: string): void
+}
+
+export interface SceneStateStripProps {
+  documentControl?: SceneStateStripDocumentControl
+}
+
 function countStateOverrides(state: ScenePresentationState): number {
   let count = Object.keys(state.nodeOverrides).length
   if (Object.prototype.hasOwnProperty.call(state, 'backgroundColor')) count += 1
@@ -23,7 +61,14 @@ function countStateOverrides(state: ScenePresentationState): number {
   return count
 }
 
-export function SceneStateStrip() {
+export function SceneStateStrip({ documentControl }: SceneStateStripProps = {}) {
+  if (documentControl) {
+    return <SceneStateStripView documentControl={documentControl} />
+  }
+  return <LegacySceneStateStripAdapter />
+}
+
+function LegacySceneStateStripAdapter() {
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
   const editorMode = useEditorStore((state) => state.editorMode)
@@ -53,26 +98,87 @@ export function SceneStateStrip() {
   const clearState = useEditorStore(
     (state) => state.clearPresentationStateOverrides,
   )
-  const [editingStateId, setEditingStateId] = useState<string | null>(null)
-  const [draftName, setDraftName] = useState('')
-  const [pendingAction, setPendingAction] = useState<PendingAction>(null)
-
   const presentation = useMemo(
     () => ensureScenePresentation(scene),
     [scene],
   )
+  const states = useMemo<SceneStateStripStateRow[]>(
+    () => presentation.states.map((state) => ({
+      id: state.id,
+      name: state.name,
+      overrideCount: countStateOverrides(state),
+      incomingCount: scene.interactions.filter((rule) =>
+        rule.actions.some(({ action }) =>
+          action.type === 'presentation.set' && action.stateId === state.id,
+        ),
+      ).length,
+      scopedCount: scene.interactions.filter((rule) =>
+        rule.conditions.some((condition) =>
+          condition.type === 'presentation.in' && condition.stateIds.includes(state.id),
+        ),
+      ).length,
+      initial: state.id === presentation.initialStateId,
+      thumbnail: state.id === presentation.thumbnailStateId,
+    })),
+    [presentation, scene.interactions],
+  )
+
+  return (
+    <SceneStateStripView
+      documentControl={{
+        editingScope,
+        editorMode,
+        activeStateId,
+        states,
+        onSetEditorMode: setEditorMode,
+        onActivateState: setActiveState,
+        onAddState: () => addState(),
+        onDuplicateState: duplicateState,
+        onRenameState: renameState,
+        onSetInitialState: setInitialState,
+        onSetThumbnailState: setThumbnailState,
+        onClearState: clearState,
+        onDeleteState: (stateId) => { deleteState(stateId) },
+      }}
+    />
+  )
+}
+
+function SceneStateStripView({
+  documentControl,
+}: {
+  documentControl: SceneStateStripDocumentControl
+}) {
+  const {
+    editingScope,
+    editorMode,
+    activeStateId,
+    states,
+    onSetEditorMode,
+    onActivateState,
+    onAddState,
+    onDuplicateState,
+    onRenameState,
+    onSetInitialState,
+    onSetThumbnailState,
+    onClearState,
+    onDeleteState,
+  } = documentControl
+  const [editingStateId, setEditingStateId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const activeState = activeStateId === null
     ? null
-    : presentation.states.find((state) => state.id === activeStateId) ?? null
+    : states.find((state) => state.id === activeStateId) ?? null
 
   useEffect(() => {
     if (
       editingStateId &&
-      !presentation.states.some((state) => state.id === editingStateId)
+      !states.some((state) => state.id === editingStateId)
     ) {
       setEditingStateId(null)
     }
-  }, [editingStateId, presentation.states])
+  }, [editingStateId, states])
 
   const startRename = () => {
     if (!activeState) return
@@ -82,7 +188,7 @@ export function SceneStateStrip() {
 
   const commitRename = () => {
     if (editingStateId && draftName.trim()) {
-      renameState(editingStateId, draftName)
+      onRenameState(editingStateId, draftName)
     }
     setEditingStateId(null)
   }
@@ -118,14 +224,14 @@ export function SceneStateStrip() {
             className="state-action"
             aria-label="新建场景状态"
             title="新建场景状态"
-            onClick={() => addState()}
+            onClick={onAddState}
           >
             <Plus size={14} /><span>新状态</span>
           </button>
           <button
             type="button"
             className="state-action"
-            onClick={() => activeState ? duplicateState(activeState.id) : addState()}
+            onClick={() => activeState ? onDuplicateState(activeState.id) : onAddState()}
             aria-label={activeState ? '复制当前状态' : '从基础新建状态'}
             title={activeState ? '复制当前状态及其覆盖' : '从基础创建空状态'}
           >
@@ -144,20 +250,20 @@ export function SceneStateStrip() {
           <button
             type="button"
             className="state-action"
-            disabled={!activeState || activeState.id === presentation.initialStateId}
+            disabled={!activeState || activeState.initial}
             aria-label="将当前状态设为运行初始状态"
-            title={activeState?.id === presentation.initialStateId ? '当前已是运行初始状态' : '设为运行初始状态'}
-            onClick={() => activeState && setInitialState(activeState.id)}
+            title={activeState?.initial ? '当前已是运行初始状态' : '设为运行初始状态'}
+            onClick={() => activeState && onSetInitialState(activeState.id)}
           >
             <Star size={14} /><span>设为初始</span>
           </button>
           <button
             type="button"
             className="state-action"
-            disabled={!activeState || activeState.id === presentation.thumbnailStateId}
+            disabled={!activeState || activeState.thumbnail}
             aria-label="将当前状态设为场景缩略图状态"
-            title={activeState?.id === presentation.thumbnailStateId ? '当前已用于场景缩略图' : '用于左侧场景缩略图'}
-            onClick={() => activeState && setThumbnailState(activeState.id)}
+            title={activeState?.thumbnail ? '当前已用于场景缩略图' : '用于左侧场景缩略图'}
+            onClick={() => activeState && onSetThumbnailState(activeState.id)}
           >
             <ImageIcon size={14} /><span>设为缩略图</span>
           </button>
@@ -174,9 +280,9 @@ export function SceneStateStrip() {
           <button
             type="button"
             className="state-action state-action--danger"
-            disabled={!activeState || presentation.states.length <= 1}
+            disabled={!activeState || states.length <= 1}
             aria-label="删除当前状态"
-            title={presentation.states.length <= 1 ? '至少保留一个命名状态' : '删除当前状态'}
+            title={states.length <= 1 ? '至少保留一个命名状态' : '删除当前状态'}
             onClick={() => setPendingAction('delete')}
           >
             <Trash2 size={14} /><span>删除</span>
@@ -186,7 +292,7 @@ export function SceneStateStrip() {
           <button
             type="button"
             className="state-action scene-state-strip__professional-link"
-            onClick={() => setEditorMode('professional')}
+            onClick={() => onSetEditorMode('professional')}
           >
             管理状态
           </button>
@@ -200,7 +306,7 @@ export function SceneStateStrip() {
             className={`scene-state-card scene-state-card--base${activeStateId === null ? ' scene-state-card--active' : ''}`}
             aria-pressed={activeStateId === null}
             aria-label="基础场景，所有命名状态的继承源"
-            onClick={() => setActiveState(null)}
+            onClick={() => onActivateState(null)}
           >
             <span className="scene-state-card__preview">基础</span>
             <span className="scene-state-card__name">基础场景</span>
@@ -208,24 +314,13 @@ export function SceneStateStrip() {
           </button>
         </li>
 
-        {presentation.states.map((state) => {
+        {states.map((state) => {
           const active = state.id === activeStateId
-          const isInitial = state.id === presentation.initialStateId
-          const isThumbnail = state.id === presentation.thumbnailStateId
-          const overrideCount = countStateOverrides(state)
-          const overrideSummary = overrideCount === 0
+          const isInitial = state.initial
+          const isThumbnail = state.thumbnail
+          const overrideSummary = state.overrideCount === 0
             ? '继承基础，无覆盖'
-            : `${overrideCount} 项覆盖`
-          const incomingCount = scene.interactions.filter((rule) =>
-            rule.actions.some(({ action }) =>
-              action.type === 'presentation.set' && action.stateId === state.id,
-            ),
-          ).length
-          const scopedCount = scene.interactions.filter((rule) =>
-            rule.conditions.some((condition) =>
-              condition.type === 'presentation.in' && condition.stateIds.includes(state.id),
-            ),
-          ).length
+            : `${state.overrideCount} 项覆盖`
           if (editingStateId === state.id) {
             return (
               <li
@@ -256,10 +351,10 @@ export function SceneStateStrip() {
                 className={`scene-state-card${active ? ' scene-state-card--active' : ''}`}
                 aria-pressed={active}
                 aria-label={`${state.name}，命名状态${isInitial ? '，运行初始状态' : ''}${isThumbnail ? '，场景缩略图状态' : ''}，${overrideSummary}`}
-                onClick={() => setActiveState(state.id)}
+                onClick={() => onActivateState(state.id)}
                 onDoubleClick={() => {
                   if (editorMode !== 'professional') return
-                  setActiveState(state.id)
+                  onActivateState(state.id)
                   setEditingStateId(state.id)
                   setDraftName(state.name)
                 }}
@@ -267,11 +362,11 @@ export function SceneStateStrip() {
                 <span className="scene-state-card__preview">命名状态</span>
                 <span className="scene-state-card__name">{state.name}</span>
                 <small>{overrideSummary}</small>
-                {(incomingCount > 0 || scopedCount > 0) && (
+                {(state.incomingCount > 0 || state.scopedCount > 0) && (
                   <small className="scene-state-card__links">
-                    {incomingCount > 0 ? `${incomingCount} 个入口` : ''}
-                    {incomingCount > 0 && scopedCount > 0 ? ' · ' : ''}
-                    {scopedCount > 0 ? `${scopedCount} 条状态映射` : ''}
+                    {state.incomingCount > 0 ? `${state.incomingCount} 个入口` : ''}
+                    {state.incomingCount > 0 && state.scopedCount > 0 ? ' · ' : ''}
+                    {state.scopedCount > 0 ? `${state.scopedCount} 条状态映射` : ''}
                   </small>
                 )}
                 <span className="scene-state-card__badges" aria-hidden="true">
@@ -295,8 +390,8 @@ export function SceneStateStrip() {
         onCancel={() => setPendingAction(null)}
         onConfirm={() => {
           if (activeState) {
-            if (pendingAction === 'delete') deleteState(activeState.id)
-            else clearState(activeState.id)
+            if (pendingAction === 'delete') onDeleteState(activeState.id)
+            else onClearState(activeState.id)
           }
           setPendingAction(null)
         }}

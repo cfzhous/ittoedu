@@ -317,12 +317,14 @@ describe('Course Studio product model', () => {
     )
     current = project.surfaces[0]
     if (current?.type !== 'slide') throw new Error('expected slide')
-    project = deleteSlidePresentationState(
+    expect(() => deleteSlidePresentationState(
       project, slide.id, sceneId, 'state_initial', NOW,
-    )
+    )).toThrow('至少需要一个命名状态')
     current = project.surfaces[0]
     if (current?.type !== 'slide') throw new Error('expected slide')
-    expect(current.scenes[0]!.presentation).toBeUndefined()
+    expect(current.scenes[0]!.presentation?.states).toEqual([
+      { id: 'state_initial', name: '初始', layerItemOverrides: {} },
+    ])
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
   })
 })

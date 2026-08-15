@@ -11,6 +11,11 @@ import type {
 } from '../../shared/componentCatalog'
 
 interface RightSidebarProps {
+  /**
+   * Keeps the original shell/tabs available while preventing an unsupported
+   * document backend from mounting controls that would mutate another model.
+   */
+  documentEditingUnavailableReason?: string
   onAddImage(x?: number, y?: number): void
   onReplaceImage(): void
   onAddVideo(x?: number, y?: number): void
@@ -43,6 +48,7 @@ const professionalTabs: Array<{ id: SidebarTab; label: string }> = [
 ]
 
 export function RightSidebar({
+  documentEditingUnavailableReason,
   onAddImage,
   onReplaceImage,
   onAddVideo,
@@ -69,6 +75,7 @@ export function RightSidebar({
           : ''
       }`}
       aria-label="编辑面板"
+      aria-disabled={documentEditingUnavailableReason ? true : undefined}
     >
       <div
         className="sidebar-tabs"
@@ -91,7 +98,12 @@ export function RightSidebar({
         ))}
       </div>
       <div className="sidebar-content">
-        {activeTab === 'elements' && (
+        {documentEditingUnavailableReason ? (
+          <div className="right-sidebar-capability-gate" role="status">
+            <strong>{tabs.find((tab) => tab.id === activeTab)?.label ?? '编辑'}面板暂不可用</strong>
+            <p>{documentEditingUnavailableReason}</p>
+          </div>
+        ) : activeTab === 'elements' ? (
           <ElementsTab
             onAddImage={onAddImage}
             onAddVideo={onAddVideo}
@@ -99,8 +111,7 @@ export function RightSidebar({
             onImportAudio={onImportAudio}
             onImportVideo={onImportVideo}
           />
-        )}
-        {activeTab === 'components' && editorMode === 'professional' && (
+        ) : activeTab === 'components' && editorMode === 'professional' ? (
           <ComponentsTab
             componentCatalog={componentCatalog}
             onImportExternalComponents={onImportExternalComponents}
@@ -109,17 +120,15 @@ export function RightSidebar({
             onUpdateCatalogComponent={onUpdateCatalogComponent}
             onReplaceComponent={onReplaceComponent}
           />
-        )}
-        {activeTab === 'layers' && <NodesTab />}
-        {activeTab === 'properties' && (
+        ) : activeTab === 'layers' ? (
+          <NodesTab />
+        ) : activeTab === 'properties' ? (
           <PropertiesTab onReplaceImage={onReplaceImage} />
-        )}
-        {activeTab === 'automation' && editorMode === 'professional' && (
+        ) : activeTab === 'automation' && editorMode === 'professional' ? (
           <AutomationTab />
-        )}
-        {activeTab === 'developer' && editorMode === 'professional' && (
+        ) : activeTab === 'developer' && editorMode === 'professional' ? (
           <DeveloperTab />
-        )}
+        ) : null}
       </div>
     </aside>
   )

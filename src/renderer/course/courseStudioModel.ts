@@ -16,7 +16,7 @@ import {
   type SlidePresentationState,
   type SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import type { SceneNode } from '../../shared/projectTypes'
+import type { SceneNode, TeacherControllerButton } from '../../shared/projectTypes'
 import {
   createFormulaNode,
   createImageNode,
@@ -241,6 +241,66 @@ export function saveSlidePresentationState(
   }, now)
 }
 
+export function addSlidePresentationState(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  name?: string,
+  options: { id?: string; now?: string } = {},
+): CourseProjectDocument {
+  const stateId = stableId('state', options.id)
+  return cloneAndCommit(project, (draft) => {
+    const scene = findMutableSlideScene(draft, surfaceId, sceneId)
+    const presentation = scene.presentation ?? initialSlidePresentation()
+    if (presentation.states.some((state) => state.id === stateId)) {
+      throw new Error(`命名状态 ID 已存在：${stateId}`)
+    }
+    const normalized = name?.trim().slice(0, 120)
+    presentation.states.push({
+      id: stateId,
+      name: normalized || `状态 ${presentation.states.length + 1}`,
+      layerItemOverrides: {},
+    })
+    scene.presentation = presentation
+  }, options.now)
+}
+
+export function duplicateSlidePresentationState(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  stateId: string,
+  options: { id?: string; name?: string; now?: string } = {},
+): CourseProjectDocument {
+  const duplicateId = stableId('state', options.id)
+  return cloneAndCommit(project, (draft) => {
+    const scene = findMutableSlideScene(draft, surfaceId, sceneId)
+    const presentation = scene.presentation
+    const sourceIndex = presentation?.states.findIndex((state) => state.id === stateId) ?? -1
+    if (!presentation || sourceIndex < 0) throw new Error(`找不到命名状态：${stateId}`)
+    if (presentation.states.some((state) => state.id === duplicateId)) {
+      throw new Error(`命名状态 ID 已存在：${duplicateId}`)
+    }
+    const source = presentation.states[sourceIndex]!
+    presentation.states.splice(sourceIndex + 1, 0, {
+      ...structuredClone(source),
+      id: duplicateId,
+      name: options.name?.trim().slice(0, 120) || `${source.name} 副本`,
+    })
+    scene.interactions.forEach((rule) => {
+      rule.conditions.forEach((condition) => {
+        if (
+          condition.type === 'presentation.in' &&
+          condition.stateIds.includes(stateId) &&
+          !condition.stateIds.includes(duplicateId)
+        ) {
+          condition.stateIds.push(duplicateId)
+        }
+      })
+    })
+  }, options.now)
+}
+
 export function renameSlidePresentationState(
   project: CourseProjectDocument,
   surfaceId: string,
@@ -275,6 +335,147 @@ export function setInitialSlidePresentationState(
   }, now)
 }
 
+export function setThumbnailSlidePresentationState(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  stateId: string,
+  now?: string,
+): CourseProjectDocument {
+  return cloneAndCommit(project, (draft) => {
+    const scene = findMutableSlideScene(draft, surfaceId, sceneId)
+    if (!scene.presentation?.states.some((candidate) => candidate.id === stateId)) {
+      throw new Error(`找不到命名状态：${stateId}`)
+    }
+    scene.presentation.thumbnailStateId = stateId
+  }, now)
+}
+
+export function clearSlidePresentationStateOverrides(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  stateId: string,
+  now?: string,
+): CourseProjectDocument {
+  return cloneAndCommit(project, (draft) => {
+    const scene = findMutableSlideScene(draft, surfaceId, sceneId)
+    const state = scene.presentation?.states.find((candidate) => candidate.id === stateId)
+    if (!state) throw new Error(`找不到命名状态：${stateId}`)
+    state.layerItemOverrides = {}
+    delete state.layerItemOrder
+    delete state.backgroundColor
+    delete state.backgroundAssetId
+  }, now)
+}
+
+function removePresentationStateReferences(
+  interactions: SlideSceneDocument['interactions'],
+  stateId: string,
+): SlideSceneDocument['interactions'] {
+  const removedActionIds = new Set<string>()
+  let remaining = interactions.flatMap((rule) => {
+    if (rule.trigger.type === 'presentation.enter' && rule.trigger.stateId === stateId) {
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      return []
+    }
+    let valid = true
+    rule.conditions = rule.conditions.filter((condition) => {
+      if (condition.type !== 'presentation.in') return true
+      condition.stateIds = condition.stateIds.filter((id) => id !== stateId)
+      if (condition.stateIds.length === 0) valid = false
+      return condition.stateIds.length > 0
+    })
+    if (!valid) {
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      return []
+    }
+    rule.actions = rule.actions.filter((step) => {
+      const remove = step.action.type === 'presentation.set' && step.action.stateId === stateId
+      if (remove) removedActionIds.add(step.id)
+      return !remove
+    })
+    if (rule.actions.length === 0) return []
+    rule.actions[0]!.start = 'after-previous'
+    return [rule]
+  })
+  let removed = true
+  while (removed) {
+    removed = false
+    remaining = remaining.filter((rule) => {
+      if (
+        rule.trigger.type !== 'animation.completed' ||
+        !removedActionIds.has(rule.trigger.actionId)
+      ) {
+        return true
+      }
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      removed = true
+      return false
+    })
+  }
+  return remaining
+}
+
+function clearSceneGoTargetState(
+  project: CourseProjectDocument,
+  sceneId: string,
+  stateId: string,
+): void {
+  const clearIn = (interactions: SlideSceneDocument['interactions']) => {
+    interactions.forEach((rule) => {
+      rule.actions.forEach((step) => {
+        const action = step.action
+        if (
+          action.type === 'scene.go' &&
+          action.sceneId === sceneId &&
+          action.targetStateId === stateId
+        ) {
+          delete action.targetStateId
+        }
+      })
+    })
+  }
+  clearIn(project.globalInteractions)
+  project.surfaces.forEach((surface) => {
+    if (surface.type === 'slide') {
+      surface.scenes.forEach((scene) => {
+        clearIn(scene.interactions)
+        updateTeacherControllerStateOverrides(
+          scene,
+          (buttons) => clearSceneGoTargetStateButtonList(buttons, sceneId, stateId),
+        )
+      })
+    }
+  })
+  allProjectLayerItems(project).forEach((item) => {
+    if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
+    item.content.data.buttons = clearSceneGoTargetStateButtonList(
+      item.content.data.buttons,
+      sceneId,
+      stateId,
+    )
+  })
+}
+
+function clearSceneGoTargetStateButtonList(
+  buttons: TeacherControllerButton[],
+  sceneId: string,
+  stateId: string,
+): TeacherControllerButton[] {
+  return buttons.map((button) => {
+      if (
+        button.action.type !== 'scene.go' ||
+        button.action.sceneId !== sceneId ||
+        button.action.targetStateId !== stateId
+      ) {
+        return button
+      }
+      const { targetStateId: _removed, ...action } = button.action
+      return { ...button, action }
+    })
+}
+
 export function deleteSlidePresentationState(
   project: CourseProjectDocument,
   surfaceId: string,
@@ -288,17 +489,28 @@ export function deleteSlidePresentationState(
     if (!presentation) throw new Error(`找不到命名状态：${stateId}`)
     const index = presentation.states.findIndex((candidate) => candidate.id === stateId)
     if (index < 0) throw new Error(`找不到命名状态：${stateId}`)
+    if (presentation.states.length <= 1) throw new Error('Slide 场景至少需要一个命名状态')
+    const fallback = presentation.states.find((candidate) => candidate.id !== stateId)!
     presentation.states.splice(index, 1)
-    if (presentation.states.length === 0) {
-      delete scene.presentation
-      return
-    }
     if (presentation.initialStateId === stateId) {
-      presentation.initialStateId = presentation.states[0]!.id
+      presentation.initialStateId = fallback.id
     }
     if (presentation.thumbnailStateId === stateId) {
       presentation.thumbnailStateId = presentation.initialStateId
     }
+    draft.locations.forEach((location) => {
+      if (
+        location.kind === 'slide-scene' &&
+        location.surfaceId === surfaceId &&
+        location.sceneId === sceneId &&
+        location.stateId === stateId
+      ) {
+        delete location.stateId
+        location.label = `${mutableSlideSurface(draft, surfaceId).title} · ${scene.name}`
+      }
+    })
+    scene.interactions = removePresentationStateReferences(scene.interactions, stateId)
+    clearSceneGoTargetState(draft, sceneId, stateId)
   }, now)
 }
 
@@ -327,6 +539,7 @@ export function addCourseSurface(
           name: '第 1 幕',
           backgroundColor: '#ffffff',
           layerItems: [],
+          presentation: initialSlidePresentation(),
           interactions: [],
         }],
       }
@@ -448,6 +661,7 @@ export function addSlideScene(
       name: options.name ?? `第 ${surface.scenes.length + 1} 幕`,
       backgroundColor: '#ffffff',
       layerItems: [],
+      presentation: initialSlidePresentation(),
       interactions: [],
     }
     surface.scenes.push(scene)
@@ -456,14 +670,583 @@ export function addSlideScene(
         entry.kind === 'slide-scenes' && entry.surfaceId === surfaceId,
     )
     printEntry?.sceneIds.push(sceneId)
-    draft.locations.push({
+    insertAfterLastSlideLocation(draft, surfaceId, [{
       id: sceneId,
       label: `${surface.title} · ${scene.name}`,
       kind: 'slide-scene',
       surfaceId,
       sceneId,
-    })
+    }])
+    reorderSlideLocationsForSurface(draft, surfaceId)
   }, options.now)
+}
+
+function mutableSlideSurface(
+  project: CourseProjectDocument,
+  surfaceId: string,
+) {
+  const surface = project.surfaces.find((candidate) => candidate.id === surfaceId)
+  if (!surface || surface.type !== 'slide') throw new Error(`找不到 Slide 表面：${surfaceId}`)
+  return surface
+}
+
+function insertAfterLastSlideLocation(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  locations: CourseProjectDocument['locations'],
+): void {
+  let insertionIndex = project.locations.length
+  project.locations.forEach((location, index) => {
+    if (location.kind === 'slide-scene' && location.surfaceId === surfaceId) {
+      insertionIndex = index + 1
+    }
+  })
+  project.locations.splice(insertionIndex, 0, ...locations)
+}
+
+function reorderSlideLocationsForSurface(
+  project: CourseProjectDocument,
+  surfaceId: string,
+): void {
+  const surface = mutableSlideSurface(project, surfaceId)
+  const belongsToSurface = (location: CourseProjectDocument['locations'][number]) =>
+    location.kind === 'slide-scene' && location.surfaceId === surfaceId
+  const original = project.locations
+  let lastTargetIndex = -1
+  original.forEach((location, index) => {
+    if (belongsToSurface(location)) lastTargetIndex = index
+  })
+  const byScene = new Map<string, CourseProjectDocument['locations']>()
+  original.forEach((location) => {
+    if (!belongsToSurface(location) || location.kind !== 'slide-scene') return
+    const entries = byScene.get(location.sceneId) ?? []
+    entries.push(location)
+    byScene.set(location.sceneId, entries)
+  })
+  const ordered = surface.scenes.flatMap((scene) => byScene.get(scene.id) ?? [])
+  if (lastTargetIndex < 0) {
+    project.locations = [...original, ...ordered]
+    return
+  }
+  let cursor = 0
+  project.locations = original.flatMap((location, index) => {
+    const replacement = belongsToSurface(location) && cursor < ordered.length
+      ? [ordered[cursor++]!]
+      : belongsToSurface(location)
+        ? []
+        : [location]
+    if (index === lastTargetIndex && cursor < ordered.length) {
+      replacement.push(...ordered.slice(cursor))
+      cursor = ordered.length
+    }
+    return replacement
+  })
+}
+
+function reorderSlidePrintEntry(
+  project: CourseProjectDocument,
+  surfaceId: string,
+): void {
+  const surface = mutableSlideSurface(project, surfaceId)
+  const entry = project.mixedPrintPlan?.entries.find(
+    (candidate): candidate is Extract<MixedPrintEntry, { kind: 'slide-scenes' }> =>
+      candidate.kind === 'slide-scenes' && candidate.surfaceId === surfaceId,
+  )
+  if (!entry) return
+  const rank = new Map(surface.scenes.map((scene, index) => [scene.id, index]))
+  entry.sceneIds = entry.sceneIds
+    .filter((sceneId) => rank.has(sceneId))
+    .sort((left, right) => rank.get(left)! - rank.get(right)!)
+}
+
+export function renameSlideScene(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  name: string,
+  now?: string,
+): CourseProjectDocument {
+  const normalized = name.trim().slice(0, 200)
+  if (!normalized) throw new Error('场景名称不能为空')
+  return cloneAndCommit(project, (draft) => {
+    const surface = mutableSlideSurface(draft, surfaceId)
+    const scene = surface.scenes.find((candidate) => candidate.id === sceneId)
+    if (!scene) throw new Error(`找不到 Slide 场景：${sceneId}`)
+    scene.name = normalized
+    draft.locations.forEach((location) => {
+      if (
+        location.kind === 'slide-scene' &&
+        location.surfaceId === surfaceId &&
+        location.sceneId === sceneId &&
+        location.stateId === undefined
+      ) {
+        location.label = `${surface.title} · ${normalized}`
+      }
+    })
+  }, now)
+}
+
+export function reorderSlideScenes(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneIds: readonly string[],
+  now?: string,
+): CourseProjectDocument {
+  return cloneAndCommit(project, (draft) => {
+    const surface = mutableSlideSurface(draft, surfaceId)
+    if (
+      sceneIds.length !== surface.scenes.length ||
+      new Set(sceneIds).size !== sceneIds.length ||
+      sceneIds.some((id) => !surface.scenes.some((scene) => scene.id === id))
+    ) {
+      throw new Error('场景排序必须且只能包含该 Slide 表面的全部场景')
+    }
+    const byId = new Map(surface.scenes.map((scene) => [scene.id, scene]))
+    surface.scenes = sceneIds.map((id) => byId.get(id)!)
+    reorderSlideLocationsForSurface(draft, surfaceId)
+    reorderSlidePrintEntry(draft, surfaceId)
+  }, now)
+}
+
+function remapTeacherControllerButtons(
+  item: LayerItem,
+  sceneIdMap: ReadonlyMap<string, string>,
+  stateIdMap: ReadonlyMap<string, string>,
+): void {
+  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
+  item.content.data.buttons = remapTeacherControllerButtonList(
+    item.content.data.buttons,
+    sceneIdMap,
+    stateIdMap,
+  )
+}
+
+function remapTeacherControllerButtonList(
+  buttons: TeacherControllerButton[],
+  sceneIdMap: ReadonlyMap<string, string>,
+  stateIdMap: ReadonlyMap<string, string>,
+): TeacherControllerButton[] {
+  return buttons.map((button) => {
+    const duplicateSceneId = button.action.type === 'scene.go'
+      ? sceneIdMap.get(button.action.sceneId)
+      : undefined
+    return {
+      ...button,
+      id: stableId('teacher-button'),
+      action: button.action.type === 'scene.go' && duplicateSceneId
+        ? {
+            ...button.action,
+            sceneId: duplicateSceneId,
+            ...(button.action.targetStateId
+              ? { targetStateId: stateIdMap.get(button.action.targetStateId) ?? button.action.targetStateId }
+              : {}),
+          }
+        : button.action,
+    }
+  })
+}
+
+function teacherControllerOverrideButtons(
+  item: LayerItem | undefined,
+  override: SlidePresentationState['layerItemOverrides'][string],
+): TeacherControllerButton[] | undefined {
+  if (
+    item?.kind !== 'native' ||
+    item.content.nativeType !== 'teacher-controller' ||
+    !override.nativeData ||
+    !Array.isArray(override.nativeData.buttons)
+  ) {
+    return undefined
+  }
+  return override.nativeData.buttons as TeacherControllerButton[]
+}
+
+function duplicateSlideSceneDocument(
+  source: SlideSceneDocument,
+  sceneId: string,
+  name: string,
+): SlideSceneDocument {
+  const scene = structuredClone(source)
+  const sceneIdMap = new Map([[source.id, sceneId]])
+  const layerIdMap = new Map(source.layerItems.map((item) => [
+    item.layerItemId,
+    stableId('layer'),
+  ]))
+  const stateIdMap = new Map((source.presentation?.states ?? []).map((state) => [
+    state.id,
+    stableId('state'),
+  ]))
+  const actionIdMap = new Map(source.interactions.flatMap((rule) =>
+    rule.actions.map((step) => [step.id, stableId('action')] as const),
+  ))
+
+  scene.id = sceneId
+  scene.name = name
+  scene.layerItems.forEach((item) => {
+    item.layerItemId = layerIdMap.get(item.layerItemId)!
+    if (item.kind === 'runtime' && item.runtime.nodeBindings) {
+      item.runtime.nodeBindings = Object.fromEntries(
+        Object.entries(item.runtime.nodeBindings).map(([key, layerItemId]) => [
+          key,
+          layerIdMap.get(layerItemId) ?? layerItemId,
+        ]),
+      )
+    }
+    remapTeacherControllerButtons(item, sceneIdMap, stateIdMap)
+  })
+  if (scene.presentation) {
+    scene.presentation.initialStateId = stateIdMap.get(scene.presentation.initialStateId)!
+    if (scene.presentation.thumbnailStateId) {
+      scene.presentation.thumbnailStateId = stateIdMap.get(scene.presentation.thumbnailStateId)!
+    }
+    scene.presentation.states.forEach((state) => {
+      state.id = stateIdMap.get(state.id)!
+      state.layerItemOverrides = Object.fromEntries(
+        Object.entries(state.layerItemOverrides).map(([layerItemId, override]) => {
+          const buttons = teacherControllerOverrideButtons(
+            source.layerItems.find((item) => item.layerItemId === layerItemId),
+            override,
+          )
+          if (buttons && override.nativeData) {
+            override.nativeData.buttons = remapTeacherControllerButtonList(
+              buttons,
+              sceneIdMap,
+              stateIdMap,
+            )
+          }
+          return [layerIdMap.get(layerItemId) ?? layerItemId, override]
+        }),
+      )
+      if (state.layerItemOrder) {
+        state.layerItemOrder = state.layerItemOrder.map((layerItemId) =>
+          layerIdMap.get(layerItemId) ?? layerItemId,
+        )
+      }
+    })
+  }
+  scene.interactions.forEach((rule) => {
+    rule.id = stableId('rule')
+    const trigger = rule.trigger
+    if ('nodeId' in trigger) trigger.nodeId = layerIdMap.get(trigger.nodeId) ?? trigger.nodeId
+    if (trigger.type === 'presentation.enter') {
+      trigger.stateId = stateIdMap.get(trigger.stateId) ?? trigger.stateId
+    } else if (trigger.type === 'animation.completed') {
+      trigger.actionId = actionIdMap.get(trigger.actionId) ?? trigger.actionId
+    }
+    rule.conditions.forEach((condition) => {
+      if (condition.type === 'presentation.in') {
+        condition.stateIds = condition.stateIds.map((stateId) => stateIdMap.get(stateId) ?? stateId)
+      } else {
+        condition.sceneIds = condition.sceneIds.map((id) => sceneIdMap.get(id) ?? id)
+      }
+    })
+    rule.actions.forEach((step) => {
+      step.id = actionIdMap.get(step.id)!
+      const action = step.action
+      if ('nodeId' in action) action.nodeId = layerIdMap.get(action.nodeId) ?? action.nodeId
+      if (action.type === 'presentation.set') {
+        action.stateId = stateIdMap.get(action.stateId) ?? action.stateId
+      } else if (action.type === 'scene.go' && action.sceneId === source.id) {
+        action.sceneId = sceneId
+        if (action.targetStateId) {
+          action.targetStateId = stateIdMap.get(action.targetStateId) ?? action.targetStateId
+        }
+      }
+    })
+  })
+  return scene
+}
+
+function appendDuplicatedVisibility(
+  project: CourseProjectDocument,
+  locationIdMap: ReadonlyMap<string, string>,
+): void {
+  const append = (entries: ScopedLayerItem[]) => {
+    entries.forEach((entry) => {
+      if (entry.visibility.mode === 'all') return
+      const additions = entry.visibility.locationIds.flatMap((locationId) => {
+        const duplicate = locationIdMap.get(locationId)
+        return duplicate ? [duplicate] : []
+      })
+      entry.visibility.locationIds.push(...additions)
+    })
+  }
+  append(project.globalLayerItems)
+  project.surfaces.forEach((surface) => append(surface.surfaceLayerItems))
+}
+
+function appendDuplicatedSceneConditions(
+  project: CourseProjectDocument,
+  sourceSceneId: string,
+  duplicateSceneId: string,
+): void {
+  const append = (interactions: SlideSceneDocument['interactions']) => {
+    interactions.forEach((rule) => {
+      rule.conditions.forEach((condition) => {
+        if (
+          condition.type === 'scene.in' &&
+          condition.sceneIds.includes(sourceSceneId) &&
+          !condition.sceneIds.includes(duplicateSceneId)
+        ) {
+          condition.sceneIds.push(duplicateSceneId)
+        }
+      })
+    })
+  }
+  append(project.globalInteractions)
+  project.surfaces.forEach((surface) => {
+    if (surface.type === 'slide') surface.scenes.forEach((scene) => append(scene.interactions))
+  })
+}
+
+export function duplicateSlideScene(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sourceSceneId: string,
+  options: { id?: string; name?: string; now?: string } = {},
+): CourseProjectDocument {
+  const duplicateId = stableId('scene', options.id)
+  return cloneAndCommit(project, (draft) => {
+    const surface = mutableSlideSurface(draft, surfaceId)
+    const sourceIndex = surface.scenes.findIndex((scene) => scene.id === sourceSceneId)
+    if (sourceIndex < 0) throw new Error(`找不到 Slide 场景：${sourceSceneId}`)
+    if (surface.scenes.some((scene) => scene.id === duplicateId)) {
+      throw new Error(`场景 ID 已存在：${duplicateId}`)
+    }
+    const source = surface.scenes[sourceIndex]!
+    const duplicate = duplicateSlideSceneDocument(
+      source,
+      duplicateId,
+      options.name ?? `${source.name} 副本`,
+    )
+    surface.scenes.splice(sourceIndex + 1, 0, duplicate)
+
+    const sourceLocations = draft.locations.filter(
+      (location): location is Extract<
+        CourseProjectDocument['locations'][number],
+        { kind: 'slide-scene' }
+      > =>
+        location.kind === 'slide-scene' &&
+        location.surfaceId === surfaceId &&
+        location.sceneId === sourceSceneId,
+    )
+    const stateIds = new Map((source.presentation?.states ?? []).map((state, index) => [
+      state.id,
+      duplicate.presentation?.states[index]?.id,
+    ]))
+    const locationIdMap = new Map<string, string>()
+    const duplicateLocations = sourceLocations.map((location) => {
+      const locationId = location.id === sourceSceneId
+        ? duplicateId
+        : stableId('location')
+      locationIdMap.set(location.id, locationId)
+      return {
+        ...structuredClone(location),
+        id: locationId,
+        label: `${surface.title} · ${duplicate.name}`,
+        sceneId: duplicateId,
+        ...(location.stateId
+          ? { stateId: stateIds.get(location.stateId) ?? location.stateId }
+          : {}),
+      }
+    })
+    if (duplicateLocations.length === 0) {
+      duplicateLocations.push({
+        id: duplicateId,
+        label: `${surface.title} · ${duplicate.name}`,
+        kind: 'slide-scene',
+        surfaceId,
+        sceneId: duplicateId,
+      })
+    }
+    insertAfterLastSlideLocation(draft, surfaceId, duplicateLocations)
+    appendDuplicatedVisibility(draft, locationIdMap)
+    appendDuplicatedSceneConditions(draft, sourceSceneId, duplicateId)
+    reorderSlideLocationsForSurface(draft, surfaceId)
+    const printEntry = draft.mixedPrintPlan?.entries.find(
+      (entry): entry is Extract<MixedPrintEntry, { kind: 'slide-scenes' }> =>
+        entry.kind === 'slide-scenes' && entry.surfaceId === surfaceId,
+    )
+    const printIndex = printEntry?.sceneIds.indexOf(sourceSceneId) ?? -1
+    if (printEntry && printIndex >= 0) printEntry.sceneIds.splice(printIndex + 1, 0, duplicateId)
+    reorderSlidePrintEntry(draft, surfaceId)
+  }, options.now)
+}
+
+function removeDeletedLocationVisibility(
+  entries: ScopedLayerItem[],
+  deletedLocationIds: ReadonlySet<string>,
+): void {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!
+    if (entry.visibility.mode === 'all') continue
+    entry.visibility.locationIds = entry.visibility.locationIds.filter(
+      (locationId) => !deletedLocationIds.has(locationId),
+    )
+    if (entry.visibility.locationIds.length > 0) continue
+    if (entry.visibility.mode === 'include') entries.splice(index, 1)
+    else entry.visibility = { mode: 'all', locationIds: [] }
+  }
+}
+
+function removeSceneGoControllerButtons(item: LayerItem, sceneId: string): void {
+  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
+  item.content.data.buttons = removeSceneGoControllerButtonList(
+    item.content.data.buttons,
+    sceneId,
+  )
+}
+
+function removeSceneGoControllerButtonList(
+  buttons: TeacherControllerButton[],
+  sceneId: string,
+): TeacherControllerButton[] {
+  const remaining = buttons.filter((button) =>
+    button.action.type !== 'scene.go' || button.action.sceneId !== sceneId,
+  )
+  if (remaining.length === 0) {
+    remaining.push({
+      id: stableId('teacher-button'),
+      action: { type: 'scene.next' },
+      label: '下一场景',
+      visible: true,
+    })
+  }
+  return remaining
+}
+
+function updateTeacherControllerStateOverrides(
+  scene: SlideSceneDocument,
+  update: (buttons: TeacherControllerButton[]) => TeacherControllerButton[],
+): void {
+  const items = new Map(scene.layerItems.map((item) => [item.layerItemId, item]))
+  scene.presentation?.states.forEach((state) => {
+    Object.entries(state.layerItemOverrides).forEach(([layerItemId, override]) => {
+      const buttons = teacherControllerOverrideButtons(items.get(layerItemId), override)
+      if (buttons && override.nativeData) override.nativeData.buttons = update(buttons)
+    })
+  })
+}
+
+function removeSceneReferencesFromInteractions(
+  interactions: SlideSceneDocument['interactions'],
+  sceneId: string,
+): SlideSceneDocument['interactions'] {
+  const removedActionIds = new Set<string>()
+  let remaining = interactions.flatMap((rule) => {
+    let impossibleSceneCondition = false
+    rule.conditions.forEach((condition) => {
+      if (condition.type !== 'scene.in') return
+      condition.sceneIds = condition.sceneIds.filter((id) => id !== sceneId)
+      if (condition.sceneIds.length === 0) impossibleSceneCondition = true
+    })
+
+    const keptActions = rule.actions.filter((step) => {
+      const removed = step.action.type === 'scene.go' && step.action.sceneId === sceneId
+      if (removed) removedActionIds.add(step.id)
+      return !removed
+    })
+    if (impossibleSceneCondition || keptActions.length === 0) {
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      return []
+    }
+    rule.actions = keptActions
+    rule.actions[0]!.start = 'after-previous'
+    return [rule]
+  })
+
+  // Removing an impossible rule can also remove a motion action that drives another
+  // animation.completed rule. Close that dependency chain before returning the document.
+  let removedDependentRule = true
+  while (removedDependentRule) {
+    removedDependentRule = false
+    remaining = remaining.flatMap((rule) => {
+      if (
+        rule.trigger.type !== 'animation.completed' ||
+        !removedActionIds.has(rule.trigger.actionId)
+      ) {
+        return [rule]
+      }
+      rule.actions.forEach((step) => removedActionIds.add(step.id))
+      removedDependentRule = true
+      return []
+    })
+  }
+  return remaining
+}
+
+export function deleteSlideScene(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  now?: string,
+): CourseProjectDocument {
+  return cloneAndCommit(project, (draft) => {
+    const surface = mutableSlideSurface(draft, surfaceId)
+    const sceneIndex = surface.scenes.findIndex((scene) => scene.id === sceneId)
+    if (sceneIndex < 0) throw new Error(`找不到 Slide 场景：${sceneId}`)
+    if (surface.scenes.length <= 1) throw new Error('Slide 表面至少需要一个场景')
+    const deletedLocationIds = new Set(draft.locations.flatMap((location) =>
+      location.kind === 'slide-scene' &&
+      location.surfaceId === surfaceId &&
+      location.sceneId === sceneId
+        ? [location.id]
+        : [],
+    ))
+    surface.scenes.splice(sceneIndex, 1)
+    draft.locations = draft.locations.filter((location) => !deletedLocationIds.has(location.id))
+
+    removeDeletedLocationVisibility(draft.globalLayerItems, deletedLocationIds)
+    draft.surfaces.forEach((candidate) => {
+      removeDeletedLocationVisibility(candidate.surfaceLayerItems, deletedLocationIds)
+      candidate.surfaceLayerItems.forEach((entry) => removeSceneGoControllerButtons(entry.item, sceneId))
+      if (candidate.type === 'slide') {
+        candidate.scenes.forEach((scene) => {
+          scene.layerItems.forEach((item) => removeSceneGoControllerButtons(item, sceneId))
+          updateTeacherControllerStateOverrides(
+            scene,
+            (buttons) => removeSceneGoControllerButtonList(buttons, sceneId),
+          )
+          scene.interactions = removeSceneReferencesFromInteractions(scene.interactions, sceneId)
+        })
+      } else if (candidate.type === 'spatial-2d') {
+        candidate.world.layerItems.forEach((item) => removeSceneGoControllerButtons(item, sceneId))
+      }
+    })
+    draft.globalLayerItems.forEach((entry) => removeSceneGoControllerButtons(entry.item, sceneId))
+    draft.globalInteractions = removeSceneReferencesFromInteractions(draft.globalInteractions, sceneId)
+    draft.navigationGuards = draft.navigationGuards.flatMap((guard) => {
+      if (guard.fromLocationIds) {
+        guard.fromLocationIds = guard.fromLocationIds.filter((id) => !deletedLocationIds.has(id))
+        if (guard.fromLocationIds.length === 0) return []
+      }
+      guard.toLocationIds = guard.toLocationIds.filter((id) => !deletedLocationIds.has(id))
+      return guard.toLocationIds.length > 0 ? [guard] : []
+    })
+
+    if (deletedLocationIds.has(draft.startLocationId)) {
+      const fallbackScene = surface.scenes[Math.max(0, sceneIndex - 1)] ?? surface.scenes[0]
+      const fallback = fallbackScene && draft.locations.find((location) =>
+        location.kind === 'slide-scene' &&
+        location.surfaceId === surfaceId &&
+        location.sceneId === fallbackScene.id &&
+        location.stateId === undefined,
+      )
+      draft.startLocationId = fallback?.id ?? draft.locations[0]?.id ?? ''
+    }
+    reorderSlideLocationsForSurface(draft, surfaceId)
+    const printEntry = draft.mixedPrintPlan?.entries.find(
+      (entry): entry is Extract<MixedPrintEntry, { kind: 'slide-scenes' }> =>
+        entry.kind === 'slide-scenes' && entry.surfaceId === surfaceId,
+    )
+    if (printEntry) {
+      printEntry.sceneIds = printEntry.sceneIds.filter((id) => id !== sceneId)
+      if (printEntry.sceneIds.length === 0) {
+        const fallbackScene = surface.scenes[Math.max(0, sceneIndex - 1)] ?? surface.scenes[0]
+        if (fallbackScene) printEntry.sceneIds = [fallbackScene.id]
+      }
+    }
+  }, now)
 }
 
 export function addSlideTextLayer(

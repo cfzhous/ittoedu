@@ -86,8 +86,17 @@ import { CopyableSummaryDialog } from './ui/CopyableSummaryDialog'
 import { ExportSizeWarningDialog } from './ui/ExportSizeWarningDialog'
 import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import { RightSidebar } from './ui/RightSidebar'
-import { ScenePanel } from './ui/ScenePanel'
-import { SceneStateStrip } from './ui/SceneStateStrip'
+import {
+  ScenePanel,
+  type ScenePanelDocumentControl,
+} from './ui/ScenePanel'
+import {
+  buildCourseSceneThumbnailRenderModel,
+} from './ui/SceneThumbnail'
+import {
+  SceneStateStrip,
+  type SceneStateStripDocumentControl,
+} from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import type { WorkspaceSlideAuthoringInput } from './ui/workspaceSlideAuthoring'
@@ -351,14 +360,30 @@ export default function App() {
   const activeProjectHealthSummary = v9SlideVerticalSlice === null
     ? projectHealthSummary
     : { error: 0, warning: 0, info: 0, total: 0, canExport: true }
+  const v9CourseProject = v9SlideVerticalSlice?.history.present ?? null
+  const v9SelectionLocationId = v9SlideVerticalSlice?.selection.locationId ?? null
+  const v9ActiveSlideContext = useMemo(() => {
+    if (v9CourseProject === null || v9SelectionLocationId === null) return null
+    const location = v9CourseProject.locations.find(
+      (candidate) => candidate.id === v9SelectionLocationId,
+    )
+    if (!location || location.kind !== 'slide-scene') return null
+    const surface = v9CourseProject.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'slide') return null
+    const scene = surface.scenes.find(
+      (candidate) => candidate.id === location.sceneId,
+    )
+    return scene ? { location, surface, scene } : null
+  }, [v9CourseProject, v9SelectionLocationId])
   const activeDocumentLocationLabel = v9SlideVerticalSlice === null
     ? `场景 ${project.scenes.findIndex((scene) => scene.id === activeScene.id) + 1} / ${project.scenes.length}`
-    : (() => {
-        const index = v9SlideVerticalSlice.history.present.locations.findIndex(
-          (location) => location.id === v9SlideVerticalSlice.selection.locationId,
-        )
-        return `场景 ${index + 1} / ${v9SlideVerticalSlice.history.present.locations.length}`
-      })()
+    : v9ActiveSlideContext
+      ? `场景 ${v9ActiveSlideContext.surface.scenes.findIndex(
+        (scene) => scene.id === v9ActiveSlideContext.scene.id,
+      ) + 1} / ${v9ActiveSlideContext.surface.scenes.length}`
+      : '当前位置暂不支持 Slide 编辑'
   const v9StatusBarView = useMemo(() => {
     if (v9SlideVerticalSlice === null) return null
     const courseProject = v9SlideVerticalSlice.history.present
@@ -373,14 +398,20 @@ export default function App() {
       : view.layers.find((layer) => (
           layer.selectionId === v9SlideVerticalSlice.selection.selectionId
         )) ?? null
+    const editingGlobal = v9SlideVerticalSlice.editingScope === 'global'
     return {
-      locationName: view.sceneName,
-      itemCountLabel: `${sceneLayerCount} 个节点`,
+      locationName: editingGlobal ? '全局层' : view.sceneName,
+      itemCountLabel: editingGlobal
+        ? `${courseProject.globalLayerItems.length} 个全局元素`
+        : `${sceneLayerCount} 个节点`,
       selectionLabel: selectedLayer
         ? `已选：${selectedLayer.item.label}`
-        : '未选择节点',
+        : editingGlobal
+          ? '未选择全局元素'
+          : '未选择节点',
       largeProject: courseProject.locations.length > RECOMMENDED_PROJECT_SCENES ||
-        sceneLayerCount > RECOMMENDED_SCENE_NODES,
+        (editingGlobal ? courseProject.globalLayerItems.length : sceneLayerCount) >
+          RECOMMENDED_SCENE_NODES,
     }
   }, [v9SlideVerticalSlice])
   const activeStatusBarView = v9StatusBarView ?? {
@@ -398,18 +429,266 @@ export default function App() {
     largeProject: project.scenes.length > RECOMMENDED_PROJECT_SCENES ||
       activeScene.nodes.length > RECOMMENDED_SCENE_NODES,
   }
+  const v9ScenePanelBase = useMemo(() => {
+    if (
+      v9CourseProject === null ||
+      v9SlideVerticalSlice === null ||
+      v9ActiveSlideContext === null
+    ) return null
+    const surface = v9ActiveSlideContext.surface
+    const scenes = surface.scenes.map((scene) => {
+      const canonicalLocation = v9CourseProject.locations.find((location) =>
+        location.kind === 'slide-scene' &&
+        location.surfaceId === surface.id &&
+        location.sceneId === scene.id &&
+        location.stateId === undefined,
+      ) ?? v9CourseProject.locations.find((location) =>
+        location.kind === 'slide-scene' &&
+        location.surfaceId === surface.id &&
+        location.sceneId === scene.id,
+      )
+      const thumbnailStateId = scene.presentation?.thumbnailStateId ??
+        scene.presentation?.initialStateId ?? null
+      const thumbnailStateName = thumbnailStateId === null
+        ? '基础'
+        : scene.presentation?.states.find((state) => state.id === thumbnailStateId)?.name ?? '基础'
+
+      const view = canonicalLocation
+        ? buildSlideEditorView({
+            project: v9CourseProject,
+            locationId: canonicalLocation.id,
+            stateId: thumbnailStateId,
+          })
+        : null
+      const layers = view
+        ? view.layers
+        : [
+            ...v9CourseProject.globalLayerItems
+              .filter((entry) => entry.visibility.mode === 'all')
+              .map((entry) => ({
+                effectiveVisible: entry.item.visible,
+                item: entry.item,
+              })),
+            ...surface.surfaceLayerItems
+              .filter((entry) => entry.visibility.mode === 'all')
+              .map((entry) => ({
+                effectiveVisible: entry.item.visible,
+                item: entry.item,
+              })),
+            ...scene.layerItems.map((item) => ({
+              effectiveVisible: item.visible,
+              item,
+            })),
+          ].sort((left, right) =>
+            left.item.order - right.item.order ||
+            left.item.layerItemId.localeCompare(right.item.layerItemId),
+          )
+      return {
+        id: scene.id,
+        name: scene.name,
+        canonicalLocationId: canonicalLocation?.id ?? null,
+        showRuntimeBadge: layers.some(({ effectiveVisible, item }) =>
+          effectiveVisible &&
+          item.kind === 'runtime' &&
+          item.runtime.enabled &&
+          !item.runtime.staticFallback,
+        ),
+        thumbnailStateName,
+        thumbnail: buildCourseSceneThumbnailRenderModel({
+          backgroundColor: view?.backgroundColor ?? scene.backgroundColor,
+          backgroundAssetId: view
+            ? view.backgroundAssetId
+            : scene.backgroundAssetId,
+          layers,
+          assets: v9CourseProject.assets,
+          assetFiles: v9SlideVerticalSlice.assetFiles,
+          componentPackages: v9SlideVerticalSlice.componentPackages,
+        }),
+      }
+    })
+    return {
+      surfaceId: surface.id,
+      globalElementCount: v9CourseProject.globalLayerItems.length,
+      globalHasRuntime: v9CourseProject.globalLayerItems.some(
+        (entry) => entry.item.kind === 'runtime',
+      ),
+      scenes,
+    }
+  }, [
+    v9ActiveSlideContext,
+    v9CourseProject,
+    v9SlideVerticalSlice?.assetFiles,
+    v9SlideVerticalSlice?.componentPackages,
+  ])
+  const v9ScenePanelDocumentControl = useMemo<ScenePanelDocumentControl | undefined>(() => {
+    if (v9SlideVerticalSlice === null) return undefined
+    const run = (command: () => void, fallback: string) => {
+      if (lifecycleOperationInFlightRef.current) return
+      try {
+        command()
+      } catch (error) {
+        useEditorStore.getState().setError(readableError(error, fallback))
+      }
+    }
+    const sceneRows = (v9ScenePanelBase?.scenes ?? []).map((scene) => ({
+      id: scene.id,
+      name: scene.name,
+      active: v9SlideVerticalSlice.editingScope === 'scene' &&
+        scene.id === v9ActiveSlideContext?.scene.id,
+      showRuntimeBadge: scene.showRuntimeBadge,
+      thumbnailStateName: scene.thumbnailStateName,
+      thumbnail: scene.thumbnail,
+    }))
+    return {
+      editingScope: v9SlideVerticalSlice.editingScope,
+      globalElementCount: v9ScenePanelBase?.globalElementCount ??
+        v9SlideVerticalSlice.history.present.globalLayerItems.length,
+      globalHasRuntime: v9ScenePanelBase?.globalHasRuntime ??
+        v9SlideVerticalSlice.history.present.globalLayerItems.some(
+          (entry) => entry.item.kind === 'runtime',
+        ),
+      globalEditingDisabled: true,
+      globalEditingUnavailableReason:
+        '全局层编辑暂不可用；控制器与全局元素将在完整作者能力中开放',
+      scenes: sceneRows,
+      onAddScene: () => run(() => {
+        if (v9ScenePanelBase === null) throw new Error('当前位置不是 Slide 表面')
+        useEditorStore.getState().addCourseScene()
+      }, '无法新建场景'),
+      onActivateScene: (sceneId) => run(() => {
+        const row = v9ScenePanelBase?.scenes.find((scene) => scene.id === sceneId)
+        if (!row?.canonicalLocationId) throw new Error('该场景缺少课程位置，暂时无法打开')
+        useEditorStore.getState().activateCourseScene(sceneId)
+      }, '无法切换场景'),
+      onActivateGlobal: () => run(() => {
+        useEditorStore.getState().setStatus(
+          '全局层编辑暂不可用；控制器与全局元素将在完整作者能力中开放',
+        )
+      }, '无法切换到全局层'),
+      onRenameScene: (sceneId, name) => run(() => {
+        useEditorStore.getState().renameCourseScene(sceneId, name)
+      }, '无法重命名场景'),
+      onDeleteScene: (sceneId) => run(() => {
+        useEditorStore.getState().deleteCourseScene(sceneId)
+      }, '无法删除场景'),
+      onDuplicateScene: (sceneId) => run(() => {
+        useEditorStore.getState().duplicateCourseScene(sceneId)
+      }, '无法复制场景'),
+      onReorderScenes: (sceneIds) => run(() => {
+        useEditorStore.getState().reorderCourseScenes(sceneIds)
+      }, '无法调整场景顺序'),
+    }
+  }, [
+    v9ActiveSlideContext?.scene.id,
+    v9ScenePanelBase,
+    v9SlideVerticalSlice,
+  ])
+  const v9SceneStateStripDocumentControl = useMemo<
+    SceneStateStripDocumentControl | undefined
+  >(() => {
+    if (v9SlideVerticalSlice === null) return undefined
+    const scene = v9ActiveSlideContext?.scene ?? null
+    const presentation = scene?.presentation
+    const states = (presentation?.states ?? []).map((state) => ({
+      id: state.id,
+      name: state.name,
+      overrideCount: Object.keys(state.layerItemOverrides).length +
+        (Object.prototype.hasOwnProperty.call(state, 'backgroundColor') ? 1 : 0) +
+        (Object.prototype.hasOwnProperty.call(state, 'backgroundAssetId') ? 1 : 0) +
+        (Object.prototype.hasOwnProperty.call(state, 'layerItemOrder') ? 1 : 0),
+      incomingCount: scene?.interactions.filter((rule) =>
+        rule.actions.some(({ action }) =>
+          action.type === 'presentation.set' && action.stateId === state.id,
+        ),
+      ).length ?? 0,
+      scopedCount: scene?.interactions.filter((rule) =>
+        rule.conditions.some((condition) =>
+          condition.type === 'presentation.in' && condition.stateIds.includes(state.id),
+        ),
+      ).length ?? 0,
+      initial: state.id === presentation?.initialStateId,
+      thumbnail: state.id === presentation?.thumbnailStateId,
+    }))
+    const activeStateId = v9SlideVerticalSlice.selection.stateId !== null &&
+      states.some((state) => state.id === v9SlideVerticalSlice.selection.stateId)
+      ? v9SlideVerticalSlice.selection.stateId
+      : null
+    const run = (command: () => void, fallback: string) => {
+      if (lifecycleOperationInFlightRef.current) return
+      try {
+        command()
+      } catch (error) {
+        useEditorStore.getState().setError(readableError(error, fallback))
+      }
+    }
+    return {
+      editingScope: v9SlideVerticalSlice.editingScope,
+      editorMode,
+      activeStateId,
+      states,
+      onSetEditorMode: (mode) => run(() => {
+        useEditorStore.getState().setEditorMode(mode)
+      }, '无法切换编辑模式'),
+      onActivateState: (stateId) => run(() => {
+        useEditorStore.getState().activateCoursePresentationState(stateId)
+      }, '无法切换命名状态'),
+      onAddState: () => run(() => {
+        useEditorStore.getState().addCoursePresentationState()
+      }, '无法新建命名状态'),
+      onDuplicateState: (stateId) => run(() => {
+        useEditorStore.getState().duplicateCoursePresentationState(stateId)
+      }, '无法复制命名状态'),
+      onRenameState: (stateId, name) => run(() => {
+        useEditorStore.getState().renameCoursePresentationState(stateId, name)
+      }, '无法重命名状态'),
+      onSetInitialState: (stateId) => run(() => {
+        useEditorStore.getState().setInitialCoursePresentationState(stateId)
+      }, '无法设置初始状态'),
+      onSetThumbnailState: (stateId) => run(() => {
+        useEditorStore.getState().setThumbnailCoursePresentationState(stateId)
+      }, '无法设置缩略图状态'),
+      onClearState: (stateId) => run(() => {
+        useEditorStore.getState().clearCoursePresentationStateOverrides(stateId)
+      }, '无法清除状态覆盖'),
+      onDeleteState: (stateId) => run(() => {
+        useEditorStore.getState().deleteCoursePresentationState(stateId)
+      }, '无法删除命名状态'),
+    }
+  }, [editorMode, v9ActiveSlideContext?.scene, v9SlideVerticalSlice])
   const v9SlideAuthoring = useMemo<WorkspaceSlideAuthoringInput | undefined>(() => {
     if (v9SlideVerticalSlice === null) return undefined
     const snapshot = buildV9SlideWorkspaceSnapshot(v9SlideVerticalSlice)
+    const stateName = v9SlideVerticalSlice.editingScope === 'global'
+      ? '全局层'
+      : v9SlideVerticalSlice.selection.stateId === null
+        ? '基础'
+        : v9ActiveSlideContext?.scene.presentation?.states.find(
+            (state) => state.id === v9SlideVerticalSlice.selection.stateId,
+          )?.name ?? '状态'
     return {
       ...snapshot,
+      sessionId: v9SlideVerticalSlice.sessionId,
+      previewResources: {
+        assets: v9SlideVerticalSlice.history.present.assets,
+        assetFiles: v9SlideVerticalSlice.assetFiles,
+        componentPackages:
+          v9SlideVerticalSlice.history.present.componentPackages,
+        designTokens: v9SlideVerticalSlice.history.present.designTokens,
+        media: v9SlideVerticalSlice.history.present.media,
+      },
+      sceneName: v9ActiveSlideContext?.scene.name ?? snapshot.document.name,
+      stateName,
+      editingScope: v9SlideVerticalSlice.editingScope,
+      unsupportedActionReason: '当前位置试运行暂不可用',
       onSelectionChange: (event) => {
-        if (lifecycleOperationInFlightRef.current) return
+        if (lifecycleOperationInFlightRef.current) return false
         useEditorStore.getState().selectCourseLayers(event)
+        return true
       },
       onMoveEnd: (event) => {
-        if (lifecycleOperationInFlightRef.current) return
+        if (lifecycleOperationInFlightRef.current) return false
         useEditorStore.getState().moveCourseLayers(event)
+        return true
       },
     }
   }, [v9SlideVerticalSlice])
@@ -1312,18 +1591,44 @@ export default function App() {
       } else if ((event.ctrlKey || event.metaKey) && key === 'a') {
         event.preventDefault()
         const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          state.setStatus('多选暂不可用')
+          return
+        }
         state.selectNodes(selectEditingNodes(state).map((node) => node.id))
       } else if ((event.ctrlKey || event.metaKey) && key === 'c') {
         event.preventDefault()
-        useEditorStore.getState().copySelectedNodes()
+        const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          state.setStatus('复制暂不可用')
+          return
+        }
+        state.copySelectedNodes()
       } else if ((event.ctrlKey || event.metaKey) && key === 'v') {
         event.preventDefault()
-        useEditorStore.getState().pasteNodes()
+        const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          state.setStatus('粘贴暂不可用')
+          return
+        }
+        state.pasteNodes()
       } else if ((event.ctrlKey || event.metaKey) && key === 'd') {
         event.preventDefault()
-        useEditorStore.getState().duplicateSelectedNodes()
+        const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          state.setStatus('图层复制暂不可用')
+          return
+        }
+        state.duplicateSelectedNodes()
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          if (state.courseSession.selection.selectionId !== null) {
+            event.preventDefault()
+            state.setStatus('图层删除暂不可用')
+          }
+          return
+        }
         if (state.selectedNodeIds.length > 0 && !state.editingTextNodeId) {
           event.preventDefault()
           state.deleteSelectedNodes()
@@ -1339,12 +1644,25 @@ export default function App() {
           ArrowUp: [0, -distance],
           ArrowDown: [0, distance],
         }[event.key]
-        if (movement && useEditorStore.getState().selectedNodeIds.length > 0) {
+        const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          if (movement && state.courseSession.selection.selectionId !== null) {
+            event.preventDefault()
+            state.setStatus('键盘微移暂不可用')
+          }
+          return
+        }
+        if (movement && state.selectedNodeIds.length > 0) {
           event.preventDefault()
-          useEditorStore.getState().nudgeSelection(movement[0], movement[1])
+          state.nudgeSelection(movement[0], movement[1])
         }
       } else if (event.key === 'Escape') {
-        useEditorStore.getState().selectNodes([])
+        const state = useEditorStore.getState()
+        if (state.courseSession !== null) {
+          state.selectCourseLayers({ nodeIds: [], additive: false })
+          return
+        }
+        state.selectNodes([])
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -1388,22 +1706,33 @@ export default function App() {
             ? ' app-main--developer'
             : ''
         }`}
+        aria-busy={busy}
+        inert={busy ? true : undefined}
       >
-        <ScenePanel />
+        <ScenePanel documentControl={v9ScenePanelDocumentControl} />
         <div className="editor-center">
           <Workspace
             slideAuthoring={v9SlideAuthoring}
-            onAddImage={(x, y) =>
-              void selectAndImportImage('add', { x, y })
-            }
-            onAddVideo={(x, y) =>
-              void selectAndImportVideo('add', { x, y })
-            }
-            onSelectImageAsset={selectImageAsset}
+            interactionDisabled={busy}
+            onAddImage={v9BackendActive
+              ? () => setStatus('图片添加暂不可用')
+              : (x, y) => void selectAndImportImage('add', { x, y })}
+            onAddVideo={v9BackendActive
+              ? () => setStatus('视频添加暂不可用')
+              : (x, y) => void selectAndImportVideo('add', { x, y })}
+            onSelectImageAsset={v9BackendActive
+              ? async () => {
+                  setStatus('素材替换暂不可用')
+                  return null
+                }
+              : selectImageAsset}
           />
-          <SceneStateStrip />
+          <SceneStateStrip documentControl={v9SceneStateStripDocumentControl} />
         </div>
         <RightSidebar
+          documentEditingUnavailableReason={v9BackendActive
+            ? '元素、图层、属性与互动编辑暂不可用；当前工程不会被误改。'
+            : undefined}
           onAddImage={(x, y) =>
             void selectAndImportImage('add', { x, y })
           }

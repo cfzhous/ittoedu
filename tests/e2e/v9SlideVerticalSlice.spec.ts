@@ -14,6 +14,7 @@ const root = resolve(__dirname, '..', '..')
 const runDirectory = join(tmpdir(), `ittoedu-v05-${process.pid}`)
 const userDataDirectory = join(runDirectory, 'electron-profile')
 const projectPath = join(runDirectory, 'v9-slide-roundtrip.h5lesson')
+const sceneAuthoringProjectPath = join(runDirectory, 'v9-scene-authoring.h5lesson')
 const recoveredProjectPath = join(runDirectory, 'v9-recovered-from-default-start.h5lesson')
 const evidenceDirectory = join(root, 'test-results', 'v05')
 const screenshotPath = join(evidenceDirectory, 'v9-slide-reopened-1366x768.png')
@@ -69,11 +70,11 @@ async function launchEditor(options: {
     if (!prepareWorkspace) {
       return { app, page, pageErrors, consoleErrors, externalRequests }
     }
-    const initialStateButton = page.locator('.scene-state-card').filter({
-      has: page.locator('.scene-state-card__name', { hasText: '初始' }),
+    const baseStateButton = page.locator('.scene-state-card').filter({
+      has: page.locator('.scene-state-card__name', { hasText: '基础场景' }),
     })
-    await initialStateButton.click()
-    await expect(initialStateButton).toHaveAttribute('aria-pressed', 'true')
+    await baseStateButton.click()
+    await expect(baseStateButton).toHaveAttribute('aria-pressed', 'true')
     const retry = page.getByRole('button', { name: '重新载入画布', exact: true })
     if (await retry.count()) await retry.click()
     await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
@@ -235,11 +236,16 @@ async function playerTextCentroid(page: Page): Promise<{ x: number; y: number }>
     .toBuffer({ resolveWithObject: true })
   const top = Math.floor(info.height * 250 / 720)
   const bottom = Math.ceil(info.height * 550 / 720)
+  // The transformed iframe outline occupies its outermost CSS pixel. It is
+  // dark like the text, but is fixed to the viewport and must not contribute
+  // to the rendered text centroid.
+  const left = Math.min(2, info.width)
+  const right = Math.max(left, info.width - 2)
   let count = 0
   let totalX = 0
   let totalY = 0
   for (let y = top; y < bottom; y += 1) {
-    for (let x = 0; x < info.width; x += 1) {
+    for (let x = left; x < right; x += 1) {
       const offset = (y * info.width + x) * info.channels
       const red = data[offset]!
       const green = data[offset + 1]!
@@ -408,8 +414,10 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
       exact: true,
     }).click()
     const statusBar = editor.page.locator('.status-bar')
+    await expect(editor.page.locator('.app-main')).toHaveAttribute('inert', '')
     await expect(statusBar).toContainText('正在处理…')
     await expect(statusBar).not.toContainText('正在处理…')
+    await expect(editor.page.locator('.app-main')).not.toHaveAttribute('inert', '')
     await expect(statusBar).toContainText('场景 1')
     await expect(statusBar).toContainText('1 个节点')
     await expect(statusBar).toContainText('未选择节点')
@@ -427,13 +435,11 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
       name: '编辑状态',
       exact: true,
     })
-    await runCurrentLocation.click()
-    await expect(runCurrentLocation).toHaveAttribute('aria-pressed', 'true')
-    await expect(
-      editor.page.frameLocator('.runtime-preview-frame')
-        .getByTestId('teacher-escape-controls'),
-    ).toBeVisible()
-    await editCanvas.click()
+    await expect(runCurrentLocation).toBeDisabled()
+    await expect(runCurrentLocation).toHaveAttribute(
+      'title',
+      '当前位置试运行暂不可用',
+    )
     await expect(editCanvas).toHaveAttribute('aria-pressed', 'true')
     await expectInspectionEscapePlaneUnmounted(editor.page)
 
@@ -513,6 +519,98 @@ test('moves, undoes, redoes, saves and reopens one V9 text in the original App',
     await expect.poll(() => editor.page.evaluate(async () => Boolean(
       await window.desktopAPI?.readRecoveryProject()
     )), { timeout: 5_000 }).toBe(false)
+    expectCleanRenderer(editor)
+  } finally {
+    await closeEditor(editor.app)
+  }
+})
+
+test('authors V9 scenes and presentation states through the original panels', async () => {
+  test.slow()
+  let editor = await launchEditor()
+  try {
+    await resizeContent(editor.app, editor.page, 1366, 768)
+    const sceneItems = editor.page.locator('.scene-item')
+    await expect(sceneItems).toHaveCount(1)
+    await expect(editor.page.getByTestId('global-layer-entry')).toBeDisabled()
+    await expect(editor.page.getByText('元素面板暂不可用')).toBeVisible()
+
+    await editor.page.getByTestId('add-scene').click()
+    await expect(sceneItems).toHaveCount(2)
+    await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 2 / 2')
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(true)
+
+    const secondSceneRename = editor.page.getByRole('button', {
+      name: '重命名场景“第 2 幕”',
+    })
+    await secondSceneRename.dblclick()
+    const sceneNameInput = editor.page.locator('.scene-name-input')
+    await sceneNameInput.fill('探究场景')
+    await sceneNameInput.press('Enter')
+    await expect(editor.page.getByRole('button', {
+      name: '重命名场景“探究场景”',
+    })).toBeVisible()
+
+    await editor.page.getByRole('button', { name: '管理状态' }).click()
+    await expect(editor.page.getByRole('button', { name: '新建场景状态' })).toBeVisible()
+    await editor.page.getByRole('button', { name: '新建场景状态' }).click()
+    const activeState = editor.page.locator('.scene-state-card[aria-pressed="true"]')
+    await expect(activeState).toContainText('状态 2')
+    await editor.page.getByRole('button', { name: '重命名当前状态' }).click()
+    const stateNameInput = editor.page.getByRole('textbox', { name: '状态名称' })
+    await stateNameInput.fill('反馈态')
+    await stateNameInput.press('Enter')
+    await expect(activeState).toContainText('反馈态')
+    await editor.page.getByRole('button', {
+      name: '将当前状态设为场景缩略图状态',
+    }).click()
+    await expect(activeState).toContainText('缩略图')
+    await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
+
+    await patchProjectDialogs(editor.app, { save: sceneAuthoringProjectPath })
+    await editor.page.keyboard.press('Control+s')
+    await expect.poll(() => existsSync(sceneAuthoringProjectPath)).toBe(true)
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
+
+    const archive = openCourseProjectArchive(readFileSync(sceneAuthoringProjectPath))
+    const surface = archive.project.surfaces.find((candidate) => candidate.type === 'slide')
+    if (!surface || surface.type !== 'slide') throw new Error('Saved Slide surface is missing')
+    expect(surface.scenes).toHaveLength(2)
+    const authoredScene = surface.scenes[1]!
+    expect(authoredScene.name).toBe('探究场景')
+    const feedback = authoredScene.presentation?.states.find((state) => state.name === '反馈态')
+    expect(feedback).toBeDefined()
+    expect(authoredScene.presentation?.thumbnailStateId).toBe(feedback?.id)
+    expectCleanRenderer(editor)
+  } finally {
+    await closeEditor(editor.app)
+  }
+
+  editor = await launchEditor()
+  try {
+    await resizeContent(editor.app, editor.page, 1366, 768)
+    await patchProjectDialogs(editor.app, { open: sceneAuthoringProjectPath })
+    await editor.page.getByRole('button', {
+      name: '打开工程（Ctrl+O）',
+      exact: true,
+    }).click()
+    await expect(editor.page.locator('.scene-item')).toHaveCount(2)
+    await editor.page.getByRole('group', {
+      name: '场景 2：探究场景',
+    }).getByRole('button', {
+      name: /打开场景“探究场景”/,
+    }).click()
+    await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 2 / 2')
+    await expect(editor.page.locator('.canvas-label')).toContainText('探究场景')
+    await expect(editor.page.getByText('反馈态', { exact: true }).first()).toBeVisible()
+    await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)

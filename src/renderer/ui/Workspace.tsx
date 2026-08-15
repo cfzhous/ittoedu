@@ -62,6 +62,14 @@ import { FormulaEditDialog } from './FormulaEditDialog'
 import {
   createWorkspaceSlidePreviewProject,
   resolveWorkspaceSlideAuthoringInput,
+  workspaceAuthoringActionAllowed,
+  workspaceCanvasLabel,
+  workspaceMoveAllowed,
+  workspaceSelectionAllowed,
+  workspaceSlidePreviewAssetFiles,
+  workspaceSlidePreviewGenerationIdentity,
+  workspaceSlidePreviewSceneId,
+  workspaceSlidePreviewStateId,
   type WorkspaceSlideAuthoringInput,
 } from './workspaceSlideAuthoring'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
@@ -126,6 +134,7 @@ interface WorkspaceProps {
   onAddVideo(x?: number, y?: number): void
   onSelectImageAsset(): Promise<ImportedImageAsset | null>
   slideAuthoring?: WorkspaceSlideAuthoringInput
+  interactionDisabled?: boolean
 }
 
 interface FormulaEditSession {
@@ -344,6 +353,7 @@ export function Workspace({
   onAddVideo,
   onSelectImageAsset,
   slideAuthoring,
+  interactionDisabled = false,
 }: WorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement>(null)
   const stageViewportRef = useRef<HTMLDivElement>(null)
@@ -352,7 +362,8 @@ export function Workspace({
   const runtimeFrameRef = useRef<HTMLIFrameElement>(null)
   const slideAuthoringInputRef = useRef(slideAuthoring)
   slideAuthoringInputRef.current = slideAuthoring
-  const slideAuthoringDocumentId = slideAuthoring?.document.id ?? null
+  const interactionDisabledRef = useRef(interactionDisabled)
+  interactionDisabledRef.current = interactionDisabled
   const lastParentFocusRef = useRef<HTMLElement | null>(null)
   const authoringFocusRecoveryTimerRef = useRef<number | null>(null)
   const retiredPreviewResourcesRef = useRef(new Set<{
@@ -441,7 +452,9 @@ export function Workspace({
 
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
-  const canvasMode = useEditorStore((state) => state.canvasMode)
+  const storedCanvasMode = useEditorStore((state) => state.canvasMode)
+  const hasInjectedSlideAuthoring = slideAuthoring !== undefined
+  const canvasMode = hasInjectedSlideAuthoring ? 'edit' : storedCanvasMode
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
@@ -461,10 +474,21 @@ export function Workspace({
   )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
 
+  const reportUnsupportedInjectedAction = useCallback((label: string) => {
+    const injected = slideAuthoringInputRef.current
+    if (!injected) return false
+    useEditorStore.getState().setStatus(
+      `${label}：${injected.unsupportedActionReason}`,
+    )
+    return true
+  }, [])
+
   useEffect(() => setLastAuthoringSelection(null), [
     editingScope,
+    interactionDisabled,
     project.id,
     scene.id,
+    slideAuthoring?.sessionId,
   ])
 
   const stageTransform = useMemo(() => createStageViewportTransform({
@@ -491,7 +515,27 @@ export function Workspace({
   useEffect(() => {
     layoutRevisionRef.current += 1
   }, [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
+  const injectedPreviewGenerationIdentity = useMemo(
+    () => slideAuthoring
+      ? workspaceSlidePreviewGenerationIdentity(slideAuthoring)
+      : null,
+    [
+      slideAuthoring?.componentPackages,
+      slideAuthoring?.document,
+      slideAuthoring?.previewResources,
+      slideAuthoring?.sessionId,
+    ],
+  )
+  const injectedPreviewStructuralKey =
+    injectedPreviewGenerationIdentity?.structuralKey ?? null
+  const activePreviewComponentPackages =
+    injectedPreviewGenerationIdentity?.componentPackages ?? componentPackages
+  const injectedPreviewAssetFiles =
+    injectedPreviewGenerationIdentity?.assetFiles ?? null
   const previewRebuildKey = useMemo(() => {
+    if (injectedPreviewStructuralKey !== null) {
+      return injectedPreviewStructuralKey
+    }
     const nodeIdentity = (node: SceneNode) => ({
       id: node.id,
       type: node.type,
@@ -536,20 +580,23 @@ export function Workspace({
       globalInteractions: project.globalInteractions,
       playback: project.playback,
     })
-  }, [project])
+  }, [injectedPreviewStructuralKey, project])
   const previewGeneration = useMemo<object>(() => ({}), [
-    componentPackages,
+    activePreviewComponentPackages,
+    injectedPreviewAssetFiles,
+    injectedPreviewGenerationIdentity?.resourceKey ?? null,
     previewRebuildKey,
     previewRetryRevision,
-    slideAuthoringDocumentId,
+    injectedPreviewGenerationIdentity?.sessionId ?? null,
   ])
-  const authoringCanvasInteractive = isAuthoringCanvasInteractive({
-    canvasMode,
-    playerReady: authoringReadyRef.current,
-    snapshotPending: authoringSnapshotBarrierRef.current !== null,
-    hasPreviewFeedback: previewFeedback !== null,
-    generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
-  })
+  const authoringCanvasInteractive = !interactionDisabled &&
+    isAuthoringCanvasInteractive({
+      canvasMode,
+      playerReady: authoringReadyRef.current,
+      snapshotPending: authoringSnapshotBarrierRef.current !== null,
+      hasPreviewFeedback: previewFeedback !== null,
+      generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
+    })
 
   useEffect(() => {
     const rememberParentFocus = (event: FocusEvent) => {
@@ -801,6 +848,7 @@ export function Workspace({
     }
     const editorState = useEditorStore.getState()
     const currentScene = selectActiveScene(editorState)
+    const injectedSlideAuthoring = slideAuthoringInputRef.current
     authoringRevisionRef.current += 1
     const command: PlayerAuthoringPatchCommand = {
       type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
@@ -809,8 +857,14 @@ export function Workspace({
       requestId: crypto.randomUUID(),
       revision: authoringRevisionRef.current,
       context: {
-        sceneId: currentScene.id,
-        stateId: editorState.activePresentationStateId,
+        sceneId: workspaceSlidePreviewSceneId(
+          injectedSlideAuthoring,
+          currentScene.id,
+        ),
+        stateId: workspaceSlidePreviewStateId(
+          injectedSlideAuthoring,
+          editorState.activePresentationStateId,
+        ),
       },
       patch,
     }
@@ -836,6 +890,14 @@ export function Workspace({
   }, [failRuntimePreview])
 
   useEffect(() => onElementAnimationPreviewRequested(({ action, delayMs }) => {
+    if (interactionDisabledRef.current) return
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'animation-preview',
+    )) {
+      reportUnsupportedInjectedAction('动画预览暂不可用')
+      return
+    }
     const store = useEditorStore.getState()
     const currentNode = selectEditingNodes(store).find(
       (node) => node.id === action.nodeId,
@@ -857,7 +919,7 @@ export function Workspace({
     if (!posted) {
       store.setStatus('编辑画布尚未就绪，请稍后重试动画预览')
     }
-  }), [postAuthoringPatch])
+  }), [postAuthoringPatch, reportUnsupportedInjectedAction])
 
   const flushAuthoringNodePatches = useCallback(() => {
     authoringFrameRef.current = null
@@ -893,10 +955,14 @@ export function Workspace({
   const syncCompleteAuthoringSnapshot = useCallback(() => {
     const editorState = useEditorStore.getState()
     const currentScene = selectActiveScene(editorState)
-    const materialized = materializeScene(
+    const injectedSlideAuthoring = slideAuthoringInputRef.current
+    const materialized = injectedSlideAuthoring?.document ?? materializeScene(
       currentScene,
       editorState.activePresentationStateId,
     )
+    const globalNodes = injectedSlideAuthoring
+      ? []
+      : editorState.project.globalLayer
     if (authoringFrameRef.current !== null) {
       window.cancelAnimationFrame(authoringFrameRef.current)
       authoringFrameRef.current = null
@@ -908,7 +974,7 @@ export function Workspace({
         target: { kind: 'native-node', scope: 'scene', nodeId: node.id },
         node,
       })),
-      ...editorState.project.globalLayer.map((item): PlayerAuthoringPatch => ({
+      ...globalNodes.map((item): PlayerAuthoringPatch => ({
         kind: 'native-node',
         target: {
           kind: 'native-node',
@@ -978,11 +1044,21 @@ export function Workspace({
         injectedSlideAuthoring,
       )
       const hostMode: PlayerHostMode = 'playback'
-      const initialStateId = editorState.activePresentationStateId ??
-        ensureScenePresentation(initialScene).initialStateId
+      const initialStateId = workspaceSlidePreviewStateId(
+        injectedSlideAuthoring,
+        editorState.activePresentationStateId ??
+          ensureScenePresentation(initialScene).initialStateId,
+      )
+      const initialSceneId = workspaceSlidePreviewSceneId(
+        injectedSlideAuthoring,
+        initialScene.id,
+      )
       payloadResources = createRuntimePreviewPayloadResources({
         project: previewProject,
-        assetFiles,
+        assetFiles: workspaceSlidePreviewAssetFiles(
+          injectedSlideAuthoring,
+          assetFiles,
+        ),
         components: injectedSlideAuthoring?.componentPackages ?? componentPackages,
       })
       const payload = payloadResources.payload
@@ -994,9 +1070,9 @@ export function Workspace({
         payload,
         assetTransfers: payloadResources.assetTransfers,
         playerBundle,
-        initialSceneId: initialScene.id,
+        initialSceneId,
         initialStateId,
-        editingScope: editorState.editingScope,
+        editingScope: injectedSlideAuthoring?.editingScope ?? editorState.editingScope,
         hostMode,
         bootstrapSent: false,
       }
@@ -1012,7 +1088,8 @@ export function Workspace({
       setPreviewUrl(blobResources.documentUrl)
       setPreviewFeedback({
         kind: 'loading',
-        title: useEditorStore.getState().canvasMode === 'edit'
+        title: injectedSlideAuthoring ||
+          useEditorStore.getState().canvasMode === 'edit'
           ? '正在准备编辑画布'
           : '正在准备当前位置试运行',
         message: '正在载入隔离 Player…',
@@ -1020,7 +1097,9 @@ export function Workspace({
       previewStartupTimerRef.current = window.setTimeout(() => {
         failRuntimePreview(
           currentToken,
-          '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前工程的运行时或组件。',
+          injectedSlideAuthoring
+            ? '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前课件的动态内容或复用内容。'
+            : '播放器在 12 秒内没有完成启动与初始画面同步。请重试；若仍失败，请检查当前工程的运行时或组件。',
         )
       }, RUNTIME_PREVIEW_STARTUP_TIMEOUT_MS)
     } catch (error) {
@@ -1063,12 +1142,9 @@ export function Workspace({
     }
   }, [
     clearRuntimePreviewStartupTimer,
-    componentPackages,
     failRuntimePreview,
-    previewRebuildKey,
-    previewRetryRevision,
+    previewGeneration,
     retirePreviewResources,
-    slideAuthoringDocumentId,
   ])
 
   useEffect(() => () => revokeRetiredPreviewResources(), [
@@ -1224,11 +1300,19 @@ export function Workspace({
         }
         const editorState = useEditorStore.getState()
         const active = selectActiveScene(editorState)
-        const expectedStateId = editorState.activePresentationStateId ??
-          ensureScenePresentation(active).initialStateId
+        const injectedSlideAuthoring = slideAuthoringInputRef.current
+        const expectedStateId = workspaceSlidePreviewStateId(
+          injectedSlideAuthoring,
+          editorState.activePresentationStateId ??
+            ensureScenePresentation(active).initialStateId,
+        )
+        const expectedSceneId = workspaceSlidePreviewSceneId(
+          injectedSlideAuthoring,
+          active.id,
+        )
         if (
           parsed.ready.sessionId !== init.token ||
-          parsed.ready.context.sceneId !== active.id ||
+          parsed.ready.context.sceneId !== expectedSceneId ||
           parsed.ready.context.stateId !== expectedStateId
         ) {
           failRuntimePreview(
@@ -1416,14 +1500,32 @@ export function Workspace({
     }
   }, [activePresentationStateId, editingScope, globalLayer, scene])
   const fallbackSlideAuthoring = useMemo<WorkspaceSlideAuthoringInput>(() => ({
+    sessionId: `legacy-${project.id}`,
     document: fallbackDocument,
     componentPackages,
+    previewResources: {
+      assets: project.assets,
+      assetFiles,
+      componentPackages: project.componentPackages,
+      designTokens: project.designTokens,
+      media: project.media,
+    },
     selectedNodeIds,
+    sceneName: scene.name,
+    stateName: editingScope === 'global'
+      ? '全局层'
+      : activePresentationStateId === null
+        ? '基础'
+        : ensureScenePresentation(scene).states.find(
+            (state) => state.id === activePresentationStateId,
+          )?.name ?? '状态',
+    editingScope,
+    unsupportedActionReason: '',
     onSelectionChange: ({ nodeIds, additive }) => {
       const store = useEditorStore.getState()
       if (!additive) {
         store.selectNodes(nodeIds)
-        return
+        return true
       }
       const merged = new Set(store.selectedNodeIds)
       for (const nodeId of nodeIds) {
@@ -1431,19 +1533,30 @@ export function Workspace({
         else merged.add(nodeId)
       }
       store.selectNodes([...merged])
+      return true
     },
     onMoveEnd: ({ nodes }) => {
       const store = useEditorStore.getState()
       if (nodes.length === 1) {
         const [{ nodeId, x, y }] = nodes
         store.updateNode(nodeId, { x, y })
-        return
+        return true
       }
       store.updateNodes(
         nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
       )
+      return true
     },
-  }), [componentPackages, fallbackDocument, selectedNodeIds])
+  }), [
+    activePresentationStateId,
+    assetFiles,
+    componentPackages,
+    editingScope,
+    fallbackDocument,
+    scene,
+    project,
+    selectedNodeIds,
+  ])
   const activeSlideAuthoring = resolveWorkspaceSlideAuthoringInput(
     fallbackSlideAuthoring,
     slideAuthoring,
@@ -1453,19 +1566,21 @@ export function Workspace({
   const document = activeSlideAuthoring.document
   const authoringComponentPackages = activeSlideAuthoring.componentPackages
   const authoringSelectedNodeIds = activeSlideAuthoring.selectedNodeIds
+  const authoringEditingScope = activeSlideAuthoring.editingScope
 
   const editingNode = useMemo(
     () =>
-      editingTextNodeId
+      !hasInjectedSlideAuthoring && editingTextNodeId
         ? (document.nodes.find(
             (node) => node.id === editingTextNodeId && node.type === 'text',
           ) as TextNode | undefined)
         : undefined,
-    [document.nodes, editingTextNodeId],
+    [document.nodes, editingTextNodeId, hasInjectedSlideAuthoring],
   )
   const editingFormulaNode = useMemo<FormulaNode | undefined>(() => {
     const session = activeFormulaEditSession
     if (
+      hasInjectedSlideAuthoring ||
       !session ||
       canvasMode !== 'edit' ||
       session.projectId !== project.id ||
@@ -1484,6 +1599,7 @@ export function Workspace({
     canvasMode,
     document.nodes,
     editingScope,
+    hasInjectedSlideAuthoring,
     project.id,
     scene.id,
   ])
@@ -1494,23 +1610,33 @@ export function Workspace({
     }
   }, [activeFormulaEditSession, editingFormulaNode])
   const visibleRuntimeTargets = useMemo(
-    () => runtimeTargets.filter((target) => (
-      (target.kind === 'text' || target.kind === 'asset') &&
-      runtimeTargetMatchesEditingContext(target, editingScope, scene.id)
-    )),
-    [editingScope, runtimeTargets, scene.id],
+    () => hasInjectedSlideAuthoring
+      ? []
+      : runtimeTargets.filter((target) => (
+          (target.kind === 'text' || target.kind === 'asset') &&
+          runtimeTargetMatchesEditingContext(target, editingScope, scene.id)
+        )),
+    [editingScope, hasInjectedSlideAuthoring, runtimeTargets, scene.id],
   )
   const visibleComponentTargets = useMemo(
-    () => componentTargets.filter((target) => {
-      if (target.scope !== editingScope) return false
-      if (target.scope === 'scene' && target.sceneId !== scene.id) return false
-      return document.nodes.some((node) => (
-        node.id === target.nodeId &&
-        node.type === 'external-component' &&
-        node.visible
-      ))
-    }),
-    [componentTargets, document.nodes, editingScope, scene.id],
+    () => hasInjectedSlideAuthoring
+      ? []
+      : componentTargets.filter((target) => {
+          if (target.scope !== editingScope) return false
+          if (target.scope === 'scene' && target.sceneId !== scene.id) return false
+          return document.nodes.some((node) => (
+            node.id === target.nodeId &&
+            node.type === 'external-component' &&
+            node.visible
+          ))
+        }),
+    [
+      componentTargets,
+      document.nodes,
+      editingScope,
+      hasInjectedSlideAuthoring,
+      scene.id,
+    ],
   )
   const activeComponentTextTarget = useMemo(() => {
     if (
@@ -1658,6 +1784,14 @@ export function Workspace({
   const beginComponentTextEdit = useCallback((
     target: Readonly<ComponentAuthoringTextTarget>,
   ) => {
+    if (interactionDisabledRef.current) return
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'component-edit',
+    )) {
+      reportUnsupportedInjectedAction('复用内容编辑暂不可用')
+      return
+    }
     useEditorStore.getState().commitTextEdit()
     const store = useEditorStore.getState()
     const result = beginComponentTextEditSession(
@@ -1676,12 +1810,24 @@ export function Workspace({
     store.selectNode(result.session.nodeId)
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(result.session)
-  }, [currentComponentTextEditContext])
+  }, [currentComponentTextEditContext, reportUnsupportedInjectedAction])
 
   const commitComponentText = useCallback((
     session: Readonly<ComponentTextEditSession>,
     value: string,
   ) => {
+    if (interactionDisabledRef.current) {
+      setActiveComponentTextSession(null)
+      return
+    }
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'component-edit',
+    )) {
+      reportUnsupportedInjectedAction('复用内容编辑暂不可用')
+      setActiveComponentTextSession(null)
+      return
+    }
     const store = useEditorStore.getState()
     const result = resolveComponentTextEdit(
       session,
@@ -1706,12 +1852,20 @@ export function Workspace({
         : '已更新当前演示状态中的组件文字',
     )
     setActiveComponentTextSession(null)
-  }, [currentComponentTextEditContext])
+  }, [currentComponentTextEditContext, reportUnsupportedInjectedAction])
 
   const beginRuntimeTextEdit = useCallback((
     target: Readonly<RuntimeAuthoringTarget>,
   ) => {
     if (target.kind !== 'text') return
+    if (interactionDisabledRef.current) return
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'runtime-edit',
+    )) {
+      reportUnsupportedInjectedAction('动态内容编辑暂不可用')
+      return
+    }
     const store = useEditorStore.getState()
     store.commitTextEdit()
     const result = beginRuntimeTargetEditSession(
@@ -1729,12 +1883,24 @@ export function Workspace({
     }
     setActiveComponentTextSession(null)
     setActiveRuntimeTextSession(result.session)
-  }, [currentRuntimeTargetEditContext])
+  }, [currentRuntimeTargetEditContext, reportUnsupportedInjectedAction])
 
   const commitRuntimeText = useCallback((
     session: Readonly<RuntimeTargetEditSession>,
     value: string,
   ) => {
+    if (interactionDisabledRef.current) {
+      setActiveRuntimeTextSession(null)
+      return
+    }
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'runtime-edit',
+    )) {
+      reportUnsupportedInjectedAction('动态内容编辑暂不可用')
+      setActiveRuntimeTextSession(null)
+      return
+    }
     const store = useEditorStore.getState()
     const result = validateRuntimeTargetEditSession(
       session,
@@ -1779,12 +1945,20 @@ export function Workspace({
       store.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
     }
     setActiveRuntimeTextSession(null)
-  }, [currentRuntimeTargetEditContext])
+  }, [currentRuntimeTargetEditContext, reportUnsupportedInjectedAction])
 
   const replaceRuntimeAsset = useCallback(async (
     target: Readonly<RuntimeAuthoringTarget>,
   ) => {
     if (target.kind !== 'asset' || replacingRuntimeAssetTargetId) return
+    if (interactionDisabledRef.current) return
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'runtime-edit',
+    )) {
+      reportUnsupportedInjectedAction('动态内容素材替换暂不可用')
+      return
+    }
     const store = useEditorStore.getState()
     const started = beginRuntimeTargetEditSession(
       target,
@@ -1803,6 +1977,12 @@ export function Workspace({
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
+      if (interactionDisabledRef.current || slideAuthoringInputRef.current) {
+        if (slideAuthoringInputRef.current) {
+          reportUnsupportedInjectedAction('动态内容素材替换暂不可用')
+        }
+        return
+      }
       installAuthoringAssetInPlayer(imported)
       const latestState = useEditorStore.getState()
       const result = validateRuntimeTargetEditSession(
@@ -1854,6 +2034,7 @@ export function Workspace({
     currentRuntimeTargetEditContext,
     installAuthoringAssetInPlayer,
     onSelectImageAsset,
+    reportUnsupportedInjectedAction,
     replacingRuntimeAssetTargetId,
   ])
 
@@ -1861,6 +2042,14 @@ export function Workspace({
     target: Readonly<ComponentAuthoringAssetTarget>,
   ) => {
     if (replacingComponentAssetTargetId) return
+    if (interactionDisabledRef.current) return
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'component-edit',
+    )) {
+      reportUnsupportedInjectedAction('复用内容素材替换暂不可用')
+      return
+    }
     const startedState = useEditorStore.getState()
     const startedNode = selectEditingNodes(startedState).find(
       (node): node is ExternalComponentNode => (
@@ -1916,6 +2105,12 @@ export function Workspace({
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
+      if (interactionDisabledRef.current || slideAuthoringInputRef.current) {
+        if (slideAuthoringInputRef.current) {
+          reportUnsupportedInjectedAction('复用内容素材替换暂不可用')
+        }
+        return
+      }
       installAuthoringAssetInPlayer(imported)
       const latest = useEditorStore.getState()
       if (
@@ -1969,6 +2164,7 @@ export function Workspace({
   }, [
     installAuthoringAssetInPlayer,
     onSelectImageAsset,
+    reportUnsupportedInjectedAction,
     replacingComponentAssetTargetId,
   ])
 
@@ -2034,6 +2230,14 @@ export function Workspace({
   const copyAiReferenceFor = useCallback(async (
     selection: AuthoringCanvasTarget,
   ) => {
+    if (interactionDisabledRef.current) return
+    if (!workspaceAuthoringActionAllowed(
+      slideAuthoringInputRef.current,
+      'ai-reference',
+    )) {
+      reportUnsupportedInjectedAction('AI 修改引用暂不可用')
+      return
+    }
     const store = useEditorStore.getState()
     const reference = copyableAiSelectionReference({
       project: store.project,
@@ -2049,7 +2253,7 @@ export function Workspace({
     } catch {
       store.setStatus('复制 AI 修改引用失败，请检查系统剪贴板权限')
     }
-  }, [])
+  }, [reportUnsupportedInjectedAction])
 
   useLayoutEffect(() => {
     const host = gameHostRef.current
@@ -2086,11 +2290,60 @@ export function Workspace({
       passive: true,
     })
 
+    const restoreInjectedNodes = (nodeIds: readonly string[]) => {
+      const injected = slideAuthoringInputRef.current
+      if (!injected) return
+      for (const nodeId of nodeIds) {
+        const node = injected.document.nodes.find((item) => item.id === nodeId)
+        if (!node) continue
+        handle.bridge.applyNode(node)
+        if (authoringReadyRef.current) {
+          queueAuthoringNodePatch(injected.editingScope, node)
+        }
+      }
+      handle.bridge.selectNodes([...injected.selectedNodeIds])
+    }
+
     const unsubscribers = [
-      handle.bridge.onNodeSelected((event) =>
-        activeSlideAuthoringRef.current.onSelectionChange(event),
-      ),
+      handle.bridge.onNodeSelected((event) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes(event.nodeIds)
+          return
+        }
+        const injected = slideAuthoringInputRef.current
+        if (!workspaceSelectionAllowed(injected, event)) {
+          restoreInjectedNodes(event.nodeIds)
+          reportUnsupportedInjectedAction('多选暂不可用')
+          return
+        }
+        if (!activeSlideAuthoringRef.current.onSelectionChange(event)) {
+          restoreInjectedNodes(event.nodeIds)
+        }
+      }),
       handle.bridge.onNodesTransformPreview(({ nodes }) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes(nodes.map((node) => node.nodeId))
+          return
+        }
+        const injected = slideAuthoringInputRef.current
+        if (injected) {
+          if (!workspaceMoveAllowed(injected, { nodes })) return
+          const [{ nodeId, x, y, width, height, rotation }] = nodes
+          const current = injected.document.nodes.find(
+            (node) => node.id === nodeId && node.type === 'text',
+          )
+          if (
+            !current ||
+            width !== current.width ||
+            height !== current.height ||
+            rotation !== current.rotation
+          ) return
+          queueAuthoringNodePatch(
+            injected.editingScope,
+            { ...current, x, y },
+          )
+          return
+        }
         const store = useEditorStore.getState()
         if (store.canvasMode !== 'edit') return
         const currentById = new Map(
@@ -2109,13 +2362,50 @@ export function Workspace({
           )
         }
       }),
-      handle.bridge.onNodeMoveEnd((event) =>
-        activeSlideAuthoringRef.current.onMoveEnd({ nodes: [event] }),
-      ),
-      handle.bridge.onNodesMoveEnd((event) =>
-        activeSlideAuthoringRef.current.onMoveEnd(event),
-      ),
+      handle.bridge.onNodeMoveEnd((event) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes([event.nodeId])
+          return
+        }
+        const injected = slideAuthoringInputRef.current
+        const moveEvent = { nodes: [event] }
+        if (!workspaceMoveAllowed(injected, moveEvent)) {
+          restoreInjectedNodes([event.nodeId])
+          reportUnsupportedInjectedAction('当前元素移动暂不可用')
+          return
+        }
+        if (!activeSlideAuthoringRef.current.onMoveEnd(moveEvent)) {
+          restoreInjectedNodes([event.nodeId])
+        }
+      }),
+      handle.bridge.onNodesMoveEnd((event) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes(event.nodes.map((node) => node.nodeId))
+          return
+        }
+        const injected = slideAuthoringInputRef.current
+        if (!workspaceMoveAllowed(injected, event)) {
+          restoreInjectedNodes(event.nodes.map((node) => node.nodeId))
+          reportUnsupportedInjectedAction('多元素移动暂不可用')
+          return
+        }
+        if (!activeSlideAuthoringRef.current.onMoveEnd(event)) {
+          restoreInjectedNodes(event.nodes.map((node) => node.nodeId))
+        }
+      }),
       handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes([nodeId])
+          return
+        }
+        if (!workspaceAuthoringActionAllowed(
+          slideAuthoringInputRef.current,
+          'resize',
+        )) {
+          restoreInjectedNodes([nodeId])
+          reportUnsupportedInjectedAction('缩放元素暂不可用')
+          return
+        }
         const store = useEditorStore.getState()
         const node = selectEditingNodes(store).find(
           (item) => item.id === nodeId,
@@ -2128,10 +2418,34 @@ export function Workspace({
           ),
         )
       }),
-      handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) =>
-        useEditorStore.getState().updateNode(nodeId, { rotation }),
-      ),
+      handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes([nodeId])
+          return
+        }
+        if (!workspaceAuthoringActionAllowed(
+          slideAuthoringInputRef.current,
+          'rotate',
+        )) {
+          restoreInjectedNodes([nodeId])
+          reportUnsupportedInjectedAction('旋转元素暂不可用')
+          return
+        }
+        useEditorStore.getState().updateNode(nodeId, { rotation })
+      }),
       handle.bridge.onNodesTransformEnd(({ nodes }) => {
+        if (interactionDisabledRef.current) {
+          restoreInjectedNodes(nodes.map((node) => node.nodeId))
+          return
+        }
+        if (!workspaceAuthoringActionAllowed(
+          slideAuthoringInputRef.current,
+          'multi-transform',
+        )) {
+          restoreInjectedNodes(nodes.map((node) => node.nodeId))
+          reportUnsupportedInjectedAction('多元素变换暂不可用')
+          return
+        }
         const store = useEditorStore.getState()
         const currentById = new Map(
           selectEditingNodes(store).map((node) => [node.id, node]),
@@ -2147,6 +2461,14 @@ export function Workspace({
         )
       }),
       handle.bridge.onTextDoubleClick((nodeId) => {
+        if (interactionDisabledRef.current) return
+        if (!workspaceAuthoringActionAllowed(
+          slideAuthoringInputRef.current,
+          'text-edit',
+        )) {
+          reportUnsupportedInjectedAction('文字编辑暂不可用')
+          return
+        }
         setActiveFormulaEditSession(null)
         setActiveComponentTextSession(null)
         setActiveRuntimeTextSession(null)
@@ -2154,6 +2476,14 @@ export function Workspace({
         useEditorStore.getState().beginTextEdit(nodeId, 'canvas')
       }),
       handle.bridge.onFormulaDoubleClick((nodeId) => {
+        if (interactionDisabledRef.current) return
+        if (!workspaceAuthoringActionAllowed(
+          slideAuthoringInputRef.current,
+          'formula-edit',
+        )) {
+          reportUnsupportedInjectedAction('公式编辑暂不可用')
+          return
+        }
         const store = useEditorStore.getState()
         const node = selectEditingNodes(store).find((item) => item.id === nodeId)
         if (node?.type !== 'formula' || store.canvasMode !== 'edit') return
@@ -2184,7 +2514,7 @@ export function Workspace({
       gameRef.current = null
       setCanvas(null)
     }
-  }, [queueAuthoringNodePatch])
+  }, [queueAuthoringNodePatch, reportUnsupportedInjectedAction])
 
   useLayoutEffect(() => {
     // Scale.NONE deliberately leaves sizing to the unified stage, but Phaser
@@ -2235,10 +2565,10 @@ export function Workspace({
       for (const node of document.nodes) {
         const before = previousById.get(node.id)
         if (!before || !nodesEqual(before, node)) {
-          queueAuthoringNodePatch(editingScope, node)
+          queueAuthoringNodePatch(authoringEditingScope, node)
         }
       }
-      if (editingScope === 'scene') {
+      if (authoringEditingScope === 'scene') {
         if (
           !previous ||
           previous.backgroundColor !== document.backgroundColor ||
@@ -2266,9 +2596,9 @@ export function Workspace({
     previousComponentPackagesRef.current = authoringComponentPackages
   }, [
     authoringComponentPackages,
+    authoringEditingScope,
     canvasMode,
     document,
-    editingScope,
     postAuthoringPatch,
     queueAuthoringNodePatch,
   ])
@@ -2277,16 +2607,45 @@ export function Workspace({
     gameRef.current?.bridge.selectNodes([...authoringSelectedNodeIds])
   }, [authoringSelectedNodeIds])
 
+  useLayoutEffect(() => {
+    if (!interactionDisabled || !slideAuthoring) return
+    if (authoringFrameRef.current !== null) {
+      window.cancelAnimationFrame(authoringFrameRef.current)
+      authoringFrameRef.current = null
+    }
+    pendingAuthoringNodesRef.current.clear()
+    const bridge = gameRef.current?.bridge
+    bridge?.loadScene(
+      slideAuthoring.document,
+      slideAuthoring.componentPackages,
+    )
+    if (authoringReadyRef.current) {
+      for (const node of slideAuthoring.document.nodes) {
+        queueAuthoringNodePatch(slideAuthoring.editingScope, node)
+      }
+    }
+    bridge?.selectNodes([...slideAuthoring.selectedNodeIds])
+    bridge?.setTextEditing(null)
+  }, [interactionDisabled, queueAuthoringNodePatch, slideAuthoring])
+
   useEffect(() => {
+    if (hasInjectedSlideAuthoring) {
+      gameRef.current?.bridge.setTextEditing(null)
+      return
+    }
     gameRef.current?.bridge.setTextEditing(editingTextNodeId)
     if (!editingTextNodeId && selectedNode?.type === 'text') {
       gameRef.current?.bridge.applyNode(selectedNode)
     }
-  }, [editingTextNodeId, selectedNode])
+  }, [editingTextNodeId, hasInjectedSlideAuthoring, selectedNode])
 
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault()
-    if (canvasMode !== 'edit') return
+    if (interactionDisabled || canvasMode !== 'edit') return
+    if (!workspaceAuthoringActionAllowed(slideAuthoring, 'drop')) {
+      reportUnsupportedInjectedAction('画布拖入暂不可用')
+      return
+    }
     const value = event.dataTransfer.getData(
       'application/x-courseware-element',
     )
@@ -2350,7 +2709,8 @@ export function Workspace({
       className={`workspace workspace--${canvasMode}`}
       aria-label="课件画布"
       onDragOver={(event) => {
-        if (canvasMode !== 'edit') return
+        if (interactionDisabled || canvasMode !== 'edit') return
+        if (!workspaceAuthoringActionAllowed(slideAuthoring, 'drop')) return
         if (
           event.dataTransfer.types.includes(
             'application/x-courseware-element',
@@ -2415,6 +2775,7 @@ export function Workspace({
       onPointerLeave={() => setHoveredAuthoringTargetId(null)}
       onDoubleClickCapture={(event) => {
         if (
+          interactionDisabled ||
           !authoringCanvasInteractive ||
           (event.target instanceof HTMLElement &&
             event.target.closest(
@@ -2449,7 +2810,10 @@ export function Workspace({
           type="button"
           className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
           aria-pressed={canvasMode === 'edit'}
-          onClick={() => setCanvasMode('edit')}
+          disabled={interactionDisabled}
+          onClick={() => {
+            if (!slideAuthoring) setCanvasMode('edit')
+          }}
         >
           <MousePointer2 size={13} />编辑状态
         </button>
@@ -2457,7 +2821,20 @@ export function Workspace({
           type="button"
           className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
           aria-pressed={canvasMode === 'run'}
-          onClick={() => setCanvasMode('run')}
+          disabled={
+            interactionDisabled ||
+            Boolean(slideAuthoring)
+          }
+          title={slideAuthoring
+            ? activeSlideAuthoring.unsupportedActionReason
+            : undefined}
+          onClick={() => {
+            if (slideAuthoring) {
+              reportUnsupportedInjectedAction('当前位置试运行暂不可用')
+              return
+            }
+            setCanvasMode('run')
+          }}
         >
           <Play size={13} />当前位置试运行
         </button>
@@ -2477,29 +2854,27 @@ export function Workspace({
           <span title="Ctrl+滚轮缩放；按住空格或鼠标中键拖动画布">
             <Hand size={13} />
           </span>
-          <button
-            type="button"
-            aria-label="复制当前画布目标的 AI 修改引用"
-            title={lastAuthoringSelection
-              ? '复制稳定作者地址、当前 revision 和当前值'
-              : '请先点选一个 Runtime 或 Component 文字/图片'}
-            disabled={!lastAuthoringSelection}
-            onClick={() => {
-              if (lastAuthoringSelection) {
-                void copyAiReferenceFor(lastAuthoringSelection)
-              }
-            }}
-          >
-            <Copy size={13} />AI 引用
-          </button>
+          {!slideAuthoring && (
+            <button
+              type="button"
+              aria-label="复制当前画布目标的 AI 修改引用"
+              title={lastAuthoringSelection
+                ? '复制稳定作者地址、当前 revision 和当前值'
+                : '请先点选一个 Runtime 或 Component 文字/图片'}
+              disabled={interactionDisabled || !lastAuthoringSelection}
+              onClick={() => {
+                if (lastAuthoringSelection) {
+                  void copyAiReferenceFor(lastAuthoringSelection)
+                }
+              }}
+            >
+              <Copy size={13} />AI 引用
+            </button>
+          )}
         </div>
       )}
-      <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
-        1280 × 720 · {editingScope === 'global'
-          ? `全局层 · ${editingNodes.length} 个元素`
-          : `${scene.name} · ${activePresentationStateId === null
-            ? '基础'
-            : ensureScenePresentation(scene).states.find((state) => state.id === activePresentationStateId)?.name ?? '状态'}`}
+      <div className={`canvas-label${authoringEditingScope === 'global' ? ' canvas-label--global' : ''}`}>
+        1280 × 720 · {workspaceCanvasLabel(activeSlideAuthoring)}
       </div>
       <div ref={stageViewportRef} className="canvas-viewport">
         <div
@@ -2712,12 +3087,24 @@ export function Workspace({
           )}
         </div>
       </div>
-      {canvasMode === 'edit' && editingFormulaNode && (
+      {!interactionDisabled && canvasMode === 'edit' && editingFormulaNode && (
         <FormulaEditDialog
           key={`${editingFormulaNode.id}:${activePresentationStateId ?? 'base'}`}
           node={editingFormulaNode}
           onCancel={() => setActiveFormulaEditSession(null)}
           onCommit={(ast, accessibleText) => {
+            if (interactionDisabledRef.current) {
+              setActiveFormulaEditSession(null)
+              return
+            }
+            if (!workspaceAuthoringActionAllowed(
+              slideAuthoringInputRef.current,
+              'formula-edit',
+            )) {
+              reportUnsupportedInjectedAction('公式编辑暂不可用')
+              setActiveFormulaEditSession(null)
+              return
+            }
             useEditorStore.getState().updateNode(editingFormulaNode.id, {
               ast,
               accessibleText,
@@ -2726,13 +3113,18 @@ export function Workspace({
           }}
         />
       )}
-      {canvasMode === 'edit' && editingNode && canvas && workspaceRef.current && (
+      {!interactionDisabled && canvasMode === 'edit' && editingNode && canvas && workspaceRef.current && (
         <TextEditOverlay
           key={editingNode.id}
           node={editingNode}
           workspace={workspaceRef.current}
           canvas={canvas}
           onPreview={(text, runs) => {
+            if (interactionDisabledRef.current) return
+            if (!workspaceAuthoringActionAllowed(
+              slideAuthoringInputRef.current,
+              'text-edit',
+            )) return
             const draftNode = { ...editingNode, text, runs }
             const rendered = editingNode.style.overflow === 'auto-height'
               ? renderTextNodeCanvas(draftNode)
@@ -2748,6 +3140,18 @@ export function Workspace({
               )
           }}
           onCommit={(text, runs) => {
+            if (interactionDisabledRef.current) {
+              gameRef.current?.bridge.setTextEditing(null)
+              return
+            }
+            if (!workspaceAuthoringActionAllowed(
+              slideAuthoringInputRef.current,
+              'text-edit',
+            )) {
+              reportUnsupportedInjectedAction('文字编辑暂不可用')
+              gameRef.current?.bridge.setTextEditing(null)
+              return
+            }
             const store = useEditorStore.getState()
             const draftNode = { ...editingNode, text, runs }
             const rendered = editingNode.style.overflow === 'auto-height'
@@ -2774,6 +3178,17 @@ export function Workspace({
             gameRef.current?.bridge.setTextEditing(null)
           }}
           onCancel={() => {
+            if (interactionDisabledRef.current) {
+              gameRef.current?.bridge.setTextEditing(null)
+              return
+            }
+            if (!workspaceAuthoringActionAllowed(
+              slideAuthoringInputRef.current,
+              'text-edit',
+            )) {
+              gameRef.current?.bridge.setTextEditing(null)
+              return
+            }
             const store = useEditorStore.getState()
             store.cancelTextEdit()
             const restoredNode = selectEditingNodes(

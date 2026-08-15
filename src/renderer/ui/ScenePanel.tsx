@@ -16,20 +16,51 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Copy, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ensureScenePresentation } from '../../shared/presentation'
-import type { SceneDocument } from '../../shared/projectTypes'
 import { useEditorStore } from '../store/editorStore'
 import { ConfirmDialog } from './ConfirmDialog'
-import { SceneThumbnail } from './SceneThumbnail'
+import {
+  buildLegacySceneThumbnailRenderModel,
+  SceneThumbnail,
+  type SceneThumbnailRenderModel,
+} from './SceneThumbnail'
 import { hasUnrepresentedRuntime } from './sceneThumbnailComposition'
 
-interface SortableSceneProps {
-  scene: SceneDocument
-  index: number
+export interface ScenePanelSceneRow {
+  id: string
+  name: string
   active: boolean
-  canDelete: boolean
   showRuntimeBadge: boolean
+  thumbnailStateName: string
+  thumbnail: SceneThumbnailRenderModel
+}
+
+/**
+ * Narrow document/control boundary shared by the original panel UI and the V9
+ * editor backend. It contains no ProjectDocument or editor-store operations.
+ */
+export interface ScenePanelDocumentControl {
+  editingScope: 'scene' | 'global'
+  globalElementCount: number
+  globalHasRuntime: boolean
+  /** Keeps the original entry visible while a backend lacks a truthful global authoring surface. */
+  globalEditingDisabled?: boolean
+  globalEditingUnavailableReason?: string
+  scenes: readonly ScenePanelSceneRow[]
+  onAddScene(): void
+  onActivateScene(sceneId: string): void
+  onActivateGlobal(): void
+  onRenameScene(sceneId: string, name: string): void
+  onDeleteScene(sceneId: string): void
+  onDuplicateScene(sceneId: string): void
+  onReorderScenes(sceneIds: readonly string[]): void
+}
+
+interface SortableSceneProps {
+  scene: ScenePanelSceneRow
+  index: number
+  canDelete: boolean
   onActivate(): void
   onRename(name: string): void
   onDelete(): void
@@ -39,9 +70,7 @@ interface SortableSceneProps {
 function SortableScene({
   scene,
   index,
-  active,
   canDelete,
-  showRuntimeBadge,
   onActivate,
   onRename,
   onDelete,
@@ -51,9 +80,6 @@ function SortableScene({
   const [name, setName] = useState(scene.name)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: scene.id })
-  const presentation = ensureScenePresentation(scene)
-  const thumbnailStateId = presentation.thumbnailStateId ?? presentation.initialStateId
-  const thumbnailState = presentation.states.find((state) => state.id === thumbnailStateId)
 
   useEffect(() => setName(scene.name), [scene.name])
 
@@ -67,7 +93,7 @@ function SortableScene({
   return (
     <div
       ref={setNodeRef}
-      className={`scene-item${active ? ' scene-item--active' : ''}`}
+      className={`scene-item${scene.active ? ' scene-item--active' : ''}`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -91,28 +117,28 @@ function SortableScene({
       <button
         type="button"
         className="scene-thumbnail-wrap"
-        aria-current={active ? 'page' : undefined}
-        aria-label={`打开场景“${scene.name}”；缩略图使用状态“${thumbnailState?.name ?? '初始状态'}”`}
+        aria-current={scene.active ? 'page' : undefined}
+        aria-label={`打开场景“${scene.name}”；缩略图使用状态“${scene.thumbnailStateName}”`}
         onClick={(event) => {
           event.stopPropagation()
           onActivate()
         }}
       >
-        <SceneThumbnail scene={scene} />
+        <SceneThumbnail model={scene.thumbnail} />
         <span className="scene-number">{index + 1}</span>
-        {showRuntimeBadge && (
+        {scene.showRuntimeBadge && (
           <span
             className="runtime-badge"
-            title="已启用的运行时无静态后备，请在当前位置试运行中查看"
+            title="动态内容没有静态后备，请在当前位置试运行中查看"
           >
-            运行时
+            动态内容
           </span>
         )}
         <span
           className="thumbnail-state-badge"
-          title={`缩略图使用状态：${thumbnailState?.name ?? '初始状态'}`}
+          title={`缩略图使用状态：${scene.thumbnailStateName}`}
         >
-          缩略图 · {thumbnailState?.name ?? '初始状态'}
+          缩略图 · {scene.thumbnailStateName}
         </span>
       </button>
       <div className="scene-meta">
@@ -180,22 +206,12 @@ function SortableScene({
   )
 }
 
-export function ScenePanel() {
-  const scenes = useEditorStore((state) => state.project.scenes)
-  const globalLayer = useEditorStore(
-    (state) => state.project.globalLayer,
-  )
-  const globalRuntime = useEditorStore((state) => state.project.globalRuntime)
-  const editingScope = useEditorStore((state) => state.editingScope)
-  const activeSceneId = useEditorStore((state) => state.activeSceneId)
-  const addScene = useEditorStore((state) => state.addScene)
-  const deleteScene = useEditorStore((state) => state.deleteScene)
-  const duplicateScene = useEditorStore((state) => state.duplicateScene)
-  const reorderScenes = useEditorStore((state) => state.reorderScenes)
-  const updateScene = useEditorStore((state) => state.updateScene)
-  const setActiveScene = useEditorStore((state) => state.setActiveScene)
-  const setEditingScope = useEditorStore((state) => state.setEditingScope)
-  const [pendingDelete, setPendingDelete] = useState<SceneDocument | null>(null)
+function ScenePanelContent({
+  documentControl,
+}: {
+  documentControl: ScenePanelDocumentControl
+}) {
+  const [pendingDelete, setPendingDelete] = useState<ScenePanelSceneRow | null>(null)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -203,10 +219,13 @@ export function ScenePanel() {
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
-    const oldIndex = scenes.findIndex((scene) => scene.id === active.id)
-    const newIndex = scenes.findIndex((scene) => scene.id === over.id)
+    const oldIndex = documentControl.scenes.findIndex((scene) => scene.id === active.id)
+    const newIndex = documentControl.scenes.findIndex((scene) => scene.id === over.id)
     if (oldIndex < 0 || newIndex < 0) return
-    reorderScenes(arrayMove(scenes, oldIndex, newIndex).map((scene) => scene.id))
+    documentControl.onReorderScenes(
+      arrayMove([...documentControl.scenes], oldIndex, newIndex)
+        .map((scene) => scene.id),
+    )
   }
 
   return (
@@ -216,7 +235,7 @@ export function ScenePanel() {
         <button
           type="button"
           className="secondary-button"
-          onClick={addScene}
+          onClick={documentControl.onAddScene}
           data-testid="add-scene"
         >
           <Plus size={14} />
@@ -226,17 +245,20 @@ export function ScenePanel() {
       <div className="global-layer-entry-wrap">
         <button
           type="button"
-          className={`global-layer-entry${editingScope === 'global' ? ' global-layer-entry--active' : ''}`}
-          aria-pressed={editingScope === 'global'}
+          className={`global-layer-entry${documentControl.editingScope === 'global' ? ' global-layer-entry--active' : ''}`}
+          aria-pressed={documentControl.editingScope === 'global'}
           data-testid="global-layer-entry"
-          onClick={() => setEditingScope('global')}
+          disabled={documentControl.globalEditingDisabled}
+          title={documentControl.globalEditingUnavailableReason}
+          onClick={documentControl.onActivateGlobal}
         >
           <span className="global-layer-entry__icon"><Globe2 size={19} /></span>
           <span className="global-layer-entry__content">
             <strong>全局层</strong>
             <small>
-              {globalLayer.length} 个元素
-              {globalRuntime ? ' · 自定义运行时' : ''}
+              {documentControl.globalElementCount} 个元素
+              {documentControl.globalHasRuntime ? ' · 自定义动态内容' : ''}
+              {documentControl.globalEditingDisabled ? ' · 暂不可编辑' : ''}
             </small>
           </span>
           <Layers3 size={16} />
@@ -248,22 +270,20 @@ export function ScenePanel() {
         onDragEnd={onDragEnd}
       >
         <SortableContext
-          items={scenes.map((scene) => scene.id)}
+          items={documentControl.scenes.map((scene) => scene.id)}
           strategy={verticalListSortingStrategy}
         >
           <div className="scene-list">
-            {scenes.map((scene, index) => (
+            {documentControl.scenes.map((scene, index) => (
               <SortableScene
                 key={scene.id}
                 scene={scene}
                 index={index}
-                active={editingScope === 'scene' && scene.id === activeSceneId}
-                canDelete={scenes.length > 1}
-                showRuntimeBadge={hasUnrepresentedRuntime(scene, globalRuntime)}
-                onActivate={() => setActiveScene(scene.id)}
-                onRename={(name) => updateScene(scene.id, { name })}
+                canDelete={documentControl.scenes.length > 1}
+                onActivate={() => documentControl.onActivateScene(scene.id)}
+                onRename={(name) => documentControl.onRenameScene(scene.id, name)}
                 onDelete={() => setPendingDelete(scene)}
-                onDuplicate={() => duplicateScene(scene.id)}
+                onDuplicate={() => documentControl.onDuplicateScene(scene.id)}
               />
             ))}
           </div>
@@ -281,10 +301,83 @@ export function ScenePanel() {
         danger
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {
-          if (pendingDelete) deleteScene(pendingDelete.id)
+          if (pendingDelete) documentControl.onDeleteScene(pendingDelete.id)
           setPendingDelete(null)
         }}
       />
     </aside>
   )
+}
+
+export function LegacyScenePanelAdapter() {
+  const scenes = useEditorStore((state) => state.project.scenes)
+  const globalLayer = useEditorStore(
+    (state) => state.project.globalLayer,
+  )
+  const globalRuntime = useEditorStore((state) => state.project.globalRuntime)
+  const assets = useEditorStore((state) => state.project.assets)
+  const assetFiles = useEditorStore((state) => state.assetFiles)
+  const componentPackages = useEditorStore((state) => state.componentPackages)
+  const editingScope = useEditorStore((state) => state.editingScope)
+  const activeSceneId = useEditorStore((state) => state.activeSceneId)
+  const addScene = useEditorStore((state) => state.addScene)
+  const deleteScene = useEditorStore((state) => state.deleteScene)
+  const duplicateScene = useEditorStore((state) => state.duplicateScene)
+  const reorderScenes = useEditorStore((state) => state.reorderScenes)
+  const updateScene = useEditorStore((state) => state.updateScene)
+  const setActiveScene = useEditorStore((state) => state.setActiveScene)
+  const setEditingScope = useEditorStore((state) => state.setEditingScope)
+  const sceneRows = useMemo<ScenePanelSceneRow[]>(() => scenes.map((scene) => {
+    const presentation = ensureScenePresentation(scene)
+    const thumbnailStateId = presentation.thumbnailStateId ?? presentation.initialStateId
+    const thumbnailState = presentation.states.find((state) => state.id === thumbnailStateId)
+    return {
+      id: scene.id,
+      name: scene.name,
+      active: editingScope === 'scene' && scene.id === activeSceneId,
+      showRuntimeBadge: hasUnrepresentedRuntime(scene, globalRuntime),
+      thumbnailStateName: thumbnailState?.name ?? '初始状态',
+      thumbnail: buildLegacySceneThumbnailRenderModel({
+        scene,
+        globalLayer,
+        globalRuntime,
+        assets,
+        assetFiles,
+        componentPackages,
+      }),
+    }
+  }), [
+    activeSceneId,
+    assetFiles,
+    assets,
+    componentPackages,
+    editingScope,
+    globalLayer,
+    globalRuntime,
+    scenes,
+  ])
+
+  return <ScenePanelContent documentControl={{
+    editingScope,
+    globalElementCount: globalLayer.length,
+    globalHasRuntime: Boolean(globalRuntime),
+    scenes: sceneRows,
+    onAddScene: addScene,
+    onActivateScene: setActiveScene,
+    onActivateGlobal: () => setEditingScope('global'),
+    onRenameScene: (sceneId, name) => updateScene(sceneId, { name }),
+    onDeleteScene: deleteScene,
+    onDuplicateScene: duplicateScene,
+    onReorderScenes: (sceneIds) => reorderScenes([...sceneIds]),
+  }} />
+}
+
+export function ScenePanel({
+  documentControl,
+}: {
+  documentControl?: ScenePanelDocumentControl
+} = {}) {
+  return documentControl
+    ? <ScenePanelContent documentControl={documentControl} />
+    : <LegacyScenePanelAdapter />
 }

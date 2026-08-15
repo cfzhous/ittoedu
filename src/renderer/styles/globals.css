@@ -498,6 +498,28 @@ button:disabled {
   border-left: 1px solid var(--border);
 }
 
+.right-sidebar-capability-gate {
+  display: grid;
+  gap: 8px;
+  margin: 14px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--panel-bg-elevated);
+}
+
+.right-sidebar-capability-gate strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.right-sidebar-capability-gate p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
