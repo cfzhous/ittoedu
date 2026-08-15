@@ -23,7 +23,7 @@ import {
   createTeacherControllerNode,
   createTextNode,
 } from '@/renderer/project/createProject'
-import type { SceneDocument } from '@/shared/projectTypes'
+import type { ExternalComponentNode, SceneDocument } from '@/shared/projectTypes'
 import { projectDocumentSchema } from '@/shared/projectSchema'
 
 function input(
@@ -177,8 +177,6 @@ describe('Workspace Slide authoring input boundary', () => {
     const unsupported = [
       'formula-edit',
       'drop',
-      'runtime-edit',
-      'component-edit',
       'animation-preview',
       'ai-reference',
     ] as const
@@ -346,6 +344,152 @@ describe('Workspace Slide authoring input boundary', () => {
     expect(injected.value.onTextEditCommit(event)).toBe(true)
     expect(injected.value.onTextEditCommit).toHaveBeenCalledTimes(1)
     expect(injected.value.onTextEditCommit).toHaveBeenCalledWith(event)
+  })
+
+  it('allows Runtime/Component canvas edits in the injected backend without touching V8', () => {
+    const injected = input('injected')
+    const v8 = {
+      project: { title: 'V8 untouched' },
+      history: [] as string[],
+    }
+    const before = structuredClone(v8)
+    const legacyMutation = (action: string) => {
+      v8.project.title = action
+      v8.history.push(action)
+    }
+    const unsupported = [
+      'formula-edit',
+      'drop',
+      'animation-preview',
+      'ai-reference',
+    ] as const
+    for (const action of unsupported) {
+      if (workspaceAuthoringActionAllowed(injected.value, action)) {
+        legacyMutation(action)
+      }
+    }
+    // Canvas text editing is served by the V9 seam; Runtime/Component author
+    // targets follow the same unified-layer path and are allowed. None of
+    // them ever routes to the V8 project from this seam.
+    expect(workspaceAuthoringActionAllowed(injected.value, 'text-edit')).toBe(true)
+    expect(workspaceAuthoringActionAllowed(
+      injected.value,
+      'runtime-edit',
+    )).toBe(true)
+    expect(workspaceAuthoringActionAllowed(
+      injected.value,
+      'component-edit',
+    )).toBe(true)
+    expect(v8).toEqual(before)
+  })
+
+  it('selects and transforms injected component layers like native layers', () => {
+    const base = input('injected', [
+      createTextNode({ id: 'v9-text', text: 'V9', x: 20, y: 30 }),
+    ])
+    const injected: WorkspaceSlideAuthoringInput = {
+      ...base.value,
+      document: {
+        ...base.value.document,
+        nodes: [
+          ...base.value.document.nodes,
+          {
+            id: 'v9-component',
+            type: 'external-component',
+            name: '组件',
+            x: 320,
+            y: 180,
+            width: 400,
+            height: 260,
+            rotation: 0,
+            visible: true,
+            locked: false,
+            opacity: 1,
+            playbackInitialVisibility: 'inherit',
+            component: { packageId: 'example.card', version: '1.0.0' },
+            props: { title: '标题' },
+          },
+        ],
+      },
+    }
+    expect(workspaceSelectionAllowed(injected, {
+      nodeIds: ['v9-component'],
+      additive: false,
+    })).toBe(true)
+    expect(workspaceTransformAllowed(injected, {
+      nodes: [transform('v9-component', 40, 50)],
+    })).toBe(true)
+    expect(workspaceTransformAllowed(injected, {
+      nodes: [transform('v9-component', 40, 50), transform('v9-text', 1, 2)],
+    })).toBe(true)
+  })
+
+  it('carries the projected runtime and global component layers into the carrier', () => {
+    const base = input('carrier-dynamic', [createTextNode({
+      id: 'v9-text',
+      text: 'V9',
+      x: 20,
+      y: 30,
+    })])
+    const componentNode: ExternalComponentNode = {
+      id: 'v9-component',
+      type: 'external-component',
+      name: '组件',
+      x: 320,
+      y: 180,
+      width: 400,
+      height: 260,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      opacity: 1,
+      playbackInitialVisibility: 'inherit',
+      component: { packageId: 'example.card', version: '1.0.0' },
+      props: { title: '标题' },
+    }
+    const injected: WorkspaceSlideAuthoringInput = {
+      ...base.value,
+      previewDocument: {
+        ...base.value.previewDocument,
+        runtime: {
+          runtimeApiVersion: 2,
+          enabled: true,
+          renderMode: 'dom',
+          source: 'CoursewareRuntime.define({ runtimeApiVersion: 2, create() { return { destroy() {} } } })',
+          content: { values: { title: '动态标题' } },
+          assets: {},
+        },
+      },
+      globalRuntime: {
+        runtimeApiVersion: 2,
+        enabled: true,
+        renderMode: 'dom',
+        source: 'CoursewareRuntime.define({ runtimeApiVersion: 2, create() { return { destroy() {} } } })',
+        content: { values: { globalTitle: '全局' } },
+        assets: {},
+      },
+      globalCarrierLayerItems: [{
+        node: componentNode,
+        layer: 'overlay',
+      }],
+    }
+    const legacy = createProject({ includeDefaultController: false, controls: 'none' })
+    const preview = createWorkspaceSlidePreviewProject(
+      legacy,
+      legacy.scenes[0]!.id,
+      injected,
+    )
+
+    expect(preview.scenes[0]!.runtime?.content.values.title).toBe('动态标题')
+    expect(preview.scenes[0]!.nodes.map((node) => node.id)).toEqual(['v9-text'])
+    expect(preview.globalRuntime?.content.values.globalTitle).toBe('全局')
+    expect(preview.globalLayer).toEqual([{
+      node: componentNode,
+      layer: 'overlay',
+      visibility: { mode: 'all', sceneIds: [] },
+    }])
+    expect(projectDocumentSchema.parse(preview)).toEqual(preview)
+    expect(legacy).not.toHaveProperty('globalRuntime')
   })
 
   it('keeps preview generation stable for frame/name changes and invalidates real boundaries', () => {

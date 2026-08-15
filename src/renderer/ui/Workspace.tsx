@@ -56,9 +56,11 @@ import type {
 import { onElementAnimationPreviewRequested } from '../phaser/elementAnimationPreviewBus'
 import {
   selectActiveScene,
+  selectCourseRuntimeTextValue,
   selectEditingNodes,
   selectSelectedNode,
   useEditorStore,
+  type EditorState,
 } from '../store/editorStore'
 import { TextEditOverlay } from './TextEditOverlay'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
@@ -138,6 +140,7 @@ import {
   copyableAiSelectionReference,
   type AuthoringCanvasTarget,
 } from '../authoring/aiSelectionReference'
+import type { V9SlideLayerTarget } from '../course/v9SlideVerticalSlice'
 
 export interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
@@ -1674,6 +1677,41 @@ function WorkspaceEditor({
   const authoringSelectedNodeIds = activeSlideAuthoring.selectedNodeIds
   const authoringEditingScope = activeSlideAuthoring.editingScope
 
+  const courseProjectId = useEditorStore(
+    (state) => state.courseSession?.history.present.id,
+  )
+  const courseStateId = useEditorStore(
+    (state) => state.courseSession?.selection.stateId ?? null,
+  )
+  /**
+   * One editing context for both render-time session matching and synchronous
+   * commit validation. The injected V9 backend reads its own session facts
+   * (never the stale V8 store fields) so a session survives a target refresh
+   * and still fails fast when the author switches scene or state.
+   */
+  const authoringContext = useMemo(() => ({
+    projectId: hasInjectedSlideAuthoring
+      ? (courseProjectId ?? project.id)
+      : project.id,
+    scope: hasInjectedSlideAuthoring
+      ? (authoringEditingScope === 'surface' ? 'scene' : authoringEditingScope)
+      : editingScope,
+    sceneId: hasInjectedSlideAuthoring ? document.id : scene.id,
+    stateId: hasInjectedSlideAuthoring ? courseStateId : activePresentationStateId,
+  }), [
+    activePresentationStateId,
+    authoringEditingScope,
+    courseProjectId,
+    courseStateId,
+    document.id,
+    editingScope,
+    hasInjectedSlideAuthoring,
+    project.id,
+    scene.id,
+  ])
+  const authoringContextRef = useRef(authoringContext)
+  authoringContextRef.current = authoringContext
+
   const editingNode = useMemo(
     () =>
       !hasInjectedSlideAuthoring && editingTextNodeId
@@ -1715,43 +1753,33 @@ function WorkspaceEditor({
       setActiveFormulaEditSession(null)
     }
   }, [activeFormulaEditSession, editingFormulaNode])
-  const visibleRuntimeTargets = useMemo(
-    () => hasInjectedSlideAuthoring
-      ? []
-      : runtimeTargets.filter((target) => (
-          (target.kind === 'text' || target.kind === 'asset') &&
-          runtimeTargetMatchesEditingContext(target, editingScope, scene.id)
-        )),
-    [editingScope, hasInjectedSlideAuthoring, runtimeTargets, scene.id],
-  )
+  const visibleRuntimeTargets = useMemo(() => {
+    if (authoringEditingScope === 'surface') return []
+    return runtimeTargets.filter((target) => (
+      (target.kind === 'text' || target.kind === 'asset') &&
+      runtimeTargetMatchesEditingContext(target, authoringEditingScope, document.id)
+    ))
+  }, [authoringEditingScope, document.id, runtimeTargets])
   const visibleComponentTargets = useMemo(
-    () => hasInjectedSlideAuthoring
-      ? []
-      : componentTargets.filter((target) => {
-          if (target.scope !== editingScope) return false
-          if (target.scope === 'scene' && target.sceneId !== scene.id) return false
-          return document.nodes.some((node) => (
-            node.id === target.nodeId &&
-            node.type === 'external-component' &&
-            node.visible
-          ))
-        }),
-    [
-      componentTargets,
-      document.nodes,
-      editingScope,
-      hasInjectedSlideAuthoring,
-      scene.id,
-    ],
+    () => componentTargets.filter((target) => {
+      if (target.scope !== authoringEditingScope) return false
+      if (target.scope === 'scene' && target.sceneId !== document.id) return false
+      return document.nodes.some((node) => (
+        node.id === target.nodeId &&
+        node.type === 'external-component' &&
+        node.visible
+      ))
+    }),
+    [componentTargets, authoringEditingScope, document.id, document.nodes],
   )
   const activeComponentTextTarget = useMemo(() => {
     if (
       !activeComponentTextSession ||
       !componentTextEditSessionMatchesContext(activeComponentTextSession, {
-        projectId: project.id,
-        scope: editingScope,
-        sceneId: scene.id,
-        stateId: activePresentationStateId,
+        projectId: authoringContext.projectId,
+        scope: authoringContext.scope,
+        sceneId: authoringContext.sceneId,
+        stateId: authoringContext.stateId,
       })
     ) {
       return undefined
@@ -1762,10 +1790,10 @@ function WorkspaceEditor({
     ))
   }, [
     activeComponentTextSession,
-    activePresentationStateId,
-    editingScope,
-    project.id,
-    scene.id,
+    authoringContext.projectId,
+    authoringContext.scope,
+    authoringContext.sceneId,
+    authoringContext.stateId,
     visibleComponentTargets,
   ])
   const componentEditingNode = useMemo(
@@ -1787,9 +1815,9 @@ function WorkspaceEditor({
       !activeRuntimeTextSession ||
       activeRuntimeTextSession.kind !== 'text' ||
       !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession, {
-        projectId: project.id,
-        scope: editingScope,
-        sceneId: scene.id,
+        projectId: authoringContext.projectId,
+        scope: authoringContext.scope,
+        sceneId: authoringContext.sceneId,
       })
     ) {
       return undefined
@@ -1799,17 +1827,30 @@ function WorkspaceEditor({
     ))
   }, [
     activeRuntimeTextSession,
-    editingScope,
-    project.id,
-    scene.id,
+    authoringContext.projectId,
+    authoringContext.sceneId,
+    authoringContext.scope,
     visibleRuntimeTargets,
   ])
-  const activeRuntimeTextValue = activeRuntimeTextTarget?.kind === 'text'
-    ? (activeRuntimeTextTarget.scope === 'global'
-        ? project.globalRuntime
-        : scene.runtime
-      )?.content.values[activeRuntimeTextTarget.key] ?? ''
-    : ''
+  const activeRuntimeTextValue = useEditorStore(useCallback(
+    (state: EditorState) => {
+      const target = activeRuntimeTextTarget
+      if (!target || target.kind !== 'text') return ''
+      if (hasInjectedSlideAuthoring) {
+        return selectCourseRuntimeTextValue(
+          state,
+          target.scope,
+          target.sceneId,
+          target.key,
+        )
+      }
+      const runtime = target.scope === 'global'
+        ? state.project.globalRuntime
+        : state.project.scenes.find((item) => item.id === target.sceneId)?.runtime
+      return runtime?.content.values[target.key] ?? ''
+    },
+    [activeRuntimeTextTarget, hasInjectedSlideAuthoring],
+  ))
 
   useEffect(() => {
     if (
@@ -1834,26 +1875,31 @@ function WorkspaceEditor({
   const currentComponentTextEditContext = useCallback(
     (): ComponentTextEditContext => {
       const store = useEditorStore.getState()
-      const nodes = selectEditingNodes(store)
+      const injected = slideAuthoringInputRef.current
+      const nodes = injected
+        ? injected.document.nodes
+        : selectEditingNodes(store)
       const visibleComponentNodeIds = new Set(nodes.flatMap((node) => (
         node.type === 'external-component' && node.visible ? [node.id] : []
       )))
       return {
-        projectId: store.project.id,
-        scope: store.editingScope,
-        sceneId: store.activeSceneId,
-        stateId: store.activePresentationStateId,
+        projectId: authoringContextRef.current.projectId,
+        scope: authoringContextRef.current.scope,
+        sceneId: authoringContextRef.current.sceneId,
+        stateId: authoringContextRef.current.stateId,
         nodes,
-        componentPackages: store.componentPackages,
+        componentPackages: injected
+          ? injected.componentPackages
+          : store.componentPackages,
         // Read the synchronous host registry rather than React render state so
         // a blur racing with target cleanup can never commit a retired target.
         targets: [...componentTargetsByHostRef.current.values()]
           .flat()
           .filter((target): target is Readonly<ComponentAuthoringTextTarget> => (
             target.kind === 'component-text' &&
-            target.scope === store.editingScope &&
+            target.scope === authoringContextRef.current.scope &&
             (target.scope === 'global' ||
-              target.sceneId === store.activeSceneId) &&
+              target.sceneId === authoringContextRef.current.sceneId) &&
             visibleComponentNodeIds.has(target.nodeId)
           )),
       }
@@ -1863,12 +1909,12 @@ function WorkspaceEditor({
 
   const currentRuntimeTargetEditContext = useCallback(
     (): RuntimeTargetEditContext => {
-      const store = useEditorStore.getState()
+      const injected = slideAuthoringInputRef.current
       return {
-        projectId: store.project.id,
-        scope: store.editingScope,
-        sceneId: store.activeSceneId,
-        stateId: store.activePresentationStateId,
+        projectId: authoringContextRef.current.projectId,
+        scope: authoringContextRef.current.scope,
+        sceneId: authoringContextRef.current.sceneId,
+        stateId: authoringContextRef.current.stateId,
         // Read the synchronous host registry so a commit racing with target
         // cleanup cannot write into a replacement Runtime that happens to use
         // the same content or asset key.
@@ -1878,14 +1924,28 @@ function WorkspaceEditor({
             (target.kind === 'text' || target.kind === 'asset') &&
             runtimeTargetMatchesEditingContext(
               target,
-              store.editingScope,
-              store.activeSceneId,
+              authoringContextRef.current.scope,
+              authoringContextRef.current.sceneId,
             )
           )),
       }
     },
     [],
   )
+
+  const courseLayerTarget = useCallback((
+    layerItemId: string,
+  ): V9SlideLayerTarget | null => {
+    const session = useEditorStore.getState().courseSession
+    if (!session) return null
+    return {
+      sessionId: session.sessionId,
+      locationId: session.selection.locationId,
+      stateId: session.selection.stateId,
+      editingScope: session.editingScope,
+      layerItemId,
+    }
+  }, [])
 
   const beginComponentTextEdit = useCallback((
     target: Readonly<ComponentAuthoringTextTarget>,
@@ -1913,7 +1973,14 @@ function WorkspaceEditor({
       setActiveComponentTextSession(null)
       return
     }
-    store.selectNode(result.session.nodeId)
+    if (slideAuthoringInputRef.current) {
+      useEditorStore.getState().selectCourseLayers({
+        nodeIds: [result.session.nodeId],
+        additive: false,
+      })
+    } else {
+      store.selectNode(result.session.nodeId)
+    }
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(result.session)
   }, [currentComponentTextEditContext, reportUnsupportedInjectedAction])
@@ -1949,6 +2016,26 @@ function WorkspaceEditor({
       setActiveComponentTextSession(null)
       return
     }
+    if (slideAuthoringInputRef.current) {
+      const latest = useEditorStore.getState()
+      const target = courseLayerTarget(result.nodeId)
+      if (!target) {
+        latest.setStatus('组件文字目标已失效，未写入修改')
+        setActiveComponentTextSession(null)
+        return
+      }
+      const accepted = latest.updateCourseComponentProps(target, result.props)
+      if (!accepted) latest.setStatus('组件文字目标已失效，未写入修改')
+      else {
+        latest.setStatus(
+          session.stateId === null || session.scope === 'global'
+            ? '已更新组件文字'
+            : '已更新当前演示状态中的组件文字',
+        )
+      }
+      setActiveComponentTextSession(null)
+      return
+    }
     store.updateNode(result.nodeId, {
       props: result.props,
     })
@@ -1958,7 +2045,7 @@ function WorkspaceEditor({
         : '已更新当前演示状态中的组件文字',
     )
     setActiveComponentTextSession(null)
-  }, [currentComponentTextEditContext, reportUnsupportedInjectedAction])
+  }, [courseLayerTarget, currentComponentTextEditContext, reportUnsupportedInjectedAction])
 
   const beginRuntimeTextEdit = useCallback((
     target: Readonly<RuntimeAuthoringTarget>,
@@ -2022,6 +2109,38 @@ function WorkspaceEditor({
       return
     }
     const target = result.target
+    if (slideAuthoringInputRef.current) {
+      const latest = useEditorStore.getState()
+      const layerItemId = latest.resolveCourseRuntimeLayerItemId(
+        target.scope,
+        target.sceneId,
+      )
+      const layerTarget = layerItemId ? courseLayerTarget(layerItemId) : null
+      if (
+        target.kind !== 'text' ||
+        !layerTarget ||
+        !layerItemId
+      ) {
+        latest.setStatus('运行时文字目标已失效，请重新选择')
+        setActiveRuntimeTextSession(null)
+        return
+      }
+      const accepted = latest.updateCourseRuntimeContent(
+        layerTarget,
+        target.key,
+        value,
+      )
+      if (!accepted) latest.setStatus('运行时文字目标已失效，未写入修改')
+      else {
+        latest.setStatus(
+          target.scope === 'global'
+            ? '已更新全局运行时文字；此内容由整课共享'
+            : '已更新运行时文字；此内容由当前场景的所有状态共享',
+        )
+      }
+      setActiveRuntimeTextSession(null)
+      return
+    }
     const runtime = target.scope === 'global'
       ? store.project.globalRuntime
       : store.project.scenes.find((item) => item.id === target.sceneId)?.runtime
@@ -2051,7 +2170,7 @@ function WorkspaceEditor({
       store.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
     }
     setActiveRuntimeTextSession(null)
-  }, [currentRuntimeTargetEditContext, reportUnsupportedInjectedAction])
+  }, [courseLayerTarget, currentRuntimeTargetEditContext, reportUnsupportedInjectedAction])
 
   const replaceRuntimeAsset = useCallback(async (
     target: Readonly<RuntimeAuthoringTarget>,
@@ -2083,12 +2202,7 @@ function WorkspaceEditor({
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
-      if (interactionDisabledRef.current || slideAuthoringInputRef.current) {
-        if (slideAuthoringInputRef.current) {
-          reportUnsupportedInjectedAction('动态内容素材替换暂不可用')
-        }
-        return
-      }
+      if (interactionDisabledRef.current) return
       installAuthoringAssetInPlayer(imported)
       const latestState = useEditorStore.getState()
       const result = validateRuntimeTargetEditSession(
@@ -2104,6 +2218,38 @@ function WorkspaceEditor({
         return
       }
       const liveTarget = result.target
+      const activeTabBeforeImport = latestState.activeTab
+      latestState.importAsset(imported.meta, imported.bytes)
+      useEditorStore.setState({ activeTab: activeTabBeforeImport })
+      if (slideAuthoringInputRef.current) {
+        const layerItemId = latestState.resolveCourseRuntimeLayerItemId(
+          liveTarget.scope,
+          liveTarget.sceneId,
+        )
+        const layerTarget = layerItemId ? courseLayerTarget(layerItemId) : null
+        if (
+          liveTarget.kind !== 'asset' ||
+          !layerTarget ||
+          !layerItemId
+        ) {
+          latestState.setStatus('运行时图片目标已失效，请重新选择')
+          return
+        }
+        const accepted = latestState.updateCourseRuntimeAsset(
+          layerTarget,
+          liveTarget.key,
+          imported.meta.id,
+        )
+        if (!accepted) latestState.setStatus('运行时图片目标已失效，未写入修改')
+        else {
+          latestState.setStatus(
+            liveTarget.scope === 'global'
+              ? '已替换全局运行时图片；此素材由整课共享'
+              : '已替换运行时图片；此素材由当前场景的所有状态共享',
+          )
+        }
+        return
+      }
       const runtime = liveTarget.scope === 'global'
         ? latestState.project.globalRuntime
         : latestState.project.scenes.find(
@@ -2123,9 +2269,6 @@ function WorkspaceEditor({
           [liveTarget.key]: { assetId: imported.meta.id },
         },
       }
-      const activeTabBeforeImport = latestState.activeTab
-      latestState.importAsset(imported.meta, imported.bytes)
-      useEditorStore.setState({ activeTab: activeTabBeforeImport })
       if (liveTarget.scope === 'global') {
         latestState.updateGlobalRuntime(patch)
         latestState.setStatus('已替换全局运行时图片；此素材由整课共享')
@@ -2137,6 +2280,7 @@ function WorkspaceEditor({
       setReplacingRuntimeAssetTargetId(null)
     }
   }, [
+    courseLayerTarget,
     currentRuntimeTargetEditContext,
     installAuthoringAssetInPlayer,
     onSelectImageAsset,
@@ -2157,7 +2301,11 @@ function WorkspaceEditor({
       return
     }
     const startedState = useEditorStore.getState()
-    const startedNode = selectEditingNodes(startedState).find(
+    const injected = slideAuthoringInputRef.current
+    const editingNodesForScope = injected
+      ? injected.document.nodes
+      : selectEditingNodes(startedState)
+    const startedNode = editingNodesForScope.find(
       (node): node is ExternalComponentNode => (
         node.id === target.nodeId &&
         node.type === 'external-component' &&
@@ -2170,9 +2318,9 @@ function WorkspaceEditor({
       .some((candidate) => (
         candidate.kind === 'component-asset' &&
         candidate.targetId === target.targetId &&
-        candidate.scope === startedState.editingScope &&
+        candidate.scope === authoringContextRef.current.scope &&
         (candidate.scope === 'global' ||
-          candidate.sceneId === startedState.activeSceneId) &&
+          candidate.sceneId === authoringContextRef.current.sceneId) &&
         candidate.nodeId === target.nodeId &&
         candidate.componentId === target.componentId &&
         candidate.key === target.key
@@ -2181,7 +2329,12 @@ function WorkspaceEditor({
       startedState.setStatus('组件图片目标已失效，请重新选择')
       return
     }
-    const packageData = Object.values(startedState.componentPackages).find(
+    const packageData = (injected
+      ? injected.componentPackages
+      : startedState.componentPackages
+    ) && Object.values(injected
+      ? injected.componentPackages
+      : startedState.componentPackages).find(
       (candidate) => (
         candidate.manifest.id === startedNode.component.packageId &&
         candidate.manifest.version === startedNode.component.version
@@ -2196,37 +2349,41 @@ function WorkspaceEditor({
       return
     }
     const identity = {
-      projectId: startedState.project.id,
-      scope: startedState.editingScope,
-      sceneId: startedState.activeSceneId,
-      stateId: startedState.activePresentationStateId,
+      projectId: authoringContextRef.current.projectId,
+      scope: authoringContextRef.current.scope,
+      sceneId: authoringContextRef.current.sceneId,
+      stateId: authoringContextRef.current.stateId,
       nodeId: startedNode.id,
       componentId: startedNode.component.packageId,
       componentVersion: startedNode.component.version,
       key: target.key,
       targetId: target.targetId,
     } as const
-    startedState.selectNode(startedNode.id)
+    if (injected) {
+      useEditorStore.getState().selectCourseLayers({
+        nodeIds: [startedNode.id],
+        additive: false,
+      })
+    } else {
+      startedState.selectNode(startedNode.id)
+    }
     setReplacingComponentAssetTargetId(target.targetId)
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
-      if (interactionDisabledRef.current || slideAuthoringInputRef.current) {
-        if (slideAuthoringInputRef.current) {
-          reportUnsupportedInjectedAction('复用内容素材替换暂不可用')
-        }
-        return
-      }
+      if (interactionDisabledRef.current) return
       installAuthoringAssetInPlayer(imported)
       const latest = useEditorStore.getState()
-      if (
-        latest.project.id !== identity.projectId ||
-        latest.editingScope !== identity.scope ||
-        latest.activeSceneId !== identity.sceneId ||
-        latest.activePresentationStateId !== identity.stateId
-      ) {
-        latest.setStatus('组件图片编辑上下文已切换，未写入修改')
-        return
+      if (!injected) {
+        if (
+          latest.project.id !== identity.projectId ||
+          latest.editingScope !== identity.scope ||
+          latest.activeSceneId !== identity.sceneId ||
+          latest.activePresentationStateId !== identity.stateId
+        ) {
+          latest.setStatus('组件图片编辑上下文已切换，未写入修改')
+          return
+        }
       }
       const liveTarget = [...componentTargetsByHostRef.current.values()]
         .flat()
@@ -2237,7 +2394,10 @@ function WorkspaceEditor({
           candidate.componentId === identity.componentId &&
           candidate.key === identity.key
         ))
-      const liveNode = selectEditingNodes(latest).find(
+      const liveScopeNodes = injected
+        ? slideAuthoringInputRef.current?.document.nodes ?? []
+        : selectEditingNodes(latest)
+      const liveNode = liveScopeNodes.find(
         (node): node is ExternalComponentNode => (
           node.id === identity.nodeId &&
           node.type === 'external-component' &&
@@ -2252,12 +2412,30 @@ function WorkspaceEditor({
       const previousTab = latest.activeTab
       latest.importAsset(imported.meta, imported.bytes)
       useEditorStore.setState({ activeTab: previousTab })
+      const nextProps = setComponentPropValue(
+        liveNode.props,
+        identity.key,
+        imported.meta.id,
+      )
+      if (injected) {
+        const layerTarget = courseLayerTarget(liveNode.id)
+        if (!layerTarget) {
+          latest.setStatus('组件图片目标已失效，未写入修改')
+          return
+        }
+        const accepted = latest.updateCourseComponentProps(layerTarget, nextProps)
+        if (!accepted) latest.setStatus('组件图片目标已失效，未写入修改')
+        else {
+          latest.setStatus(
+            identity.stateId === null || identity.scope === 'global'
+              ? '已替换组件图片'
+              : '已替换当前演示状态中的组件图片',
+          )
+        }
+        return
+      }
       latest.updateNode(liveNode.id, {
-        props: setComponentPropValue(
-          liveNode.props,
-          identity.key,
-          imported.meta.id,
-        ),
+        props: nextProps,
       })
       latest.setStatus(
         identity.stateId === null || identity.scope === 'global'
@@ -2268,6 +2446,7 @@ function WorkspaceEditor({
       setReplacingComponentAssetTargetId(null)
     }
   }, [
+    courseLayerTarget,
     installAuthoringAssetInPlayer,
     onSelectImageAsset,
     reportUnsupportedInjectedAction,

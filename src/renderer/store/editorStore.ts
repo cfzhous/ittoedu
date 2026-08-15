@@ -145,6 +145,8 @@ import {
   replaceV9SlideNativeNode,
   reorderV9SlideScenes,
   reorderV9SlideLayers,
+  resolveV9SlideRuntimeLayerItemId,
+  resolveV9SlideRuntimeTextValue,
   selectV9SlideVerticalSlice,
   setInitialV9SlidePresentationState,
   setThumbnailV9SlidePresentationState,
@@ -153,11 +155,14 @@ import {
   setV9SlideSceneBackgroundColor,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
+  updateV9SlideComponentProps,
   updateV9SlideInteractionRule,
   updateV9SlideLayer,
   updateV9SlideMotionTargets,
   updateV9SlideNativeNode,
   updateV9SlideRuntime,
+  updateV9SlideRuntimeAsset,
+  updateV9SlideRuntimeContent,
   type V9SlideLayerPatch,
   type V9SlideEditingScope,
   type V9SlideLayerOrderTarget,
@@ -332,6 +337,24 @@ export interface EditorState {
     runs: TextRun[],
   ): boolean
   clearCourseNativeNodeOverride(target: V9SlideNativeNodeTarget): boolean
+  updateCourseRuntimeContent(
+    target: V9SlideLayerTarget,
+    key: string,
+    value: string,
+  ): boolean
+  updateCourseRuntimeAsset(
+    target: V9SlideLayerTarget,
+    key: string,
+    assetId: string,
+  ): boolean
+  updateCourseComponentProps(
+    target: V9SlideLayerTarget,
+    props: Record<string, unknown>,
+  ): boolean
+  resolveCourseRuntimeLayerItemId(
+    scope: 'scene' | 'global',
+    sceneId?: string,
+  ): string | null
   deleteCourseLayer(target: V9SlideLayerTarget): boolean
   duplicateCourseLayer(target: V9SlideLayerTarget): boolean
   reorderCourseLayers(target: V9SlideLayerOrderTarget): boolean
@@ -2101,6 +2124,75 @@ export const useEditorStore = create<EditorState>((set, get) => {
           : { ...state, courseSession, statusMessage: '已恢复基础属性' }
       })
       return accepted
+    },
+
+    updateCourseRuntimeContent(target, key, value) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = updateV9SlideRuntimeContent(
+          state.courseSession,
+          target,
+          key,
+          value,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '动态文字已更新' }
+      })
+      return accepted
+    },
+
+    updateCourseRuntimeAsset(target, key, assetId) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = updateV9SlideRuntimeAsset(
+          state.courseSession,
+          target,
+          key,
+          assetId,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '动态图片已更新' }
+      })
+      return accepted
+    },
+
+    updateCourseComponentProps(target, props) {
+      let accepted = false
+      set((state) => {
+        if (
+          state.courseSession === null ||
+          !matchesCourseLayerContext(state.courseSession, target)
+        ) return state
+        accepted = true
+        const courseSession = updateV9SlideComponentProps(
+          state.courseSession,
+          target,
+          props,
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '组件内容已更新' }
+      })
+      return accepted
+    },
+
+    resolveCourseRuntimeLayerItemId(scope, sceneId) {
+      const state = get()
+      return state.courseSession === null
+        ? null
+        : resolveV9SlideRuntimeLayerItemId(state.courseSession, scope, sceneId)
     },
 
     deleteCourseLayer(target) {
@@ -5161,4 +5253,23 @@ export const selectSelectedNode = (state: EditorState) =>
 export const selectSelectedNodes = (state: EditorState) => {
   const selected = new Set(state.selectedNodeIds)
   return selectEditingNodes(state).filter((node) => selected.has(node.id))
+}
+
+/**
+ * Reads one Runtime content value from the V9 course session (the single write
+ * truth) instead of the legacy V8 project that stays stale in V9 mode.
+ */
+export const selectCourseRuntimeTextValue = (
+  state: EditorState,
+  scope: 'scene' | 'global',
+  sceneId: string | undefined,
+  key: string,
+): string => {
+  if (state.courseSession === null) return ''
+  return resolveV9SlideRuntimeTextValue(
+    state.courseSession,
+    scope,
+    sceneId,
+    key,
+  ) ?? ''
 }

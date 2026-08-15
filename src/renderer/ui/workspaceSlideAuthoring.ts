@@ -1,5 +1,12 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
-import type { ProjectDocument, SceneDocument, SceneNode, TextRun } from '../../shared/projectTypes'
+import type {
+  ExternalComponentNode,
+  ProjectDocument,
+  SceneDocument,
+  SceneNode,
+  TextRun,
+} from '../../shared/projectTypes'
+import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import type {
   NodeTransformEndEvent,
@@ -50,6 +57,13 @@ export interface WorkspaceSlideAuthoringInput {
   readonly editingScope: WorkspaceSlideEditingScope
   /** Explains why legacy-only authoring commands are unavailable. */
   readonly unsupportedActionReason: string
+  /** Global API-2 runtime projected into the carrier's globalRuntime slot. */
+  readonly globalRuntime?: RuntimeDocument
+  /** Global component layers projected into the carrier's globalLayer. */
+  readonly globalCarrierLayerItems?: ReadonlyArray<{
+    readonly node: ExternalComponentNode
+    readonly layer: 'underlay' | 'overlay'
+  }>
   /** `false` rejects a gesture that raced with a lifecycle boundary. */
   readonly onSelectionChange: (event: Readonly<NodeSelectionEvent>) => boolean
   readonly onTransformEnd: (event: Readonly<NodesTransformEndEvent>) => boolean
@@ -137,15 +151,22 @@ export type UnsupportedWorkspaceAuthoringAction =
 /**
  * Capability gate for events that still belong exclusively to the legacy V8
  * backend. Keeping the decision here makes every caller choose one backend
- * before it can invoke a mutating command. Canvas text editing is the one
- * legacy entry the V9 backend now serves through `onTextEditCommit`.
+ * before it can invoke a mutating command. Canvas text editing is served
+ * through `onTextEditCommit`, and Runtime/Component author targets follow the
+ * same unified-layer path as Native targets, so those canvas edits are allowed
+ * in the injected V9 backend too; everything else keeps a single-backend
+ * decision before it can invoke a mutating command.
  */
 export function workspaceAuthoringActionAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
   action: UnsupportedWorkspaceAuthoringAction,
 ): boolean {
   if (!injected) return true
-  return action === 'text-edit' && injected.onTextEditCommit !== undefined
+  return (
+    (action === 'text-edit' && injected.onTextEditCommit !== undefined) ||
+    action === 'runtime-edit' ||
+    action === 'component-edit'
+  )
 }
 
 /**
@@ -161,7 +182,7 @@ export function workspaceTextEditTargetNode(
   return node?.type === 'text' && node.visible && !node.locked ? node : null
 }
 
-/** V9 accepts the complete visible Native selection, including locked items. */
+/** V9 accepts the complete visible Native/Component selection, including locked items. */
 export function workspaceSelectionAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
   event: Readonly<NodeSelectionEvent>,
@@ -172,11 +193,11 @@ export function workspaceSelectionAllowed(
   const nodesById = new Map(injected.document.nodes.map((node) => [node.id, node]))
   return event.nodeIds.every((nodeId) => {
     const node = nodesById.get(nodeId)
-    return Boolean(node && node.type !== 'external-component' && node.visible)
+    return Boolean(node && node.visible)
   })
 }
 
-/** Validates one complete Native transform before it reaches the V9 command. */
+/** Validates one complete Native/Component transform before it reaches the V9 command. */
 export function workspaceTransformAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
   event: Readonly<NodesTransformEndEvent>,
@@ -190,7 +211,6 @@ export function workspaceTransformAllowed(
     const node = nodesById.get(transform.nodeId)
     return Boolean(
       node &&
-      node.type !== 'external-component' &&
       node.visible &&
       !node.locked &&
       Number.isFinite(transform.x) &&
@@ -216,7 +236,8 @@ export function workspaceCanvasLabel(
 /**
  * Player reconstruction key. Frame/content values are patched through the
  * inspection channel; only topology and executable component identity rebuild
- * the isolated carrier.
+ * the isolated carrier. Global dynamic layers mount in the carrier's global
+ * plane, so their identity must also invalidate the reconstruction.
  */
 export function workspaceSlidePreviewStructuralKey(
   input: WorkspaceSlideAuthoringInput,
@@ -234,6 +255,27 @@ export function workspaceSlidePreviewStructuralKey(
         : {}),
     })),
     interactions: input.previewDocument.interactions,
+    ...(input.previewDocument.runtime
+      ? {
+          runtime: {
+            enabled: input.previewDocument.runtime.enabled,
+            renderMode: input.previewDocument.runtime.renderMode,
+            source: input.previewDocument.runtime.source,
+          },
+        }
+      : {}),
+    globalRuntime: input.globalRuntime
+      ? {
+          enabled: input.globalRuntime.enabled,
+          renderMode: input.globalRuntime.renderMode,
+          source: input.globalRuntime.source,
+        }
+      : null,
+    globalCarrierLayers: (input.globalCarrierLayerItems ?? []).map((item) => ({
+      id: item.node.id,
+      packageId: item.node.component.packageId,
+      version: item.node.component.version,
+    })),
   })
 }
 
@@ -309,6 +351,9 @@ export function resolveWorkspaceSlideAuthoringInput(
 /**
  * Builds the isolated Player's read-only compatibility payload. Injected V9
  * authoring never inherits V8 scenes, globals, controller, runtime or assets.
+ * V9 runtime/component layers enter the same carrier path as Native layers:
+ * the scene runtime slot and global layer carry the projected dynamic content,
+ * while every layer keeps its own host ownership in the V9 project.
  */
 export function createWorkspaceSlidePreviewProject(
   project: ProjectDocument,
@@ -330,6 +375,9 @@ export function createWorkspaceSlidePreviewProject(
       backgroundColor: projected.backgroundColor,
       backgroundAssetId: projected.backgroundAssetId ?? null,
       nodes: structuredClone(projected.nodes),
+      ...(projected.runtime
+        ? { runtime: structuredClone(projected.runtime) }
+        : {}),
       presentation: {
         initialStateId: WORKSPACE_SLIDE_PREVIEW_STATE_ID,
         thumbnailStateId: WORKSPACE_SLIDE_PREVIEW_STATE_ID,
@@ -345,8 +393,15 @@ export function createWorkspaceSlidePreviewProject(
     componentPackages: structuredClone(
       injected.previewResources.componentPackages,
     ),
-    globalLayer: [],
+    globalLayer: (injected.globalCarrierLayerItems ?? []).map((item) => ({
+      node: structuredClone(item.node),
+      layer: item.layer,
+      visibility: { mode: 'all', sceneIds: [] },
+    })),
     globalInteractions: [],
+    ...(injected.globalRuntime
+      ? { globalRuntime: structuredClone(injected.globalRuntime) }
+      : {}),
     designTokens: structuredClone(injected.previewResources.designTokens),
     media: structuredClone(injected.previewResources.media),
     playback: {

@@ -1,22 +1,27 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
+import { resolveComponentEditorProperties } from '../../shared/componentProps'
 import { nanoid } from 'nanoid'
 import type {
+  ComponentLayerItem,
   CourseProjectDocument,
   CourseRuntimeDefinition,
   LayerItem,
   LayerItemOverride,
   NativeLayerItem,
+  RuntimeLayerItem,
   SlidePresentationState,
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
 import type {
   DeepPartial,
   EmbeddedComponentPackageMeta,
+  ExternalComponentNode,
   SceneDocument,
   SceneNode,
   ShapeType,
   AssetMeta,
 } from '../../shared/projectTypes'
+import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import {
   courseRuntimeDefinitionSchema,
   materializeNativeLayerItem,
@@ -87,6 +92,7 @@ import {
   type SlideEditorLayerView,
   type SlideEditorLayerScope,
 } from './slideEditorView'
+import { compareStableStrings } from '../../shared/stableOrder'
 
 export const V9_EDITOR_BACKEND = 'v9' as const
 export const V9_SLIDE_TEST_BACKEND = 'v9-slide-test' as const
@@ -219,6 +225,20 @@ export interface V9SlideWorkspaceSnapshot {
   readonly previewDocument: SceneDocument
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly selectedNodeIds: readonly string[]
+  /**
+   * The single API-2 runtime layer projected into the isolated Player carrier
+   * as the legacy scene runtime. Every author target reported for the active
+   * scene resolves to this layer's stable layerItemId.
+   */
+  readonly sceneRuntimeLayerItemId?: string
+  /** Global API-2 runtime projected into the carrier's globalRuntime slot. */
+  readonly globalRuntime?: RuntimeDocument
+  readonly globalRuntimeLayerItemId?: string
+  /** Global component layers projected into the carrier's globalLayer. */
+  readonly globalCarrierLayerItems?: ReadonlyArray<{
+    readonly node: ExternalComponentNode
+    readonly layer: 'underlay' | 'overlay'
+  }>
 }
 
 /** Production is the default; one exact query keeps the isolated regression fixture. */
@@ -466,6 +486,16 @@ type ReadonlyNativeLayer = Omit<SlideEditorLayerView, 'item'> & {
   readonly item: DeepReadonly<NativeLayerItem>
 }
 
+type ReadonlyComponentLayer = Omit<SlideEditorLayerView, 'item'> & {
+  readonly item: DeepReadonly<ComponentLayerItem>
+}
+
+type ReadonlyRuntimeLayer = Omit<SlideEditorLayerView, 'item'> & {
+  readonly item: DeepReadonly<RuntimeLayerItem>
+}
+
+type ReadonlyAuthoringLayer = ReadonlyNativeLayer | ReadonlyComponentLayer
+
 function nativeNodeFromLayer(
   layer: ReadonlyNativeLayer,
   visibility: 'base' | 'effective' = 'effective',
@@ -481,9 +511,81 @@ function nativeNodeFromLayer(
     : { ...node, visible }
 }
 
+/**
+ * Projects one V9 component layer into the SceneNode proxy consumed by the
+ * Phaser overlay and the isolated Player carrier. The node id IS the stable
+ * V9 layerItemId, so component author targets and the authoringAddress stay
+ * valid across save/reopen without ever persisting a transient hitId.
+ */
+function componentNodeFromLayer(
+  layer: ReadonlyComponentLayer,
+  visibility: 'base' | 'effective' = 'effective',
+): ExternalComponentNode {
+  const visible = visibility === 'base' ? layer.item.visible : layer.effectiveVisible
+  const frame = layer.item.frame
+  return {
+    id: layer.item.layerItemId,
+    type: 'external-component',
+    name: layer.item.label,
+    x: frame.x,
+    y: frame.y,
+    width: frame.width,
+    height: frame.height,
+    rotation: layer.item.rotation,
+    visible,
+    locked: layer.item.locked,
+    opacity: layer.item.opacity,
+    playbackInitialVisibility: layer.item.playbackInitialVisibility,
+    component: structuredClone(layer.item.component),
+    props: structuredClone(layer.item.props),
+  }
+}
+
+/**
+ * Maps one API-2 runtime layer into the legacy SceneDocument.runtime consumed
+ * by the isolated Player carrier. `surface-v1`/API-3 runtimes are not part of
+ * the legacy carrier and return undefined; they remain playable through the
+ * Published Course V2 host while the editor workspace is not yet their host.
+ */
+export function runtimeLayerToRuntimeDocument(
+  item: DeepReadonly<RuntimeLayerItem>,
+): RuntimeDocument | undefined {
+  const runtime = item.runtime
+  if (
+    runtime.protocol !== 'legacy-runtime-v2' ||
+    runtime.runtimeApiVersion !== 2 ||
+    !runtime.enabled
+  ) {
+    return undefined
+  }
+  return {
+    runtimeApiVersion: 2,
+    enabled: true,
+    renderMode: runtime.renderMode,
+    source: runtime.source,
+    content: structuredClone(runtime.content),
+    assets: structuredClone(runtime.assets),
+    ...(runtime.nodeBindings
+      ? { nodeBindings: structuredClone(runtime.nodeBindings) }
+      : {}),
+    ...(runtime.staticFallback
+      ? {
+          staticFallback: {
+            assetId: runtime.staticFallback.assetId,
+            coverage:
+              runtime.staticFallback.coverage === 'scene'
+                ? 'full-scene'
+                : 'runtime-layer',
+            layer: 'overlay',
+          },
+        }
+      : {}),
+  }
+}
+
 function authoringLayerVisible(
   state: V9SlideVerticalSliceState,
-  layer: ReadonlyNativeLayer,
+  layer: ReadonlyAuthoringLayer,
 ): boolean {
   return state.editingScope === 'scene'
     ? layer.effectiveVisible
@@ -496,6 +598,26 @@ function activeSlideView(state: V9SlideVerticalSliceState) {
     locationId: state.selection.locationId,
     stateId: state.selection.stateId,
   })
+}
+
+function selectableLayers(
+  state: V9SlideVerticalSliceState,
+): Map<string, ReadonlyAuthoringLayer> {
+  const location = state.history.present.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (location?.kind !== 'slide-scene') return new Map()
+  const source = state.editingScope
+  return new Map(activeSlideView(state).layers.flatMap((layer) => {
+    if (
+      layer.source !== source ||
+      (layer.item.kind !== 'native' && layer.item.kind !== 'component') ||
+      (layer.item.kind === 'native' &&
+        source !== 'global' &&
+        layer.item.content.nativeType === 'teacher-controller')
+    ) return []
+    return [[layer.selectionId, layer as ReadonlyAuthoringLayer] as const]
+  }))
 }
 
 function selectableNativeLayers(
@@ -524,6 +646,25 @@ function sameSelection(
   return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
+/**
+ * The scene's single legacy-carrier runtime: the lowest-order enabled API-2
+ * runtime layer, mirroring what `buildV9SlideWorkspaceSnapshot` projects.
+ * Multiple runtime layers per scene remain a documented carrier limitation.
+ */
+function sceneRuntimeLayerItem(
+  state: V9SlideVerticalSliceState,
+): DeepReadonly<RuntimeLayerItem> | undefined {
+  const view = activeSlideView(state)
+  return view.layers
+    .filter((layer): layer is ReadonlyRuntimeLayer =>
+      layer.source === 'scene' && layer.item.kind === 'runtime')
+    .map((layer) => layer.item)
+    .sort((left, right) =>
+      left.order - right.order ||
+      compareStableStrings(left.layerItemId, right.layerItemId))
+    .find((item) => item.runtime.enabled)
+}
+
 export function buildV9SlideWorkspaceSnapshot(
   state: V9SlideVerticalSliceState,
 ): V9SlideWorkspaceSnapshot {
@@ -535,22 +676,69 @@ export function buildV9SlideWorkspaceSnapshot(
   const nativeLayers = view.layers.filter(
     (layer): layer is ReadonlyNativeLayer => layer.item.kind === 'native',
   )
-  const nodes = nativeLayers
-    .filter((layer) =>
-      layer.source === state.editingScope &&
-      (
-        state.editingScope === 'global' ||
-        layer.item.content.nativeType !== 'teacher-controller'
-      ),
-    )
-    .map((layer) => nativeNodeFromLayer(
-      layer,
-      state.editingScope === 'scene' ? 'effective' : 'base',
-    ))
-  const previewNodes = nativeLayers.map((layer) => nativeNodeFromLayer(layer))
+  const componentLayers = view.layers.filter(
+    (layer): layer is ReadonlyComponentLayer => layer.item.kind === 'component',
+  )
+  const nodes = [
+    ...nativeLayers
+      .filter((layer) =>
+        layer.source === state.editingScope &&
+        (
+          state.editingScope === 'global' ||
+          layer.item.content.nativeType !== 'teacher-controller'
+        ),
+      )
+      .map((layer) => nativeNodeFromLayer(
+        layer,
+        state.editingScope === 'scene' ? 'effective' : 'base',
+      )),
+    ...componentLayers
+      .filter((layer) => layer.source === state.editingScope)
+      .map((layer) => componentNodeFromLayer(
+        layer,
+        state.editingScope === 'scene' ? 'effective' : 'base',
+      )),
+  ]
+  // Global component layers mount in the carrier's globalLayer (so the Player
+  // reports them with scope 'global'), never in the flattened carrier scene.
+  // Every other component layer joins the unified scene composition.
+  const previewNodes = [
+    ...nativeLayers.map((layer) => nativeNodeFromLayer(layer)),
+    ...componentLayers
+      .filter((layer) => layer.source !== 'global')
+      .map((layer) => componentNodeFromLayer(layer)),
+  ]
   const nodeIds = new Set(nodes.map((node) => node.id))
   const selectedNodeIds = state.selection.selectionIds.filter((id) => nodeIds.has(id))
-  const sceneDocument = (documentNodes: SceneNode[]): SceneDocument => ({
+  const runtimeLayer = sceneRuntimeLayerItem(state)
+  const runtime = runtimeLayer
+    ? runtimeLayerToRuntimeDocument(runtimeLayer)
+    : undefined
+  const globalRuntimeLayer = state.history.present.globalLayerItems
+    .map((entry) => entry.item)
+    .find((item): item is RuntimeLayerItem =>
+      item.kind === 'runtime' && item.runtime.enabled)
+  const globalRuntime = globalRuntimeLayer
+    ? runtimeLayerToRuntimeDocument(globalRuntimeLayer)
+    : undefined
+  const globalComponentItems = state.history.present.globalLayerItems
+    .filter((entry) => entry.item.kind === 'component')
+  const globalCarrierLayerItems = globalComponentItems.map((entry) => ({
+    node: componentNodeFromLayer({
+      source: 'global',
+      scopedVisible: entry.item.visible,
+      effectiveVisible: entry.item.visible,
+      selectionId: entry.item.layerItemId,
+      item: entry.item as DeepReadonly<ComponentLayerItem>,
+    }),
+    // The legacy carrier has no V9 underlay/overlay planes; every global
+    // component renders in the overlay root so targets stay hit-testable.
+    layer: 'overlay' as const,
+  }))
+  const sceneDocument = (
+    documentNodes: SceneNode[],
+    withRuntime = false,
+  ): SceneDocument => ({
     id: view.sceneId,
     name: view.sceneName,
     backgroundColor: view.backgroundColor,
@@ -558,13 +746,21 @@ export function buildV9SlideWorkspaceSnapshot(
       ? {}
       : { backgroundAssetId: view.backgroundAssetId }),
     nodes: documentNodes,
+    ...(withRuntime && runtime ? { runtime } : {}),
     interactions: [],
   })
   return {
     document: sceneDocument(nodes),
-    previewDocument: sceneDocument(previewNodes),
+    previewDocument: sceneDocument(previewNodes, true),
     componentPackages: state.componentPackages,
     selectedNodeIds,
+    ...(runtimeLayer && runtime ? { sceneRuntimeLayerItemId: runtimeLayer.layerItemId } : {}),
+    ...(globalRuntime && globalRuntimeLayer
+      ? { globalRuntime, globalRuntimeLayerItemId: globalRuntimeLayer.layerItemId }
+      : {}),
+    ...(globalCarrierLayerItems.length > 0
+      ? { globalCarrierLayerItems }
+      : {}),
   }
 }
 
@@ -573,7 +769,7 @@ export function selectV9SlideVerticalSlice(
   input: V9SlideSelectionInput,
 ): V9SlideVerticalSliceState {
   if (new Set(input.nodeIds).size !== input.nodeIds.length) return state
-  const selectable = selectableNativeLayers(state)
+  const selectable = selectableLayers(state)
   if (input.nodeIds.some((nodeId) => !selectable.has(nodeId))) return state
   let nextSelectionIds: string[]
   if (input.additive) {
@@ -603,7 +799,7 @@ export function transformV9SlideVerticalSlice(
   if (input.nodes.length === 0 || new Set(input.nodes.map((node) => node.nodeId)).size !== input.nodes.length) {
     return state
   }
-  const selectable = selectableNativeLayers(state)
+  const selectable = selectableLayers(state)
   const selectedIds = new Set(state.selection.selectionIds)
   const valid = input.nodes.every((node) => {
     const layer = selectable.get(node.nodeId)
@@ -648,7 +844,7 @@ export function transformV9SlideVerticalSlice(
           )
           for (const transform of input.nodes) {
             const item = byId.get(transform.nodeId)
-            if (!item || item.kind !== 'native') {
+            if (!item || (item.kind !== 'native' && item.kind !== 'component')) {
               throw new Error(
                 state.editingScope === 'global'
                   ? '所选全局元素已失效，请重新选择'
@@ -685,7 +881,7 @@ export function nudgeV9SlideSelection(
   now?: string,
 ): V9SlideVerticalSliceState {
   if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return state
-  const selectable = selectableNativeLayers(state)
+  const selectable = selectableLayers(state)
   const nodes = state.selection.selectionIds.flatMap((nodeId) => {
     const layer = selectable.get(nodeId)
     if (!layer || !authoringLayerVisible(state, layer) || layer.item.locked) return []
@@ -714,10 +910,10 @@ function selectionAfterLayerCommand(
   })
 }
 
-function activeScopedNativeLayer(
+function activeScopedAuthoringLayer(
   state: V9SlideVerticalSliceState,
   layerItemId: string,
-): ReadonlyNativeLayer {
+): ReadonlyAuthoringLayer {
   const layer = activeSlideView(state).layers.find(
     (candidate) =>
       candidate.selectionId === layerItemId &&
@@ -725,8 +921,9 @@ function activeScopedNativeLayer(
   )
   if (
     !layer ||
-    layer.item.kind !== 'native' ||
+    (layer.item.kind !== 'native' && layer.item.kind !== 'component') ||
     (
+      layer.item.kind === 'native' &&
       state.editingScope !== 'global' &&
       layer.item.content.nativeType === 'teacher-controller'
     )
@@ -739,7 +936,24 @@ function activeScopedNativeLayer(
           : '找不到当前场景中的元素',
     )
   }
+  return layer as ReadonlyAuthoringLayer
+}
+
+function activeScopedNativeLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): ReadonlyNativeLayer {
+  const layer = activeScopedAuthoringLayer(state, layerItemId)
+  if (layer.item.kind !== 'native') throw new Error('当前元素暂不支持属性编辑')
   return layer as ReadonlyNativeLayer
+}
+
+function activeSceneAuthoringLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): ReadonlyAuthoringLayer {
+  if (state.editingScope !== 'scene') throw new Error('请先切换到场景层')
+  return activeScopedAuthoringLayer(state, layerItemId)
 }
 
 function activeSceneNativeLayer(
@@ -1295,11 +1509,149 @@ export function updateV9SlideLayer(
   now?: string,
 ): V9SlideVerticalSliceState {
   const normalizedLabel = patch.label?.trim().slice(0, 200)
-  return updateV9SlideNativeNode(state, layerItemId, {
+  const nodePatch = {
     ...(normalizedLabel ? { name: normalizedLabel } : {}),
     ...(patch.visible === undefined ? {} : { visible: patch.visible }),
     ...(patch.locked === undefined ? {} : { locked: patch.locked }),
+  }
+  const layer = activeScopedAuthoringLayer(state, layerItemId)
+  if (layer.item.kind === 'component') {
+    return updateV9SlideComponentLayer(state, layer as ReadonlyComponentLayer, nodePatch, now)
+  }
+  return updateV9SlideNativeNode(state, layerItemId, nodePatch, now)
+}
+
+const COMPONENT_LAYER_PATCH_KEYS = new Set([
+  'name',
+  'x',
+  'y',
+  'width',
+  'height',
+  'rotation',
+  'opacity',
+  'visible',
+  'locked',
+  'playbackInitialVisibility',
+])
+
+function patchedComponentLayerItem(
+  current: ComponentLayerItem,
+  patch: V9SlideNativeNodePatch,
+): ComponentLayerItem {
+  const unsupportedKey = Object.keys(patch).find(
+    (key) => key !== 'id' && key !== 'type' && !COMPONENT_LAYER_PATCH_KEYS.has(key),
+  )
+  if (unsupportedKey) throw new Error('当前元素暂不支持修改这项属性')
+  const frame = {
+    ...current.frame,
+    ...(patch.x === undefined ? {} : { x: patch.x }),
+    ...(patch.y === undefined ? {} : { y: patch.y }),
+    ...(patch.width === undefined ? {} : { width: patch.width }),
+    ...(patch.height === undefined ? {} : { height: patch.height }),
+  }
+  const next: ComponentLayerItem = {
+    ...structuredClone(current),
+    frame,
+  }
+  if (patch.name !== undefined) {
+    const name = patch.name.trim()
+    if (!name) throw new Error('元素名称不能为空')
+    if (name.length > 200) throw new Error('元素名称最多 200 个字符')
+    next.label = name
+  }
+  if (patch.visible !== undefined) next.visible = patch.visible
+  if (patch.locked !== undefined) next.locked = patch.locked
+  if (patch.rotation !== undefined) next.rotation = patch.rotation
+  if (patch.opacity !== undefined) next.opacity = patch.opacity
+  if (patch.playbackInitialVisibility !== undefined) {
+    next.playbackInitialVisibility = patch.playbackInitialVisibility
+  }
+  return next
+}
+
+function synchronizeCommonLayerOverride(
+  override: LayerItemOverride,
+  base: LayerItem,
+  next: LayerItem,
+): void {
+  const stableFields = [
+    ['label', 'label'],
+    ['visible', 'visible'],
+    ['locked', 'locked'],
+    ['rotation', 'rotation'],
+    ['opacity', 'opacity'],
+    ['playbackInitialVisibility', 'playbackInitialVisibility'],
+  ] as const
+  for (const [overrideKey, itemKey] of stableFields) {
+    if (courseValuesEqual(base[itemKey], next[itemKey])) delete override[overrideKey]
+    else override[overrideKey] = next[itemKey] as never
+  }
+  const frame = { ...(override.frame ?? {}) }
+  for (const key of ['x', 'y', 'width', 'height'] as const) {
+    if (courseValuesEqual(base.frame[key], next.frame[key])) delete frame[key]
+    else frame[key] = next.frame[key]
+  }
+  if (Object.keys(frame).length === 0) delete override.frame
+  else override.frame = frame
+}
+
+function updateV9SlideComponentLayer(
+  state: V9SlideVerticalSliceState,
+  layer: ReadonlyComponentLayer,
+  patch: V9SlideNativeNodePatch,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const current = structuredClone(layer.item) as ComponentLayerItem
+  const next = patchedComponentLayerItem(current, patch)
+  if (courseValuesEqual(current, next)) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const writeBase = (base: ComponentLayerItem): void => {
+      const converted = next
+      const hitPolicy = base.hitPolicy
+      Object.assign(base, converted)
+      base.hitPolicy = hitPolicy
+    }
+    if (state.editingScope === 'scene' && state.selection.stateId !== null) {
+      const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+      if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+      const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+      const presentationState = draftScene?.presentation?.states.find(
+        (candidate) => candidate.id === state.selection.stateId,
+      )
+      if (!draftScene || !presentationState) throw new Error('当前命名状态已失效')
+      const base = draftScene.layerItems.find(
+        (item) => item.layerItemId === layer.item.layerItemId,
+      )
+      if (!base || base.kind !== 'component') throw new Error('当前元素已失效')
+      const override = presentationState.layerItemOverrides[base.layerItemId] ?? {}
+      synchronizeCommonLayerOverride(override, base, next)
+      presentationState.layerItemOverrides[base.layerItemId] = override
+      deleteEmptyOverride(presentationState.layerItemOverrides, base.layerItemId)
+      return
+    }
+    if (state.editingScope === 'scene') {
+      const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+      if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+      const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+      const base = draftScene?.layerItems.find(
+        (item) => item.layerItemId === layer.item.layerItemId,
+      )
+      if (!draftScene || !base || base.kind !== 'component') throw new Error('当前元素已失效')
+      writeBase(base)
+      return
+    }
+    const entries = state.editingScope === 'global'
+      ? draft.globalLayerItems
+      : draft.surfaces.find((candidate) => candidate.id === surface.id)
+        ?.surfaceLayerItems
+    const base = entries?.find(
+      (entry) => entry.item.layerItemId === layer.item.layerItemId,
+    )?.item
+    if (!entries || !base || base.kind !== 'component') throw new Error('当前元素已失效')
+    writeBase(base)
   }, now)
+  return commitV9SlideDocument(state, project)
 }
 
 function courseValuesEqual(left: unknown, right: unknown): boolean {
@@ -1438,35 +1790,15 @@ function synchronizeNativeNodeOverride(
   nextNode: SceneNode,
 ): void {
   const baseNode = materializeNativeLayerItem(baseItem)
-  const stableFields = [
-    ['label', 'name'],
-    ['visible', 'visible'],
-    ['locked', 'locked'],
-    ['rotation', 'rotation'],
-    ['opacity', 'opacity'],
-    ['playbackInitialVisibility', 'playbackInitialVisibility'],
-  ] as const
-  for (const [overrideKey, nodeKey] of stableFields) {
-    if (courseValuesEqual(baseNode[nodeKey], nextNode[nodeKey])) {
-      delete override[overrideKey]
-    } else {
-      override[overrideKey] = nextNode[nodeKey] as never
-    }
+  const baseLayer = sceneNodeToCourseLayerItem(baseNode, baseItem.order)
+  const nextLayer = sceneNodeToCourseLayerItem(nextNode, baseItem.order)
+  if (baseLayer.kind !== 'native' || nextLayer.kind !== 'native') {
+    throw new Error('当前元素暂不支持属性编辑')
   }
-
-  const frame = { ...(override.frame ?? {}) }
-  for (const key of ['x', 'y', 'width', 'height'] as const) {
-    if (courseValuesEqual(baseNode[key], nextNode[key])) delete frame[key]
-    else frame[key] = nextNode[key]
-  }
-  if (Object.keys(frame).length === 0) delete override.frame
-  else override.frame = frame
-
-  const nextItem = sceneNodeToCourseLayerItem(nextNode, baseItem.order)
-  if (nextItem.kind !== 'native') throw new Error('当前元素暂不支持属性编辑')
+  synchronizeCommonLayerOverride(override, baseLayer, nextLayer)
   const nativeData = sparseCourseRecordDiff(
     baseItem.content.data as Record<string, unknown>,
-    nextItem.content.data as Record<string, unknown>,
+    nextLayer.content.data as Record<string, unknown>,
   )
   if (Object.keys(nativeData).length === 0) delete override.nativeData
   else override.nativeData = nativeData
@@ -1478,7 +1810,16 @@ export function updateV9SlideNativeNode(
   patch: V9SlideNativeNodePatch,
   now?: string,
 ): V9SlideVerticalSliceState {
-  const layer = activeScopedNativeLayer(state, layerItemId)
+  const scopedLayer = activeScopedAuthoringLayer(state, layerItemId)
+  if (scopedLayer.item.kind === 'component') {
+    return updateV9SlideComponentLayer(
+      state,
+      scopedLayer as ReadonlyComponentLayer,
+      patch,
+      now,
+    )
+  }
+  const layer = scopedLayer as ReadonlyNativeLayer
   const currentNode = materializeNativeLayerItem(
     structuredClone(layer.item) as NativeLayerItem,
   )
@@ -1548,13 +1889,251 @@ export function clearV9SlideNativeNodeOverride(
   return commitV9SlideDocument(state, project)
 }
 
+function activeRuntimeLayerItemId(
+  state: V9SlideVerticalSliceState,
+  scope: 'scene' | 'global',
+  sceneId?: string,
+): string | null {
+  if (scope === 'global') {
+    const entry = state.history.present.globalLayerItems.find(
+      (candidate) => candidate.item.kind === 'runtime' && candidate.item.runtime.enabled,
+    )
+    return entry?.item.layerItemId ?? null
+  }
+  if (sceneId !== undefined && sceneId !== activeSlideView(state).sceneId) return null
+  return sceneRuntimeLayerItem(state)?.layerItemId ?? null
+}
+
+export function resolveV9SlideRuntimeLayerItemId(
+  state: V9SlideVerticalSliceState,
+  scope: 'scene' | 'global',
+  sceneId?: string,
+): string | null {
+  return activeRuntimeLayerItemId(state, scope, sceneId)
+}
+
+export function resolveV9SlideRuntimeTextValue(
+  state: V9SlideVerticalSliceState,
+  scope: 'scene' | 'global',
+  sceneId: string | undefined,
+  key: string,
+): string | undefined {
+  const layerItemId = activeRuntimeLayerItemId(state, scope, sceneId)
+  if (layerItemId === null) return undefined
+  if (scope === 'global') {
+    const entry = state.history.present.globalLayerItems.find(
+      (candidate) => candidate.item.layerItemId === layerItemId,
+    )
+    return entry?.item.kind === 'runtime'
+      ? entry.item.runtime.content.values[key]
+      : undefined
+  }
+  const layer = sceneRuntimeLayerItem(state)
+  return layer?.runtime.content.values[key]
+}
+
+function locateRuntimeLayerItem(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): LayerItem {
+  const layer = activeSlideView(state).layers.find(
+    (candidate) =>
+      candidate.selectionId === layerItemId &&
+      candidate.source === state.editingScope,
+  )
+  if (!layer || layer.item.kind !== 'runtime') {
+    throw new Error('找不到当前动态内容层')
+  }
+  return structuredClone(layer.item)
+}
+
+/**
+ * Updates one authored Runtime content value. The runtime layer keeps its own
+ * host ownership; only the persisted content value changes through the V9
+ * history, never a projected Native node.
+ */
+export function updateV9SlideRuntimeContent(
+  state: V9SlideVerticalSliceState,
+  target: V9SlideLayerTarget,
+  key: string,
+  value: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = locateRuntimeLayerItem(state, target.layerItemId)
+  if (layer.kind !== 'runtime') throw new Error('找不到当前动态内容层')
+  if (!Object.prototype.hasOwnProperty.call(layer.runtime.content.values, key)) {
+    throw new Error('当前动态内容没有这个文字字段')
+  }
+  if (layer.runtime.content.values[key] === value) return state
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const item = findDraftLayerItem(draft, state, target.layerItemId)
+    if (!item || item.kind !== 'runtime') throw new Error('当前动态内容层已失效')
+    item.runtime.content.values[key] = value
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+export function updateV9SlideRuntimeAsset(
+  state: V9SlideVerticalSliceState,
+  target: V9SlideLayerTarget,
+  key: string,
+  assetId: string,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = locateRuntimeLayerItem(state, target.layerItemId)
+  if (layer.kind !== 'runtime') throw new Error('找不到当前动态内容层')
+  if (!Object.prototype.hasOwnProperty.call(layer.runtime.assets, key)) {
+    throw new Error('当前动态内容没有这个图片字段')
+  }
+  if (layer.runtime.assets[key].assetId === assetId) return state
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const item = findDraftLayerItem(draft, state, target.layerItemId)
+    if (!item || item.kind !== 'runtime') throw new Error('当前动态内容层已失效')
+    item.runtime.assets[key] = { assetId }
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+/**
+ * Applies complete component props produced by the canvas text/asset editor.
+ * In a named scene state the base item is never rewritten; only the sparse
+ * diff that differs from the base is stored as a state override.
+ */
+export function updateV9SlideComponentProps(
+  state: V9SlideVerticalSliceState,
+  target: V9SlideLayerTarget,
+  props: Record<string, unknown>,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const layer = activeScopedAuthoringLayer(state, target.layerItemId)
+  if (layer.item.kind !== 'component') throw new Error('当前元素不是复用组件')
+  assertEditableComponentProps(state, layer.item, props)
+  if (courseValuesEqual(layer.item.props, props)) return state
+  const { surface, scene } = activeSlideSceneContext(state)
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const locate = (item: LayerItem | undefined): item is ComponentLayerItem =>
+      item !== undefined && item.kind === 'component'
+    if (state.editingScope === 'scene' && state.selection.stateId !== null) {
+      const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+      if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+      const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+      const presentationState = draftScene?.presentation?.states.find(
+        (candidate) => candidate.id === state.selection.stateId,
+      )
+      if (!draftScene || !presentationState) throw new Error('当前命名状态已失效')
+      const base = draftScene.layerItems.find((item) => item.layerItemId === target.layerItemId)
+      if (!locate(base)) throw new Error('当前组件已失效')
+      const override = presentationState.layerItemOverrides[base.layerItemId] ?? {}
+      const componentProps = sparseComponentPropsDiff(base.props, props)
+      if (Object.keys(componentProps).length === 0) delete override.componentProps
+      else override.componentProps = componentProps
+      presentationState.layerItemOverrides[base.layerItemId] = override
+      deleteEmptyOverride(presentationState.layerItemOverrides, base.layerItemId)
+      return
+    }
+    if (state.editingScope === 'scene') {
+      const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
+      if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
+      const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
+      const base = draftScene?.layerItems.find((item) => item.layerItemId === target.layerItemId)
+      if (!draftScene || !locate(base)) throw new Error('当前组件已失效')
+      base.props = structuredClone(props)
+      return
+    }
+    const entries = state.editingScope === 'global'
+      ? draft.globalLayerItems
+      : draft.surfaces.find((candidate) => candidate.id === surface.id)
+        ?.surfaceLayerItems
+    const base = entries?.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item
+    if (!entries || !locate(base)) throw new Error('当前组件已失效')
+    base.props = structuredClone(props)
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+function findDraftLayerItem(
+  draft: CourseProjectDocument,
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): LayerItem | undefined {
+  if (state.editingScope === 'global') {
+    return draft.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === layerItemId,
+    )?.item
+  }
+  const location = draft.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (!location || location.kind !== 'slide-scene') return undefined
+  const surface = draft.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (state.editingScope === 'surface') {
+    return surface?.surfaceLayerItems.find(
+      (entry) => entry.item.layerItemId === layerItemId,
+    )?.item
+  }
+  if (surface?.type !== 'slide') return undefined
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  return scene?.layerItems.find((item) => item.layerItemId === layerItemId)
+}
+
+function sparseComponentPropsDiff(
+  base: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(next)) {
+    const baseValue = base[key]
+    if (courseValuesEqual(baseValue, value)) continue
+    if (
+      value !== null && baseValue !== null &&
+      typeof value === 'object' && typeof baseValue === 'object' &&
+      !Array.isArray(value) && !Array.isArray(baseValue)
+    ) {
+      const nested = sparseComponentPropsDiff(
+        baseValue as Record<string, unknown>,
+        value as Record<string, unknown>,
+      )
+      if (Object.keys(nested).length > 0) result[key] = nested
+      continue
+    }
+    result[key] = structuredClone(value)
+  }
+  return result
+}
+
+/**
+ * Locally disables component props that the manifest does not declare as
+ * author-editable, without hiding the shared generic property section. Only
+ * keys that actually differ from the current props are checked, so unchanged
+ * internal props pass through untouched.
+ */
+function assertEditableComponentProps(
+  state: V9SlideVerticalSliceState,
+  item: DeepReadonly<ComponentLayerItem>,
+  props: Record<string, unknown>,
+): void {
+  const meta = state.componentPackages[item.component.packageId]
+  if (!meta) throw new Error('当前组件包已失效，请重新选择')
+  const editableKeys = new Set(
+    resolveComponentEditorProperties(meta.manifest, item.props as Record<string, unknown>)
+      .map((property) => property.key),
+  )
+  const changed = Object.keys(sparseComponentPropsDiff(item.props, props))
+  const unsupported = changed.find((key) => !editableKeys.has(key))
+  if (unsupported) {
+    throw new Error(`组件属性“${unsupported}”暂不支持修改`)
+  }
+}
+
 export function deleteV9SlideLayer(
   state: V9SlideVerticalSliceState,
   layerItemId: string,
   now?: string,
 ): V9SlideVerticalSliceState {
   if (state.editingScope === 'surface') {
-    activeScopedNativeLayer(state, layerItemId)
+    activeScopedAuthoringLayer(state, layerItemId)
     const remainingSelection = state.selection.selectionIds.filter(
       (id) => id !== layerItemId,
     )
@@ -1577,7 +2156,7 @@ export function deleteV9SlideLayer(
       deletingLastSurfaceItem ? 'scene' : 'surface',
     )
   }
-  const layer = activeSceneNativeLayer(state, layerItemId)
+  const layer = activeSceneAuthoringLayer(state, layerItemId)
   const remainingSelection = state.selection.selectionIds.filter((id) => id !== layerItemId)
   if (state.selection.stateId !== null && !layer.item.visible) {
     if (remainingSelection.length === state.selection.selectionIds.length) return state
@@ -1683,15 +2262,21 @@ export function deleteV9SlideLayer(
   )
 }
 
+function authoringDuplicateIdPrefix(layer: ReadonlyAuthoringLayer): string {
+  return layer.item.kind === 'native'
+    ? layer.item.content.nativeType
+    : 'component'
+}
+
 export function duplicateV9SlideLayer(
   state: V9SlideVerticalSliceState,
   layerItemId: string,
   now?: string,
 ): V9SlideVerticalSliceState {
   if (state.editingScope === 'surface') {
-    const layer = activeScopedNativeLayer(state, layerItemId)
+    const layer = activeScopedAuthoringLayer(state, layerItemId)
     const { surface, scene } = activeSlideSceneContext(state)
-    const duplicateId = `${layer.item.content.nativeType}-${nanoid(10)}`
+    const duplicateId = `${authoringDuplicateIdPrefix(layer)}-${nanoid(10)}`
     const project = updateCourseProject(state.history.present, (draft) => {
       const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
       const source = draftSurface?.surfaceLayerItems.find(
@@ -1701,7 +2286,7 @@ export function duplicateV9SlideLayer(
         !draftSurface ||
         draftSurface.type !== 'slide' ||
         !source ||
-        source.item.kind !== 'native'
+        (source.item.kind !== 'native' && source.item.kind !== 'component')
       ) {
         throw new Error('当前共用元素已失效')
       }
@@ -1734,18 +2319,22 @@ export function duplicateV9SlideLayer(
       selectionAfterLayerCommand(state, project, [duplicateId]),
     )
   }
-  const layer = activeSceneNativeLayer(state, layerItemId)
+  const layer = activeSceneAuthoringLayer(state, layerItemId)
   const { surface, scene } = activeSlideSceneContext(state)
-  const duplicateId = `${layer.item.content.nativeType}-${nanoid(10)}`
+  const duplicateId = `${authoringDuplicateIdPrefix(layer)}-${nanoid(10)}`
   const project = updateCourseProject(state.history.present, (draft) => {
     const draftSurface = draft.surfaces.find((candidate) => candidate.id === surface.id)
     if (!draftSurface || draftSurface.type !== 'slide') throw new Error('当前幻灯片已失效')
     const draftScene = draftSurface.scenes.find((candidate) => candidate.id === scene.id)
     const source = draftScene?.layerItems.find((item) => item.layerItemId === layerItemId)
-    if (!draftScene || !source || source.kind !== 'native') throw new Error('当前元素已失效')
+    if (
+      !draftScene ||
+      !source ||
+      (source.kind !== 'native' && source.kind !== 'component')
+    ) throw new Error('当前元素已失效')
     const duplicate = structuredClone(
       state.selection.stateId === null ? source : layer.item,
-    ) as NativeLayerItem
+    ) as LayerItem
     duplicate.layerItemId = duplicateId
     duplicate.label = `${layer.item.label} 副本`.slice(0, 200)
     duplicate.frame.x += 24
