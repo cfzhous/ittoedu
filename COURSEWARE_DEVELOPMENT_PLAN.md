@@ -215,6 +215,23 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 | T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | integrated |
 | T-CSTATE | 课程状态与恢复（M4-E） | M4 | T-PSES、T-CTRL | integrated |
 
+M5/M6 任务板（协调者已按 §4.5 规范拆出并登记）：
+
+| ID | 目标（口径见从属计划） | 供给 | 依赖 | owns | 状态 |
+|---|---|---|---|---|---|
+| T-FLOW-VIEW | M5-A 原壳 Flow 只读投影：稳定块遍历/轮廓/位置标签与表、公式、媒体、共享图层物化；FlowWorkspace/FlowOutlinePanel 组件 | M5 | 无 | `src/renderer/course/flowEditorView.ts`、`src/renderer/ui/FlowWorkspace.tsx`、`src/renderer/ui/FlowOutlinePanel.tsx` 与对应测试 | pending |
+| T-FLOW-CMD | M5-B Flow 作者命令与历史切片：增删/复制/移动/重排/嵌套移动一次手势一次 history，陈旧目标拒绝、ID 再生成、选择恢复 | M5 | 无（与 T-FLOW-VIEW 并行，接口由协调者固定） | `src/renderer/course/flowEditorCommands.ts`、`src/renderer/course/flowEditorSlice.ts` 与对应测试 | pending |
+| T-FLOW-PROPS | M5-B Flow 插入面板与属性文档控件：全部块类型插入、段落/列表/表格/媒体/公式/代码/提示块/章节/组件属性编辑 | M5 | T-FLOW-CMD | `src/renderer/ui/FlowElementsTab.tsx`、`src/renderer/ui/FlowPropertiesTab.tsx` 与对应测试 | pending |
+| T-SPAT-VIEW | M6-A Spatial 作者只读模型与世界坐标命令：统一全局/表面/世界图层、camera home/frames、semanticZoom、世界坐标选择/变换、一次手势一次 history、会话相机不入历史 | M6 | 无 | `src/renderer/course/spatialEditorView.ts`、`src/renderer/course/spatialEditorCommands.ts` 与对应测试 | pending |
+| T-SPAT-WORKSPACE | M6-B/M6-C Spatial 工作区：会话 pan/zoom-at-cursor、minimap、culling、世界内容接受 camera transform、屏幕空间控件不随世界缩放、节点增选移缩放旋转手势 | M6 | T-SPAT-VIEW | `src/renderer/ui/SpatialWorkspace.tsx`、`src/renderer/ui/spatialWorkspaceAuthoring.ts`、`src/renderer/ui/SpatialLayerInspector.tsx` 与对应测试 | pending |
+| T-SPAT-CAMERA | M6-B 镜头帧与语义缩放作者链：镜头创建/重命名/排序/切换/删除持久化；semanticZoom 规则编辑；会话相机与持久镜头分离 | M6 | T-SPAT-VIEW | `src/renderer/course/spatialCameraCommands.ts`、`src/renderer/ui/SpatialCameraPanel.tsx` 与对应测试 | pending |
+| T-PLAYER-FLOW | M5-C FlowSurfaceHost 异步更新与销毁竞态修复；保持统一图层/教师控制器/捕获顺序 | M5 | 无 | `src/player/surfaces/flow/FlowSurfaceHost.ts` 与 `tests/unit/flowUnifiedLayers.test.tsx` | pending |
+| T-PLAYER-SPATIAL | M6-C/M6-D SpatialSurfaceHost 运行合同：全局/表面教师控制器与 session 控件留在屏幕空间、控制器单 owner/静音/全屏/progress、动态捕获不再退化为静态占位 | M6 | 无 | `src/player/surfaces/spatial/SpatialSurfaceHost.ts`、`src/player/surfaces/spatial/spatialModel.ts` 与对应测试 | pending |
+| T-FLOW-TARGETS | M5-B Flow 互动、状态与 Runtime/Component 作者目标：Flow 位置 globalInteractions 试运行执行/检查态惰性、稳定 block/图层目标 | M5 | T-FLOW-CMD、T-FLOW-VIEW、T-PLAYER-FLOW | `src/player/surfaces/flow/FlowSurfaceHost.ts` 中目标报告边界与对应测试 | pending |
+| T-SPAT-RELATIONS | M6-A/M6-B Spatial 路径与关系：共享 Schema/Types 最小增量、路径/关系命令与编辑器、稳定 ID 与悬空引用拒绝 | M6 | T-SPAT-VIEW | `src/renderer/course/spatialPathCommands.ts`、`src/renderer/ui/SpatialPathEditor.tsx`、`src/shared/courseProjectTypes.ts`、`src/shared/courseProjectSchema.ts` 中路径/关系最小边界与对应测试 | pending |
+| T-PUB-APP | M6-D PublishedCourseApp 接入 Spatial 单一 owner 教师动作/playbackControls/initialMuted 与镜头恢复 | M6 | T-PLAYER-SPATIAL | `src/player/PublishedCourseApp.ts` 中 Spatial 窄接线与对应测试 | pending |
+| T-M5M6-INTEGRATE | 共享热点串行集成：App/Workspace/RightSidebar/ScenePanel/editorStore 窄接口接入 Flow 与 Spatial 编辑路由；正式 PDF/DOCX 菜单接线 | M5/M6 | 上述 Flow/Spatial 模块任务 | `src/renderer/App.tsx`、`src/renderer/store/editorStore.ts`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/TopToolbar.tsx` 与对应测试 | pending |
+
 M3/M4 任务板已清空。M5/M6 任务板由协调者按 §4.5 规范拆出后在本节登记；M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
 
 ### 4.6 集成 Gate
