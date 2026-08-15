@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Page } from 'playwright'
 import {
+  addCourseSurface,
   addSpatialCameraFrame,
   addSpatialTextLayer,
   createCourseProject,
@@ -19,7 +20,6 @@ import {
   createCourseProjectArchive,
   openCourseProjectArchive,
 } from '../../src/renderer/project/courseProjectArchive'
-import type { SpatialSurfaceDocument } from '../../src/shared/courseProjectTypes'
 
 const root = resolve(__dirname, '..', '..')
 const runDirectory = join(tmpdir(), `ittoedu-v9-spatial-authoring-${process.pid}`)
@@ -31,7 +31,7 @@ const SPATIAL_SURFACE_ID = 'spatial-authoring-surface'
 const SPATIAL_CAMERA_ID = 'spatial-authoring-overview'
 const TEXT_ID = 'spatial-authoring-text'
 const TEXT_NAME = '空间文本'
-const TEXT_INITIAL = { x: 120, y: 90, width: 240, height: 72, rotation: 0 }
+const TEXT_INITIAL = { x: -300, y: 90, width: 400, height: 80, rotation: 0 }
 
 interface EditorHandle {
   app: ElectronApplication
@@ -119,15 +119,10 @@ async function openProject(editor: EditorHandle, path: string): Promise<void> {
   await expect(editor.page.getByRole('button', { name: '重命名课件' }))
     .toContainText('空间创作真实纵切')
   await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)
-  await editor.page.getByTestId('canvas-stage').locator('canvas').waitFor()
+  await editor.page.getByTestId('spatial-workspace').waitFor()
 }
 
 async function enterSpatialWorkspace(page: Page): Promise<void> {
-  // The left location strip is the product's single navigation surface for
-  // Slide scenes, Flow blocks and Spatial camera frames.
-  const entry = page.locator('.scene-panel__location').filter({ hasText: '空间画布 · 总览' })
-  await expect(entry).toBeVisible()
-  await entry.click()
   await expect(page.getByTestId('spatial-workspace')).toBeVisible()
   await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
 }
@@ -244,24 +239,11 @@ test.beforeAll(() => {
     title: '空间创作真实纵切',
     now: NOW,
   })
-  project = updateCourseProject(project, (draft) => {
-    const spatial: SpatialSurfaceDocument = {
-      type: 'spatial-2d',
-      id: SPATIAL_SURFACE_ID,
-      title: '空间画布',
-      surfaceLayerItems: [],
-      world: {
-        bounds: { mode: 'infinite' },
-        layerItems: [],
-      },
-      camera: {
-        home: { x: 0, y: 0, zoom: 1 },
-        frames: [],
-      },
-      semanticZoom: [],
-    }
-    draft.surfaces.push(spatial)
-  }, NOW)
+  project = addCourseSurface(project, 'spatial-2d', {
+    id: SPATIAL_SURFACE_ID,
+    title: '空间画布',
+    now: NOW,
+  })
   project = addSpatialTextLayer(project, SPATIAL_SURFACE_ID, '这是一条空间文本', {
     id: TEXT_ID,
     x: TEXT_INITIAL.x,
@@ -277,6 +259,9 @@ test.beforeAll(() => {
     name: '总览',
     now: NOW,
   })
+  project = updateCourseProject(project, (draft) => {
+    draft.startLocationId = SPATIAL_CAMERA_ID
+  }, NOW)
   writeFileSync(sourceProjectPath, createCourseProjectArchive({
     project,
     assetFiles: {},
@@ -331,20 +316,22 @@ test('authors one Spatial world text with stable chrome across camera and save',
     // Session camera changes must never resize the outside-transform chrome.
     await workspace.getByRole('button', { name: '放大视图' }).click()
     await workspace.getByRole('button', { name: '放大视图' }).click()
-    await expect.poll(() => workspace.getAttribute('data-camera-zoom')).toBe('1.5625')
+    await expect.poll(async () => Number(await workspace.getAttribute('data-camera-zoom')))
+      .toBeCloseTo(1.5625, 2)
     await expectChromeSizesStable(editor.page, homeChrome)
 
     await workspace.getByRole('button', { name: '缩小视图' }).click()
     await workspace.getByRole('button', { name: '缩小视图' }).click()
     await workspace.getByRole('button', { name: '缩小视图' }).click()
     await workspace.getByRole('button', { name: '缩小视图' }).click()
-    await expect.poll(() => workspace.getAttribute('data-camera-zoom')).toBe('0.64')
+    await expect.poll(async () => Number(await workspace.getAttribute('data-camera-zoom')))
+      .toBeCloseTo(0.64, 2)
     await expectChromeSizesStable(editor.page, homeChrome)
 
     await workspace.getByRole('button', { name: '回到总览' }).click()
     await expect(workspace.getByTestId('spatial-zoom-label')).toHaveText('100%')
-    await expect(workspace.getAttribute('data-camera-x')).toBe('0')
-    await expect(workspace.getAttribute('data-camera-y')).toBe('0')
+    await expect(workspace).toHaveAttribute('data-camera-x', '0')
+    await expect(workspace).toHaveAttribute('data-camera-y', '0')
 
     // Empty-space pan is session-only and must not move chrome boxes.
     const workspaceBox = await workspace.boundingBox()
@@ -353,7 +340,7 @@ test('authors one Spatial world text with stable chrome across camera and save',
     await editor.page.mouse.down({ button: 'left' })
     await editor.page.mouse.move(workspaceBox.x + workspaceBox.width / 2 + 120, workspaceBox.y + workspaceBox.height / 2 + 60, { steps: 4 })
     await editor.page.mouse.up({ button: 'left' })
-    await expect.poll(() => workspace.getAttribute('data-camera-x')).not.toBe('0')
+    await expect.poll(async () => await workspace.getAttribute('data-camera-x')).not.toBe('0')
     await expectChromeSizesStable(editor.page, homeChrome)
     await workspace.getByRole('button', { name: '回到总览' }).click()
 

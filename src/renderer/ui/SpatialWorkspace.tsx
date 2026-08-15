@@ -751,7 +751,11 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
         }}
       >
         <button type="button" onClick={() => zoomBy(1 / 1.25)} aria-label="缩小视图">−</button>
-        <output data-testid="spatial-zoom-label" aria-label="空间缩放倍率">{zoomPercent}%</output>
+        <output
+          data-testid="spatial-zoom-label"
+          aria-label="空间缩放倍率"
+          style={{ minWidth: 48, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
+        >{zoomPercent}%</output>
         <button type="button" onClick={() => zoomBy(1.25)} aria-label="放大视图">+</button>
         <button type="button" onClick={resetCamera} aria-label="回到总览">⌂</button>
       </div>
