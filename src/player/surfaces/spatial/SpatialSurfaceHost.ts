@@ -10,6 +10,7 @@ import type {
 import { renderFormulaNodeSvg } from '../../../shared/formulaRenderer'
 import type { FormulaNode } from '../../../shared/projectTypes'
 import type { TeacherControllerAction } from '../../../shared/projectTypes'
+import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
 import type {
   SurfaceCapture,
   SurfaceCaptureRequest,
@@ -55,6 +56,19 @@ export interface SpatialRenderOptions {
   onCameraChange?: (camera: SpatialCamera) => void
 }
 
+export interface SpatialAudioChangeSource {
+  on<T = unknown>(eventName: string, listener: (payload: T) => void | Promise<void>): () => void
+}
+
+export interface SpatialCourseProgressSource {
+  /** All course locations in published navigation order. */
+  getLocations(): TeacherControllerSceneInfo[]
+  /** Current course location id (one of the location ids when present). */
+  getCurrentLocationId(): string | null
+  /** Optional state/phase label appended after the current location name. */
+  getStateLabel?(): string | null
+}
+
 export interface SpatialSurfaceHostOptions {
   minZoom?: number
   maxZoom?: number
@@ -88,6 +102,17 @@ export interface SpatialSurfaceHostOptions {
   playbackControls?: 'canvas' | 'none'
   /** Course session mute seed (`project.media.audio.defaultMuted`). */
   initialMuted?: boolean
+  /**
+   * Course session audio event source. When provided the host subscribes to
+   * `audio:change` and refreshes teacher-controller mute labels; when omitted
+   * the host keeps the `initialMuted` seed (no-op fallback).
+   */
+  audioChangeSource?: SpatialAudioChangeSource
+  /**
+   * Course session progress source for teacher-controller progress labels.
+   * When omitted the host keeps the previous empty-scene fallback label.
+   */
+  courseProgressSource?: SpatialCourseProgressSource
 }
 
 export interface SpatialLayerHit {
@@ -866,7 +891,7 @@ function createSpatialRecord(
     item: NativeLayerItem,
   ) => void | Promise<void>,
   teacherControllerContext: TeacherControllerDomContext | null = null,
-  teacherControllerSessionSeed: TeacherControllerDomSession | null = null,
+  getTeacherControllerSession: ((item: LayerItem) => TeacherControllerDomSession) | null = null,
 ): SpatialItemRecord {
   const screenSpace = isScreenSpaceControllerEntry(source, item)
   const wrapper = screenSpace
@@ -905,7 +930,9 @@ function createSpatialRecord(
         getCurrentSceneId: teacherControllerContext.getCurrentSceneId,
         getStateLabel: teacherControllerContext.getStateLabel,
         getStatus: teacherControllerContext.getStatus,
-        getSession: () => teacherControllerSessionSeed ?? teacherControllerContext.getSession(controllerItem.layerItemId),
+        getSession: () => getTeacherControllerSession
+          ? getTeacherControllerSession(controllerItem)
+          : teacherControllerContext.getSession(controllerItem.layerItemId),
         onSessionChange: (next) => teacherControllerContext.onSessionChange(controllerItem.layerItemId, next),
         onAction: (action) => { void onTeacherControllerAction(action, controllerItem) },
         getInteractive: teacherControllerContext.getInteractive,
@@ -1064,6 +1091,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   #domPlayback = new DomPlaybackFreeze()
   #teacherControllerSession = new Map<string, TeacherControllerDomSession>()
   #controllerMuted: boolean
+  #audioChangeDisposer: (() => void) | null = null
 
   constructor(
     spatial: SpatialSurfaceDocument,
@@ -1210,6 +1238,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     root.addEventListener('keydown', this.#handleKeyDown)
     this.#updateCameraTransform()
     this.#renderChrome()
+    this.#subscribeAudioChange()
     return this.#run(() => this.#reconcileDocument())
   }
 
@@ -1346,6 +1375,8 @@ export class SpatialSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       if (this.#destroyed) return
       this.#destroyed = true
+      this.#audioChangeDisposer?.()
+      this.#audioChangeDisposer = null
       this.#teacherControllerSession.clear()
       this.#surfaceAbortController?.abort('spatial-surface-destroyed')
       const dom = this.#root?.ownerDocument
@@ -1442,7 +1473,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
           resolveAsset,
           (action, controller) => this.#handleTeacherControllerAction(action, controller),
           this.#teacherControllerContext(),
-          this.#controllerSession(item) ?? null,
+          (candidate) => this.#readControllerSession(candidate),
         )
         const surfaceSignal = this.#surfaceAbortController?.signal
         if (surfaceSignal?.aborted) record.abortController.abort(surfaceSignal.reason)
@@ -1459,7 +1490,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
           resolveAsset,
           (action, controller) => this.#handleTeacherControllerAction(action, controller),
           this.#teacherControllerContext(),
-          this.#controllerSession(item) ?? null,
+          (candidate) => this.#readControllerSession(candidate),
         )
         record.controllerDom?.destroy()
         record.abortController.abort('spatial-native-item-updated')
@@ -1594,24 +1625,45 @@ export class SpatialSurfaceHost implements SurfaceHost {
   }
 
   #teacherControllerContext(): TeacherControllerDomContext {
+    const progressSource = this.#options.courseProgressSource
     return {
       canvas: { width: this.#camera.viewportWidth, height: this.#camera.viewportHeight },
-      scenes: [],
-      getCurrentSceneId: () => null,
-      getStateLabel: () => null,
+      scenes: progressSource?.getLocations() ?? [],
+      getCurrentSceneId: () => progressSource?.getCurrentLocationId() ?? null,
+      getStateLabel: () => progressSource?.getStateLabel?.() ?? null,
       getStatus: () => ({
         muted: this.#controllerMuted,
         fullscreen: Boolean(this.#root?.ownerDocument.fullscreenElement),
       }),
       getSession: (layerItemId) => {
         const item = this.#records.get(layerItemId)?.item
-        return this.#controllerSession(item) ?? {
-          offset: { dx: 0, dy: 0 },
-          collapsed: false,
-        }
+        return this.#readControllerSession(item)
       },
       onSessionChange: (layerItemId, next) => this.#applyTeacherControllerSession(layerItemId, next),
       getInteractive: () => this.#controllerInteractive(),
+    }
+  }
+
+  /** Subscribes to the optional course audio session; no-op without a source. */
+  #subscribeAudioChange(): void {
+    this.#audioChangeDisposer?.()
+    this.#audioChangeDisposer = null
+    const source = this.#options.audioChangeSource
+    if (!source) return
+    this.#audioChangeDisposer = source.on<{ muted?: boolean }>(
+      'audio:change',
+      (event) => {
+        if (typeof event?.muted !== 'boolean') return
+        this.#controllerMuted = event.muted
+        this.#refreshControllerStatuses()
+      },
+    )
+  }
+
+  /** Re-renders every mounted teacher controller from the live session status. */
+  #refreshControllerStatuses(): void {
+    for (const record of this.#records.values()) {
+      record.controllerDom?.refreshStatus()
     }
   }
 
@@ -1627,6 +1679,14 @@ export class SpatialSurfaceHost implements SurfaceHost {
     }
     this.#teacherControllerSession.set(controller.layerItemId, session)
     return session
+  }
+
+  /** Live read used by DOM controllers so reset/replay never rehydrates a stale seed. */
+  #readControllerSession(item: LayerItem | undefined): TeacherControllerDomSession {
+    return this.#controllerSession(item) ?? {
+      offset: { dx: 0, dy: 0 },
+      collapsed: false,
+    }
   }
 
   /** Persists a controller session change and moves the screen-space wrapper. */
