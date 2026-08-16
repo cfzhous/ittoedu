@@ -176,16 +176,6 @@ M5/M6 任务板全部 integrated 后，协调者按真实证据复核（四路�
 - **`course-studio.spec.ts` 已退休**：它等待的 donor 壳 testid 自 dc190ed 起不在正式 import graph，该测试自此必然失败；其覆盖价值已被原壳上的 v9SlideVerticalSlice/v9TrialRun/v9DefaultBoundary/v9SpatialAuthoring 等价覆盖。donor 源文件本体移除仍属 M8。
 - **Schema 加法变更（spatial world.paths/relations）**：带 `.default([])` 与引用完整性校验，旧工程零迁移打开有测试背书；属 §2.5 需授权项，已获用户确认（deepseek M5/M6 工作范围内）。
 
-### 3.7 M5/M6 收口轮审计（2026-08-16，真实体验复核）
-
-收口任务板（T-FIX-*）集成后，协调者做第二轮 diff 审查（两路子智能体）+ 真实体验复核（Electron 实机，`output/manual-test/flow-start.h5lesson`、`spatial-start.h5lesson`、ecosystem-mixed 示例）：
-
-- **真实复核通过项**：Flow 插入七类块/结构编辑（列表项、表格列）/工具条六键/Delete、Ctrl+D/属性一次编辑一次撤销/图层页/试运行启停与工程不变/另存为→关闭→重开→继续编辑/四种导出全真（DOCX 为真实 OOXML 语义文档，含 `w:tbl`、零图片伪装）；Spatial 0.5x/1x/2x 缩放、平移、小地图、屏幕控件不随世界缩放、点选拖动、Inspector 负坐标 Enter 提交与一次撤销、"从当前画面添加镜头"捕获真实会话位姿、路径/关系编辑画布与 Player 试运行双端可见、三种导出全真；Mixed 编辑器三类位置导航与三种工作区切换正常。
-- **收口轮过度声称（Gate 前置阻断）**：T-FIX-SPAT-CTRL 与 T-FIX-SURFACE-NAV 只交付"宿主能力 + 单测"，生产 Player 未接线——试运行中 Spatial 控制器 progress 仍显示"场景 — / 0 · 等待开始"、静音标签不刷新；混合工程场景目录仍只列幻灯片场景（实机截图证实）。另发现：App 壳会话相机镜头切换后 effect 时序回退 home（P2）、relation label/path name 零渲染（P2）、试运行 fallback 测试造假式薄弱（P2）。
-- **UI/UX 结构性问题成立**（用户"UI 设计完全不对"观察证实）：Flow 编辑画布为暗色舞台漂浮块而非文档式阅读栏、画布不支持直接编辑文字；左面板层级混乱（纯 slide 工程重复导航、重复添加入口、大纲混排）；Spatial 左面板为密排工程表单；术语残留（FLOW/SPATIAL/内容块/表面）；Flow/Spatial 路由底部状态条显示 Slide 语义。**决策：暂停 M7/M8，先做 UI/UX 收口批次与两个 Player 接线修复（§4.5 后续任务板 T-WIRE-*/T-FIX-*）。**
-- **工程形态（四模式）设计方向**：deepseek 遗留设计文档 [`docs/plans/UIUX_FOUR_MODE_DESIGN.md`](docs/plans/UIUX_FOUR_MODE_DESIGN.md)（原名 UIUX_ASSESSMENT_AND_FOUR_MODE_DESIGN.md），提出"工程形态为一等概念"的四模式信息架构。该方向改变壳层信息架构、触及 preservation 门禁与 §2.1 原壳合同，属 M7/M8 前的产品决策点，待用户裁决，裁决前不按其动工。
-- 收口轮机器证据：typecheck 绿、全量 Vitest 205 文件/1325 测试、构建通过、全量 Electron E2E 9/9 通过；禁区（tests/contracts、verify-editor-preservation.ts）未被收口轮触碰；无 donor（CourseStudioApp/CourseSurfaceCanvas/V9EditorShell）重引入正式 import graph。
-
 ## 4. 并行任务模式
 
 开发不再按阶段串行推进，而是由唯一协调者把阶段完成定义拆成任务单元，多执行者并行交付，按依赖序集成进单一主线。阶段 Gate 保留为唯一验收标准，但不再是执行链。
@@ -264,25 +254,13 @@ M5/M6 收口任务板（2026-08-15 审计登记；修复完成后方可判定 M5
 | T-FIX-FLOW-ENTRY | Flow 结构命令 UI 入口（删除/复制/重排/层级移动按钮 + Delete/Ctrl+D 键盘）+ onStructuralCommand 接线 + 媒体/互动组件插入禁用或教师安全拒绝（缺口 §5-P2-3/4/5） | M5 | 无 | Flow 大纲/画布/ElementsTab/PropertiesTab 与对应测试 | integrated |
 | T-FIX-FLOW-LAYER | Flow 统一图层进入生产画布与图层面板（消费 view 已物化的 global/surface 图层；不经 donor FlowCourseCanvas）（缺口 §5-P2-6） | M5 | T-FIX-FLOW-ENTRY | FlowWorkspace/RightSidebar 窄边界与对应测试 | integrated |
 | T-FIX-SPAT-INSPECT | SpatialLayerInspector blur/Enter 提交（一次编辑一次 history）+ 支持负坐标输入（缺口 §5-P2-7） | M6 | 无 | SpatialLayerInspector 与对应测试 | integrated |
-| T-FIX-SPAT-CTRL | Spatial 控制器三件套：audio:change 订阅刷新静音标签、progress 真实源、replay 后 DOM 与 canonical session 一致（去 seed 钉死）（缺口 §5-P2-8） | M6 | 无 | SpatialSurfaceHost 控制器段与对应测试 | partial（宿主能力与单测真实；生产 Player 未接线 → 拆出 T-WIRE-SPAT-CTRL） |
-| T-FIX-SURFACE-NAV | 混合工程表面导航入口 + 场景目录按 location 列举三类 kind（缺口 §5-P2-9/10） | M5/M6 | 无 | ScenePanel 跨表面列表 + picker 按 location 与对应测试 | partial（编辑器侧真实复核证实；Player picker 未接线 → 拆出 T-WIRE-PICKER） |
-| T-FIX-TRIAL-FS | Flow/Spatial 路由"当前位置试运行"动线（缺口 §5-P2-11） | M5/M6 | 无 | Workspace 早返回分支与 trialRunOverlay 窄边界与对应测试 | integrated（真实复核证实；残留 P2：fallback 测试造假式薄弱 → T-FIX-TRIAL-TEST） |
+| T-FIX-SPAT-CTRL | Spatial 控制器三件套：audio:change 订阅刷新静音标签、progress 真实源、replay 后 DOM 与 canonical session 一致（去 seed 钉死）（缺口 §5-P2-8） | M6 | 无 | SpatialSurfaceHost 控制器段与对应测试 | integrated |
+| T-FIX-SURFACE-NAV | 混合工程表面导航入口 + 场景目录按 location 列举三类 kind（缺口 §5-P2-9/10） | M5/M6 | 无 | ScenePanel 跨表面列表 + picker 按 location 与对应测试 | integrated |
+| T-FIX-TRIAL-FS | Flow/Spatial 路由"当前位置试运行"动线（缺口 §5-P2-11） | M5/M6 | 无 | Workspace 早返回分支与 trialRunOverlay 窄边界与对应测试 | integrated |
 
-P1/P2 收口任务已集成主线，并完成共享热点 App/Store/Workspace 接线与 `publishedCourse.ts` paths/relations 水合修复。收口证据：全量 Vitest 205 文件 / 1325 测试、`npm run typecheck`、`build:player`、`build:renderer` 通过；代表 Electron E2E `v9DefaultBoundary` 3/3 与 `v9SpatialAuthoring` 1/1 通过。**但 2026-08-16 第二轮审计（diff 审查 + 真实体验复核）发现 T-FIX-SPAT-CTRL 与 T-FIX-SURFACE-NAV 只交付"能力 + 单测"，生产 Player 行为未变（`PublishedCourseApp` 未接线），另发现 App 壳会话相机时序缺陷、relation label/path name 零渲染、试运行 fallback 假测试，以及 UI/UX 结构性问题（见 M5/M6 阶段计划 §6）——M5/M6 Gate 仍不判定。**
+P1/P2 收口任务已全部 integrated，并完成共享热点 App/Store/Workspace 接线与 `publishedCourse.ts` paths/relations 水合修复。收口证据：全量 Vitest 205 文件 / 1325 测试、`npm run typecheck`、`build:player`、`build:renderer` 通过；代表 Electron E2E `v9DefaultBoundary` 3/3 与 `v9SpatialAuthoring` 1/1 通过。
 
-收口轮后续任务板（2026-08-16 审计登记，Gate 前置条件）：
-
-| ID | 目标 | 供给 | 依赖 | owns | 状态 |
-|---|---|---|---|---|---|
-| T-WIRE-SPAT-CTRL | 生产接线：`PublishedCourseApp` 构造 SpatialSurfaceHost 时传入 `audioChangeSource`（events）与 `courseProgressSource`（基于课程 locations）；补一条试运行 progress/静音的真实断言 | M6 | 无 | `src/player/PublishedCourseApp.ts` Spatial 窄接线与对应测试 | pending |
-| T-WIRE-PICKER | 生产接线：`PublishedCourseApp.#pickerScenes()` 改为按 location 列举 slide-scene/flow-block/spatial-camera 三类，onSelect 走统一 navigate；混合工程场景目录真实断言 | M5/M6 | 无 | `src/player/PublishedCourseApp.ts` picker 窄接线与对应测试 | pending |
-| T-FIX-CAM-TIMING | 修 App 壳会话相机 effect 时序（镜头切换后不回退 home）+ 补 App 级"从当前画面添加"接线断言 | M6 | 无 | `src/renderer/App.tsx` 相机 effect 与对应测试 | pending |
-| T-FIX-TRIAL-TEST | 重做 `workspaceFlowSpatialTrial` fallback 用例为真实点击与"退出后工程不变"断言；relation label/path name 渲染补位 | M5/M6 | 无 | 对应测试 + Spatial 文本渲染 | pending |
-| T-FIX-UI-FLOW | Flow 编辑画布改为文档式阅读栏呈现（与试运行一致）、画布直接编辑文字、工具条位置合理化、移除纯 slide 工程的重复课程内容导航与重复添加入口 | M5 | 无 | FlowWorkspace/ScenePanel/RightSidebar 与对应测试 | pending |
-| T-FIX-UI-SPATIAL | Spatial 左面板重构为教师向布局（镜头卡片化、语义缩放与世界图层收敛） | M6 | 无 | ScenePanel/SpatialCameraPanel/SpatialPathEditor 与对应测试 | pending |
-| T-FIX-UI-TERMS | 教师可见术语统一：去掉"FLOW/SPATIAL/表面/内容块"等内部词，错误文案与按钮一致；Flow/Spatial 路由底部状态条不再显示 Slide 语义（"场景画面/基础场景"） | M5/M6 | 无 | 状态栏/错误文案/面板标题与对应测试 | pending |
-
-**决策：暂停 M7/M8 流水线，先完成上述收口与 UI 批次**——UI/UX 结构性问题不会随后续开发自愈，M7 的 Mixed 与 M8 的教师验收都建立在其上。P3 一致性项（DOCX 范围、schemaVersion bump、helper 去重、旋转选择 chrome、capture 队列、includeInStaticExports、Flow 宿主 interactions、世界图层删除级联、控制器 viewport 刚性）保持登记为 Gate 前收尾批次，由协调者视余量继续派发。
+P3 一致性项（术语、DOCX 范围、schemaVersion bump、helper 去重、旋转选择 chrome、capture 队列、includeInStaticExports、Flow 宿主 interactions、世界图层删除级联）仍登记为 M5/M6 Gate 前的收尾批次，由协调者视余量继续派发；修复完成前 M5/M6 Gate 仍不判定。
 
 M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
 
