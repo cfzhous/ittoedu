@@ -289,7 +289,15 @@ export function buildCourseExportDifferenceReport(
 ): CourseExportDifference[] {
   return surfaces.flatMap((surface): CourseExportDifference[] => {
     const common: CourseExportDifference[] = [
-      { surfaceId: surface.id, surfaceKind: surface.kind, target: 'html', disposition: 'preserved', detail: 'Native interactive surface host' },
+      {
+        surfaceId: surface.id,
+        surfaceKind: surface.kind,
+        target: 'html',
+        disposition: 'preserved',
+        detail: surface.kind === 'spatial-2d'
+          ? 'Native interactive surface host plus authored Spatial paths and relations'
+          : 'Native interactive surface host',
+      },
       {
         surfaceId: surface.id,
         surfaceKind: surface.kind,
@@ -298,16 +306,20 @@ export function buildCourseExportDifferenceReport(
         detail: surface.kind === 'flow'
           ? 'Semantic paginated Flow plus ordered static unified layers'
           : surface.kind === 'spatial-2d'
-            ? 'Authored overview and camera frames'
+            ? 'Authored overview and camera frames with Spatial paths and relations rendered in static SVG'
             : 'Authored stable slide frame',
       },
     ]
     common.push(surface.kind === 'slide'
       ? { surfaceId: surface.id, surfaceKind: surface.kind, target: 'pptx', disposition: 'preserved', detail: 'Slide-compatible export path' }
-      : { surfaceId: surface.id, surfaceKind: surface.kind, target: 'pptx', disposition: 'omitted', detail: 'This surface has no PPTX mapping' })
+      : surface.kind === 'spatial-2d'
+        ? { surfaceId: surface.id, surfaceKind: surface.kind, target: 'pptx', disposition: 'omitted', detail: 'This surface has no PPTX mapping; Spatial paths and relations are omitted' }
+        : { surfaceId: surface.id, surfaceKind: surface.kind, target: 'pptx', disposition: 'omitted', detail: 'This surface has no PPTX mapping' })
     common.push(surface.kind === 'flow'
       ? { surfaceId: surface.id, surfaceKind: surface.kind, target: 'docx', disposition: 'preserved', detail: 'Structured Flow blocks plus explicit ordered layer fallbacks' }
-      : { surfaceId: surface.id, surfaceKind: surface.kind, target: 'docx', disposition: 'omitted', detail: 'This surface has no DOCX mapping' })
+      : surface.kind === 'spatial-2d'
+        ? { surfaceId: surface.id, surfaceKind: surface.kind, target: 'docx', disposition: 'omitted', detail: 'This surface has no DOCX mapping; Spatial paths and relations are omitted' }
+        : { surfaceId: surface.id, surfaceKind: surface.kind, target: 'docx', disposition: 'omitted', detail: 'This surface has no DOCX mapping' })
     return common
   })
 }

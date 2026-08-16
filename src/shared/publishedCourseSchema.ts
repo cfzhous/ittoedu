@@ -17,6 +17,8 @@ import {
   runtimeContentSchema,
   spatialCameraFrameSchema,
   spatialCameraPoseSchema,
+  spatialPathDocumentSchema,
+  spatialRelationDocumentSchema,
   strictCourseInteractionsSchema,
 } from './courseProjectSchema'
 import type {
@@ -219,13 +221,76 @@ const publishedSpatialSurfaceSchema = z.object({
       }).strict(),
     ]),
     layerItems: publishedLayerListSchema,
+    paths: z.array(spatialPathDocumentSchema).max(10_000).default([]),
+    relations: z.array(spatialRelationDocumentSchema).max(10_000).default([]),
   }).strict(),
   camera: z.object({
     home: spatialCameraPoseSchema,
     frames: z.array(spatialCameraFrameSchema).max(10_000),
   }).strict(),
   semanticZoom: z.array(semanticZoomSchema).max(10_000),
-}).strict()
+}).strict().superRefine((surface, context) => {
+  const itemIds = new Set(surface.world.layerItems.map((item) => item.layerItemId))
+  const pathIds = new Set<string>()
+  surface.world.paths.forEach((path, index) => {
+    if (pathIds.has(path.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'paths', index, 'id'],
+        message: `Spatial path ids must be unique: ${path.id}`,
+      })
+    }
+    pathIds.add(path.id)
+    if (new Set(path.layerItemIds).size !== path.layerItemIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'paths', index, 'layerItemIds'],
+        message: 'Spatial path item ids must be unique',
+      })
+    }
+    path.layerItemIds.forEach((itemId) => {
+      if (!itemIds.has(itemId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['world', 'paths', index, 'layerItemIds'],
+          message: `Spatial path references missing world item: ${itemId}`,
+        })
+      }
+    })
+  })
+  const relationIds = new Set<string>()
+  surface.world.relations.forEach((relation, index) => {
+    if (relationIds.has(relation.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'id'],
+        message: `Spatial relation ids must be unique: ${relation.id}`,
+      })
+    }
+    relationIds.add(relation.id)
+    if (!itemIds.has(relation.sourceLayerItemId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'sourceLayerItemId'],
+        message: `Spatial relation references missing world item: ${relation.sourceLayerItemId}`,
+      })
+    }
+    if (!itemIds.has(relation.targetLayerItemId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'targetLayerItemId'],
+        message: `Spatial relation references missing world item: ${relation.targetLayerItemId}`,
+      })
+    }
+    if (relation.sourceLayerItemId === relation.targetLayerItemId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index],
+        message: 'Spatial relation source and target must be different world items',
+      })
+    }
+  })
+})
 
 export const publishedCourseSurfaceSchema: z.ZodType<PublishedCourseSurface> = z.discriminatedUnion('type', [
   publishedSlideSurfaceSchema,

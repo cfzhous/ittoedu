@@ -69,6 +69,27 @@ function safeColor(value: string | undefined, fallback: string): string {
     : fallback
 }
 
+function spatialItemCenter(frame: SpatialWorkspaceFrame): { x: number; y: number } {
+  return { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 }
+}
+
+function spatialPathDashArray(dash?: 'solid' | 'dashed' | 'dotted'): string | undefined {
+  if (dash === 'dashed') return '8 6'
+  if (dash === 'dotted') return '2 5'
+  return undefined
+}
+
+function spatialRelationMarkerId(relationId: string, index: number): string {
+  return `spatial-relation-${index}-${relationId.replace(/[^A-Za-z0-9_-]/g, '-')}`
+}
+
+function workspaceItemFrame(
+  item: LayerItem,
+  drafts: Readonly<Record<string, SpatialWorkspaceFrame>>,
+): SpatialWorkspaceFrame {
+  return drafts[item.layerItemId] ?? workspaceFrameFromLayerItem(item)
+}
+
 function frameScreenCenter(
   camera: SpatialCamera,
   frame: SpatialWorkspaceFrame,
@@ -589,6 +610,73 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
         style={{ display: 'block', width: viewportSize.width, height: viewportSize.height }}
       >
         <g data-spatial-world transform={worldGroupTransform(camera)}>
+          {((spatial.world.paths?.length ?? 0) > 0 || (spatial.world.relations?.length ?? 0) > 0) && (
+            <g data-spatial-paths-relations style={{ pointerEvents: 'none' }}>
+              <defs>
+                {(spatial.world.relations ?? []).map((relation, index) => relation.kind === 'line'
+                  ? null
+                  : (
+                    <marker
+                      key={relation.id}
+                      id={spatialRelationMarkerId(relation.id, index)}
+                      markerWidth="10"
+                      markerHeight="10"
+                      refX="9"
+                      refY="5"
+                      orient="auto-start-reverse"
+                      markerUnits="strokeWidth"
+                    >
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" />
+                    </marker>
+                  ))}
+              </defs>
+              {(spatial.world.paths ?? []).map((path) => {
+                const points = path.layerItemIds
+                  .map((layerItemId) => itemById.get(layerItemId))
+                  .filter((item): item is LayerItem => Boolean(item))
+                  .map((item) => spatialItemCenter(workspaceItemFrame(item, drafts)))
+                if (points.length === 0) return null
+                const style = path.style ?? {}
+                return (
+                  <polyline
+                    key={path.id}
+                    data-spatial-path-id={path.id}
+                    points={points.map((point) => `${point.x},${point.y}`).join(' ')}
+                    fill="none"
+                    stroke={safeColor(style.color, '#64748b')}
+                    strokeWidth={Math.max(0.5, style.width ?? 2)}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    strokeDasharray={spatialPathDashArray(style.dash)}
+                  />
+                )
+              })}
+              {(spatial.world.relations ?? []).map((relation, index) => {
+                const source = itemById.get(relation.sourceLayerItemId)
+                const target = itemById.get(relation.targetLayerItemId)
+                if (!source || !target) return null
+                const sourcePoint = spatialItemCenter(workspaceItemFrame(source, drafts))
+                const targetPoint = spatialItemCenter(workspaceItemFrame(target, drafts))
+                const markerId = spatialRelationMarkerId(relation.id, index)
+                return (
+                  <line
+                    key={relation.id}
+                    data-spatial-relation-id={relation.id}
+                    x1={sourcePoint.x}
+                    y1={sourcePoint.y}
+                    x2={targetPoint.x}
+                    y2={targetPoint.y}
+                    fill="none"
+                    stroke="#64748b"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    markerStart={relation.kind === 'bidirectional' ? `url(#${markerId})` : undefined}
+                    markerEnd={relation.kind === 'line' ? undefined : `url(#${markerId})`}
+                  />
+                )
+              })}
+            </g>
+          )}
           {renderItems.map((item) => {
             const frame = drafts[item.layerItemId] ?? workspaceFrameFromLayerItem(item)
             const centerX = frame.x + frame.width / 2

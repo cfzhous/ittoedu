@@ -4,6 +4,8 @@ import type {
   NativeLayerItem,
   RuntimeLayerItem,
   ScopedLayerItem,
+  SpatialPathDocument,
+  SpatialRelationDocument,
 } from '../../../shared/courseProjectTypes'
 import { renderFormulaNodeSvg } from '../../../shared/formulaRenderer'
 import type { FormulaNode } from '../../../shared/projectTypes'
@@ -217,7 +219,7 @@ function itemFill(item: LayerItem): string {
 }
 
 type SvgSpec = {
-  tag: 'g' | 'defs' | 'marker' | 'rect' | 'ellipse' | 'line' | 'path' | 'polygon' | 'circle' | 'text' | 'tspan'
+  tag: 'g' | 'defs' | 'marker' | 'rect' | 'ellipse' | 'line' | 'path' | 'polygon' | 'polyline' | 'circle' | 'text' | 'tspan'
   attributes?: Record<string, string | number>
   text?: string
   children?: SvgSpec[]
@@ -379,6 +381,115 @@ function markerSpec(id: string, arrow: string, color: string): SvgSpec | null {
   }
 }
 
+const DEFAULT_SPATIAL_PATH_COLOR = '#64748b'
+const DEFAULT_SPATIAL_PATH_WIDTH = 2
+
+function spatialLayerCenter(item: LayerItem): { x: number; y: number } {
+  return {
+    x: item.frame.x + item.frame.width / 2,
+    y: item.frame.y + item.frame.height / 2,
+  }
+}
+
+function spatialPathDashArray(
+  dash: NonNullable<SpatialPathDocument['style']>['dash'],
+): string | undefined {
+  if (dash === 'dashed') return '8 6'
+  if (dash === 'dotted') return '2 5'
+  return undefined
+}
+
+function spatialRelationMarkerId(relationId: string, index: number): string {
+  return `spatial-relation-${index}-${relationId.replace(/[^A-Za-z0-9_-]/g, '-')}`
+}
+
+function spatialPathsRelationsSpecs(spatial: SpatialSurfaceDocument): SvgSpec[] {
+  const specs: SvgSpec[] = []
+  const centers = new Map(spatial.world.layerItems.map((item) => [
+    item.layerItemId,
+    spatialLayerCenter(item),
+  ]))
+  const markerDefs: SvgSpec[] = []
+
+  for (const path of spatial.world.paths ?? []) {
+    const points = path.layerItemIds
+      .map((layerItemId) => centers.get(layerItemId))
+      .filter((point): point is { x: number; y: number } => Boolean(point))
+    if (points.length === 0) continue
+    const style = path.style ?? {}
+    const attributes: Record<string, string | number> = {
+      'data-spatial-path-id': path.id,
+      fill: 'none',
+      stroke: safeColor(style.color, DEFAULT_SPATIAL_PATH_COLOR),
+      'stroke-width': Math.max(0.5, style.width ?? DEFAULT_SPATIAL_PATH_WIDTH),
+      'stroke-linejoin': 'round',
+      'stroke-linecap': 'round',
+    }
+    const dash = spatialPathDashArray(style.dash)
+    if (dash) attributes['stroke-dasharray'] = dash
+    specs.push({
+      tag: 'polyline',
+      attributes: {
+        ...attributes,
+        points: points.map((point) => `${point.x},${point.y}`).join(' '),
+      },
+    })
+  }
+
+  ;(spatial.world.relations ?? []).forEach((relation, relationIndex) => {
+    const source = centers.get(relation.sourceLayerItemId)
+    const target = centers.get(relation.targetLayerItemId)
+    if (!source || !target) return
+    const markerId = spatialRelationMarkerId(relation.id, relationIndex)
+    if (relation.kind !== 'line') {
+      const marker = markerSpec(markerId, 'triangle', DEFAULT_SPATIAL_PATH_COLOR)
+      if (marker) markerDefs.push(marker)
+    }
+    specs.push({
+      tag: 'line',
+      attributes: {
+        'data-spatial-relation-id': relation.id,
+        x1: source.x,
+        y1: source.y,
+        x2: target.x,
+        y2: target.y,
+        fill: 'none',
+        stroke: DEFAULT_SPATIAL_PATH_COLOR,
+        'stroke-width': DEFAULT_SPATIAL_PATH_WIDTH,
+        'stroke-linecap': 'round',
+        ...(relation.kind === 'arrow'
+          ? { 'marker-end': `url(#${markerId})` }
+          : relation.kind === 'bidirectional'
+            ? { 'marker-start': `url(#${markerId})`, 'marker-end': `url(#${markerId})` }
+            : {}),
+      },
+    })
+  })
+
+  if (markerDefs.length > 0) specs.unshift({ tag: 'defs', children: markerDefs })
+  return specs
+}
+
+function spatialPathsRelationsMarkup(spatial: SpatialSurfaceDocument): string {
+  const specs = spatialPathsRelationsSpecs(spatial)
+  if (specs.length === 0) return ''
+  return `<g data-spatial-paths-relations="true" pointer-events="none">${specs.map(svgSpecMarkup).join('')}</g>`
+}
+
+function createSpatialPathsRelationsGroup(
+  dom: Document,
+  spatial: SpatialSurfaceDocument,
+): SVGGElement | null {
+  const specs = spatialPathsRelationsSpecs(spatial)
+  if (specs.length === 0) return null
+  const group = dom.createElementNS(SVG_NS, 'g')
+  group.dataset.spatialPathsRelations = 'true'
+  group.style.pointerEvents = 'none'
+  for (const spec of specs) group.appendChild(svgSpecElement(dom, spec))
+  return group
+}
+
+
 function shapeSpec(item: Extract<LayerItem, { kind: 'native' }>): SvgSpec | null {
   if (item.content.nativeType !== 'shape') return null
   const { frame } = item
@@ -537,6 +648,8 @@ export function renderSpatialSurface(
     `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`,
   )
   const resolveAsset = options.resolveAsset ?? (() => undefined)
+  const pathsRelations = createSpatialPathsRelationsGroup(dom, spatial)
+  if (pathsRelations) world.appendChild(pathsRelations)
   for (const item of cullSpatialItems(
     spatial.world.layerItems,
     camera,
@@ -674,11 +787,12 @@ export function renderSpatialSvgMarkup(
   resolveAsset: (assetId: string) => string | undefined = () => undefined,
 ): string {
   validateSpatialCamera(camera)
+  const pathsRelations = spatialPathsRelationsMarkup(spatial)
   const items = cullSpatialItems(spatial.world.layerItems, camera, spatial.semanticZoom)
     .map((item) => markupForItem(item, resolveAsset))
     .join('')
   const transform = `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
-  return `<svg xmlns="${SVG_NS}" width="${camera.viewportWidth}" height="${camera.viewportHeight}" viewBox="0 0 ${camera.viewportWidth} ${camera.viewportHeight}" role="img" aria-label="${escapeXml(spatial.title)}"><g transform="${transform}">${items}</g></svg>`
+  return `<svg xmlns="${SVG_NS}" width="${camera.viewportWidth}" height="${camera.viewportHeight}" viewBox="0 0 ${camera.viewportWidth} ${camera.viewportHeight}" role="img" aria-label="${escapeXml(spatial.title)}"><g transform="${transform}">${pathsRelations}${items}</g></svg>`
 }
 
 class SpatialStaticFallbackHost<T extends DynamicSpatialItem> implements SlideItemHost<T> {
@@ -935,6 +1049,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   #root: HTMLElement | null = null
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
+  #pathsRelationsGroup: SVGGElement | null = null
   #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialItemRecord>()
   #visibleRecords: SpatialItemRecord[] = []
@@ -1002,6 +1117,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       if (spatial.id !== this.id) throw new Error('Spatial surface identity cannot change')
       this.#document = cloneSpatialDocument(spatial)
+      this.#renderPathsAndRelations()
       await this.#reconcileDocument()
       this.#renderChrome()
     })
@@ -1080,6 +1196,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     this.#svg = svg
     this.#world = world
     this.#screenLayer = screenLayer
+    this.#renderPathsAndRelations()
     this.#surfaceAbortController = new AbortController()
     if (context.signal.aborted) this.#surfaceAbortController.abort(context.signal.reason)
     else context.signal.addEventListener('abort', () => {
@@ -1188,6 +1305,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
       if (record.failed) warnings.push(`${record.item.label} uses its static Spatial fallback`)
     }
     const resolveAsset = (assetId: string) => this.#context?.services.resolveAsset(assetId)
+    const pathsRelations = spatialPathsRelationsMarkup(this.#document)
     const items = visible.map((renderable) => {
       const captured = capturedByItem.get(renderable.item.layerItemId)
       if (captured) {
@@ -1198,7 +1316,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     const transform = `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
     return {
       format: 'svg',
-      content: `<svg xmlns="${SVG_NS}" width="${camera.viewportWidth}" height="${camera.viewportHeight}" viewBox="0 0 ${camera.viewportWidth} ${camera.viewportHeight}" role="img" aria-label="${escapeXml(this.#document.title)}"><g transform="${transform}">${items}</g></svg>`,
+      content: `<svg xmlns="${SVG_NS}" width="${camera.viewportWidth}" height="${camera.viewportHeight}" viewBox="0 0 ${camera.viewportWidth} ${camera.viewportHeight}" role="img" aria-label="${escapeXml(this.#document.title)}"><g transform="${transform}">${pathsRelations}${items}</g></svg>`,
       width: camera.viewportWidth,
       height: camera.viewportHeight,
       warnings: [...new Set(warnings)],
@@ -1244,6 +1362,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
       this.#root = null
       this.#svg = null
       this.#world = null
+      this.#pathsRelationsGroup = null
       this.#screenLayer = null
       this.#context = null
       this.#surfaceAbortController = null
@@ -1621,6 +1740,20 @@ export class SpatialSurfaceHost implements SurfaceHost {
         cause,
       })
     } catch { /* diagnostics must never break the surface */ }
+  }
+
+  #renderPathsAndRelations(): void {
+    if (!this.#world) return
+    const dom = this.#world.ownerDocument
+    const next = createSpatialPathsRelationsGroup(dom, this.#document)
+    if (this.#pathsRelationsGroup) {
+      this.#pathsRelationsGroup.remove()
+      this.#pathsRelationsGroup = null
+    }
+    if (next) {
+      this.#pathsRelationsGroup = next
+      this.#world.insertBefore(next, this.#world.firstChild)
+    }
   }
 
   #updateCameraTransform(): void {

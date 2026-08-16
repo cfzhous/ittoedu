@@ -495,6 +495,8 @@ function publishSurface(
     world: {
       bounds: cloneJson(surface.world.bounds),
       layerItems: surface.world.layerItems.map((item) => publishLayerItem(sources, item)),
+      paths: cloneJson(surface.world.paths ?? []),
+      relations: cloneJson(surface.world.relations ?? []),
     },
     camera: cloneJson(surface.camera),
     semanticZoom: cloneJson(surface.semanticZoom),
