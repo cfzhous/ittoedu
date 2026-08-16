@@ -3,6 +3,18 @@ export interface ScenePickerScene {
   name: string
 }
 
+export type ScenePickerLocationKind =
+  | 'slide-scene'
+  | 'flow-block'
+  | 'spatial-camera'
+
+export interface ScenePickerLocation {
+  id: string
+  locationId: string
+  name: string
+  kind: ScenePickerLocationKind
+}
+
 export const SCENE_PICKER_OPEN_EVENT = 'player:scene-picker:open'
 export const TEACHER_CONTROLLER_COLLAPSE_EVENT =
   'player:teacher-controller:collapse-change'
@@ -15,7 +27,13 @@ export interface TeacherControllerCollapseEvent {
 export interface ScenePickerOverlayOptions {
   stage: HTMLElement
   scenes: readonly ScenePickerScene[]
-  onSelect(sceneId: string, bypassNavigationGuards: boolean): void
+  /**
+   * When provided, the picker lists course locations instead of slide scenes
+   * and `onSelect` receives `locationId`. `scenes` stays only as a fallback
+   * so existing callers keep compiling without changes.
+   */
+  locations?: readonly ScenePickerLocation[]
+  onSelect(selectedId: string, bypassNavigationGuards: boolean): void
   onClose?(): void
 }
 
@@ -25,6 +43,19 @@ export interface ScenePickerOpenOptions {
 
 let scenePickerSequence = 0
 
+const scenePickerLocationKindLabels: Record<ScenePickerLocationKind, string> = {
+  'slide-scene': '幻灯片',
+  'flow-block': '讲义',
+  'spatial-camera': '空间',
+}
+
+interface PickerEntry {
+  buttonId: string
+  selectionId: string
+  name: string
+  kind?: ScenePickerLocationKind
+}
+
 function applyStyles(
   element: HTMLElement,
   styles: Partial<CSSStyleDeclaration>,
@@ -33,17 +64,20 @@ function applyStyles(
 }
 
 /**
- * Accessible delivery-time scene directory. It intentionally lives outside
+ * Accessible delivery-time course directory. It intentionally lives outside
  * Phaser so long course lists retain native scrolling, focus and keyboard
- * semantics regardless of canvas scale.
+ * semantics regardless of canvas scale. With `locations` it lists every
+ * course location (slide/flow/spatial); without it the original scene-only
+ * behavior is preserved exactly.
  */
 export class ScenePickerOverlay {
   private readonly layer: HTMLDivElement
   private readonly closeButton: HTMLButtonElement
-  private readonly sceneButtons: HTMLButtonElement[] = []
-  private readonly sceneIds: string[] = []
+  private readonly itemButtons: HTMLButtonElement[] = []
+  private readonly selectionIds: string[] = []
+  private readonly useLocations: boolean
   private readonly onSelect: (
-    sceneId: string,
+    selectedId: string,
     bypassNavigationGuards: boolean,
   ) => void
   private readonly onClose: (() => void) | undefined
@@ -55,6 +89,20 @@ export class ScenePickerOverlay {
   constructor(options: ScenePickerOverlayOptions) {
     this.onSelect = options.onSelect
     this.onClose = options.onClose
+    this.useLocations = options.locations !== undefined
+
+    const entries: PickerEntry[] = this.useLocations
+      ? (options.locations as readonly ScenePickerLocation[]).map((location) => ({
+          buttonId: location.id,
+          selectionId: location.locationId,
+          name: location.name,
+          kind: location.kind,
+        }))
+      : options.scenes.map((scene) => ({
+          buttonId: scene.id,
+          selectionId: scene.id,
+          name: scene.name,
+        }))
 
     const instanceId = ++scenePickerSequence
     const titleId = `lesson-scene-picker-title-${instanceId}`
@@ -110,7 +158,7 @@ export class ScenePickerOverlay {
     const headingGroup = document.createElement('div')
     const title = document.createElement('h2')
     title.id = titleId
-    title.textContent = '场景目录'
+    title.textContent = this.useLocations ? '课程内容' : '场景目录'
     applyStyles(title, {
       margin: '0',
       color: '#fff7df',
@@ -119,7 +167,9 @@ export class ScenePickerOverlay {
     })
     const description = document.createElement('p')
     description.id = descriptionId
-    description.textContent = `选择要跳转的场景，共 ${options.scenes.length} 个`
+    description.textContent = this.useLocations
+      ? `选择要跳转的课程内容，共 ${entries.length} 个`
+      : `选择要跳转的场景，共 ${entries.length} 个`
     applyStyles(description, {
       margin: '6px 0 0',
       color: '#b9c5d8',
@@ -131,7 +181,10 @@ export class ScenePickerOverlay {
     const closeButton = document.createElement('button')
     closeButton.type = 'button'
     closeButton.className = 'lesson-scene-picker__close'
-    closeButton.setAttribute('aria-label', '关闭场景目录')
+    closeButton.setAttribute(
+      'aria-label',
+      this.useLocations ? '关闭课程内容' : '关闭场景目录',
+    )
     closeButton.textContent = '×'
     applyStyles(closeButton, {
       width: '38px',
@@ -149,7 +202,7 @@ export class ScenePickerOverlay {
     const list = document.createElement('div')
     list.className = 'lesson-scene-picker__list'
     list.setAttribute('role', 'group')
-    list.setAttribute('aria-label', '全部场景')
+    list.setAttribute('aria-label', this.useLocations ? '全部课程内容' : '全部场景')
     applyStyles(list, {
       display: 'grid',
       minHeight: '0',
@@ -161,16 +214,23 @@ export class ScenePickerOverlay {
       scrollbarGutter: 'stable',
     })
 
-    options.scenes.forEach((scene, index) => {
+    entries.forEach((entry, index) => {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'lesson-scene-picker__item'
-      button.dataset.sceneId = scene.id
+      if (this.useLocations) {
+        button.dataset.locationId = entry.selectionId
+        if (entry.kind) button.dataset.kind = entry.kind
+      } else {
+        button.dataset.sceneId = entry.selectionId
+      }
       applyStyles(button, {
         display: 'grid',
         width: '100%',
         minHeight: '52px',
-        gridTemplateColumns: '42px minmax(0, 1fr)',
+        gridTemplateColumns: this.useLocations
+          ? '42px auto minmax(0, 1fr)'
+          : '42px minmax(0, 1fr)',
         gap: '12px',
         alignItems: 'center',
         padding: '9px 14px',
@@ -192,8 +252,26 @@ export class ScenePickerOverlay {
         fontVariantNumeric: 'tabular-nums',
         letterSpacing: '0.08em',
       })
+      button.append(number)
+
+      if (this.useLocations && entry.kind) {
+        const kind = document.createElement('span')
+        kind.textContent = scenePickerLocationKindLabels[entry.kind]
+        kind.setAttribute('aria-hidden', 'true')
+        applyStyles(kind, {
+          padding: '2px 7px',
+          border: '1px solid rgba(125, 211, 252, 0.35)',
+          borderRadius: '999px',
+          color: '#7dd3fc',
+          fontSize: '11px',
+          fontWeight: '700',
+          whiteSpace: 'nowrap',
+        })
+        button.append(kind)
+      }
+
       const name = document.createElement('span')
-      name.textContent = scene.name
+      name.textContent = entry.name
       applyStyles(name, {
         minWidth: '0',
         overflow: 'hidden',
@@ -203,16 +281,16 @@ export class ScenePickerOverlay {
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
       })
-      button.append(number, name)
+      button.append(name)
       button.addEventListener('click', () => {
         if (this.destroyed) return
         const bypassNavigationGuards = this.bypassNavigationGuards
         this.close()
-        this.onSelect(scene.id, bypassNavigationGuards)
+        this.onSelect(entry.selectionId, bypassNavigationGuards)
       })
       list.append(button)
-      this.sceneButtons.push(button)
-      this.sceneIds.push(scene.id)
+      this.itemButtons.push(button)
+      this.selectionIds.push(entry.selectionId)
     })
 
     dialog.append(header, list)
@@ -231,7 +309,7 @@ export class ScenePickerOverlay {
   }
 
   open(
-    currentSceneId: string | null,
+    currentSelectionId: string | null,
     options: ScenePickerOpenOptions = {},
   ): void {
     if (this.destroyed) return
@@ -246,8 +324,8 @@ export class ScenePickerOverlay {
     this.layer.hidden = false
     this.layer.style.display = 'grid'
 
-    this.sceneButtons.forEach((button, index) => {
-      const current = this.sceneIds[index] === currentSceneId
+    this.itemButtons.forEach((button, index) => {
+      const current = this.selectionIds[index] === currentSelectionId
       if (current) {
         button.setAttribute('aria-current', 'page')
         button.style.borderColor = 'rgba(231, 184, 92, 0.94)'
@@ -261,10 +339,10 @@ export class ScenePickerOverlay {
       }
     })
 
-    const currentButton = this.sceneButtons.find(
-      (button) => button.dataset.sceneId === currentSceneId,
+    const currentButton = this.itemButtons.find(
+      (_, index) => this.selectionIds[index] === currentSelectionId,
     )
-    const focusTarget = currentButton ?? this.sceneButtons[0] ?? this.closeButton
+    const focusTarget = currentButton ?? this.itemButtons[0] ?? this.closeButton
     queueMicrotask(() => {
       if (!this.openValue || this.destroyed) return
       focusTarget.focus({ preventScroll: true })
@@ -318,7 +396,7 @@ export class ScenePickerOverlay {
       return
     }
 
-    const focusables = [this.closeButton, ...this.sceneButtons]
+    const focusables = [this.closeButton, ...this.itemButtons]
     const activeIndex = focusables.indexOf(document.activeElement as HTMLButtonElement)
     if (event.key === 'Tab') {
       if (event.shiftKey && activeIndex <= 0) {
@@ -332,19 +410,19 @@ export class ScenePickerOverlay {
     }
 
     let target: HTMLButtonElement | undefined
-    const sceneIndex = this.sceneButtons.indexOf(
+    const itemIndex = this.itemButtons.indexOf(
       document.activeElement as HTMLButtonElement,
     )
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      target = this.sceneButtons[(Math.max(-1, sceneIndex) + 1) % this.sceneButtons.length]
+      target = this.itemButtons[(Math.max(-1, itemIndex) + 1) % this.itemButtons.length]
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      target = this.sceneButtons[
-        sceneIndex <= 0 ? this.sceneButtons.length - 1 : sceneIndex - 1
+      target = this.itemButtons[
+        itemIndex <= 0 ? this.itemButtons.length - 1 : itemIndex - 1
       ]
     } else if (event.key === 'Home') {
-      target = this.sceneButtons[0]
+      target = this.itemButtons[0]
     } else if (event.key === 'End') {
-      target = this.sceneButtons.at(-1)
+      target = this.itemButtons.at(-1)
     }
 
     if (

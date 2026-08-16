@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Copy, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { ensureScenePresentation } from '../../shared/presentation'
 import { useEditorStore } from '../store/editorStore'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -83,6 +83,150 @@ export interface ScenePanelDocumentControl {
   onDeleteScene(sceneId: string): void
   onDuplicateScene(sceneId: string): void
   onReorderScenes(sceneIds: readonly string[]): void
+}
+
+export type ScenePanelCourseLocationKind =
+  | 'slide-scene'
+  | 'flow-block'
+  | 'spatial-camera'
+
+export interface ScenePanelCourseLocation {
+  locationId: string
+  label: string
+  kind: ScenePanelCourseLocationKind
+  surfaceId: string
+  active: boolean
+}
+
+const scenePanelCourseLocationKindLabels: Record<
+  ScenePanelCourseLocationKind,
+  string
+> = {
+  'slide-scene': '幻灯片',
+  'flow-block': '讲义',
+  'spatial-camera': '空间',
+}
+
+interface CourseLocationNavProps {
+  courseLocations: readonly ScenePanelCourseLocation[]
+  onActivateLocation?: (locationId: string) => void
+  onAddFlowSurface?: () => void
+  onAddSpatialSurface?: () => void
+}
+
+const courseLocationNavListStyle: CSSProperties = {
+  display: 'grid',
+  gap: 6,
+  maxHeight: 220,
+  overflowX: 'hidden',
+  overflowY: 'auto',
+  padding: 8,
+}
+
+const courseLocationNavKindStyle: CSSProperties = {
+  padding: '2px 6px',
+  borderRadius: 6,
+  background: 'rgba(91, 156, 255, 0.16)',
+  color: '#b9d3ff',
+  fontSize: 10,
+  fontWeight: 700,
+  whiteSpace: 'nowrap',
+}
+
+const courseLocationNavLabelStyle: CSSProperties = {
+  minWidth: 0,
+  overflow: 'hidden',
+  fontSize: 12,
+  fontWeight: 600,
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
+function courseLocationNavItemStyle(active: boolean): CSSProperties {
+  return {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr)',
+    gap: 8,
+    alignItems: 'center',
+    width: '100%',
+    minHeight: 40,
+    padding: '6px 9px',
+    border: `1px solid ${active ? 'rgba(91, 156, 255, 0.58)' : 'var(--border)'}`,
+    borderRadius: 8,
+    color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+    background: active ? 'var(--accent-soft)' : 'var(--panel-bg-elevated)',
+    boxShadow: active ? 'inset 3px 0 0 #5b9cff' : 'none',
+    textAlign: 'left',
+    cursor: 'pointer',
+  }
+}
+
+function CourseLocationNav({
+  courseLocations,
+  onActivateLocation,
+  onAddFlowSurface,
+  onAddSpatialSurface,
+}: CourseLocationNavProps) {
+  return (
+    <section
+      className="course-location-nav"
+      data-testid="course-location-nav"
+      aria-label="课程内容"
+    >
+      <div className="panel-header">
+        <h2 className="panel-title">课程内容</h2>
+        {(onAddFlowSurface || onAddSpatialSurface) && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            {onAddFlowSurface && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={onAddFlowSurface}
+                data-testid="add-flow-surface"
+              >
+                <Plus size={14} />
+                添加讲义
+              </button>
+            )}
+            {onAddSpatialSurface && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={onAddSpatialSurface}
+                data-testid="add-spatial-surface"
+              >
+                <Plus size={14} />
+                添加空间
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <div
+        className="course-location-nav__list"
+        style={courseLocationNavListStyle}
+      >
+        {courseLocations.map((location) => (
+          <button
+            key={location.locationId}
+            type="button"
+            className={`course-location-nav__item${location.active ? ' course-location-nav__item--active' : ''}`}
+            style={courseLocationNavItemStyle(location.active)}
+            data-testid={`course-location-${location.locationId}`}
+            data-location-id={location.locationId}
+            data-kind={location.kind}
+            aria-current={location.active ? 'page' : undefined}
+            onClick={() => onActivateLocation?.(location.locationId)}
+          >
+            <span style={courseLocationNavKindStyle}>
+              {scenePanelCourseLocationKindLabels[location.kind]}
+            </span>
+            <span style={courseLocationNavLabelStyle}>{location.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 interface SortableSceneProps {
@@ -236,8 +380,16 @@ function SortableScene({
 
 function ScenePanelContent({
   documentControl,
+  courseLocations,
+  onActivateLocation,
+  onAddFlowSurface,
+  onAddSpatialSurface,
 }: {
   documentControl: ScenePanelDocumentControl
+  courseLocations?: readonly ScenePanelCourseLocation[]
+  onActivateLocation?: (locationId: string) => void
+  onAddFlowSurface?: () => void
+  onAddSpatialSurface?: () => void
 }) {
   const [pendingDelete, setPendingDelete] = useState<ScenePanelSceneRow | null>(null)
   const sensors = useSensors(
@@ -258,6 +410,14 @@ function ScenePanelContent({
 
   return (
     <aside className="panel scene-panel" aria-label="场景列表">
+      {courseLocations && (
+        <CourseLocationNav
+          courseLocations={courseLocations}
+          onActivateLocation={onActivateLocation}
+          onAddFlowSurface={onAddFlowSurface}
+          onAddSpatialSurface={onAddSpatialSurface}
+        />
+      )}
       <div className="panel-header">
         <h2 className="panel-title">场景</h2>
         <button
@@ -426,14 +586,32 @@ export function ScenePanel({
   documentControl,
   flowDocumentControl,
   spatialDocumentControl,
+  courseLocations,
+  onActivateLocation,
+  onAddFlowSurface,
+  onAddSpatialSurface,
 }: {
   documentControl?: ScenePanelDocumentControl
   flowDocumentControl?: ScenePanelFlowDocumentControl
   spatialDocumentControl?: ScenePanelSpatialDocumentControl
+  courseLocations?: readonly ScenePanelCourseLocation[]
+  onActivateLocation?: (locationId: string) => void
+  onAddFlowSurface?: () => void
+  onAddSpatialSurface?: () => void
 } = {}) {
+  const courseLocationNav = courseLocations ? (
+    <CourseLocationNav
+      courseLocations={courseLocations}
+      onActivateLocation={onActivateLocation}
+      onAddFlowSurface={onAddFlowSurface}
+      onAddSpatialSurface={onAddSpatialSurface}
+    />
+  ) : null
+
   if (flowDocumentControl) {
     return (
       <aside className="panel scene-panel" aria-label="Flow 讲义导航">
+        {courseLocationNav}
         <div className="panel-header">
           <h2 className="panel-title">Flow 讲义</h2>
           {flowDocumentControl.onAddSurface && (
@@ -471,6 +649,7 @@ export function ScenePanel({
     } = spatialDocumentControl
     return (
       <aside className="panel scene-panel" aria-label="Spatial 空间导航">
+        {courseLocationNav}
         <div className="panel-header">
           <h2 className="panel-title">Spatial 空间</h2>
           {onAddSurface && (
@@ -500,6 +679,7 @@ export function ScenePanel({
   if (documentControl?.unavailableReason) {
     return (
       <aside className="panel scene-panel" aria-label="场景列表">
+        {courseLocationNav}
         <div className="panel-header">
           <h2 className="panel-title">场景</h2>
         </div>
@@ -514,7 +694,23 @@ export function ScenePanel({
       </aside>
     )
   }
-  return documentControl
-    ? <ScenePanelContent documentControl={documentControl} />
-    : <LegacyScenePanelAdapter />
+  if (documentControl) {
+    return (
+      <ScenePanelContent
+        documentControl={documentControl}
+        courseLocations={courseLocations}
+        onActivateLocation={onActivateLocation}
+        onAddFlowSurface={onAddFlowSurface}
+        onAddSpatialSurface={onAddSpatialSurface}
+      />
+    )
+  }
+  if (courseLocations) {
+    return (
+      <aside className="panel scene-panel" aria-label="课程内容">
+        {courseLocationNav}
+      </aside>
+    )
+  }
+  return <LegacyScenePanelAdapter />
 }
