@@ -2,7 +2,7 @@
 
 > PARENT: [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md)
 > PREREQUISITE: M4 Gate
-> STATUS: integration-review（任务板已 integrated；2026-08-15 代码审查 + 真实复核发现 P1×2 与若干 P2，收口任务见 §5 缺口登记，Gate 未判定）
+> STATUS: engineering-candidate（M5/M6 任务与 P1/P2 收口任务均 integrated；P3 收尾批次进行中，Gate 未判定）
 > OUTCOME: 在原产品壳内完成 Flow 与 Spatial 的作者、Player、保存重开和导出
 
 M5 与 M6 默认由两个执行者并行派发：两者表面语义与 owns 不重叠，共享 Store、App、Player 与导出边界只走窄接口增量，并按根计划 §4.3 串行集成。每个表面内部保持纵切顺序；不得为了并行先建抽象框架。

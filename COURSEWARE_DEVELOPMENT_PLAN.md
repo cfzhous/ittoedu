@@ -249,16 +249,18 @@ M5/M6 收口任务板（2026-08-15 审计登记；修复完成后方可判定 M5
 
 | ID | 目标（口径见 M5/M6 阶段计划 §5） | 供给 | 依赖 | owns | 状态 |
 |---|---|---|---|---|---|
-| T-FIX-SPAT-PATHS | Spatial 路径/关系全链：编辑画布渲染折线/箭头、Published payload 保留 paths/relations（复用 spatial schema）、Player SpatialSurfaceHost 渲染、打印/PDF 包含、差异报告明示；补渲染与发布断言（缺口 §5-P1-1） | M6 | 无 | spatial 渲染链 + published 类型/schema/builder 窄边界与对应测试 | pending |
-| T-FIX-SPAT-CAM | Spatial 镜头会话相机接线：SpatialWorkspace 回传 session pose、App 喂真实位姿给"从当前画面添加/设为首页镜头"、镜头切换移动画布视口；补 App 壳层接线断言（缺口 §5-P1-2） | M6 | 无 | SpatialWorkspace/SpatialCameraPanel/App 窄接线与对应测试 | pending |
-| T-FIX-FLOW-ENTRY | Flow 结构命令 UI 入口（删除/复制/重排/层级移动按钮 + Delete/Ctrl+D 键盘）+ onStructuralCommand 接线 + 媒体/互动组件插入禁用或教师安全拒绝（缺口 §5-P2-3/4/5） | M5 | 无 | Flow 大纲/画布/ElementsTab/PropertiesTab 与对应测试 | pending |
-| T-FIX-FLOW-LAYER | Flow 统一图层进入生产画布与图层面板（消费 view 已物化的 global/surface 图层；不经 donor FlowCourseCanvas）（缺口 §5-P2-6） | M5 | T-FIX-FLOW-ENTRY | FlowWorkspace/RightSidebar 窄边界与对应测试 | pending |
-| T-FIX-SPAT-INSPECT | SpatialLayerInspector blur/Enter 提交（一次编辑一次 history）+ 支持负坐标输入（缺口 §5-P2-7） | M6 | 无 | SpatialLayerInspector 与对应测试 | pending |
-| T-FIX-SPAT-CTRL | Spatial 控制器三件套：audio:change 订阅刷新静音标签、progress 真实源、replay 后 DOM 与 canonical session 一致（去 seed 钉死）（缺口 §5-P2-8） | M6 | 无 | SpatialSurfaceHost 控制器段与对应测试 | pending |
-| T-FIX-SURFACE-NAV | 混合工程表面导航入口 + 场景目录按 location 列举三类 kind（缺口 §5-P2-9/10） | M5/M6 | 无 | ScenePanel 跨表面列表 + picker 按 location 与对应测试 | pending |
-| T-FIX-TRIAL-FS | Flow/Spatial 路由"当前位置试运行"动线（缺口 §5-P2-11） | M5/M6 | 无 | Workspace 早返回分支与 trialRunOverlay 窄边界与对应测试 | pending |
+| T-FIX-SPAT-PATHS | Spatial 路径/关系全链：编辑画布渲染折线/箭头、Published payload 保留 paths/relations（复用 spatial schema）、Player SpatialSurfaceHost 渲染、打印/PDF 包含、差异报告明示；补渲染与发布断言（缺口 §5-P1-1） | M6 | 无 | spatial 渲染链 + published 类型/schema/builder 窄边界与对应测试 | integrated |
+| T-FIX-SPAT-CAM | Spatial 镜头会话相机接线：SpatialWorkspace 回传 session pose、App 喂真实位姿给"从当前画面添加/设为首页镜头"、镜头切换移动画布视口；补 App 壳层接线断言（缺口 §5-P1-2） | M6 | 无 | SpatialWorkspace/SpatialCameraPanel/App 窄接线与对应测试 | integrated |
+| T-FIX-FLOW-ENTRY | Flow 结构命令 UI 入口（删除/复制/重排/层级移动按钮 + Delete/Ctrl+D 键盘）+ onStructuralCommand 接线 + 媒体/互动组件插入禁用或教师安全拒绝（缺口 §5-P2-3/4/5） | M5 | 无 | Flow 大纲/画布/ElementsTab/PropertiesTab 与对应测试 | integrated |
+| T-FIX-FLOW-LAYER | Flow 统一图层进入生产画布与图层面板（消费 view 已物化的 global/surface 图层；不经 donor FlowCourseCanvas）（缺口 §5-P2-6） | M5 | T-FIX-FLOW-ENTRY | FlowWorkspace/RightSidebar 窄边界与对应测试 | integrated |
+| T-FIX-SPAT-INSPECT | SpatialLayerInspector blur/Enter 提交（一次编辑一次 history）+ 支持负坐标输入（缺口 §5-P2-7） | M6 | 无 | SpatialLayerInspector 与对应测试 | integrated |
+| T-FIX-SPAT-CTRL | Spatial 控制器三件套：audio:change 订阅刷新静音标签、progress 真实源、replay 后 DOM 与 canonical session 一致（去 seed 钉死）（缺口 §5-P2-8） | M6 | 无 | SpatialSurfaceHost 控制器段与对应测试 | integrated |
+| T-FIX-SURFACE-NAV | 混合工程表面导航入口 + 场景目录按 location 列举三类 kind（缺口 §5-P2-9/10） | M5/M6 | 无 | ScenePanel 跨表面列表 + picker 按 location 与对应测试 | integrated |
+| T-FIX-TRIAL-FS | Flow/Spatial 路由"当前位置试运行"动线（缺口 §5-P2-11） | M5/M6 | 无 | Workspace 早返回分支与 trialRunOverlay 窄边界与对应测试 | integrated |
 
-P3 一致性项（术语、DOCX 范围、schemaVersion bump、helper 去重、旋转选择 chrome、capture 队列、includeInStaticExports、Flow 宿主 interactions、世界图层删除级联）登记为 M5/M6 Gate 前的收尾批次，随上述任务集成后由协调者视余量派发。
+P1/P2 收口任务已全部 integrated，并完成共享热点 App/Store/Workspace 接线与 `publishedCourse.ts` paths/relations 水合修复。收口证据：全量 Vitest 205 文件 / 1325 测试、`npm run typecheck`、`build:player`、`build:renderer` 通过；代表 Electron E2E `v9DefaultBoundary` 3/3 与 `v9SpatialAuthoring` 1/1 通过。
+
+P3 一致性项（术语、DOCX 范围、schemaVersion bump、helper 去重、旋转选择 chrome、capture 队列、includeInStaticExports、Flow 宿主 interactions、世界图层删除级联）仍登记为 M5/M6 Gate 前的收尾批次，由协调者视余量继续派发；修复完成前 M5/M6 Gate 仍不判定。
 
 M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
 
