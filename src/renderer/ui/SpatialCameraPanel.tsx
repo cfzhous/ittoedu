@@ -16,6 +16,8 @@ export interface SpatialCameraPanelProps {
   worldLayerItems: readonly LayerItem[]
   semanticZoomRules: readonly SpatialSemanticZoomRule[]
   disabled?: boolean
+  sessionCameraLabel?: string
+  disabledReason?: string
   onAddFrame(): void
   onRenameFrame(frameId: string, name: string): void
   onReorderFrame(frameId: string, toIndex: number): void
@@ -129,6 +131,8 @@ export function SpatialCameraPanel({
   worldLayerItems,
   semanticZoomRules,
   disabled = false,
+  sessionCameraLabel,
+  disabledReason,
   onAddFrame,
   onRenameFrame,
   onReorderFrame,
@@ -173,6 +177,12 @@ export function SpatialCameraPanel({
       <p className="property-hint">
         「{surfaceTitle}」的工程镜头会随课程保存；画面平移和缩放只在本次编辑中生效，不会写入课程。
       </p>
+      {sessionCameraLabel && (
+        <p className="property-hint">当前画面：{sessionCameraLabel}</p>
+      )}
+      {disabled && disabledReason && (
+        <p className="property-hint" role="status">{disabledReason}</p>
+      )}
 
       <div className="property-subsection-header">
         <strong>镜头列表</strong>

@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type {
   LayerItem,
+  SpatialCameraPose,
   SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import {
@@ -37,6 +38,8 @@ export interface SpatialWorkspaceProps {
   readonly viewportSize: { width: number; height: number }
   readonly selectedLayerItemIds?: readonly string[]
   readonly interactionDisabled?: boolean
+  readonly activeCameraFrameId?: string | null
+  readonly onCameraChange?: (pose: SpatialCameraPose) => void
   readonly onSelect: (ids: readonly string[]) => void
   readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
 }
@@ -287,16 +290,58 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     viewportSize,
     selectedLayerItemIds,
     interactionDisabled = false,
+    activeCameraFrameId,
+    onCameraChange,
     onSelect,
     onTransformEnd,
   } = props
   const rootRef = useRef<HTMLDivElement>(null)
-  const [camera, setCamera] = useState<SpatialCamera>(() => (
-    spatialCameraFromPose(spatial.camera.home, viewportSize)
-  ))
+  const [camera, setCamera] = useState<SpatialCamera>(() => {
+    const activeFrame = activeCameraFrameId
+      ? spatial.camera.frames.find((frame) => frame.id === activeCameraFrameId)
+      : undefined
+    return spatialCameraFromPose(activeFrame ?? spatial.camera.home, viewportSize)
+  })
   const [drafts, setDrafts] = useState<Readonly<Record<string, SpatialWorkspaceFrame>>>({})
   const draftsRef = useRef<Readonly<Record<string, SpatialWorkspaceFrame>>>({})
   const gestureRef = useRef<SpatialGesture | null>(null)
+  const cameraRef = useRef(camera)
+  cameraRef.current = camera
+  const onCameraChangeRef = useRef(onCameraChange)
+  onCameraChangeRef.current = onCameraChange
+  const previousHomeRef = useRef({
+    surfaceId: spatial.id,
+    x: spatial.camera.home.x,
+    y: spatial.camera.home.y,
+    zoom: spatial.camera.home.zoom,
+  })
+  const previousActiveCameraFrameIdRef = useRef(activeCameraFrameId)
+  const wheelEmitRafRef = useRef<number | null>(null)
+  const pendingWheelPoseRef = useRef<SpatialCameraPose | null>(null)
+
+  const commitCamera = useCallback((next: SpatialCamera): void => {
+    setCamera(next)
+    cameraRef.current = next
+    onCameraChangeRef.current?.({ x: next.x, y: next.y, zoom: next.zoom })
+  }, [])
+
+  const scheduleWheelEmit = useCallback((pose: SpatialCameraPose): void => {
+    pendingWheelPoseRef.current = { x: pose.x, y: pose.y, zoom: pose.zoom }
+    if (wheelEmitRafRef.current !== null) return
+    const flushWheelEmit = (): void => {
+      wheelEmitRafRef.current = null
+      const latest = pendingWheelPoseRef.current
+      pendingWheelPoseRef.current = null
+      if (latest) {
+        onCameraChangeRef.current?.({ x: latest.x, y: latest.y, zoom: latest.zoom })
+      }
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      wheelEmitRafRef.current = requestAnimationFrame(flushWheelEmit)
+    } else {
+      wheelEmitRafRef.current = window.setTimeout(flushWheelEmit, 16)
+    }
+  }, [])
 
   const selectedIds = selectedLayerItemIds ?? []
   const itemById = useMemo(
@@ -307,8 +352,29 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
   // Reset the session camera only when the surface identity or its authored
   // home pose changes. Viewport-size changes keep the current pan/zoom.
   useEffect(() => {
+    const previousHome = previousHomeRef.current
+    const nextHome = {
+      surfaceId: spatial.id,
+      x: spatial.camera.home.x,
+      y: spatial.camera.home.y,
+      zoom: spatial.camera.home.zoom,
+    }
+    previousHomeRef.current = nextHome
+    if (
+      previousHome.surfaceId === nextHome.surfaceId &&
+      previousHome.x === nextHome.x &&
+      previousHome.y === nextHome.y &&
+      previousHome.zoom === nextHome.zoom
+    ) return
     setCamera(spatialCameraFromPose(spatial.camera.home, viewportSize))
-  }, [spatial.id, spatial.camera.home.x, spatial.camera.home.y, spatial.camera.home.zoom])
+  }, [
+    spatial.id,
+    spatial.camera.home.x,
+    spatial.camera.home.y,
+    spatial.camera.home.zoom,
+    viewportSize.width,
+    viewportSize.height,
+  ])
 
   useEffect(() => {
     setCamera((current) => validateSpatialCamera({
@@ -317,6 +383,36 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
       viewportHeight: viewportSize.height,
     }))
   }, [viewportSize.width, viewportSize.height])
+
+  useEffect(() => {
+    const previousFrameId = previousActiveCameraFrameIdRef.current
+    previousActiveCameraFrameIdRef.current = activeCameraFrameId
+    if (previousFrameId === activeCameraFrameId) return
+    const activeFrame = activeCameraFrameId
+      ? spatial.camera.frames.find((frame) => frame.id === activeCameraFrameId)
+      : undefined
+    if (!activeFrame) return
+    commitCamera(spatialCameraFromPose(
+      { x: activeFrame.x, y: activeFrame.y, zoom: activeFrame.zoom },
+      viewportSize,
+    ))
+  }, [
+    activeCameraFrameId,
+    commitCamera,
+    spatial.camera.frames,
+    viewportSize.width,
+    viewportSize.height,
+  ])
+
+  useEffect(() => () => {
+    const rafId = wheelEmitRafRef.current
+    if (rafId === null) return
+    if (typeof requestAnimationFrame === 'function') {
+      cancelAnimationFrame(rafId)
+    } else {
+      window.clearTimeout(rafId)
+    }
+  }, [])
 
   const commitDrafts = useCallback((next: Readonly<Record<string, SpatialWorkspaceFrame>>) => {
     draftsRef.current = next
@@ -357,7 +453,18 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     if (!gesture || gesture.pointerId !== event.pointerId) return
     gestureRef.current = null
     rootRef.current?.releasePointerCapture?.(event.pointerId)
-    if (gesture.kind === 'pan') return
+    if (gesture.kind === 'pan') {
+      if (!gesture.moved) return
+      const nextCamera = panCamera(
+        gesture.startCamera,
+        {
+          x: event.clientX - gesture.startClientX,
+          y: event.clientY - gesture.startClientY,
+        },
+      )
+      commitCamera(nextCamera)
+      return
+    }
     if (!gesture.moved) {
       commitDrafts({})
       return
@@ -372,7 +479,7 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     }
     commitDrafts({})
     if (transforms.length > 0) onTransformEnd(transforms)
-  }, [commitDrafts, itemById, onTransformEnd])
+  }, [commitCamera, commitDrafts, itemById, onTransformEnd])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent): void => {
     const gesture = gestureRef.current
@@ -549,7 +656,9 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
 
   // Native listener: React's wheel binding is not guaranteed to be
   // non-passive, and the authoring workspace must keep its zoom-at-cursor
-  // behavior when a trackpad or wheel is used.
+  // behavior when a trackpad or wheel is used. Camera updates are applied
+  // immediately so the canvas feels responsive; the callback is scheduled on
+  // the next animation frame so it is not emitted once per wheel tick.
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
@@ -558,24 +667,29 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
       const bounds = root.getBoundingClientRect()
       const anchor = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
       const factor = Math.exp(-event.deltaY * 0.0015)
-      setCamera((current) => zoomCameraAt(current, current.zoom * factor, anchor))
+      const current = cameraRef.current
+      const next = zoomCameraAt(current, current.zoom * factor, anchor)
+      setCamera(next)
+      cameraRef.current = next
+      scheduleWheelEmit({ x: next.x, y: next.y, zoom: next.zoom })
       event.preventDefault()
     }
     root.addEventListener('wheel', handleWheel, { passive: false })
     return () => root.removeEventListener('wheel', handleWheel)
-  }, [interactionDisabled])
+  }, [interactionDisabled, scheduleWheelEmit])
 
   const zoomBy = useCallback((factor: number): void => {
-    setCamera((current) => zoomCameraAt(
+    const current = cameraRef.current
+    commitCamera(zoomCameraAt(
       current,
       current.zoom * factor,
       { x: current.viewportWidth / 2, y: current.viewportHeight / 2 },
     ))
-  }, [])
+  }, [commitCamera])
 
   const resetCamera = useCallback((): void => {
-    setCamera(spatialCameraFromPose(spatial.camera.home, viewportSize))
-  }, [spatial.camera.home, viewportSize])
+    commitCamera(spatialCameraFromPose(spatial.camera.home, viewportSize))
+  }, [commitCamera, spatial.camera.home, viewportSize])
 
   const zoomPercent = Math.round(camera.zoom * 100)
 
