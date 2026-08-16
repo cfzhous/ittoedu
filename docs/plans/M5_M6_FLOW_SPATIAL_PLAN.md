@@ -118,3 +118,28 @@ M5 与 M6 默认由两个执行者并行派发：两者表面语义与 owns 不�
 
 - 无 App 壳层 sessionCamera 接线测试、无"激活镜头移动画布"测试、无 Inspector 击键-history 测试、无任何路径/关系渲染断言、无混合工程表面导航断言。
 - 收口任务必须各补一条真实断言或代表性 Electron 路径。
+
+## 6. 收口轮审计结论（2026-08-16，真实复核）
+
+收口任务板（§4.5 T-FIX-*）集成后，协调者做了第二轮 diff 审查 + 真实体验复核（真实 Electron 应用 + 手动测试工程 `output/manual-test/`）：
+
+### 复核确认真实修复且行为成立
+- Flow 结构命令全入口（画布/大纲工具条六键 + Delete/Ctrl+D 键盘）、媒体/互动组件插入禁用带原因、统一图层叠加与图层页、Inspector blur/Enter 提交与负坐标、一次编辑一次撤销（实测撤销后精确回退）、保存→完全关闭→重开→继续编辑、四种导出（单 HTML/网页包/PDF/DOCX）全真，DOCX 为真实 OOXML 语义文档（含 `w:tbl`，零图片伪装）。
+- Spatial 0.5x/1x/2x 缩放、平移、小地图、屏幕空间控件不随世界缩放（控件尺寸在 100%/195% 下逐位一致）、点选/拖动/画布手势、"从当前画面添加镜头"捕获真实会话位姿（实测 125% · x-256 y-144）。
+- Spatial 路径/关系全链：编辑画布连线/折线、Published payload 保留、Player 试运行渲染（实测 polyline/line 节点存在）、打印/PDF 包含、差异报告不再过度声称。
+- Flow/Spatial 试运行按钮真实存在，启动/退出干净，工程不变；混合工程左栏"课程内容"跨 Slide/Flow/Spatial 导航真实可用（教师术语"幻灯片/讲义/空间"正确）。
+- 机器证据：typecheck 绿、全量 Vitest 205 文件/1325 测试、构建通过、禁区（contracts/preservation）未被收口轮触碰、无 donor 重引入。
+
+### 复核发现的未闭合缺口
+- **P1（生产 Player 未接线）**：Spatial 控制器 `audioChangeSource`/`courseProgressSource` 已实现且有单测，但 `PublishedCourseApp` 构造 SpatialSurfaceHost 时未传入——交付课件中静音标签仍钉初始值、progress 仍显示"场景 — / 0 · 等待开始"（真实复核试运行截图证实）。
+- **P1（生产 Player 未接线）**：`ScenePickerOverlay` locations 模式已实现且有单测，但 `PublishedCourseApp.#pickerScenes()` 仍只列 slide-scene——混合工程场景目录只列 2 个幻灯片场景（真实复核截图证实）。
+- **P2**：App 壳会话相机 effect 时序——镜头切换后 `spatialSessionCamera` 被重置为 null 回退 home，此时"从当前画面添加/设为首页镜头"捕获错误位姿；且无 App 级接线测试。
+- **P2**：relation `label` / path `name` 仍零渲染（数据保留但无 `<text>` 消费方）。
+- **P2**：`workspaceFlowSpatialTrial.test.tsx` 的 fallback 用例是假测试（从不点击按钮、store mock 成抛错、无"退出后工程不变"断言）。
+
+### UI/UX 结构性问题（用户真实观察"UI 设计完全不对"证实，阻塞 art candidate）
+- Flow 编辑画布把文档渲染为暗色舞台上的漂浮块 + 突兀六键工具条，不是文档式阅读栏；试运行视图呈现正确——编辑态与运行态呈现严重不一致；Flow 画布不支持直接编辑文字（只能属性栏编辑）。
+- 左面板层级混乱：纯 slide 工程也挂与场景列表重复的"课程内容"导航；导航头与表面区各有一套"添加讲义/添加空间"重复入口；大纲与课程内容混排。
+- Spatial 左面板是密排工程表单（镜头/首页镜头/语义缩放/世界图层），非教师向布局。
+- 术语残留：右栏"FLOW 内容块"/"SPATIAL 内容"、状态栏"Flow 讲义 · N 个内容块"/"Spatial 空间·总览"、错误"无法新建 Flow 讲义"（与按钮"添加讲义"自相矛盾）；Flow/Spatial 路由底部状态条显示"场景画面/基础场景"（Slide 语义）。
+- 决策：**暂停 M7/M8 流水线，先做 UI/UX 收口批次**（见总纲 §4.5 收口任务板 T-FIX-UI-*），这些问题不会随后续开发自愈，M7 的 Mixed 与 M8 的教师验收都建立在其上。
