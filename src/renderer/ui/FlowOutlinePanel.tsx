@@ -1,6 +1,7 @@
 import type { FlowEditorView, FlowOutlineEntry } from '../course/flowEditorView'
+import type { FlowBlockMoveDirection, FlowStructuralActionProps } from './FlowWorkspace'
 
-export interface FlowOutlinePanelProps {
+export interface FlowOutlinePanelProps extends FlowStructuralActionProps {
   readonly view: FlowEditorView
   readonly selectedBlockId?: string | null
   readonly onSelectBlock?: (blockId: string) => void
@@ -26,14 +27,104 @@ function buildFlowOutlineTree(entries: readonly FlowOutlineEntry[]): FlowOutline
   return roots
 }
 
+function FlowOutlineBlockToolbar({
+  blockId,
+  onDeleteBlock,
+  onDuplicateBlock,
+  onMoveBlock,
+}: {
+  blockId: string
+  onDeleteBlock?: (blockId: string) => void
+  onDuplicateBlock?: (blockId: string) => void
+  onMoveBlock?: (blockId: string, direction: FlowBlockMoveDirection) => void
+}) {
+  if (!onDeleteBlock && !onDuplicateBlock && !onMoveBlock) return null
+  return (
+    <div
+      className="flow-outline-block-toolbar"
+      role="toolbar"
+      aria-label="内容块操作"
+      data-testid="flow-outline-block-toolbar"
+      style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', margin: '4px 0' }}
+    >
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-outline-block-delete"
+        aria-label="删除"
+        disabled={!onDeleteBlock}
+        onClick={() => onDeleteBlock?.(blockId)}
+      >
+        删除
+      </button>
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-outline-block-duplicate"
+        aria-label="复制"
+        disabled={!onDuplicateBlock}
+        onClick={() => onDuplicateBlock?.(blockId)}
+      >
+        复制
+      </button>
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-outline-block-move-up"
+        aria-label="上移"
+        disabled={!onMoveBlock}
+        onClick={() => onMoveBlock?.(blockId, 'up')}
+      >
+        上移
+      </button>
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-outline-block-move-down"
+        aria-label="下移"
+        disabled={!onMoveBlock}
+        onClick={() => onMoveBlock?.(blockId, 'down')}
+      >
+        下移
+      </button>
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-outline-block-promote"
+        aria-label="提升层级"
+        disabled={!onMoveBlock}
+        onClick={() => onMoveBlock?.(blockId, 'left')}
+      >
+        提升层级
+      </button>
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-outline-block-demote"
+        aria-label="降低层级"
+        disabled={!onMoveBlock}
+        onClick={() => onMoveBlock?.(blockId, 'right')}
+      >
+        降低层级
+      </button>
+    </div>
+  )
+}
+
 function FlowOutlineNodeView({
   node,
   selectedBlockId,
   onSelectBlock,
+  onDeleteBlock,
+  onDuplicateBlock,
+  onMoveBlock,
 }: {
   node: FlowOutlineNode
   selectedBlockId: string | null | undefined
   onSelectBlock?: (blockId: string) => void
+  onDeleteBlock?: (blockId: string) => void
+  onDuplicateBlock?: (blockId: string) => void
+  onMoveBlock?: (blockId: string, direction: FlowBlockMoveDirection) => void
 }) {
   const { entry } = node
   const selected = entry.blockId === selectedBlockId
@@ -53,6 +144,16 @@ function FlowOutlineNodeView({
         </span>
         <span className="flow-outline-title">{entry.title}</span>
       </button>
+      {selected
+        ? (
+            <FlowOutlineBlockToolbar
+              blockId={entry.blockId}
+              onDeleteBlock={onDeleteBlock}
+              onDuplicateBlock={onDuplicateBlock}
+              onMoveBlock={onMoveBlock}
+            />
+          )
+        : null}
       {node.children.length > 0
         ? (
             <ul className="flow-outline-children">
@@ -62,6 +163,9 @@ function FlowOutlineNodeView({
                   node={child}
                   selectedBlockId={selectedBlockId}
                   onSelectBlock={onSelectBlock}
+                  onDeleteBlock={onDeleteBlock}
+                  onDuplicateBlock={onDuplicateBlock}
+                  onMoveBlock={onMoveBlock}
                 />
               ))}
             </ul>
@@ -75,6 +179,9 @@ export function FlowOutlinePanel({
   view,
   selectedBlockId,
   onSelectBlock,
+  onDeleteBlock,
+  onDuplicateBlock,
+  onMoveBlock,
 }: FlowOutlinePanelProps) {
   const tree = buildFlowOutlineTree(view.outline)
   return (
@@ -86,6 +193,9 @@ export function FlowOutlinePanel({
             node={node}
             selectedBlockId={selectedBlockId}
             onSelectBlock={onSelectBlock}
+            onDeleteBlock={onDeleteBlock}
+            onDuplicateBlock={onDuplicateBlock}
+            onMoveBlock={onMoveBlock}
           />
         ))}
       </ul>

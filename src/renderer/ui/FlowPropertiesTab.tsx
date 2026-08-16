@@ -79,6 +79,8 @@ export interface FlowPropertiesTabProps {
   componentPackages?: ReadonlyArray<{ packageId: string; version: string }>
   onPatch?(blockId: string, patch: FlowBlockPatch): void
   onStructuralCommand?(command: FlowStructuralCommand): void
+  /** Teacher-safe reason shown when structural commands (list items, table rows/columns) are not available. */
+  structuralUnavailableReason?: string
 }
 
 type IconComponent = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>
@@ -368,17 +370,28 @@ function ListEditor({
   block,
   disabled,
   structuralDisabled,
+  structuralUnavailableReason,
   onPatch,
   onStructuralCommand,
 }: {
   block: FlowListBlock
   disabled: boolean
   structuralDisabled: boolean
+  structuralUnavailableReason?: string
   onPatch(blockId: string, patch: FlowBlockPatch): void
   onStructuralCommand(command: FlowStructuralCommand): void
 }) {
   return (
     <BlockSection icon={List} title="列表" testId="flow-editor-list">
+      {structuralDisabled && (
+        <p
+          className="property-hint"
+          role="status"
+          data-testid="flow-structural-unavailable-reason"
+        >
+          {structuralUnavailableReason ?? '当前内容块暂不支持结构编辑，请使用其他方式调整内容。'}
+        </p>
+      )}
       <ToggleRow
         label="有序列表"
         checked={block.ordered}
@@ -543,12 +556,14 @@ function TableEditor({
   block,
   disabled,
   structuralDisabled,
+  structuralUnavailableReason,
   onPatch,
   onStructuralCommand,
 }: {
   block: FlowTableBlock
   disabled: boolean
   structuralDisabled: boolean
+  structuralUnavailableReason?: string
   onPatch(blockId: string, patch: FlowBlockPatch): void
   onStructuralCommand(command: FlowStructuralCommand): void
 }) {
@@ -556,6 +571,15 @@ function TableEditor({
   const commitRows = (rows: FlowTableBlock['rows']) => onPatch(block.id, { rows })
   return (
     <BlockSection icon={Table} title="表格" testId="flow-editor-table">
+      {structuralDisabled && (
+        <p
+          className="property-hint"
+          role="status"
+          data-testid="flow-structural-unavailable-reason"
+        >
+          {structuralUnavailableReason ?? '当前内容块暂不支持结构编辑，请使用其他方式调整内容。'}
+        </p>
+      )}
       <BufferedInput
         label="表格标题"
         value={block.caption ?? ''}
@@ -870,6 +894,7 @@ export function FlowPropertiesTab({
   componentPackages = [],
   onPatch,
   onStructuralCommand,
+  structuralUnavailableReason,
 }: FlowPropertiesTabProps) {
   if (!block) {
     return <FlowPropertiesEmpty />
@@ -893,6 +918,7 @@ export function FlowPropertiesTab({
           block={block}
           disabled={disabled}
           structuralDisabled={structuralDisabled}
+          structuralUnavailableReason={structuralUnavailableReason}
           onPatch={patch}
           onStructuralCommand={structural}
         />
@@ -913,6 +939,7 @@ export function FlowPropertiesTab({
           block={block}
           disabled={disabled}
           structuralDisabled={structuralDisabled}
+          structuralUnavailableReason={structuralUnavailableReason}
           onPatch={patch}
           onStructuralCommand={structural}
         />

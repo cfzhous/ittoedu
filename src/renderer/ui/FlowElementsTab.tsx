@@ -31,6 +31,19 @@ import type {
 
 type BlockIdOptional<Block extends FlowBlock> = Omit<Block, 'id'> & { id?: string }
 
+export type FlowElementAssetKind = 'image' | 'audio' | 'video'
+
+export interface FlowElementAsset {
+  readonly id: string
+  readonly label: string
+  readonly kind: FlowElementAssetKind
+}
+
+export interface FlowElementsUnavailableReasons {
+  readonly media?: string
+  readonly component?: string
+}
+
 export type FlowHeadingInsertRequest = BlockIdOptional<FlowHeadingBlock>
 export type FlowParagraphInsertRequest = BlockIdOptional<FlowParagraphBlock>
 export type FlowListInsertRequest = BlockIdOptional<FlowListBlock>
@@ -65,6 +78,13 @@ export interface FlowElementsTabProps {
   onInsertNested?(sectionId: string, request: FlowBlockInsertRequest): void
   disabledReason?: string
   nestedSectionId?: string
+  /** Available project assets. When this prop is present and empty, media
+   *  insertion is disabled with a teacher-safe reason. */
+  assets?: readonly FlowElementAsset[]
+  /** Available embedded component packages. When this prop is present and
+   *  empty, component insertion is disabled with a teacher-safe reason. */
+  componentPackages?: readonly { packageId: string; version: string }[]
+  unavailableReasons?: FlowElementsUnavailableReasons
 }
 
 interface FlowBlockTypeMeta {
@@ -100,6 +120,10 @@ function clientTempId(prefix: string): string {
  *  layer requires complete child records on insert. */
 export function createFlowBlockInsertRequest(
   type: FlowBlock['type'],
+  context: {
+    assets?: readonly FlowElementAsset[]
+    componentPackages?: readonly { packageId: string; version: string }[]
+  } = {},
 ): FlowBlockInsertRequest {
   switch (type) {
     case 'heading':
@@ -117,18 +141,21 @@ export function createFlowBlockInsertRequest(
       }
     case 'divider':
       return { id: clientTempId('block'), type }
-    case 'media':
-      // The command layer is expected to reject or fill an empty asset id
-      // with a teacher-safe message before the block becomes persisted data.
+    case 'media': {
+      const usableAssets = (context.assets ?? []).filter(
+        (asset) => asset.kind === 'image' || asset.kind === 'audio' || asset.kind === 'video',
+      )
+      const firstAsset = usableAssets.find((asset) => asset.kind === 'image') ?? usableAssets[0]
       return {
         id: clientTempId('block'),
         type,
-        assetId: '',
-        mediaKind: 'image',
+        assetId: firstAsset?.id ?? '',
+        mediaKind: firstAsset?.kind ?? 'image',
         altText: '',
         caption: '',
         layout: 'content-width',
       }
+    }
     case 'table':
       return {
         id: clientTempId('block'),
@@ -178,14 +205,19 @@ export function createFlowBlockInsertRequest(
         collapsedByDefault: false,
         blocks: [],
       }
-    case 'component':
+    case 'component': {
+      const firstPackage = context.componentPackages?.[0]
+      const fallbackAsset = (context.assets ?? []).find((asset) => asset.kind === 'image')
       return {
         id: clientTempId('block'),
         type,
-        component: { packageId: '', version: '' },
+        component: firstPackage
+          ? { packageId: firstPackage.packageId, version: firstPackage.version }
+          : { packageId: '', version: '' },
         props: {},
-        staticFallbackAssetId: '',
+        staticFallbackAssetId: fallbackAsset?.id ?? '',
       }
+    }
   }
 }
 
@@ -194,11 +226,23 @@ export function FlowElementsTab({
   onInsertNested,
   disabledReason,
   nestedSectionId,
+  assets,
+  componentPackages,
+  unavailableReasons,
 }: FlowElementsTabProps) {
   const toggleId = useId()
   const [insertNested, setInsertNested] = useState(false)
   const disabled = Boolean(disabledReason)
   const canNest = Boolean(onInsertNested) && Boolean(nestedSectionId)
+  const usableMediaAssets = (assets ?? []).filter(
+    (asset) => asset.kind === 'image' || asset.kind === 'audio' || asset.kind === 'video',
+  )
+  const mediaUnavailableReason = assets !== undefined && usableMediaAssets.length === 0
+    ? (unavailableReasons?.media ?? '请先导入图片、音频或视频素材，再插入媒体内容。')
+    : undefined
+  const componentUnavailableReason = componentPackages !== undefined && componentPackages.length === 0
+    ? (unavailableReasons?.component ?? '请先嵌入互动组件包，再插入互动组件。')
+    : undefined
 
   const handleInsert = (request: FlowBlockInsertRequest) => {
     if (disabled) return
@@ -222,6 +266,18 @@ export function FlowElementsTab({
         </div>
       )}
 
+      {mediaUnavailableReason && (
+        <p className="property-hint" role="status" data-testid="flow-media-unavailable-reason">
+          {mediaUnavailableReason}
+        </p>
+      )}
+
+      {componentUnavailableReason && (
+        <p className="property-hint" role="status" data-testid="flow-component-unavailable-reason">
+          {componentUnavailableReason}
+        </p>
+      )}
+
       {canNest && (
         <div className="toggle-row" data-testid="flow-nested-insert-toggle">
           <span>插入到当前分节</span>
@@ -240,23 +296,31 @@ export function FlowElementsTab({
       )}
 
       <div className="element-grid" role="group" aria-label="Flow 内容块类型">
-        {FLOW_BLOCK_TYPES.map(({ type, label, icon: Icon, testId }) => (
-          <button
-            key={type}
-            type="button"
-            className="element-card"
-            aria-label={label}
-            data-testid={testId}
-            disabled={disabled}
-            title={disabled ? disabledReason : `插入${label}`}
-            onClick={() => handleInsert(createFlowBlockInsertRequest(type))}
-          >
-            <span className="element-icon">
-              <Icon size={20} aria-hidden="true" />
-            </span>
-            {label}
-          </button>
-        ))}
+        {FLOW_BLOCK_TYPES.map(({ type, label, icon: Icon, testId }) => {
+          const typeUnavailableReason = type === 'media'
+            ? mediaUnavailableReason
+            : type === 'component'
+              ? componentUnavailableReason
+              : undefined
+          const typeDisabled = disabled || Boolean(typeUnavailableReason)
+          return (
+            <button
+              key={type}
+              type="button"
+              className="element-card"
+              aria-label={label}
+              data-testid={testId}
+              disabled={typeDisabled}
+              title={typeDisabled ? (typeUnavailableReason ?? disabledReason ?? `插入${label}`) : `插入${label}`}
+              onClick={() => handleInsert(createFlowBlockInsertRequest(type, { assets, componentPackages }))}
+            >
+              <span className="element-icon">
+                <Icon size={20} aria-hidden="true" />
+              </span>
+              {label}
+            </button>
+          )
+        })}
       </div>
 
       {disabled && !disabledReason && (
