@@ -1,4 +1,4 @@
-import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import type { CourseLocation, CourseProjectDocument } from '@/shared/courseProjectTypes'
 import {
   buildPublishedCourseV2Payload,
   type CoursePublishSources,
@@ -12,6 +12,22 @@ import { COURSE_PLAYER_CSS } from '@/renderer/export/course/buildCoursePackages'
 export interface TrialRunStart {
   readonly locationId: string
   readonly stateId?: string
+}
+
+/**
+ * Locations whose kind owns a meaningful "current position" for a trial
+ * run. Flow and Spatial locations start from their selected block/camera;
+ * slide-scene keeps its existing state-carrying behavior.
+ */
+export function trialRunSupportedForLocation(location: CourseLocation): boolean {
+  switch (location.kind) {
+    case 'slide-scene':
+    case 'flow-block':
+    case 'spatial-camera':
+      return true
+    default:
+      return false
+  }
 }
 
 export interface TrialRunSelection {

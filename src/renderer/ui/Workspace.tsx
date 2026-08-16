@@ -173,6 +173,7 @@ export interface WorkspaceProps {
   spatialAuthoring?: WorkspaceSpatialAuthoringInput
   courseLocationUnavailableReason?: string
   interactionDisabled?: boolean
+  onTrialRun?: () => void
 }
 
 interface FormulaEditSession {
@@ -367,6 +368,54 @@ type CanvasAuthoringHit =
   | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
   | { kind: 'component'; target: Readonly<ComponentAuthoringTarget> }
 
+function WorkspaceTrialRunButton({
+  onTrialRun,
+  interactionDisabled = false,
+  testId,
+}: {
+  onTrialRun?: () => void
+  interactionDisabled?: boolean
+  testId: string
+}) {
+  const unavailable = !onTrialRun
+  const disabled = unavailable || interactionDisabled
+  return (
+    <button
+      type="button"
+      className="workspace-trial-run-switch"
+      data-testid={testId}
+      disabled={disabled}
+      title={unavailable
+        ? '当前位置试运行暂不可用'
+        : interactionDisabled
+          ? '正在处理，请稍候'
+          : '从当前位置开始试运行'}
+      onClick={disabled ? undefined : () => onTrialRun?.()}
+      style={{
+        position: 'absolute',
+        top: 7,
+        right: 9,
+        zIndex: 8,
+        display: 'inline-flex',
+        minHeight: 25,
+        alignItems: 'center',
+        gap: 4,
+        padding: '0 8px',
+        border: '1px solid rgba(255, 255, 255, 0.09)',
+        borderRadius: 7,
+        color: 'var(--text-muted)',
+        background: 'rgba(20, 22, 27, 0.9)',
+        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.18)',
+        backdropFilter: 'blur(6px)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontSize: 10,
+      }}
+    >
+      <Play size={13} />当前位置试运行
+    </button>
+  )
+}
+
 export function Workspace(props: WorkspaceProps) {
   if (props.courseLocationUnavailableReason) {
     return (
@@ -387,6 +436,11 @@ export function Workspace(props: WorkspaceProps) {
   if (props.flowAuthoring) {
     return (
       <main className="workspace workspace--edit" aria-label="Flow 讲义画布">
+        <WorkspaceTrialRunButton
+          onTrialRun={props.onTrialRun}
+          interactionDisabled={props.interactionDisabled}
+          testId="workspace-flow-trial-run"
+        />
         <div className="workspace-flow-authoring" data-testid="workspace-flow-authoring">
           <FlowWorkspace
             view={props.flowAuthoring.view}
@@ -400,6 +454,11 @@ export function Workspace(props: WorkspaceProps) {
   if (props.spatialAuthoring) {
     return (
       <main className="workspace workspace--edit" aria-label="Spatial 空间画布">
+        <WorkspaceTrialRunButton
+          onTrialRun={props.onTrialRun}
+          interactionDisabled={props.interactionDisabled}
+          testId="workspace-spatial-trial-run"
+        />
         <div className="workspace-spatial-authoring" data-testid="workspace-spatial-authoring">
           <SpatialWorkspace
             spatial={props.spatialAuthoring.spatial}
