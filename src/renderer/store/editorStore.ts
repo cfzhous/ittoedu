@@ -166,7 +166,7 @@ import {
   type SpatialPathUpdate,
   type SpatialRelationUpdate,
 } from '../course/spatialPathCommands'
-import type { FlowBlockPatch } from '../ui/FlowPropertiesTab'
+import type { FlowBlockPatch, FlowStructuralCommand } from '../ui/FlowPropertiesTab'
 import type { SpatialLayerInspectorLayer } from '../ui/SpatialLayerInspector'
 import {
   activateV9SlidePresentationState,
@@ -211,6 +211,7 @@ import {
   resolveV9SlideRuntimeLayerItemId,
   resolveV9SlideRuntimeTextValue,
   selectV9CourseFlowBlock,
+  selectV9CourseFlowLayer,
   selectV9CourseLocation,
   selectV9CourseSpatialLayers,
   selectV9SlideVerticalSlice,
@@ -315,6 +316,68 @@ function applyFlowBlockPatch(block: FlowBlock, patch: FlowBlockPatch): FlowBlock
     }
   }
   return next
+}
+
+function applyFlowStructuralCommand(
+  block: FlowBlock,
+  command: FlowStructuralCommand,
+): void {
+  if (block.type === 'list') {
+    if (command.kind === 'list.addItem') {
+      block.items.push({ id: `list-item:${nanoid(8)}`, text: command.text })
+      return
+    }
+    if (command.kind === 'list.deleteItem') {
+      const index = block.items.findIndex((item) => item.id === command.itemId)
+      if (index < 0) throw new Error('所选列表项已失效，请重新选择')
+      block.items.splice(index, 1)
+      return
+    }
+    if (command.kind === 'list.editItem') {
+      const item = block.items.find((entry) => entry.id === command.itemId)
+      if (!item) throw new Error('所选列表项已失效，请重新选择')
+      item.text = command.text
+      return
+    }
+    if (command.kind === 'list.reorderItem') {
+      const fromIndex = block.items.findIndex((item) => item.id === command.itemId)
+      if (fromIndex < 0) throw new Error('所选列表项已失效，请重新选择')
+      const [item] = block.items.splice(fromIndex, 1)
+      if (!item) throw new Error('所选列表项已失效，请重新选择')
+      block.items.splice(Math.max(0, Math.min(command.toIndex, block.items.length)), 0, item)
+      return
+    }
+  }
+  if (block.type === 'table') {
+    if (command.kind === 'table.addColumn') {
+      const columnId = `column:${nanoid(8)}`
+      block.columns.push({ id: columnId, header: '新列' })
+      for (const row of block.rows) row.cells[columnId] = ''
+      return
+    }
+    if (command.kind === 'table.deleteColumn') {
+      const columnIndex = block.columns.findIndex((column) => column.id === command.columnId)
+      if (columnIndex < 0) throw new Error('所选表格列已失效，请重新选择')
+      block.columns.splice(columnIndex, 1)
+      for (const row of block.rows) delete row.cells[command.columnId]
+      return
+    }
+    if (command.kind === 'table.addRow') {
+      const rowId = `row:${nanoid(8)}`
+      block.rows.push({
+        id: rowId,
+        cells: Object.fromEntries(block.columns.map((column) => [column.id, ''])),
+      })
+      return
+    }
+    if (command.kind === 'table.deleteRow') {
+      const rowIndex = block.rows.findIndex((row) => row.id === command.rowId)
+      if (rowIndex < 0) throw new Error('所选表格行已失效，请重新选择')
+      block.rows.splice(rowIndex, 1)
+      return
+    }
+  }
+  throw new Error('当前 Flow 内容块不支持该结构操作')
 }
 
 export type SidebarTab =
@@ -552,6 +615,8 @@ export interface EditorState {
   addCourseSurface(type: 'flow' | 'spatial-2d', title?: string): void
   selectCourseLocation(locationId: string): void
   selectCourseFlowBlock(blockId: string): void
+  selectCourseFlowLayer(layerItemId: string): void
+  applyCourseFlowStructuralCommand(command: FlowStructuralCommand): void
   insertCourseFlowBlock(
     request: FlowEditorBlockInput,
     options?: InsertCourseFlowBlockOptions,
@@ -3095,6 +3160,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
         return selectV9CourseFlowBlock(session, blockId)
       }, '已选择 Flow 内容块')
+    },
+
+    selectCourseFlowLayer(layerItemId) {
+      applyCourseCommand((session) => {
+        if (
+          session.selection.surfaceKind === 'flow' &&
+          session.selection.flowLayerItemId === layerItemId
+        ) {
+          return null
+        }
+        return selectV9CourseFlowLayer(session, layerItemId)
+      }, '已选择 Flow 图层')
+    },
+
+    applyCourseFlowStructuralCommand(command) {
+      applyCourseCommand((session) => {
+        const target = flowBlockTarget(
+          session.history.present,
+          session.selection,
+          command.blockId,
+        )
+        const history = updateFlowEditorBlock(
+          session.history,
+          target,
+          (block) => applyFlowStructuralCommand(block, command),
+        )
+        return replaceV9CourseHistory(session, history)
+      }, 'Flow 内容块结构已更新')
     },
 
     insertCourseFlowBlock(request, options) {

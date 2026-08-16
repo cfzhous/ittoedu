@@ -141,7 +141,7 @@ describe('Workspace Flow/Spatial current-location trial run', () => {
     expect(onTrialRun).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the Flow/Spatial trial-run buttons disabled with a teacher-safe title when no callback is provided', () => {
+  it('falls back to the internal course-session trial host when no external callback is provided', () => {
     const flow = render(
       <Workspace
         flowAuthoring={{
@@ -156,8 +156,8 @@ describe('Workspace Flow/Spatial current-location trial run', () => {
     )
 
     const flowButton = flow.getByTestId('workspace-flow-trial-run')
-    expect(flowButton).toBeDisabled()
-    expect(flowButton).toHaveAttribute('title', '当前位置试运行暂不可用')
+    expect(flowButton).not.toBeDisabled()
+    expect(flowButton).toHaveAttribute('title', '从当前位置开始试运行')
 
     flow.unmount()
 
@@ -178,7 +178,7 @@ describe('Workspace Flow/Spatial current-location trial run', () => {
     )
 
     const spatialButton = spatial.getByTestId('workspace-spatial-trial-run')
-    expect(spatialButton).toBeDisabled()
-    expect(spatialButton).toHaveAttribute('title', '当前位置试运行暂不可用')
+    expect(spatialButton).not.toBeDisabled()
+    expect(spatialButton).toHaveAttribute('title', '从当前位置开始试运行')
   })
 })

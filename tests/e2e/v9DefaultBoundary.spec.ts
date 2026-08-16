@@ -149,11 +149,11 @@ async function expectEditableMultiSurface(
   if (kind === 'flow-block') {
     await expect(editor.page.locator('.flow-editor-surface')).toHaveCount(1)
     await expect(editor.page.getByTestId('scene-panel-flow-outline')).toHaveCount(1)
-    await expect(editor.page.getByTestId('add-flow-surface')).toHaveCount(1)
+    await expect(editor.page.getByTestId('add-flow-surface')).toHaveCount(2)
   } else {
     await expect(editor.page.getByTestId('spatial-workspace')).toHaveCount(1)
     await expect(editor.page.getByTestId('scene-panel-spatial-frames')).toHaveCount(1)
-    await expect(editor.page.getByTestId('add-spatial-surface')).toHaveCount(1)
+    await expect(editor.page.getByTestId('add-spatial-surface')).toHaveCount(2)
   }
   await expect(editor.page.getByTestId('canvas-stage')).toHaveCount(0)
   await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)

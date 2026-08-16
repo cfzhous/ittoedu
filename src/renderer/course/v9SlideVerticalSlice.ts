@@ -184,6 +184,7 @@ export type V9CourseSurfaceKind = 'slide' | 'flow' | 'spatial-2d'
 export interface V9CourseSelection extends SlideEditorSelection {
   readonly surfaceKind?: V9CourseSurfaceKind
   readonly flowBlockId?: string | null
+  readonly flowLayerItemId?: string | null
   readonly spatialLayerItemIds?: readonly string[]
 }
 
@@ -407,6 +408,55 @@ function selectCourseEditorLocation(
     surfaceKind: 'spatial-2d' as const,
     spatialLayerItemIds: Object.freeze([]),
   })
+}
+
+export function selectV9CourseFlowLayer(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): V9SlideVerticalSliceState {
+  const project = state.history.present
+  const currentLocation = project.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (!currentLocation || currentLocation.kind !== 'flow-block') {
+    throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
+  }
+  const surface = project.surfaces.find(
+    (candidate) => candidate.id === currentLocation.surfaceId,
+  )
+  if (!surface || surface.type !== 'flow') {
+    throw new Error('当前 Flow 表面已失效，请重新选择')
+  }
+  const layerIds = new Set([
+    ...project.globalLayerItems.map((entry) => entry.item.layerItemId),
+    ...surface.surfaceLayerItems.map((entry) => entry.item.layerItemId),
+  ])
+  if (!layerIds.has(layerItemId)) {
+    throw new Error('所选 Flow 图层已失效，请重新选择')
+  }
+  const flowSelection = selectFlowEditorBlock(
+    project,
+    currentLocation.id,
+    currentLocation.blockId,
+  )
+  return freezeState(
+    state.sessionId,
+    state.history,
+    Object.freeze({
+      locationId: flowSelection.locationId,
+      stateId: null,
+      selectionIds: Object.freeze([layerItemId]),
+      surfaceKind: 'flow' as const,
+      flowBlockId: currentLocation.blockId,
+      flowLayerItemId: layerItemId,
+    }),
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
 }
 
 export function selectV9CourseFlowBlock(

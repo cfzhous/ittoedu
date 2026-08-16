@@ -131,6 +131,8 @@ function restoreSurface(surface: PublishedCourseSurface): CourseSurfaceDocument 
     world: {
       bounds: structuredClone(surface.world.bounds),
       layerItems: surface.world.layerItems.map(restoreLayerItem),
+      ...(surface.world.paths ? { paths: structuredClone(surface.world.paths) } : {}),
+      ...(surface.world.relations ? { relations: structuredClone(surface.world.relations) } : {}),
     },
     camera: structuredClone(surface.camera),
     semanticZoom: structuredClone(surface.semanticZoom),

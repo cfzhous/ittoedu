@@ -141,9 +141,9 @@ import {
   type AuthoringCanvasTarget,
 } from '../authoring/aiSelectionReference'
 import type { V9SlideLayerTarget } from '../course/v9SlideVerticalSlice'
-import type { FlowEditorView } from '../course/flowEditorView'
-import type { SpatialSurfaceDocument } from '../../shared/courseProjectTypes'
-import { FlowWorkspace } from './FlowWorkspace'
+import type { FlowEditorLayerView, FlowEditorView } from '../course/flowEditorView'
+import type { SpatialCameraPose, SpatialSurfaceDocument } from '../../shared/courseProjectTypes'
+import { FlowWorkspace, type FlowBlockMoveDirection } from './FlowWorkspace'
 import {
   SpatialWorkspace,
   type SpatialWorkspaceItemTransform,
@@ -153,12 +153,20 @@ export interface WorkspaceFlowAuthoringInput {
   readonly view: FlowEditorView
   readonly selectedBlockId?: string | null
   readonly onSelectBlock?: (blockId: string) => void
+  readonly onDeleteBlock?: (blockId: string) => void
+  readonly onDuplicateBlock?: (blockId: string) => void
+  readonly onMoveBlock?: (blockId: string, direction: FlowBlockMoveDirection) => void
+  readonly layers?: readonly FlowEditorLayerView[]
+  readonly selectedLayerItemId?: string | null
+  readonly onSelectLayer?: (layerItemId: string) => void
 }
 
 export interface WorkspaceSpatialAuthoringInput {
   readonly spatial: SpatialSurfaceDocument
   readonly viewportSize: { width: number; height: number }
   readonly selectedLayerItemIds?: readonly string[]
+  readonly activeCameraFrameId?: string | null
+  readonly onCameraChange?: (camera: SpatialCameraPose) => void
   readonly interactionDisabled?: boolean
   readonly onSelect: (ids: readonly string[]) => void
   readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
@@ -416,6 +424,95 @@ function WorkspaceTrialRunButton({
   )
 }
 
+function FlowSpatialTrialRunHost({
+  externalOnTrialRun,
+  interactionDisabled = false,
+  testId,
+}: {
+  externalOnTrialRun?: () => void
+  interactionDisabled?: boolean
+  testId: string
+}) {
+  const [trialRun, setTrialRun] = useState<{ url: string } | null>(null)
+  const resourceRef = useRef<{ revoke(): void } | null>(null)
+  const startTrialRun = useCallback(() => {
+    if (resourceRef.current) return
+    const state = useEditorStore.getState()
+    const courseSession = state.courseSession
+    if (courseSession === null) {
+      state.setStatus('当前位置试运行不可用：工程尚未打开')
+      return
+    }
+    try {
+      const start = resolveTrialRunStart(
+        courseSession.history.present,
+        courseSession.selection,
+      )
+      const resource = createTrialRunOverlay(
+        {
+          project: courseSession.history.present,
+          assetFiles: courseSession.assetFiles,
+          components: courseSession.componentPackages,
+        },
+        start,
+        loadPlayerBundle(),
+      )
+      resourceRef.current = resource
+      setTrialRun({ url: resource.url })
+      state.setStatus('当前位置试运行已启动；退出后回到编辑画布，现有内容不会改变')
+    } catch (error) {
+      state.setStatus(`当前位置试运行启动失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [])
+  const closeTrialRun = useCallback(() => {
+    resourceRef.current?.revoke()
+    resourceRef.current = null
+    setTrialRun(null)
+  }, [])
+  useEffect(() => () => {
+    resourceRef.current?.revoke()
+    resourceRef.current = null
+  }, [])
+  return (
+    <>
+      <WorkspaceTrialRunButton
+        onTrialRun={externalOnTrialRun ?? startTrialRun}
+        interactionDisabled={interactionDisabled}
+        testId={testId}
+      />
+      {trialRun && (
+        <iframe
+          className="trial-run-frame"
+          data-testid="trial-run-frame"
+          title="当前位置试运行"
+          src={trialRun.url}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            border: 0,
+            zIndex: 40,
+          }}
+        />
+      )}
+      {trialRun && (
+        <button
+          type="button"
+          className="trial-run-exit"
+          data-testid="trial-run-exit"
+          title="退出试运行"
+          aria-label="退出试运行"
+          onClick={closeTrialRun}
+          style={{ position: 'absolute', top: 7, right: 140, zIndex: 45 }}
+        >
+          退出试运行
+        </button>
+      )}
+    </>
+  )
+}
+
 export function Workspace(props: WorkspaceProps) {
   if (props.courseLocationUnavailableReason) {
     return (
@@ -436,8 +533,8 @@ export function Workspace(props: WorkspaceProps) {
   if (props.flowAuthoring) {
     return (
       <main className="workspace workspace--edit" aria-label="Flow 讲义画布">
-        <WorkspaceTrialRunButton
-          onTrialRun={props.onTrialRun}
+        <FlowSpatialTrialRunHost
+          externalOnTrialRun={props.onTrialRun}
           interactionDisabled={props.interactionDisabled}
           testId="workspace-flow-trial-run"
         />
@@ -446,6 +543,12 @@ export function Workspace(props: WorkspaceProps) {
             view={props.flowAuthoring.view}
             selectedBlockId={props.flowAuthoring.selectedBlockId}
             onSelectBlock={props.flowAuthoring.onSelectBlock}
+            onDeleteBlock={props.flowAuthoring.onDeleteBlock}
+            onDuplicateBlock={props.flowAuthoring.onDuplicateBlock}
+            onMoveBlock={props.flowAuthoring.onMoveBlock}
+            layers={props.flowAuthoring.layers}
+            selectedLayerItemId={props.flowAuthoring.selectedLayerItemId}
+            onSelectLayer={props.flowAuthoring.onSelectLayer}
           />
         </div>
       </main>
@@ -454,8 +557,8 @@ export function Workspace(props: WorkspaceProps) {
   if (props.spatialAuthoring) {
     return (
       <main className="workspace workspace--edit" aria-label="Spatial 空间画布">
-        <WorkspaceTrialRunButton
-          onTrialRun={props.onTrialRun}
+        <FlowSpatialTrialRunHost
+          externalOnTrialRun={props.onTrialRun}
           interactionDisabled={props.interactionDisabled}
           testId="workspace-spatial-trial-run"
         />
@@ -464,6 +567,8 @@ export function Workspace(props: WorkspaceProps) {
             spatial={props.spatialAuthoring.spatial}
             viewportSize={props.spatialAuthoring.viewportSize}
             selectedLayerItemIds={props.spatialAuthoring.selectedLayerItemIds}
+            activeCameraFrameId={props.spatialAuthoring.activeCameraFrameId}
+            onCameraChange={props.spatialAuthoring.onCameraChange}
             interactionDisabled={props.spatialAuthoring.interactionDisabled}
             onSelect={props.spatialAuthoring.onSelect}
             onTransformEnd={props.spatialAuthoring.onTransformEnd}
