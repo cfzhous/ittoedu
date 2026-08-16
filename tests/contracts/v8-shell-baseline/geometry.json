@@ -1,72 +1,16 @@
 {
-  "capturedAt": "2026-08-14T15:40:22.475Z",
-  "sourceCommit": "3e41ec058627d38c4b9f5439b454cc72331e1485",
-  "executionParent": "48dd493377a27dfbfd28850a28bf925e274cd82e",
-  "routeEvidence": {
-    "visibleButton": true,
-    "appShellReached": true,
-    "initialLegacyQueryReload": true,
-    "screenshotNormalization": "Only the fixed ProductApp route-return button was hidden; App descendants were untouched."
-  },
-  "previewRecovery": {
-    "initialDiagnostics": [],
-    "usedVisibleRetry": false,
-    "recovered": true
-  },
-  "mouseEvidence": {
-    "capturedAt": "2026-08-14T23:32:10.6304812+08:00",
-    "input": "Windows SendInput through Computer Use on the real Phaser canvas",
-    "window": {
-      "title": "* 互动课件编辑器",
-      "contentObservation": "1427x899 Windows capture; Electron content viewport reported 1427x865 by Playwright"
-    },
-    "sequence": [
-      "Activate the visible Electron window",
-      "Click the Layers tab through accessibility index 155",
-      "Drag the selected text from window coordinate (670,335) to (730,375)",
-      "Observe Properties X/Y after the system drag",
-      "Click toolbar Undo through accessibility index 87",
-      "Observe restored Properties X/Y and the 已撤销 status"
-    ],
-    "initial": {
-      "x": 440,
-      "y": 320
-    },
-    "moved": {
-      "x": 540.9,
-      "y": 387.3
-    },
-    "restored": {
-      "x": 440,
-      "y": 320
-    },
-    "screenStart": {
-      "x": 670,
-      "y": 335
-    },
-    "screenEnd": {
-      "x": 730,
-      "y": 375
-    },
-    "undoEvidence": {
-      "toolbarControl": "撤销（Ctrl+Z）",
-      "status": "已撤销"
-    },
-    "playwrightProbe": {
-      "selectionClickPassed": true,
-      "dragInjectionPassed": false,
-      "canvasCursor": "move",
-      "disposition": "Tooling limitation only; system-level pointer drag and toolbar Undo passed."
-    }
-  },
+  "capturedAt": "2026-08-16T04:32:24.267Z",
+  "sourceCommit": "5799007345cb41917a82c2ccecc03a276b8c7aed",
+  "executionParent": "5799007345cb41917a82c2ccecc03a276b8c7aed",
+  "recaptureReason": "Retire frozen P1 shell-height defect geometry (appShell pinned at 720px exposing window background below taller viewports). The same original shell now fills the viewport; replacement assertions live in tests/e2e/v9SlideVerticalSlice.spec.ts (expectAppShellFillsViewport).",
   "captures": [
     {
       "viewport": {
         "width": 1280,
         "height": 720
       },
-      "bytes": 96962,
-      "sha256": "b3fc23c4e973076e1c573ea402957dd5dcf5f61ac3aa3d7d5388eb3f5171cc38",
+      "bytes": 94439,
+      "sha256": "66d8bf49b76103cf3afcba4381633ec42c34356479bed4b8b5ea191803f73702",
       "resizeTrace": [
         {
           "width": 1427,
@@ -158,11 +102,11 @@
           },
           "canvasStage": {
             "x": 227,
-            "y": 101.156,
-            "width": 739,
-            "height": 415.688,
-            "right": 966,
-            "bottom": 516.844
+            "y": 125.969,
+            "width": 713,
+            "height": 401.063,
+            "right": 940,
+            "bottom": 527.031
           },
           "stateStrip": {
             "x": 205,
@@ -197,8 +141,8 @@
         "width": 1366,
         "height": 768
       },
-      "bytes": 104909,
-      "sha256": "2d5c8dcc8c9f9ed211ca3804bc845e0edf96dabe86c651e5c487d37f1abd0f69",
+      "bytes": 102576,
+      "sha256": "ba8cb7c7a2dddc8f99c7066db09c4f9a39d460a29ed977c70d786fe63bd0f1b4",
       "resizeTrace": [
         {
           "width": 1280,
@@ -232,9 +176,9 @@
             "x": 0,
             "y": 0,
             "width": 1366,
-            "height": 720,
+            "height": 768,
             "right": 1366,
-            "bottom": 720
+            "bottom": 768
           },
           "toolbar": {
             "x": 0,
@@ -248,73 +192,73 @@
             "x": 0,
             "y": 52,
             "width": 1366,
-            "height": 642,
+            "height": 690,
             "right": 1366,
-            "bottom": 694
+            "bottom": 742
           },
           "scenePanel": {
             "x": 0,
             "y": 53,
             "width": 224,
-            "height": 640,
+            "height": 688,
             "right": 224,
-            "bottom": 693
+            "bottom": 741
           },
           "editorCenter": {
             "x": 224,
             "y": 53,
             "width": 830,
-            "height": 640,
+            "height": 688,
             "right": 1054,
-            "bottom": 693
+            "bottom": 741
           },
           "workspace": {
             "x": 224,
             "y": 53,
             "width": 830,
-            "height": 492,
+            "height": 540,
             "right": 1054,
-            "bottom": 545
+            "bottom": 593
           },
           "canvasViewport": {
             "x": 246,
             "y": 95,
             "width": 786,
-            "height": 428,
+            "height": 476,
             "right": 1032,
-            "bottom": 523
+            "bottom": 571
           },
           "canvasStage": {
-            "x": 258.555,
-            "y": 95,
-            "width": 760.889,
-            "height": 428,
-            "right": 1019.444,
-            "bottom": 523
+            "x": 246,
+            "y": 111.938,
+            "width": 786,
+            "height": 442.125,
+            "right": 1032,
+            "bottom": 554.063
           },
           "stateStrip": {
             "x": 224,
-            "y": 545,
+            "y": 593,
             "width": 830,
             "height": 148,
             "right": 1054,
-            "bottom": 693
+            "bottom": 741
           },
           "rightSidebar": {
             "x": 1054,
             "y": 53,
             "width": 312,
-            "height": 640,
+            "height": 688,
             "right": 1366,
-            "bottom": 693
+            "bottom": 741
           },
           "statusBar": {
             "x": 0,
-            "y": 694,
+            "y": 742,
             "width": 1366,
             "height": 26,
             "right": 1366,
-            "bottom": 720
+            "bottom": 768
           }
         }
       },
@@ -325,8 +269,8 @@
         "width": 1920,
         "height": 1080
       },
-      "bytes": 112562,
-      "sha256": "184246d593ddadb867c47ec0f5bc01192be57b57aef20a57b17662e9c4d3a60e",
+      "bytes": 129828,
+      "sha256": "c9b911add199fe76956e3fc3af0ab642fc70efed5004d491623695b552c10054",
       "resizeTrace": [
         {
           "width": 1366,
@@ -360,9 +304,9 @@
             "x": 0,
             "y": 0,
             "width": 1920,
-            "height": 720,
+            "height": 1080,
             "right": 1920,
-            "bottom": 720
+            "bottom": 1080
           },
           "toolbar": {
             "x": 0,
@@ -376,73 +320,73 @@
             "x": 0,
             "y": 52,
             "width": 1920,
-            "height": 642,
+            "height": 1002,
             "right": 1920,
-            "bottom": 694
+            "bottom": 1054
           },
           "scenePanel": {
             "x": 0,
             "y": 53,
             "width": 224,
-            "height": 640,
+            "height": 1000,
             "right": 224,
-            "bottom": 693
+            "bottom": 1053
           },
           "editorCenter": {
             "x": 224,
             "y": 53,
             "width": 1384,
-            "height": 640,
+            "height": 1000,
             "right": 1608,
-            "bottom": 693
+            "bottom": 1053
           },
           "workspace": {
             "x": 224,
             "y": 53,
             "width": 1384,
-            "height": 492,
+            "height": 852,
             "right": 1608,
-            "bottom": 545
+            "bottom": 905
           },
           "canvasViewport": {
             "x": 246,
             "y": 95,
             "width": 1340,
-            "height": 428,
+            "height": 788,
             "right": 1586,
-            "bottom": 523
+            "bottom": 883
           },
           "canvasStage": {
-            "x": 535.555,
-            "y": 95,
-            "width": 760.889,
-            "height": 428,
-            "right": 1296.444,
-            "bottom": 523
+            "x": 246,
+            "y": 112.125,
+            "width": 1340,
+            "height": 753.75,
+            "right": 1586,
+            "bottom": 865.875
           },
           "stateStrip": {
             "x": 224,
-            "y": 545,
+            "y": 905,
             "width": 1384,
             "height": 148,
             "right": 1608,
-            "bottom": 693
+            "bottom": 1053
           },
           "rightSidebar": {
             "x": 1608,
             "y": 53,
             "width": 312,
-            "height": 640,
+            "height": 1000,
             "right": 1920,
-            "bottom": 693
+            "bottom": 1053
           },
           "statusBar": {
             "x": 0,
-            "y": 694,
+            "y": 1054,
             "width": 1920,
             "height": 26,
             "right": 1920,
-            "bottom": 720
+            "bottom": 1080
           }
         }
       },
