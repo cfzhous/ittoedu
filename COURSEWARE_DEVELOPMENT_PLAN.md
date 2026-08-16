@@ -166,6 +166,16 @@ Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工
 - 课程状态与恢复：CourseLocation/state/guard/controller 同一课程状态、replay 单语义单元单次进入、restart 整课重置、会话状态不写 archive、checkpoint 不产生 history/dirty、Trial/Preview/HTML 隔离销毁无泄漏（T-CSTATE）。
 - L3 证据：M4 定向测试、typecheck、build:player、代表性 Electron 3 条、`npm test`、preservation 门禁全部通过。
 
+### 3.6 M5/M6 审计与既有问题处置（2026-08-15）
+
+M5/M6 任务板全部 integrated 后，协调者按真实证据复核（四路代码审查 + Electron 实机截图/交互 + 全量测试 + E2E 对分）：
+
+- **M5/M6 Gate 未判定**：发现 P1×2（Spatial 路径/关系全链不可见、镜头会话相机未接线）与 P2×9（Flow 结构编辑零入口、统一图层不进生产画布、Spatial Inspector 击键历史、控制器三件套不全、混合工程无表面导航、Flow/Spatial 无试运行动线等），口径与证据见 M5/M6 阶段计划 §5；收口任务板已登记（§4.5）。
+- **preservation visual 冻结 golden 已重捕获**：旧基线冻结于 P1 修复前（期望壳固定 720px），与已退休行为永久冲突。P1 已被产品协议明确关闭且有 replacement test（`expectAppShellFillsViewport`），按 §7 条款重捕获同壳基线，掩码区域人工核对无夹带视觉变化。
+- **`v9GlobalControllerAndHealth` 控制器几何失败已校准修复**：对分证明失败引入于 M3 集成期（0c12bb0 通过、7cd5939 起失败），拖动管线逐字节未变；90% 缩放 × 小数 fitScale 的鼠标量化误差（DPR 2 → 0.5 CSS px 步进）踩过 ±1px 容差，且像素断言对 T-CTRL DOM 渲染器的边框/内缩样式过度敏感。修复：几何容差校准为 ≤2px（注明量化依据），绘制断言改为 frame 内网格扫描取最小亮度（忠实于"绘制落在已提交 frame 内"）。spec 复跑通过。
+- **`course-studio.spec.ts` 已退休**：它等待的 donor 壳 testid 自 dc190ed 起不在正式 import graph，该测试自此必然失败；其覆盖价值已被原壳上的 v9SlideVerticalSlice/v9TrialRun/v9DefaultBoundary/v9SpatialAuthoring 等价覆盖。donor 源文件本体移除仍属 M8。
+- **Schema 加法变更（spatial world.paths/relations）**：带 `.default([])` 与引用完整性校验，旧工程零迁移打开有测试背书；属 §2.5 需授权项，已获用户确认（deepseek M5/M6 工作范围内）。
+
 ## 4. 并行任务模式
 
 开发不再按阶段串行推进，而是由唯一协调者把阶段完成定义拆成任务单元，多执行者并行交付，按依赖序集成进单一主线。阶段 Gate 保留为唯一验收标准，但不再是执行链。
@@ -233,7 +243,24 @@ M5/M6 任务板（协调者已按 §4.5 规范拆出并登记）：
 | T-M5M6-STORE | 共享热点串行集成第一步：editorStore 增加 Flow/Spatial 会话选择、块/图层/镜头/语义缩放/路径命令、Flow/Spatial surface 创建；保持 Slide 一操作一 history 回归 | M5/M6 | 上述 Flow/Spatial 模块任务 | `src/renderer/store/editorStore.ts`、`src/renderer/course/v9SlideVerticalSlice.ts` 窄边界与对应测试 | integrated |
 | T-M5M6-SHELL | 共享热点串行集成第二步：App/Workspace/ScenePanel/RightSidebar/TopToolbar 接入 Flow 与 Spatial 编辑路由与正式 PDF/DOCX 菜单；不动 Store 真相 | M5/M6 | T-M5M6-STORE | `src/renderer/App.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/ui/TopToolbar.tsx` 与对应测试 | integrated |
 
-M3/M4 任务板已清空。M5/M6 任务板由协调者按 §4.5 规范拆出后在本节登记；M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。上述 M5/M6 任务已全部 integrated：Flow/Spatial 作者命令、原壳工作区、镜头/语义缩放、路径/关系、Player 运行合同与正式 PDF/DOCX 菜单均已入主线；L2 定向证据 136 测试与全量 Vitest 196 文件 / 1280 测试、`tsc --noEmit`、`build:player`、`build:renderer`、agent-kit 测试均通过。M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
+M3/M4 任务板已清空。M5/M6 任务板由协调者按 §4.5 规范拆出后在本节登记；M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。上述 M5/M6 任务已全部 integrated：Flow/Spatial 作者命令、原壳工作区、镜头/语义缩放、路径/关系、Player 运行合同与正式 PDF/DOCX 菜单均已入主线；L2 定向证据 136 测试与全量 Vitest 196 文件 / 1280 测试、`tsc --noEmit`、`build:player`、`build:renderer`、agent-kit 测试均通过。**但 2026-08-15 协调者审计（四路代码审查 + Electron 真实复核）发现 P1×2 与 P2×9（口径见 M5/M6 阶段计划 §5 缺口登记），M5/M6 Gate 未判定。**
+
+M5/M6 收口任务板（2026-08-15 审计登记；修复完成后方可判定 M5/M6 Gate）：
+
+| ID | 目标（口径见 M5/M6 阶段计划 §5） | 供给 | 依赖 | owns | 状态 |
+|---|---|---|---|---|---|
+| T-FIX-SPAT-PATHS | Spatial 路径/关系全链：编辑画布渲染折线/箭头、Published payload 保留 paths/relations（复用 spatial schema）、Player SpatialSurfaceHost 渲染、打印/PDF 包含、差异报告明示；补渲染与发布断言（缺口 §5-P1-1） | M6 | 无 | spatial 渲染链 + published 类型/schema/builder 窄边界与对应测试 | pending |
+| T-FIX-SPAT-CAM | Spatial 镜头会话相机接线：SpatialWorkspace 回传 session pose、App 喂真实位姿给"从当前画面添加/设为首页镜头"、镜头切换移动画布视口；补 App 壳层接线断言（缺口 §5-P1-2） | M6 | 无 | SpatialWorkspace/SpatialCameraPanel/App 窄接线与对应测试 | pending |
+| T-FIX-FLOW-ENTRY | Flow 结构命令 UI 入口（删除/复制/重排/层级移动按钮 + Delete/Ctrl+D 键盘）+ onStructuralCommand 接线 + 媒体/互动组件插入禁用或教师安全拒绝（缺口 §5-P2-3/4/5） | M5 | 无 | Flow 大纲/画布/ElementsTab/PropertiesTab 与对应测试 | pending |
+| T-FIX-FLOW-LAYER | Flow 统一图层进入生产画布与图层面板（消费 view 已物化的 global/surface 图层；不经 donor FlowCourseCanvas）（缺口 §5-P2-6） | M5 | T-FIX-FLOW-ENTRY | FlowWorkspace/RightSidebar 窄边界与对应测试 | pending |
+| T-FIX-SPAT-INSPECT | SpatialLayerInspector blur/Enter 提交（一次编辑一次 history）+ 支持负坐标输入（缺口 §5-P2-7） | M6 | 无 | SpatialLayerInspector 与对应测试 | pending |
+| T-FIX-SPAT-CTRL | Spatial 控制器三件套：audio:change 订阅刷新静音标签、progress 真实源、replay 后 DOM 与 canonical session 一致（去 seed 钉死）（缺口 §5-P2-8） | M6 | 无 | SpatialSurfaceHost 控制器段与对应测试 | pending |
+| T-FIX-SURFACE-NAV | 混合工程表面导航入口 + 场景目录按 location 列举三类 kind（缺口 §5-P2-9/10） | M5/M6 | 无 | ScenePanel 跨表面列表 + picker 按 location 与对应测试 | pending |
+| T-FIX-TRIAL-FS | Flow/Spatial 路由"当前位置试运行"动线（缺口 §5-P2-11） | M5/M6 | 无 | Workspace 早返回分支与 trialRunOverlay 窄边界与对应测试 | pending |
+
+P3 一致性项（术语、DOCX 范围、schemaVersion bump、helper 去重、旋转选择 chrome、capture 队列、includeInStaticExports、Flow 宿主 interactions、世界图层删除级联）登记为 M5/M6 Gate 前的收尾批次，随上述任务集成后由协调者视余量派发。
+
+M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
 
 ### 4.6 集成 Gate
 

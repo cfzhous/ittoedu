@@ -2,7 +2,7 @@
 
 > PARENT: [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../COURSEWARE_DEVELOPMENT_PLAN.md)
 > PREREQUISITE: M4 Gate
-> STATUS: engineering-candidate（任务板已 integrated；M5/M6 Gate 仍待教师真实视觉/互动复核）
+> STATUS: integration-review（任务板已 integrated；2026-08-15 代码审查 + 真实复核发现 P1×2 与若干 P2，收口任务见 §5 缺口登记，Gate 未判定）
 > OUTCOME: 在原产品壳内完成 Flow 与 Spatial 的作者、Player、保存重开和导出
 
 M5 与 M6 默认由两个执行者并行派发：两者表面语义与 owns 不重叠，共享 Store、App、Player 与导出边界只走窄接口增量，并按根计划 §4.3 串行集成。每个表面内部保持纵切顺序；不得为了并行先建抽象框架。
@@ -83,3 +83,38 @@ M5 与 M6 默认由两个执行者并行派发：两者表面语义与 owns 不�
 - 不先发明统一画布框架再迁移两个表面。
 - 不复制 donor 的 FlowBlockEditor、SpatialAuthoringPanels 或 CourseStudio 壳。
 - 不用截图型导出来冒充 Flow 语义 DOCX/PDF。
+
+## 5. 收口缺口登记（2026-08-15 审计）
+
+2026-08-15 由协调者对集成主线做四路代码审查 + 真实应用复核（Electron 实机截图与交互）。测试全绿但下列缺口被真实证据证实；全部经由总纲 §4.5 收口任务板派发修复，修复前 M5/M6 Gate 不得判定。
+
+### P1（阻断 Gate）
+
+1. **Spatial 路径/关系"能存不能见"**：编辑画布与 Player 均零渲染；Published payload 静默丢弃（`publishedCourseSchema.ts` world 为 strict 且无 paths/relations；`buildPublishedCourse.ts` spatial 分支不拷贝；`SpatialSurfaceHost` 只渲染 world.layerItems）。保存重开成立但试运行/预览/导出全丢，差异报告还过度声称 preserved。对应 M6-B"关系与路径编辑"、M6-D"路径、关系运行成立"。
+2. **Spatial 镜头会话相机未接线**：`App.tsx` 把 `sessionCamera` 硬编码为 `surface.camera.home`，`SpatialWorkspace` 的真实 pan/zoom 仅存组件内 state、无回传出口——"从当前画面添加"永远复刻 home 位姿，"设为首页镜头"被相等守卫拦截恒为 no-op；镜头切换也不移动画布视口。对应 M6-B"镜头创建/切换"。
+
+### P2（功能缺口）
+
+3. **Flow 结构命令零 UI 入口**：删除/复制/重排/层级移动命令有实现有测试，但大纲与画布无按钮、键盘 Delete/Ctrl+D 只回"暂不支持"。
+4. **Flow 结构编辑未接线**：`onStructuralCommand` 未传入 App 侧 properties，列表/表格结构编辑在生产全部静默禁用且无原因说明。
+5. **Flow 媒体/互动组件插入必败且泄漏原始 Zod JSON**：无素材/组件包时应禁用并给教师可读原因，或由命令层先校验再以中文消息拒绝。
+6. **Flow 统一图层不进生产画布**：view 已物化 global/surface 图层但无消费者；layers 页被门控；图层叠加只存在于 donor 组件 `FlowCourseCanvas`（禁止回到正式 import graph）。
+7. **SpatialLayerInspector 每击键一条 history**（违反一操作一历史）且受控 number input 无法键入负坐标（世界坐标合法负值普遍存在）。
+8. **Spatial 控制器三件套不全**：静音标签不订阅 `audio:change` 永不刷新；progress 硬编码空 scenes 显示"场景 — / 0 · 等待开始"（真实复核截图证实）；拖动/收起后 replay 使 DOM 与 canonical session 去同步（getSession seed 钉死）。
+9. **场景目录只列 slide-scene**：Flow/Spatial 位置缺席 picker（混合课程目录不完整）。
+10. **混合工程无表面导航入口**（真实复核证实）：混合课程打开后停留在起始表面，Flow/Spatial 表面在编辑器内不可达。
+11. **Flow/Spatial 路由缺"当前位置试运行"动线**：Workspace 早返回绕过 WorkspaceEditor 的试运行按钮；仅"整课预览"可用。Gate 口径含试运行。
+
+### P3（一致性与风格）
+
+12. 术语泄漏："FLOW 讲义"/"SPATIAL 空间"进入面板标题、状态栏出现"表面"字样（§2.4 要求普通教师只见教学概念）。
+13. DOCX 只导出当前选中 Flow 表面且建议文件名恒为工程名；PDF 导出的 E2E 只断言菜单可用未真出 PDF。
+14. schemaVersion 未随 strict 新字段 bump：含 paths/relations 的档案在旧 V9 构建上只报泛化"校验失败"。
+15. 世界图层删除不修 paths/relations/semanticZoom 引用（当前删除入口不可达；暴露删除入口前必须补级联修复，参照 `deleteSpatialCameraFrame` 模式）。
+16. 重复实现：`flowSurfaceIn`/`findFlowBlockRecursive`/`flowBlockLabel`（规则不一致）/`spatialSurfaceIn`/`valuesEqual`/`screenControlRect`（生产零调用）等。
+17. Spatial 旋转元素的选择 chrome 轴对齐不贴合；`capture` 不经队列；`includeInStaticExports` 被忽略；Published App 未给 Flow 宿主传 `interactions`；`teacherControllerContext().canvas` 快照与硬编码 1120×760 viewport 刚性隐患。
+
+### 测试盲区（与上述缺陷一一对应）
+
+- 无 App 壳层 sessionCamera 接线测试、无"激活镜头移动画布"测试、无 Inspector 击键-history 测试、无任何路径/关系渲染断言、无混合工程表面导航断言。
+- 收口任务必须各补一条真实断言或代表性 Electron 路径。

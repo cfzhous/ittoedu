@@ -132,15 +132,15 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前为 M5/M6，恢复于产品检查点 `7f04a8a`（M4 Gate 已于 2026-08-15 通过）。
+当前为 M5/M6 收口，恢复于产品检查点 `7f04a8a`（M4 Gate 已于 2026-08-15 通过）。
 
 M4 已成立（`7f04a8a`）：Published Slide 会话生命周期与异步 action await、教师控制器运行合同（收展/拖动/目录/静音/全屏/重播/重启单 owner）、Runtime API 2/3 与 Component API 4 全链、课程状态与恢复单一 owner（replay 单次进入、会话态不写 archive、checkpoint 无 history/dirty、隔离销毁无泄漏）；L3 证据全通过。
 
-M5/M6 依次推进（默认并行，按根计划任务板）：
+M5/M6 任务板已全部 integrated（Flow/Spatial 作者命令、原壳工作区、镜头/语义缩放、路径/关系、Player 运行合同），但 2026-08-15 协调者审计发现 P1×2 与 P2×9（详见 `docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md` §5 缺口登记），**M5/M6 Gate 未判定**。当前优先：
 
-1. Flow：语义结构、层级、表格、公式、媒体、统一图层、稳定选择、属性、状态、互动；Player、保存重开与 HTML/PDF/DOCX 路径。
-2. Spatial：pan/zoom、选择、变换、关系、镜头、路径、小地图、状态、互动；world/viewport 坐标分离；Player、保存重开与导出。
-3. M5/M6 Gate 后进入 M7（Mixed 与发布导出）与 M8（最终收敛）。
+1. 收口任务板（根计划 §4.5）：先修两个 P1（Spatial 路径/关系全链渲染与发布、镜头会话相机接线），再修 P2（Flow 结构编辑入口、统一图层进生产画布、Spatial Inspector 击键历史、控制器三件套、混合工程表面导航、Flow/Spatial 试运行动线）。
+2. 全部收口任务 integrated 后按 L3 判定 M5/M6 Gate，再进入 M7（Mixed 与发布导出）与 M8（最终收敛）。
+3. 已处置的既有问题见总纲 §3.6（golden 重捕获、控制器测试校准、course-studio 陈旧 spec 退休）。
 
 ## 7. 关键不变量
 
