@@ -1,4 +1,6 @@
 import { Shapes, Sigma, Type } from 'lucide-react'
+import { compareStableStrings } from '../../shared/stableOrder'
+import type { FlowEditorLayerView } from '../course/flowEditorView'
 import { ElementsTab, type ElementsTabDocumentControl } from './ElementsTab'
 import { NodesTab, type NodesTabDocumentControl } from './NodesTab'
 import {
@@ -46,9 +48,17 @@ export interface RightSidebarDocumentControl {
   readonly unavailableReasons?: Partial<Record<SidebarTab, string>>
 }
 
+export interface RightSidebarFlowLayerControl {
+  readonly layers: readonly FlowEditorLayerView[]
+  readonly selectedLayerItemId?: string | null
+  onSelectLayer?(layerItemId: string): void
+}
+
 export interface RightSidebarFlowDocumentControl {
   readonly elements: FlowElementsTabProps
   readonly properties: FlowPropertiesTabProps
+  /** When present, the layers tab shows the same teacher-facing Flow layer list. */
+  readonly layers?: RightSidebarFlowLayerControl
 }
 
 export interface RightSidebarSpatialElementsControl {
@@ -167,6 +177,73 @@ function SpatialElementsPanel({
   )
 }
 
+function sortFlowLayerViews(
+  layers: readonly FlowEditorLayerView[],
+): FlowEditorLayerView[] {
+  return [...layers].sort((left, right) =>
+    left.item.order - right.item.order ||
+    compareStableStrings(left.selectionId, right.selectionId),
+  )
+}
+
+function FlowLayerList({
+  layers,
+  selectedLayerItemId,
+  onSelectLayer,
+}: RightSidebarFlowLayerControl) {
+  const sortedLayers = sortFlowLayerViews(layers)
+  return (
+    <div className="flow-layer-list" data-testid="flow-layer-list">
+      <div className="section-heading section-heading--spaced">
+        <span>图层</span>
+      </div>
+      {sortedLayers.length === 0 ? (
+        <div className="empty-state" role="status">
+          当前讲义还没有图层。
+        </div>
+      ) : (
+        <div className="flow-layer-list__items" role="list">
+          {sortedLayers.map((layer) => {
+            const layerLabel = layer.item.label || (
+              layer.source === 'global' ? '全局图层' : '讲义图层'
+            )
+            const sourceLabel = layer.source === 'global' ? '全局' : '讲义'
+            const selected = layer.selectionId === selectedLayerItemId
+            const clickable = Boolean(onSelectLayer)
+            return (
+              <button
+                key={layer.selectionId}
+                type="button"
+                role="listitem"
+                className={`flow-layer-list-item${selected ? ' flow-layer-list-item--selected' : ''}`}
+                data-layer-item-id={layer.selectionId}
+                data-layer-source={layer.source}
+                data-layer-visible={layer.item.visible}
+                data-layer-locked={layer.item.locked}
+                data-layer-scoped-visible={layer.scopedVisible}
+                data-layer-effective-visible={layer.effectiveVisible}
+                data-testid={`flow-layer-list-item-${layer.selectionId}`}
+                disabled={!clickable}
+                onClick={
+                  clickable
+                    ? () => onSelectLayer?.(layer.selectionId)
+                    : undefined
+                }
+              >
+                <span className="flow-layer-list-item__label">{layerLabel}</span>
+                <span className="flow-layer-list-item__source">{sourceLabel}</span>
+                <span className="flow-layer-list-item__state">
+                  {layer.item.visible ? '显示' : '隐藏'} · {layer.item.locked ? '锁定' : '未锁定'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function RightSidebar({
   documentEditingUnavailableReason,
   documentControl,
@@ -190,7 +267,9 @@ export function RightSidebar({
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const tabs = editorMode === 'professional' ? professionalTabs : simpleTabs
   const controlledTabAvailable = flowDocumentControl
-    ? activeTab === 'elements' || activeTab === 'properties'
+    ? activeTab === 'elements' ||
+      activeTab === 'properties' ||
+      (activeTab === 'layers' && Boolean(flowDocumentControl.layers))
     : spatialDocumentControl
       ? activeTab === 'elements' || activeTab === 'layers' || activeTab === 'properties'
       : documentControl
@@ -267,6 +346,8 @@ export function RightSidebar({
             <FlowElementsTab {...flowDocumentControl.elements} />
           ) : activeTab === 'properties' ? (
             <FlowPropertiesTab {...flowDocumentControl.properties} />
+          ) : activeTab === 'layers' && flowDocumentControl.layers ? (
+            <FlowLayerList {...flowDocumentControl.layers} />
           ) : null
         ) : spatialDocumentControl ? (
           activeTab === 'elements' ? (

@@ -1,7 +1,12 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import { compareStableStrings } from '../../shared/stableOrder'
 import { serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode } from '../../shared/projectTypes'
-import type { FlowBlockView, FlowEditorView } from '../course/flowEditorView'
+import type {
+  FlowBlockView,
+  FlowEditorLayerView,
+  FlowEditorView,
+} from '../course/flowEditorView'
 
 export type FlowBlockMoveDirection = 'up' | 'down' | 'left' | 'right'
 
@@ -15,7 +20,98 @@ export interface FlowWorkspaceProps extends FlowStructuralActionProps {
   readonly view: FlowEditorView
   readonly selectedBlockId?: string | null
   readonly onSelectBlock?: (blockId: string) => void
+  readonly layers?: readonly FlowEditorLayerView[]
+  readonly selectedLayerItemId?: string | null
+  readonly onSelectLayer?: (layerItemId: string) => void
   readonly readOnly?: boolean
+}
+
+function sortFlowLayerViews(
+  layers: readonly FlowEditorLayerView[],
+): FlowEditorLayerView[] {
+  return [...layers].sort((left, right) =>
+    left.item.order - right.item.order ||
+    compareStableStrings(left.selectionId, right.selectionId),
+  )
+}
+
+function flowLayerCardStyle(layer: FlowEditorLayerView): CSSProperties {
+  return {
+    position: 'absolute',
+    left: layer.item.frame.x,
+    top: layer.item.frame.y,
+    width: layer.item.frame.width,
+    height: layer.item.frame.height,
+    boxSizing: 'border-box',
+    pointerEvents: 'auto',
+  }
+}
+
+function FlowAuthoringLayerOverlay({
+  layers,
+  selectedLayerItemId,
+  onSelectLayer,
+}: {
+  layers: readonly FlowEditorLayerView[]
+  selectedLayerItemId: string | null | undefined
+  onSelectLayer?: (layerItemId: string) => void
+}) {
+  const sortedLayers = sortFlowLayerViews(layers)
+  if (sortedLayers.length === 0) return null
+  return (
+    <div
+      className="flow-authoring-layer-overlay"
+      data-testid="flow-authoring-layer-overlay"
+      style={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none' }}
+    >
+      {sortedLayers.map((layer) => {
+        const layerLabel = layer.item.label || (
+          layer.source === 'global' ? '全局图层' : '讲义图层'
+        )
+        const sourceLabel = layer.source === 'global' ? '全局' : '讲义'
+        const selected = layer.selectionId === selectedLayerItemId
+        const clickable = Boolean(onSelectLayer)
+        const stateLabel = [
+          layer.item.visible ? '显示' : '隐藏',
+          layer.item.locked ? '锁定' : '未锁定',
+        ].join(' · ')
+        const ariaLabel = `${layerLabel}（${sourceLabel} · ${stateLabel}）`
+        return (
+          <button
+            key={layer.selectionId}
+            type="button"
+            className={`flow-layer-card${selected ? ' flow-layer-card--selected' : ''}`}
+            data-layer-item-id={layer.selectionId}
+            data-layer-source={layer.source}
+            data-layer-visible={layer.item.visible}
+            data-layer-locked={layer.item.locked}
+            data-layer-scoped-visible={layer.scopedVisible}
+            data-layer-effective-visible={layer.effectiveVisible}
+            data-testid={`flow-layer-card-${layer.selectionId}`}
+            aria-label={ariaLabel}
+            style={{
+              ...flowLayerCardStyle(layer),
+              pointerEvents: clickable ? 'auto' : 'none',
+            }}
+            onClick={
+              clickable
+                ? (event) => {
+                    event.stopPropagation()
+                    onSelectLayer?.(layer.selectionId)
+                  }
+                : undefined
+            }
+          >
+            <span className="flow-layer-card__label">{layerLabel}</span>
+            <span className="flow-layer-card__source">{sourceLabel}</span>
+            <span className="flow-layer-card__state">
+              {layer.item.visible ? '显示' : '隐藏'} · {layer.item.locked ? '锁定' : '未锁定'}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function flowBlockFrameProps(
@@ -302,6 +398,9 @@ export function FlowWorkspace({
   view,
   selectedBlockId,
   onSelectBlock,
+  layers,
+  selectedLayerItemId,
+  onSelectLayer,
   readOnly = false,
   onDeleteBlock,
   onDuplicateBlock,
@@ -349,7 +448,10 @@ export function FlowWorkspace({
     <article
       className="flow-editor-surface"
       data-surface-id={view.surfaceId}
-      style={{ '--flow-reading-width': `${view.layout.readingWidth}px` } as CSSProperties}
+      style={{
+        '--flow-reading-width': `${view.layout.readingWidth}px`,
+        position: 'relative',
+      } as CSSProperties}
       tabIndex={0}
       aria-label="Flow 讲义画布"
       onKeyDown={handleKeyDown}
@@ -367,6 +469,13 @@ export function FlowWorkspace({
           onMoveBlock={onMoveBlock}
         />
       ))}
+      {layers ? (
+        <FlowAuthoringLayerOverlay
+          layers={layers}
+          selectedLayerItemId={selectedLayerItemId}
+          onSelectLayer={onSelectLayer}
+        />
+      ) : null}
     </article>
   )
 }
