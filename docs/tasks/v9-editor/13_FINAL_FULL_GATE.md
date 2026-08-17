@@ -94,7 +94,7 @@ FINAL_GATE
 
 ```md
 FINAL_GATE
-- baseline / HEAD: 恢复基线与 git HEAD 均为 `e2e34aa29ddb72abb2c691e414a4d8f461f35b2c`（`codex/v9-parity-reconstruction`）。实现未提交，工作树脏。
+- baseline / HEAD: 恢复基线 `e2e34aa29ddb72abb2c691e414a4d8f461f35b2c`。Gate 当时工作于 `codex/v9-parity-reconstruction`（checkpoint `bffbf95`），随后合回仓库根目录。
 - full commands and durations:
   - `npm run verify:full`（状态条隐藏后终跑）exit 0，83.9s，2026-08-16T23:39:48Z
     - capability index OK：12 cards

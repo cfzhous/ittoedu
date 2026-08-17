@@ -1,10 +1,10 @@
 # 最终体验检查清单（T11 冻结，供 T12 填写）
 
 > 冻结日期：2026-08-17
-> 工作树：`output/worktrees/v9-parity-reconstruction`
+> 工作树（Gate 当时）：`output/worktrees/v9-parity-reconstruction`；现已合回仓库根目录
 > 恢复基线：`e2e34aa29ddb72abb2c691e414a4d8f461f35b2c`
 > 产品入口：`ProductApp.tsx` → `App.tsx`（`CourseStudioApp` 不是正式前端）
-> 当前工程状态：T12 已填；机器 Gate 支持 `engineering candidate`；未达 `art candidate` / `accepted`
+> 当前工程状态：T12 已填并合回根目录；机器 Gate 支持 `engineering candidate`；未达 `art candidate` / `accepted`
 
 对照根总纲 §10.3 / §10.4 / §11。每项由 T12 在真实 Electron/浏览器中执行并留下截图或录像。自动化最多证明 `engineering candidate`。
 

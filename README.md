@@ -6,13 +6,13 @@
 
 长期开发范围和完成定义只看 [根目录唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)。新 Agent 可从 [项目认知索引](PROJECT_COGNITION_INDEX.md) 进入真实代码；当前可用能力以源码、Schema 与 [Agent Kit 能力卡](agent-kit/capabilities/index.json) 为准。
 
-当前仓库状态是 T10 `integration candidate`，待 [T12 全量 Gate](docs/tasks/v9-editor/13_FINAL_FULL_GATE.md)。自动化最多证明 `engineering candidate`。`art candidate` 只适用于已经过真实画面与关键交互复核的具体课例；`accepted` 必须由教师明确确认。体验步骤见 [最终体验清单](docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md)。
+当前仓库状态是 T12 `engineering candidate`。T01–T12 已在 `codex/v9-parity-reconstruction` 完成并合回本仓库根目录；根目录 `npm run dev` / `npm run start` 打开的就是这一版。自动化已通过 `verify:full`、V9 Playwright 与课例校验。`art candidate` 只适用于已经过真实画面与关键交互复核的具体课例；`accepted` 必须由教师明确确认。体验步骤与已知缺口见 [最终体验清单](docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md) 与 [T12 Gate 报告](docs/tasks/v9-editor/13_FINAL_FULL_GATE.md)。
 
 当前编辑器内没有可见 AI：正式表面不提供复制引用、应用 Patch、聊天、模型、Provider 或网络调用。`courseAiHandoff` / `courseAiPatch` 是 internal/reserved、未挂载。Focusky 级镜头化演示和自动结构编辑是远期方向，不是现有能力。
 
 ## 快速开始
 
-要求 Windows、Node.js 与 npm。
+要求 Windows、Node.js 与 npm。在**仓库根目录**执行（不要在 `output/worktrees/` 里启动，除非你明确要打开旧检出）：
 
 ```powershell
 npm install
@@ -46,7 +46,7 @@ npm run install:courseware-skills
 
 V9 不公开 `underlay` / `overlay`。全局、surface、scene/world 中的所有可视项以稳定 `layerItemId` 和显式 `order` 合成；选择、播放、保存与导出必须遵循同一顺序。Flow 的语义块仍是文档流，surface/global 视觉项在文档上方的统一覆盖层内排序，不与段落逐项交错。显式 V8 迁移保留单平面 Runtime；无法无损表达的旧双平面 Hybrid 会被拒绝，而不是静默改变层级。
 
-高频手工能力（右键、Delete/Backspace、剪贴板、就地文字、图层排序/锁定/隐藏、声音、媒体、教师控制台）必须可发现。当前已知未闭合项见体验清单 §0：Flow 的 cut/paste 命令未实现；全局层粘贴未提供；V9 会话没有 `replaceCourseComponentPackage`；开发工作台没有 `addCourseRuntimeLayer`。
+高频手工能力（右键、Delete/Backspace、剪贴板、就地文字、图层排序/锁定/隐藏、声音、媒体、教师控制台）必须可发现。当前已知未闭合项见体验清单 §0：没有 `addCourseRuntimeLayer`；全局层非拖放上/下移仍拒绝；纯 Slide 紧凑左栏缺可见「共享内容 / 全课」标题。Flow cut/paste 与全局 paste 已接线，但 T12 未做实机勾选。
 
 ## 作者目标与外部构建
 

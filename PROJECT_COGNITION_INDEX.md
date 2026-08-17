@@ -131,16 +131,16 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前阶段是 **T10 `integration candidate`，待 T12 全量 Gate**。T01–T11 已在恢复 worktree `output/worktrees/v9-parity-reconstruction` 交付；首选恢复基线仍是 `e2e34aa`，条件回退点是 `7f04a8a`。体验清单已冻结为 [`docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md`](docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md)。不得把 integration candidate 写成已通过全量验证或教师验收。
+当前阶段是 **T12 `engineering candidate`，已合回仓库根目录**。T01–T12 在恢复分支 `codex/v9-parity-reconstruction` 完成；首选恢复基线仍是 `e2e34aa`，条件回退点是 `7f04a8a`。日常启动、构建和验证以仓库根目录为准，不要从 `output/worktrees/v9-parity-reconstruction` 启动。体验清单见 [`docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md`](docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md)，Gate 报告见 [`docs/tasks/v9-editor/13_FINAL_FULL_GATE.md`](docs/tasks/v9-editor/13_FINAL_FULL_GATE.md)。不得把 `engineering candidate` 写成 `art candidate` 或教师验收。
 
 全局层继续作为可见作者入口：四态左栏固定「共享内容 → 全局层（全课）」，`globalLayerItems` / `surfaceLayerItems` 仍是 V9 存储与发布能力。纯 Slide / Flow / Spatial / Mixed 只从 `locations` / `surfaces` 推导，不新增 `projectMode`。当前编辑器内仍没有可见 AI；`courseAiHandoff` / `courseAiPatch` 只是 internal/reserved、未挂载，不参与本轮完成判定。Focusky 级镜头化与自动结构编辑不是现有能力。
 
-T10 接线后仍须按源码诚实对待的缺口：V9 会话没有 `replaceCourseComponentPackage`；没有 `addCourseRuntimeLayer`（开发页不造假入口）；`executeFlowEditorAction` 未实现 paste/cut；全局层粘贴未提供。这些写在体验清单 §0，由 T12 记「受阻」或回派，不在文档里抹平。
+T12 仍须按源码诚实对待的缺口：没有 `addCourseRuntimeLayer`（开发页不造假入口）；全局层非拖放上/下移仍拒绝；纯 Slide 紧凑左栏缺可见「共享内容 / 全课」标题。Flow cut/paste 与全局 paste、`replaceCourseComponentPackage` 已接线，但未做完整实机勾选。细节写在体验清单 §0。
 
 当前优先顺序：
 
-1. T12 按任务文档跑唯一全量自动化，再按体验清单做三视口与十个交互场景。
-2. 失败按文件所有权回派；修复者只跑最小测试，再由 T12 复跑。
+1. 在仓库根目录用 `npm run dev` 做教师级体验复核（IME、八向、声音、Mixed 串页、参考图像素）。
+2. 失败按文件所有权修复；不要把根目录合回前的轻量化脏树重新当成产品路径。
 3. 全量绿灯只证明项目级 `engineering candidate`；真实视觉/互动复核后才可称 `art candidate`。
 4. 继续保留全局层；继续不引入 `projectMode`；继续不把 reserved AI 接口宣传成可用工作流。
 

@@ -4,7 +4,7 @@
 > 更新日期：2026-08-17
 > 适用协议：Course Project V9、Published Course V2、Runtime API 2/3、Component API 4
 > 状态：唯一长期产品与开发总纲
-> 执行入口：[`docs/tasks/v9-editor/00_INDEX.md`](docs/tasks/v9-editor/00_INDEX.md)
+> 执行入口：仓库根目录；任务索引 [`docs/tasks/v9-editor/00_INDEX.md`](docs/tasks/v9-editor/00_INDEX.md)
 
 本方案汇总此前多轮代码评估、真实体验复核、Git 供体分析和 UI 定稿。它取代以删除、隐藏或禁用既有能力为手段的“轻量界面收敛”路线。这里的“轻量”只表示低学习成本、默认界面克制和渐进披露，不表示减少 V8 已经可用的编辑能力。
 
@@ -83,6 +83,10 @@
 3. 在恢复 worktree 中运行 M4/M5/M6 原有测试、启动真实 Electron/浏览器应用，并按第 10 节做基线资格检查。
 4. 默认继续使用 `e2e34aa`。只有在它违反“V9 单一工程真相”、核心保存/重开链断裂，或多个相互独立子系统均需推倒重写时，才转到 `7f04a8a`。
 5. 若使用 `7f04a8a`，后续 Flow/Spatial 提交只作为纵切供体选择性重放，不盲目整串 cherry-pick，不带回过期计划和被放宽的测试。
+
+### 3.5 合回仓库根目录
+
+T01–T12 已在 `codex/v9-parity-reconstruction` 完成。该分支已合回仓库根目录当前主工作分支；根目录 `npm run dev` / `npm run start` 打开的就是这一版。合回前，根目录 `codex/v9-editor-v8-base` 上未提交的轻量化试验已归档到 `archive/v9-editor-v8-base-dirty-pre-parity`，只作取证，不进入默认产品路径。`output/worktrees/v9-parity-reconstruction` 可以保留为历史检出，不再作为日常启动目录。
 
 ## 4. 页面创建、纯课程与自动适配
 
@@ -475,4 +479,4 @@ Gate：工程状态达到 `engineering candidate`，视觉/互动复核达到 `a
 - 执行者再读任务索引、共享合同和自己领取的单一任务文档；不得顺手承接相邻 lane。
 - 长期决策只更新本文件；执行状态更新任务索引和相应任务交付记录，不再创建互相冲突的总计划。
 - 每次交付必须写明：基线提交、改动纵切、实际修改文件、最小测试命令与结果、集成请求、视觉/互动证据和剩余风险。
-- 当前脏工作区在恢复分支完成并验收前一直保留为取证材料；任何清理都需单独确认。
+- 恢复工作树完成后已合回根目录。根目录合回前的脏树归档在 `archive/v9-editor-v8-base-dirty-pre-parity`；不要把它重新当成默认产品路径。任何对归档分支或历史 worktree 的清理都需单独确认。

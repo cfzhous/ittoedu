@@ -1,6 +1,6 @@
 # V9 编辑器无降级完整化：并发任务索引
 
-> 状态：T01–T12 已完成；T12 结果 `engineering candidate`；恢复基线 `e2e34aa`；工作树 `output/worktrees/v9-parity-reconstruction`
+> 状态：T01–T12 已完成并合回仓库根目录；T12 结果 `engineering candidate`；恢复基线 `e2e34aa`；产品代码以根目录当前分支为准，`output/worktrees/v9-parity-reconstruction` 只是历史检出
 > 唯一长期总纲：[`COURSEWARE_DEVELOPMENT_PLAN.md`](../../../COURSEWARE_DEVELOPMENT_PLAN.md)
 > UI 基准：[`V9_EDITOR_UI_DESIGN_SPEC.md`](../../../V9_EDITOR_UI_DESIGN_SPEC.md) 与根目录五张 `V9_EDITOR_UI_*` 图片
 > 全量验证所有者：仅 `T12`
