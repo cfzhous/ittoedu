@@ -14,20 +14,30 @@ import {
   createCourseProjectArchive,
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
+import { createEditorSelectionSnapshot } from '@/renderer/course/editorActionTypes'
 import {
   addV9SlideComponentLayer,
   addV9SlideComponentPackages,
   addV9SlideInteractionRule,
   addV9SlidePresentationState,
+  addV9SlideShapeLayer,
+  addV9SlideTextLayer,
+  activateV9SlideScene,
   buildV9SlideWorkspaceSnapshot,
   captureV9SlideVerticalSliceArchive,
+  commitV9SlideTextEdit,
   completeV9SlideVerticalSliceSave,
+  copyV9SlideLayers,
+  createV9SlideTextEditSessionKey,
   createV9SlideVerticalSliceState,
   deleteV9SlideComponentPackage,
   deleteV9SlideInteractionRule,
+  deleteV9SlideLayers,
+  executeSlideEditorAction,
   isV9SlideVerticalSliceDirty,
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
+  pasteV9SlideLayers,
   redoV9SlideVerticalSlice,
   renameV9SlideVerticalSlice,
   replaceV9SlideNativeNode,
@@ -40,6 +50,7 @@ import {
   updateV9SlideMotionTargets,
   updateV9SlideNativeNode,
   updateV9SlideRuntime,
+  v9SlideLayerAuthoringAddress,
   V9_EDITOR_BACKEND,
   V9_SLIDE_TEST_BACKEND,
   V9_SLIDE_TEST_QUERY,
@@ -968,3 +979,194 @@ function componentPackageFixture(id: string): ComponentPackageData {
     },
   }
 }
+
+function slideActionSnapshot(
+  state: ReturnType<typeof createV9SlideVerticalSliceState>,
+  options: {
+    readonly nodeIds?: readonly string[]
+    readonly focus?: 'none' | 'text-edit-session' | 'formula-edit-session'
+    readonly clipboardAvailable?: boolean
+  } = {},
+) {
+  const location = state.history.present.locations.find(
+    (candidate) => candidate.id === state.selection.locationId,
+  )
+  if (!location || location.kind !== 'slide-scene') throw new Error('expected slide location')
+  const nodeIds = options.nodeIds ?? state.selection.selectionIds
+  return createEditorSelectionSnapshot({
+    sessionId: state.sessionId,
+    projectId: state.history.present.id,
+    projectRevision: state.history.present.revision,
+    locationId: state.selection.locationId,
+    surfaceId: location.surfaceId,
+    surfaceKind: 'slide',
+    owner: 'scene',
+    sceneId: location.sceneId,
+    focus: options.focus ?? 'none',
+    targets: nodeIds.map((layerItemId) => ({
+      owner: 'scene' as const,
+      layerItemId,
+      kind: 'text' as const,
+    })),
+    constraints: { clipboardAvailable: options.clipboardAvailable ?? true },
+  })
+}
+
+describe('T05 Slide surface adapter and text session', () => {
+  it('deletes a multi-selection in one history step', () => {
+    const withShape = addV9SlideShapeLayer(
+      createV9SlideVerticalSliceState(),
+      'rectangle',
+      80,
+      90,
+      MOVE_NOW,
+    )
+    const selected = selectV9SlideVerticalSlice(withShape, {
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID, withShape.selection.selectionIds[0]!],
+      additive: false,
+    })
+    const deleted = deleteV9SlideLayers(selected, selected.selection.selectionIds, MOVE_NOW)
+    const location = deleted.history.present.locations.find(
+      (candidate) => candidate.id === deleted.selection.locationId,
+    )
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected slide')
+    const surface = deleted.history.present.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+    const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)!
+
+    expect(deleted.history.present.revision).toBe(selected.history.present.revision + 1)
+    expect(scene.layerItems.map((item) => item.layerItemId)).not.toEqual(
+      expect.arrayContaining([...selected.selection.selectionIds]),
+    )
+    expect(deleted.selection.selectionIds).toEqual([])
+  })
+
+  it('hides inherited named-state items and structurally deletes state-owned items', () => {
+    const named = addV9SlidePresentationState(createV9SlideVerticalSliceState(), '反馈态', MOVE_NOW)
+    const inserted = addV9SlideTextLayer(named, 200, 200, MOVE_NOW)
+    const ownedId = inserted.selection.selectionIds[0]!
+    const selected = selectV9SlideVerticalSlice(inserted, {
+      nodeIds: [V9_SLIDE_TEST_TEXT_ID, ownedId],
+      additive: false,
+    })
+    const deleted = deleteV9SlideLayers(selected, selected.selection.selectionIds, MOVE_NOW)
+    const location = deleted.history.present.locations.find(
+      (candidate) => candidate.id === deleted.selection.locationId,
+    )
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected slide')
+    const surface = deleted.history.present.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+    const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)!
+    const presentationState = scene.presentation!.states.find(
+      (candidate) => candidate.id === deleted.selection.stateId,
+    )!
+
+    expect(scene.layerItems.some((item) => item.layerItemId === V9_SLIDE_TEST_TEXT_ID)).toBe(true)
+    expect(presentationState.layerItemOverrides[V9_SLIDE_TEST_TEXT_ID]).toEqual({ visible: false })
+    expect(scene.layerItems.some((item) => item.layerItemId === ownedId)).toBe(false)
+    expect(deleted.history.present.revision).toBe(selected.history.present.revision + 1)
+  })
+
+  it('refuses delete during a text-edit session and pastes new stable ids', () => {
+    const selected = selectFixtureText(createV9SlideVerticalSliceState())
+    const refused = executeSlideEditorAction(
+      'delete',
+      slideActionSnapshot(selected, { focus: 'text-edit-session' }),
+      { session: selected, now: MOVE_NOW },
+    )
+    expect(refused.ok).toBe(false)
+    expect(refused.reason).toContain('只编辑文本')
+    expect(refused.session).toBe(selected)
+
+    const copied = executeSlideEditorAction(
+      'copy',
+      slideActionSnapshot(selected),
+      { session: selected, now: MOVE_NOW },
+    )
+    expect(copied.ok).toBe(true)
+    const pasted = executeSlideEditorAction(
+      'paste',
+      slideActionSnapshot(selected, { nodeIds: [] }),
+      { session: selected, clipboard: copied.clipboard, now: MOVE_NOW },
+    )
+    expect(pasted.ok).toBe(true)
+    const pastedId = pasted.session.selection.selectionIds[0]!
+    expect(pastedId).not.toBe(V9_SLIDE_TEST_TEXT_ID)
+    expect(pasted.session.history.present.revision).toBe(selected.history.present.revision + 1)
+  })
+
+  it('commits canvas text by authoringAddress + revision and rejects a stale scene switch', () => {
+    const selected = selectFixtureText(createV9SlideVerticalSliceState())
+    const key = createV9SlideTextEditSessionKey(selected, V9_SLIDE_TEST_TEXT_ID)
+    expect(key.authoringAddress).toBe(
+      v9SlideLayerAuthoringAddress(selected, V9_SLIDE_TEST_TEXT_ID, 'content.text'),
+    )
+    const committed = commitV9SlideTextEdit(selected, key, {
+      text: '画布提交后仍在同一字段',
+      runs: [{ start: 0, end: 2, style: { bold: true } }],
+    }, MOVE_NOW)
+    expect(committed.ok).toBe(true)
+    const node = buildV9SlideWorkspaceSnapshot(committed.session).document.nodes[0]
+    expect(node).toMatchObject({
+      id: V9_SLIDE_TEST_TEXT_ID,
+      text: '画布提交后仍在同一字段',
+      runs: [{ start: 0, end: 2, style: { bold: true } }],
+    })
+
+    const switched = activateV9SlideScene(selected, selected.history.present.surfaces
+      .find((surface) => surface.type === 'slide')!.scenes[0]!.id)
+    const stale = commitV9SlideTextEdit(switched, key, {
+      text: '陈旧回调不应写入',
+      runs: [],
+    }, MOVE_NOW)
+    expect(stale.ok).toBe(false)
+    expect(stale.reason).toContain('已失效')
+  })
+
+  it('keeps copy/paste interaction rewrites on a new id', () => {
+    let state = createV9SlideVerticalSliceState()
+    state = addV9SlideInteractionRule(state, {
+      id: 'rule-click-text',
+      name: '点击文字',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: V9_SLIDE_TEST_TEXT_ID },
+      conditions: [],
+      actions: [{
+        id: 'action-enter-text',
+        start: 'after-previous',
+        delayMs: 0,
+        action: {
+          type: 'node.enter',
+          nodeId: V9_SLIDE_TEST_TEXT_ID,
+          effect: 'fade',
+          durationMs: 200,
+          easing: 'ease-out',
+        },
+      }],
+    }, MOVE_NOW)
+    const clipboard = copyV9SlideLayers(state, [V9_SLIDE_TEST_TEXT_ID])
+    const pasted = pasteV9SlideLayers(state, clipboard, MOVE_NOW)
+    const pastedId = pasted.selection.selectionIds[0]!
+    const location = pasted.history.present.locations.find(
+      (candidate) => candidate.id === pasted.selection.locationId,
+    )
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected slide')
+    const surface = pasted.history.present.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+    const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)!
+    const cloned = scene.interactions.find(
+      (rule) => rule.trigger.type === 'node.click' && rule.trigger.nodeId === pastedId,
+    )
+    expect(pastedId).not.toBe(V9_SLIDE_TEST_TEXT_ID)
+    expect(cloned).toBeDefined()
+    expect(cloned!.id).not.toBe(state.history.present.surfaces
+      .find((candidate) => candidate.type === 'slide')!
+      .scenes[0]!.interactions[0]!.id)
+  })
+})

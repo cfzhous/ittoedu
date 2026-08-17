@@ -185,19 +185,44 @@ export function FlowOutlinePanel({
 }: FlowOutlinePanelProps) {
   const tree = buildFlowOutlineTree(view.outline)
   return (
-    <nav className="flow-outline-panel" aria-label="讲义大纲">
+    <nav
+      className="flow-outline-panel"
+      aria-label="课程结构"
+      data-testid="flow-outline-panel"
+    >
       <ul className="flow-outline-root">
-        {tree.map((node) => (
-          <FlowOutlineNodeView
-            key={node.entry.blockId}
-            node={node}
-            selectedBlockId={selectedBlockId}
-            onSelectBlock={onSelectBlock}
-            onDeleteBlock={onDeleteBlock}
-            onDuplicateBlock={onDuplicateBlock}
-            onMoveBlock={onMoveBlock}
-          />
-        ))}
+        <li
+          data-flow-outline-kind="page"
+          data-flow-outline-page-id={view.surfaceId}
+        >
+          <button
+            type="button"
+            className="flow-outline-item flow-outline-item--page"
+            data-flow-outline-page-id={view.surfaceId}
+            aria-label={`流式页面：${view.surfaceTitle}`}
+            onClick={() => onSelectBlock?.(view.activeBlockId)}
+          >
+            <span className="flow-outline-kind" aria-hidden="true">页</span>
+            <span className="flow-outline-title">{view.surfaceTitle}</span>
+          </button>
+          {tree.length > 0
+            ? (
+                <ul className="flow-outline-children">
+                  {tree.map((node) => (
+                    <FlowOutlineNodeView
+                      key={node.entry.blockId}
+                      node={node}
+                      selectedBlockId={selectedBlockId}
+                      onSelectBlock={onSelectBlock}
+                      onDeleteBlock={onDeleteBlock}
+                      onDuplicateBlock={onDuplicateBlock}
+                      onMoveBlock={onMoveBlock}
+                    />
+                  ))}
+                </ul>
+              )
+            : null}
+        </li>
       </ul>
     </nav>
   )

@@ -51,6 +51,7 @@ import {
 } from '../../shared/playerInspectionProtocol'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
 import type {
+  EditorOverlayHitTarget,
   NodeTransformEndEvent,
 } from '../phaser/EditorPhaserBridge'
 import { onElementAnimationPreviewRequested } from '../phaser/elementAnimationPreviewBus'
@@ -80,9 +81,26 @@ import {
   workspaceSlidePreviewSceneId,
   workspaceSlidePreviewStateId,
   workspacePreviewNodeWithTransform,
+  type WorkspaceRuntimeHitTarget,
   type WorkspaceSlideAuthoringInput,
   type WorkspaceSlideEditingScope,
 } from './workspaceSlideAuthoring'
+
+function phaserHitTargets(
+  targets: readonly WorkspaceRuntimeHitTarget[] | undefined,
+): EditorOverlayHitTarget[] | undefined {
+  if (!targets?.length) return undefined
+  return targets.map((target) => ({
+    nodeId: target.layerItemId,
+    x: target.x,
+    y: target.y,
+    width: target.width,
+    height: target.height,
+    rotation: target.rotation,
+    visible: target.visible,
+    locked: target.locked,
+  }))
+}
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
@@ -116,6 +134,7 @@ import {
   rotatedRectIntersectsStage,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
+  stageOverlayCssTransform,
 } from '../authoring/stageViewportTransform'
 import { runtimeTargetMatchesEditingContext } from '../authoring/runtimeAuthoringContext'
 import {
@@ -142,7 +161,9 @@ import {
 } from '../authoring/aiSelectionReference'
 import type { V9SlideLayerTarget } from '../course/v9SlideVerticalSlice'
 import type { FlowEditorLayerView, FlowEditorView } from '../course/flowEditorView'
+import type { SpatialViewportOverlay } from '../course/spatialEditorView'
 import type { SpatialCameraPose, SpatialSurfaceDocument } from '../../shared/courseProjectTypes'
+import type { FlowBlockPatch, FlowStructuralCommand } from './FlowPropertiesTab'
 import { FlowWorkspace, type FlowBlockMoveDirection } from './FlowWorkspace'
 import {
   SpatialWorkspace,
@@ -159,6 +180,8 @@ export interface WorkspaceFlowAuthoringInput {
   readonly layers?: readonly FlowEditorLayerView[]
   readonly selectedLayerItemId?: string | null
   readonly onSelectLayer?: (layerItemId: string) => void
+  readonly onPatchBlock?: (blockId: string, patch: FlowBlockPatch) => void
+  readonly onStructuralCommand?: (command: FlowStructuralCommand) => void
 }
 
 export interface WorkspaceSpatialAuthoringInput {
@@ -166,9 +189,20 @@ export interface WorkspaceSpatialAuthoringInput {
   readonly viewportSize: { width: number; height: number }
   readonly selectedLayerItemIds?: readonly string[]
   readonly activeCameraFrameId?: string | null
+  readonly viewportOverlays?: readonly SpatialViewportOverlay[]
+  readonly selectedViewportLayerId?: string | null
   readonly onCameraChange?: (camera: SpatialCameraPose) => void
   readonly interactionDisabled?: boolean
   readonly onSelect: (ids: readonly string[]) => void
+  readonly onSelectViewportLayer?: (input: {
+    layerItemId: string
+    source: 'global' | 'surface'
+  }) => void
+  readonly onCommitEdit?: (input: {
+    layerItemId: string
+    kind: 'text' | 'formula'
+    value: string
+  }) => void
   readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
 }
 
@@ -180,6 +214,7 @@ export interface WorkspaceProps {
   flowAuthoring?: WorkspaceFlowAuthoringInput
   spatialAuthoring?: WorkspaceSpatialAuthoringInput
   courseLocationUnavailableReason?: string
+  locationSessionKey?: string
   interactionDisabled?: boolean
   onTrialRun?: () => void
 }
@@ -532,7 +567,11 @@ export function Workspace(props: WorkspaceProps) {
   }
   if (props.flowAuthoring) {
     return (
-      <main className="workspace workspace--edit" aria-label="Flow 讲义画布">
+      <main
+        key={props.locationSessionKey ?? 'flow'}
+        className="workspace workspace--edit"
+        aria-label="Flow 讲义画布"
+      >
         <FlowSpatialTrialRunHost
           externalOnTrialRun={props.onTrialRun}
           interactionDisabled={props.interactionDisabled}
@@ -549,6 +588,8 @@ export function Workspace(props: WorkspaceProps) {
             layers={props.flowAuthoring.layers}
             selectedLayerItemId={props.flowAuthoring.selectedLayerItemId}
             onSelectLayer={props.flowAuthoring.onSelectLayer}
+            onPatchBlock={props.flowAuthoring.onPatchBlock}
+            onStructuralCommand={props.flowAuthoring.onStructuralCommand}
           />
         </div>
       </main>
@@ -556,7 +597,11 @@ export function Workspace(props: WorkspaceProps) {
   }
   if (props.spatialAuthoring) {
     return (
-      <main className="workspace workspace--edit" aria-label="Spatial 空间画布">
+      <main
+        key={props.locationSessionKey ?? 'spatial'}
+        className="workspace workspace--edit"
+        aria-label="Spatial 空间画布"
+      >
         <FlowSpatialTrialRunHost
           externalOnTrialRun={props.onTrialRun}
           interactionDisabled={props.interactionDisabled}
@@ -568,16 +613,20 @@ export function Workspace(props: WorkspaceProps) {
             viewportSize={props.spatialAuthoring.viewportSize}
             selectedLayerItemIds={props.spatialAuthoring.selectedLayerItemIds}
             activeCameraFrameId={props.spatialAuthoring.activeCameraFrameId}
+            viewportOverlays={props.spatialAuthoring.viewportOverlays}
+            selectedViewportLayerId={props.spatialAuthoring.selectedViewportLayerId}
             onCameraChange={props.spatialAuthoring.onCameraChange}
             interactionDisabled={props.spatialAuthoring.interactionDisabled}
             onSelect={props.spatialAuthoring.onSelect}
+            onSelectViewportLayer={props.spatialAuthoring.onSelectViewportLayer}
+            onCommitEdit={props.spatialAuthoring.onCommitEdit}
             onTransformEnd={props.spatialAuthoring.onTransformEnd}
           />
         </div>
       </main>
     )
   }
-  return <WorkspaceEditor {...props} />
+  return <WorkspaceEditor key={props.locationSessionKey} {...props} />
 }
 
 function WorkspaceEditor({
@@ -667,6 +716,9 @@ function WorkspaceEditor({
     readonly nodeId: string
     readonly node: TextNode
     readonly authoring: WorkspaceSlideAuthoringInput
+    readonly sessionKey: NonNullable<
+      ReturnType<EditorState['createCourseTextEditSessionKey']>
+    >
   } | null>(null)
   const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
     useState<string | null>(null)
@@ -2917,7 +2969,12 @@ function WorkspaceEditor({
             reportUnsupportedInjectedAction('文字编辑暂不可用')
             return
           }
-          setV9TextEditSession({ nodeId, node, authoring: injected })
+          const sessionKey = useEditorStore.getState().createCourseTextEditSessionKey(nodeId)
+          if (!sessionKey) {
+            reportUnsupportedInjectedAction('文字编辑会话无法开始')
+            return
+          }
+          setV9TextEditSession({ nodeId, node, authoring: injected, sessionKey })
           return
         }
         useEditorStore.getState().selectNode(nodeId)
@@ -2988,7 +3045,11 @@ function WorkspaceEditor({
       previous.id !== document.id ||
       componentsChanged
     ) {
-      handle.bridge.loadScene(document, authoringComponentPackages)
+      handle.bridge.loadScene(
+        document,
+        authoringComponentPackages,
+        phaserHitTargets(activeSlideAuthoring.runtimeHitTargets),
+      )
     } else {
       const previousById = new Map(previous.nodes.map((node) => [node.id, node]))
       const nextById = new Map(document.nodes.map((node) => [node.id, node]))
@@ -3080,6 +3141,7 @@ function WorkspaceEditor({
       : null
     previousComponentPackagesRef.current = authoringComponentPackages
   }, [
+    activeSlideAuthoring.runtimeHitTargets,
     authoringComponentPackages,
     authoringEditingScope,
     canvasMode,
@@ -3105,6 +3167,7 @@ function WorkspaceEditor({
     bridge?.loadScene(
       slideAuthoring.document,
       slideAuthoring.componentPackages,
+      phaserHitTargets(slideAuthoring.runtimeHitTargets),
     )
     if (authoringReadyRef.current) {
       for (const node of slideAuthoring.previewDocument.nodes) {
@@ -3378,11 +3441,11 @@ function WorkspaceEditor({
           className="canvas-stage-stack"
           data-panning={panning || undefined}
           style={{
-            left: stageTransform.stageRect.x,
-            top: stageTransform.stageRect.y,
+            left: 0,
+            top: 0,
             width: STAGE_VIEWPORT_WIDTH,
             height: STAGE_VIEWPORT_HEIGHT,
-            transform: `scale(${stageTransform.scale})`,
+            transform: stageOverlayCssTransform(stageTransform),
             // Geometry must change atomically: the Player, Phaser hit proxies and
             // authoring targets all consume this transform in the same frame.
             transition: 'none',
@@ -3733,15 +3796,10 @@ function WorkspaceEditor({
             gameRef.current?.bridge.setTextEditing(null)
             setV9TextEditSession(null)
             if (interactionDisabledRef.current || !session) return
-            if (!injected?.onTextEditCommit) {
-              reportUnsupportedInjectedAction('文字编辑暂不可用')
-              return
-            }
-            const accepted = injected.onTextEditCommit({
-              nodeId: session.nodeId,
-              text,
-              runs,
-            })
+            const accepted = useEditorStore.getState().commitCourseTextEditSession(
+              session.sessionKey,
+              { text, runs },
+            )
             if (!accepted) {
               useEditorStore.getState().setStatus('文字目标已变化，未写入修改')
             }

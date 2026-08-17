@@ -7,6 +7,9 @@ import {
 } from '@/renderer/course/courseStudioModel'
 import {
   buildSpatialEditorView,
+  buildSpatialViewportOverlays,
+  spatialLayerAuthoringAddress,
+  spatialSemanticZoomHitOrder,
   type DeepReadonly,
 } from '@/renderer/course/spatialEditorView'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
@@ -228,5 +231,41 @@ describe('Spatial editor read projection', () => {
     })
     const filledView = buildSpatialEditorView({ project: withText, locationId: location.id })
     expect(filledView.worldBounds).toEqual({ x: 100, y: 200, width: 400, height: 80 })
+  })
+
+  it('projects viewport overlays and a deterministic semantic-zoom hit order', () => {
+    const fixture = spatialFixture()
+    const view = buildSpatialEditorView({
+      project: fixture.project,
+      locationId: fixture.locationId,
+    })
+    const overlays = buildSpatialViewportOverlays(view)
+    expect(overlays.every((overlay) => overlay.source === 'global' || overlay.source === 'surface')).toBe(true)
+    expect(overlays.some((overlay) => overlay.layerItemId === fixture.controllerId)).toBe(true)
+    expect(overlays.every((overlay) => overlay.layerItemId !== 'world-a')).toBe(true)
+
+    expect(spatialSemanticZoomHitOrder(view, 1)).toEqual(['world-a', 'world-b'])
+
+    const hidden = updateCourseProject(fixture.project, (draft) => {
+      const surface = draft.surfaces.find((candidate) => candidate.id === fixture.surfaceId)
+      if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+      surface.semanticZoom.push({
+        id: 'sz-hide',
+        layerItemIds: ['world-a'],
+        minZoom: 0,
+        maxZoom: 0.4,
+        visible: false,
+      })
+    }, NOW)
+    const hiddenView = buildSpatialEditorView({
+      project: hidden,
+      locationId: fixture.locationId,
+    })
+    expect(spatialSemanticZoomHitOrder(hiddenView, 0.25)).toEqual(['world-b'])
+
+    const worldLayer = view.layers.find((layer) => layer.selectionId === 'world-a')!
+    const address = spatialLayerAuthoringAddress(view, worldLayer)
+    expect(address).toContain('world-a')
+    expect(address).toContain('content.text')
   })
 })

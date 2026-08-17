@@ -9,6 +9,7 @@ import {
   v9InteractionSceneDocument,
   v9InteractionSounds,
   v9SlideScenes,
+  collectV9InteractionRuleWarnings,
 } from '../course/slideInteractionView'
 import {
   useEditorStore,
@@ -251,6 +252,7 @@ function V9AutomationTab({
       : v9AutomationSceneContext(courseSession),
     [courseSession],
   )
+  const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
   if (courseSession === null || snapshot === null || context === null) return null
 
   const project = courseSession.history.present
@@ -270,6 +272,12 @@ function V9AutomationTab({
     activeScene?.presentation,
   )
   const selectedNodeId = courseSession.selection.selectionIds.at(-1) ?? null
+  const ruleWarnings = collectV9InteractionRuleWarnings(
+    project,
+    rules,
+    snapshot.document.nodes,
+  )
+  const diagnosticMessages = [...new Set(Object.values(ruleWarnings).flat())]
 
   return (
     <div className="properties-scroll" data-testid="automation-tab">
@@ -277,6 +285,21 @@ function V9AutomationTab({
         <h2>互动与动画</h2>
         <p>先从模板开始，再用“当—如果—就”微调。这里不重复显示元素单击规则。</p>
       </section>
+      {diagnosticMessages.length > 0 ? (
+        <section
+          className="property-section automation-diagnostics"
+          aria-labelledby="automation-diagnostics-title"
+        >
+          <h3 className="property-title" id="automation-diagnostics-title">
+            需要处理的映射
+          </h3>
+          {diagnosticMessages.map((message) => (
+            <p key={message} className="property-hint" role="alert">
+              {message}
+            </p>
+          ))}
+        </section>
+      ) : null}
       <SceneAutomationEditor
         scene={sceneDocument}
         sourceScope={sourceScope}
@@ -286,8 +309,10 @@ function V9AutomationTab({
         activeStateId={courseSession.selection.stateId}
         scenes={scenes}
         sounds={sounds}
+        ruleWarnings={ruleWarnings}
         onOpenClickRules={onOpenClickRules}
         onPrepareMotionTargets={(nodeIds) => onPrepareMotionTargets(nodeIds)}
+        onRunPreview={() => setCanvasMode('run')}
         onAddRule={onAddRule}
         onUpdateRule={onUpdateRule}
         onDeleteRule={onDeleteRule}

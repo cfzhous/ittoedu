@@ -1,4 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test'
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -148,32 +149,30 @@ async function expectEditableMultiSurface(
 ): Promise<void> {
   if (kind === 'flow-block') {
     await expect(editor.page.locator('.flow-editor-surface')).toHaveCount(1)
-    await expect(editor.page.getByTestId('scene-panel-flow-outline')).toHaveCount(1)
-    await expect(editor.page.getByTestId('add-flow-surface')).toHaveCount(2)
+    await expect(editor.page.getByTestId('workspace-flow-authoring')).toHaveCount(1)
+    await expect(editor.page.getByTestId('course-page-tree')).toHaveCount(1)
+    await expect(editor.page.getByTestId('add-flow-page')).toHaveCount(1)
   } else {
     await expect(editor.page.getByTestId('spatial-workspace')).toHaveCount(1)
-    await expect(editor.page.getByTestId('scene-panel-spatial-frames')).toHaveCount(1)
-    await expect(editor.page.getByTestId('add-spatial-surface')).toHaveCount(2)
+    await expect(editor.page.getByTestId('workspace-spatial-authoring')).toHaveCount(1)
+    await expect(editor.page.getByTestId('course-page-tree')).toHaveCount(1)
+    await expect(editor.page.getByTestId('add-spatial-page')).toHaveCount(1)
   }
   await expect(editor.page.getByTestId('canvas-stage')).toHaveCount(0)
   await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)
   await expect(editor.page.getByTestId('workspace-course-location-gate')).toHaveCount(0)
-  await expect(editor.page.getByTestId('scene-state-strip-course-location-gate')).toHaveCount(0)
   await expect(editor.page.getByTestId('add-scene')).toHaveCount(0)
-  await expect(editor.page.getByTestId('global-layer-entry')).toHaveCount(0)
+  await expect(editor.page.getByTestId('shared-content-section')).toHaveCount(1)
+  await expect(editor.page.getByTestId('global-layer-entry')).toHaveCount(1)
   await expect(editor.page.locator('.app-crash')).toHaveCount(0)
 }
 
 async function exerciseUnavailableShortcuts(editor: EditorHandle): Promise<void> {
+  // Copy/select-all must not write. Duplicate, Delete and nudge are real Flow/Spatial
+  // authoring actions now and would dirty a selected block or world item.
   for (const shortcut of [
     'Control+a',
     'Control+c',
-    'Control+d',
-    'Delete',
-    'ArrowLeft',
-    'ArrowRight',
-    'ArrowUp',
-    'ArrowDown',
   ]) {
     await editor.page.keyboard.press(shortcut)
   }
@@ -406,57 +405,31 @@ test('opens Flow and Spatial start locations in their production authoring works
   }
 })
 
-test('restores an old recovery copy only through the explicit migration boundary', async () => {
+test('ignores an old V8 recovery copy and requires explicit legacy import', async () => {
   test.slow()
   const legacyBytes = readFileSync(legacyPath)
-  let editor = await launchEditor(legacyRecoveryProfile, { waitForCanvas: true })
+  const recoveryDir = join(legacyRecoveryProfile, 'project-data')
+  mkdirSync(recoveryDir, { recursive: true })
+  writeFileSync(join(recoveryDir, 'recovery.h5lesson'), legacyBytes)
+  writeFileSync(join(recoveryDir, 'recovery.json'), `${JSON.stringify({
+    version: 1,
+    projectName: '旧版恢复副本',
+    savedAt: Date.now(),
+    sha256: createHash('sha256').update(legacyBytes).digest('hex'),
+    schemaVersion: 8,
+  }, null, 2)}\n`)
+
+  const editor = await launchEditor(legacyRecoveryProfile, { waitForCanvas: true })
   try {
-    await editor.page.evaluate(async (bytes) => {
-      await window.desktopAPI?.writeRecoveryProject({
-        projectName: '旧版恢复副本',
-        bytes: Uint8Array.from(bytes),
-      })
-    }, [...legacyBytes])
-  } finally {
-    await closeEditor(editor.app)
-  }
-
-  editor = await launchEditor(legacyRecoveryProfile)
-  try {
-    const recoveryButton = editor.page.getByRole('button', { name: '恢复课件' })
-    await expect(recoveryButton).toBeVisible()
-    await recoveryButton.click()
-    await expect(recoveryButton).toHaveCount(0)
-    await expect(editor.page.getByRole('button', { name: '重命名课件' }))
-      .toContainText('待导入旧课件 *')
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await expect.poll(
-      () => editor.page.evaluate(async () => {
-        const recovery = await window.desktopAPI?.readRecoveryProject()
-        return recovery ? [...recovery.bytes] : null
-      }),
-      { timeout: 8_000 },
-    ).not.toBeNull()
-
-    const currentRecovery = await editor.page.evaluate(async () => {
-      const recovery = await window.desktopAPI?.readRecoveryProject()
-      return recovery ? [...recovery.bytes] : null
-    })
-    expect(currentRecovery).not.toBeNull()
-    expect(openCourseProjectArchive(Uint8Array.from(currentRecovery!)).project.schemaVersion)
-      .toBe(9)
-
-    await patchProjectDialogs(editor.app, { save: recoveredLegacyPath })
-    await editor.page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
-    await expect.poll(() => existsSync(recoveredLegacyPath)).toBe(true)
-    const recovered = openCourseProjectArchive(readFileSync(recoveredLegacyPath))
-    expect(recovered.project.schemaVersion).toBe(9)
-    expect(recovered.project.title).toBe('待导入旧课件')
+    await expect(editor.page.getByRole('button', { name: '恢复课件' })).toHaveCount(0)
     await expect.poll(() => editor.page.evaluate(async () => (
       await window.desktopAPI?.readRecoveryProject()
     ))).toBeNull()
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(false)
+    await expect(editor.page.getByRole('button', { name: '重命名课件' }))
+      .not.toContainText('待导入旧课件')
     expect(editor.pageErrors).toEqual([])
     expect(editor.consoleErrors).toEqual([])
   } finally {

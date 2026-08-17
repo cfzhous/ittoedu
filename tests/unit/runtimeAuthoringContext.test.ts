@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { runtimeTargetMatchesEditingContext } from '../../src/renderer/authoring/runtimeAuthoringContext'
+import {
+  isEphemeralRuntimeHitIdentity,
+  runtimePersistedAuthoringField,
+  runtimeSameSceneLimitMessage,
+  runtimeTargetMatchesEditingContext,
+} from '../../src/renderer/authoring/runtimeAuthoringContext'
 
 describe('runtime authoring editing context', () => {
   it('shows only targets belonging to the active scene scope', () => {
@@ -31,5 +36,13 @@ describe('runtime authoring editing context', () => {
       'global',
       'scene-a',
     )).toBe(false)
+  })
+
+  it('persists the declared content key, never a Runtime DOM hitId', () => {
+    expect(runtimePersistedAuthoringField({ key: 'title' })).toBe('title')
+    expect(isEphemeralRuntimeHitIdentity('registered:1')).toBe(true)
+    expect(isEphemeralRuntimeHitIdentity('dom:overlay-hit')).toBe(true)
+    expect(isEphemeralRuntimeHitIdentity('title')).toBe(false)
+    expect(runtimeSameSceneLimitMessage()).toMatch(/只投射第一个已启用的 Runtime API 2 层/)
   })
 })

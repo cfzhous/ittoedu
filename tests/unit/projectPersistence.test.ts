@@ -19,6 +19,11 @@ vi.mock('electron', () => ({
   dialog: {},
 }))
 
+import { createBlankSlideCourse } from '../../src/renderer/course/courseLocationCommands'
+import { updateCourseProject } from '../../src/renderer/course/courseStudioModel'
+import { createProject } from '../../src/renderer/project/createProject'
+import { createProjectArchive } from '../../src/renderer/project/projectArchive'
+import { saveCourseProject } from '../../src/renderer/project/saveProject'
 import { openRecentProjectFile } from '../../src/main/fileDialogs'
 import {
   clearRecoveryProject,
@@ -246,5 +251,161 @@ describe('projectPersistence', () => {
     await expect(openRecentProjectFile(approvedPath)).rejects.toMatchObject({
       code: 'PROJECT_ARCHIVE_INVALID',
     })
+  })
+
+  it('stores V9 recovery identity and does not treat V8 as the default recovery backend', async () => {
+    const created = createBlankSlideCourse({
+      id: 'persist-v9',
+      title: '恢复身份',
+      now: '2026-08-17T04:00:00.000Z',
+    })
+    const saved = saveCourseProject({
+      project: created.project,
+      assetFiles: {},
+      componentFiles: {},
+    }, '2026-08-17T04:00:00.000Z')
+    const officialPath = path.join(testRoot, 'persist-v9.h5lesson')
+    await writeRecoveryProject({
+      projectName: '恢复身份.h5lesson',
+      projectPath: officialPath,
+      bytes: saved.bytes,
+    })
+
+    const metadata = JSON.parse(
+      await fs.readFile(path.join(testRoot, 'project-data', 'recovery.json'), 'utf8'),
+    ) as {
+      projectId?: string
+      revision?: number
+      schemaVersion?: number
+      updatedAt?: string
+    }
+    expect(metadata).toMatchObject({
+      projectId: 'persist-v9',
+      revision: 0,
+      schemaVersion: 9,
+      updatedAt: '2026-08-17T04:00:00.000Z',
+    })
+
+    const v8 = createProject({
+      id: 'persist-v8',
+      title: '旧恢复',
+      now: '2026-08-17T04:00:00.000Z',
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const v8Bytes = createProjectArchive({
+      project: v8,
+      assetFiles: {},
+      componentFiles: {},
+    })
+    await expect(writeRecoveryProject({
+      projectName: '旧恢复.h5lesson',
+      bytes: v8Bytes,
+    })).rejects.toMatchObject({ code: 'RECOVERY_BACKEND_UNSUPPORTED' })
+
+    const storagePath = path.join(testRoot, 'project-data')
+    await fs.mkdir(storagePath, { recursive: true })
+    await fs.writeFile(path.join(storagePath, 'recovery.h5lesson'), v8Bytes)
+    await fs.writeFile(
+      path.join(storagePath, 'recovery.json'),
+      `${JSON.stringify({
+        version: 1,
+        projectName: '旧恢复.h5lesson',
+        savedAt: Date.now(),
+        sha256: crypto.createHash('sha256').update(v8Bytes).digest('hex'),
+        schemaVersion: 8,
+        projectId: 'persist-v8',
+      }, null, 2)}\n`,
+    )
+    expect(await readRecoveryProject()).toBeNull()
+  })
+
+  it('does not offer a stale recovery that would overwrite a newer official V9 file', async () => {
+    const created = createBlankSlideCourse({
+      id: 'stale-recovery',
+      title: '旧副本',
+      now: '2026-08-17T05:00:00.000Z',
+    })
+    const older = saveCourseProject({
+      project: created.project,
+      assetFiles: {},
+      componentFiles: {},
+    }, '2026-08-17T05:00:00.000Z')
+    const newerProject = updateCourseProject(created.project, (draft) => {
+      draft.title = '正式更新'
+    }, '2026-08-17T05:10:00.000Z')
+    const newer = saveCourseProject({
+      project: newerProject,
+      assetFiles: {},
+      componentFiles: {},
+    }, '2026-08-17T05:10:00.000Z')
+    const officialPath = path.join(testRoot, 'stale-recovery.h5lesson')
+    await fs.writeFile(officialPath, newer.bytes)
+    await writeRecoveryProject({
+      projectName: '旧副本.h5lesson',
+      projectPath: officialPath,
+      bytes: older.bytes,
+    })
+
+    expect(await readRecoveryProject()).toBeNull()
+    await expect(fs.access(path.join(testRoot, 'project-data', 'recovery.h5lesson')))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('offers a newer recovery snapshot against an older official V9 file', async () => {
+    const created = createBlankSlideCourse({
+      id: 'fresh-recovery',
+      title: '新副本',
+      now: '2026-08-17T06:00:00.000Z',
+    })
+    const official = saveCourseProject({
+      project: created.project,
+      assetFiles: {},
+      componentFiles: {},
+    }, '2026-08-17T06:00:00.000Z')
+    const edited = updateCourseProject(created.project, (draft) => {
+      draft.title = '未保存修订'
+    }, '2026-08-17T06:20:00.000Z')
+    const recovery = saveCourseProject({
+      project: edited,
+      assetFiles: {},
+      componentFiles: {},
+    }, '2026-08-17T06:20:00.000Z')
+    const officialPath = path.join(testRoot, 'fresh-recovery.h5lesson')
+    await fs.writeFile(officialPath, official.bytes)
+    await writeRecoveryProject({
+      projectName: '新副本.h5lesson',
+      projectPath: officialPath,
+      bytes: recovery.bytes,
+    })
+
+    const offered = await readRecoveryProject()
+    expect(offered).not.toBeNull()
+    expect(offered?.projectPath).toBe(officialPath)
+    expect([...offered!.bytes]).toEqual([...recovery.bytes])
+  })
+
+  it('records recent projects as paths only, without a V8 backend field', async () => {
+    const filePath = path.join(testRoot, 'recent-v9.h5lesson')
+    const created = createBlankSlideCourse({
+      id: 'recent-v9',
+      title: '最近工程',
+      now: '2026-08-17T07:00:00.000Z',
+    })
+    const saved = saveCourseProject({
+      project: created.project,
+      assetFiles: {},
+      componentFiles: {},
+    }, '2026-08-17T07:00:00.000Z')
+    await fs.writeFile(filePath, saved.bytes)
+    await recordRecentProject(filePath)
+    const recent = await listRecentProjects()
+    expect(recent[0]).toEqual({
+      path: filePath,
+      name: 'recent-v9.h5lesson',
+      lastOpenedAt: expect.any(Number),
+    })
+    expect(recent[0]).not.toHaveProperty('backend')
+    expect(recent[0]).not.toHaveProperty('schemaVersion')
   })
 })

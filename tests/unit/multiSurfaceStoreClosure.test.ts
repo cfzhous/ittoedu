@@ -124,4 +124,13 @@ describe('M5/M6 closure store commands', () => {
     table = flowSurface(session).blocks.find((block) => block.id === tableId)
     expect(table?.type === 'table' && table.columns).toHaveLength(2)
   })
+
+  it('adds a slide page through the T03 page command without rewriting V8 truth', () => {
+    const store = useEditorStore.getState()
+    store.addCoursePage('slide', '第二页')
+    const session = courseSession()
+    const slides = session.history.present.surfaces.filter((surface) => surface.type === 'slide')
+    expect(slides.length).toBeGreaterThan(1)
+    expect(session.history.present.surfaces.some((surface) => surface.type === 'flow')).toBe(true)
+  })
 })

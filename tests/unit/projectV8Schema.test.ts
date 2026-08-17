@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { interactionTriggerSchema } from '@/shared/interactionSchema'
 import { projectDocumentSchema } from '@/shared/projectSchema'
 import { createProject } from '@/renderer/project/createProject'
+import {
+  importProjectV8ArchiveAsCourseProject,
+  inspectCourseProjectArchiveIdentity,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
+import { createProjectArchive } from '@/renderer/project/projectArchive'
+import { saveCourseProject } from '@/renderer/project/saveProject'
 
 describe('Project V8 schema boundary', () => {
   it('creates an explicit V8 slide project with presenter defaults', () => {
@@ -146,5 +153,27 @@ describe('Project V8 schema boundary', () => {
       type: 'presenter.command',
       command: 'previous',
     })
+  })
+
+  it('keeps V8 as an explicit import source, not the default archive backend', () => {
+    const project = createProject({
+      id: 'v8-boundary',
+      now: '2026-08-17T10:00:00.000Z',
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    expect(project.schemaVersion).toBe(8)
+    const bytes = createProjectArchive({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    })
+    expect(inspectCourseProjectArchiveIdentity(bytes).schemaVersion).toBe(8)
+    expect(() => openCourseProjectArchive(bytes)).toThrow(/显式迁移/)
+    const imported = importProjectV8ArchiveAsCourseProject(bytes)
+    expect(imported.project.schemaVersion).toBe(9)
+    expect(imported.report.targetFormat).toBe('current-course')
+    const saved = saveCourseProject(imported, '2026-08-17T10:00:00.000Z')
+    expect(inspectCourseProjectArchiveIdentity(saved.bytes).schemaVersion).toBe(9)
   })
 })

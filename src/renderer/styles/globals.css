@@ -5416,3 +5416,120 @@ button:disabled {
   box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
 }
+
+.app-main,
+.app-main--developer {
+  min-width: 0;
+}
+
+.scene-panel,
+.right-sidebar {
+  min-width: 0;
+}
+
+.shared-content-section {
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.shared-content-section .global-layer-entry {
+  margin: 8px;
+}
+
+.course-page-tree {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.course-page-tree__list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.course-page-tree__node {
+  display: grid;
+  gap: 4px;
+}
+
+.course-page-tree__children {
+  display: grid;
+  gap: 4px;
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.course-page-tree__label {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  text-align: left;
+  background: transparent;
+}
+
+.course-page-tree__label.is-active {
+  border-color: rgba(91, 156, 255, 0.58);
+  color: var(--text-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 #5b9cff;
+}
+
+.add-content-menu,
+.new-course-menu {
+  position: relative;
+  margin: 8px;
+}
+
+.add-content-menu__panel,
+.new-course-menu__panel {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg-elevated);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+}
+
+.add-content-menu__panel button,
+.new-course-menu__panel button {
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+}
+
+.add-content-menu__panel button:hover,
+.new-course-menu__panel button:hover {
+  background: var(--panel-bg-hover);
+}
+
+.course-audio-panel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 14px 16px;
+}
+
+.course-audio-panel__list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.flow-inline-editor {
+  min-width: 12em;
+  font: inherit;
+}

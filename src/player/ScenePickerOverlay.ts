@@ -13,6 +13,8 @@ export interface ScenePickerLocation {
   locationId: string
   name: string
   kind: ScenePickerLocationKind
+  /** Slide locations also expose sceneId so existing scene-directory tests keep working. */
+  sceneId?: string
 }
 
 export const SCENE_PICKER_OPEN_EVENT = 'player:scene-picker:open'
@@ -54,6 +56,7 @@ interface PickerEntry {
   selectionId: string
   name: string
   kind?: ScenePickerLocationKind
+  sceneId?: string
 }
 
 function applyStyles(
@@ -91,12 +94,13 @@ export class ScenePickerOverlay {
     this.onClose = options.onClose
     this.useLocations = options.locations !== undefined
 
-    const entries: PickerEntry[] = this.useLocations
+        const entries: PickerEntry[] = this.useLocations
       ? (options.locations as readonly ScenePickerLocation[]).map((location) => ({
           buttonId: location.id,
           selectionId: location.locationId,
           name: location.name,
           kind: location.kind,
+          ...(location.sceneId ? { sceneId: location.sceneId } : {}),
         }))
       : options.scenes.map((scene) => ({
           buttonId: scene.id,
@@ -221,6 +225,7 @@ export class ScenePickerOverlay {
       if (this.useLocations) {
         button.dataset.locationId = entry.selectionId
         if (entry.kind) button.dataset.kind = entry.kind
+        if (entry.sceneId) button.dataset.sceneId = entry.sceneId
       } else {
         button.dataset.sceneId = entry.selectionId
       }

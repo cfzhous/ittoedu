@@ -11,7 +11,7 @@ import type {
   SceneDocument,
   SceneNode,
 } from '../../shared/projectTypes'
-import type { EditorPhaserBridge } from './EditorPhaserBridge'
+import type { EditorOverlayHitTarget, EditorPhaserBridge } from './EditorPhaserBridge'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
 import { ProxyNodeAdapter } from './adapters/ProxyNodeAdapter'
 import type { AdapterBounds, NodeAdapter } from './adapters/NodeAdapter'
@@ -35,6 +35,35 @@ interface AxisBounds {
 interface TransformSnapshot {
   nodeId: string
   bounds: AdapterBounds
+}
+
+function hitTargetProxyNode(target: EditorOverlayHitTarget): SceneNode {
+  return {
+    id: target.nodeId,
+    name: target.nodeId,
+    type: 'shape',
+    shapeType: 'rectangle',
+    x: target.x,
+    y: target.y,
+    width: target.width,
+    height: target.height,
+    rotation: target.rotation,
+    opacity: 0,
+    visible: target.visible,
+    locked: target.locked,
+    playbackInitialVisibility: 'inherit',
+    style: {
+      fillColor: '#000000',
+      fillOpacity: 0,
+      borderColor: '#000000',
+      borderOpacity: 0,
+      borderWidth: 0,
+      lineStyle: 'solid',
+      cornerRadius: 0,
+      startArrow: 'none',
+      endArrow: 'none',
+    },
+  }
 }
 
 function modifierPressed(pointer: Phaser.Input.Pointer): boolean {
@@ -125,13 +154,21 @@ export class EditorScene extends Phaser.Scene {
   loadDocument(
     document: SceneDocument,
     components: Record<string, ComponentPackageData>,
+    hitTargets: readonly EditorOverlayHitTarget[] = [],
   ): void {
     this.clearAdapters()
     this.document = structuredClone(document)
     this.components = components
     this.cameras.main.setBackgroundColor('rgba(0,0,0,0)')
     document.nodes.forEach((node) => this.mountAdapter(node))
-    this.reorderNodes(document.nodes.map((node) => node.id))
+    for (const target of hitTargets) {
+      if (this.adapters.has(target.nodeId)) continue
+      this.mountAdapter(hitTargetProxyNode(target))
+    }
+    this.reorderNodes([
+      ...document.nodes.map((node) => node.id),
+      ...hitTargets.map((target) => target.nodeId).filter((id) => !document.nodes.some((node) => node.id === id)),
+    ])
     this.selectNodes([])
   }
 

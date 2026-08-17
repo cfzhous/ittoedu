@@ -4,6 +4,8 @@ import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPub
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
+  FlowSurfaceDocument,
+  SlideSurfaceDocument,
   ScopedLayerItem,
   SpatialSurfaceDocument,
 } from '@/shared/courseProjectTypes'
@@ -32,7 +34,7 @@ function spatialSurfaceDocument(): SpatialSurfaceDocument {
   }
 }
 
-function teacherControllerLayer(): ScopedLayerItem {
+function teacherControllerLayer(options: { showSceneProgress?: boolean } = {}): ScopedLayerItem {
   return {
     item: {
       layerItemId: 'course-teacher-controller',
@@ -50,7 +52,7 @@ function teacherControllerLayer(): ScopedLayerItem {
         nativeType: 'teacher-controller',
         data: {
           title: '教师控制台',
-          showSceneProgress: false,
+          showSceneProgress: options.showSceneProgress ?? false,
           compact: false,
           collapsible: true,
           defaultCollapsed: false,
@@ -77,10 +79,27 @@ function teacherControllerLayer(): ScopedLayerItem {
   }
 }
 
-function spatialProject(): CourseProjectDocument {
+function spatialProject(options: {
+  includeSlideLocation?: boolean
+  showSceneProgress?: boolean
+} = {}): CourseProjectDocument {
   const project = createCourseProject({ id: 'published-spatial', title: '空间发布课件' })
   const spatial = spatialSurfaceDocument()
-  project.surfaces = [spatial]
+  const slide: SlideSurfaceDocument = {
+    id: 'slide-surface',
+    title: '导入',
+    type: 'slide',
+    canvas: { width: 1280, height: 720 },
+    surfaceLayerItems: [],
+    scenes: [{
+      id: 'slide-scene-1',
+      name: '导入',
+      backgroundColor: '#ffffff',
+      layerItems: [],
+      interactions: [],
+    }],
+  }
+  project.surfaces = options.includeSlideLocation ? [spatial, slide] : [spatial]
   project.locations = [
     {
       id: 'location-spatial-1',
@@ -96,6 +115,13 @@ function spatialProject(): CourseProjectDocument {
       surfaceId: spatial.id,
       cameraFrameId: 'frame-2',
     },
+    ...(options.includeSlideLocation ? [{
+      id: 'location-slide-1',
+      label: '导入',
+      kind: 'slide-scene' as const,
+      surfaceId: slide.id,
+      sceneId: 'slide-scene-1',
+    }] : []),
     {
       id: 'location-spatial-3',
       label: '镜头三',
@@ -105,7 +131,29 @@ function spatialProject(): CourseProjectDocument {
     },
   ]
   project.startLocationId = 'location-spatial-1'
-  project.globalLayerItems = [teacherControllerLayer()]
+  project.globalLayerItems = [teacherControllerLayer({
+    showSceneProgress: options.showSceneProgress,
+  })]
+  if (options.includeSlideLocation) {
+    project.mixedPrintPlan = {
+      pageSize: 'A4',
+      orientation: 'auto',
+      entries: [
+        {
+          id: 'print-spatial',
+          kind: 'spatial-frames',
+          surfaceId: spatial.id,
+          cameraFrameIds: spatial.camera.frames.map((frame) => frame.id),
+        },
+        {
+          id: 'print-slide',
+          kind: 'slide-scenes',
+          surfaceId: slide.id,
+          sceneIds: ['slide-scene-1'],
+        },
+      ],
+    }
+  }
   return courseProjectDocumentSchema.parse(project)
 }
 
@@ -229,6 +277,100 @@ describe('PublishedCourseApp Spatial wiring', () => {
 
     expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
       .toHaveTextContent('声音 · 关')
+
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('wires the Spatial controller to live course mute and all-location progress', async () => {
+    history.replaceState(null, '', '#')
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(publish(spatialProject({
+      includeSlideLocation: true,
+      showSceneProgress: true,
+    })), root)
+
+    expect(root.querySelector('[data-layer-item-id="course-teacher-controller"]'))
+      .toHaveTextContent('1 / 4 · 镜头一')
+
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => {
+      expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
+        .toHaveTextContent('声音 · 关')
+    })
+
+    expect(await app.navigate('location-spatial-2')).toBe(true)
+    expect(root.querySelector('[data-layer-item-id="course-teacher-controller"]'))
+      .toHaveTextContent('2 / 4 · 镜头二')
+
+    expect(await app.navigate('location-slide-1')).toBe(true)
+    await app.restart()
+    expect(root.querySelector('[data-layer-item-id="course-teacher-controller"]'))
+      .toHaveTextContent('1 / 4 · 镜头一')
+
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('wires the Flow controller to the same course location progress, not the overlay scene', async () => {
+    history.replaceState(null, '', '#')
+    const project = spatialProject({ showSceneProgress: true })
+    const flow: FlowSurfaceDocument = {
+      id: 'flow-surface',
+      title: '讲义',
+      type: 'flow',
+      surfaceLayerItems: [],
+      layout: { readingWidth: 760, wideContentWidth: 1120 },
+      blocks: [
+        { id: 'flow-heading', type: 'heading', level: 1, text: '函数概念' },
+        { id: 'flow-paragraph', type: 'paragraph', text: '自变量与因变量。' },
+      ],
+    }
+    const spatial = project.surfaces[0]!
+    project.surfaces = [spatial, flow]
+    project.locations = [
+      project.locations[0]!,
+      {
+        id: 'location-flow-heading',
+        label: '函数概念',
+        kind: 'flow-block',
+        surfaceId: flow.id,
+        blockId: 'flow-heading',
+      },
+      project.locations[1]!,
+      project.locations[2]!,
+    ]
+    project.mixedPrintPlan = {
+      pageSize: 'A4',
+      orientation: 'auto',
+      entries: [
+        {
+          id: 'print-spatial',
+          kind: 'spatial-frames',
+          surfaceId: spatial.id,
+          cameraFrameIds: spatial.type === 'spatial-2d'
+            ? spatial.camera.frames.map((frame) => frame.id)
+            : [],
+        },
+        { id: 'print-flow', kind: 'flow-document', surfaceId: flow.id },
+      ],
+    }
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(publish(courseProjectDocumentSchema.parse(project)), root)
+
+    expect(await app.navigate('location-flow-heading')).toBe(true)
+    await vi.waitFor(() => {
+      const controller = root.querySelector(
+        '.course-surface-host:not([hidden]) [data-layer-item-id="course-teacher-controller"]',
+      )
+      expect(controller).toHaveTextContent('2 / 4 · 函数概念')
+      expect(controller).not.toHaveTextContent('语义长文覆盖图层')
+      expect(controller).not.toHaveTextContent('1 / 1')
+    })
 
     await app.destroy()
     root.remove()

@@ -57,6 +57,7 @@ function flowView(): FlowEditorView {
     ],
     globalLayerItems: [],
     surfaceLayerItems: [],
+    effectiveLayers: [],
   }
 }
 

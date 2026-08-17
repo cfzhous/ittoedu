@@ -69,6 +69,21 @@ export interface SpatialCourseProgressSource {
   getStateLabel?(): string | null
 }
 
+/**
+ * Bundles the Player-side audio/progress sources for T09 PublishedCourseApp.
+ * The host already consumes these options; this helper only documents the
+ * wiring contract and forwards the same objects.
+ */
+export function createSpatialPlayerSessionSources(input: {
+  audioChangeSource?: SpatialAudioChangeSource
+  courseProgressSource?: SpatialCourseProgressSource
+}): Pick<SpatialSurfaceHostOptions, 'audioChangeSource' | 'courseProgressSource'> {
+  return {
+    audioChangeSource: input.audioChangeSource,
+    courseProgressSource: input.courseProgressSource,
+  }
+}
+
 export interface SpatialSurfaceHostOptions {
   minZoom?: number
   maxZoom?: number
@@ -489,6 +504,21 @@ function spatialPathsRelationsSpecs(spatial: SpatialSurfaceDocument): SvgSpec[] 
             : {}),
       },
     })
+    if (relation.label) {
+      specs.push({
+        tag: 'text',
+        attributes: {
+          'data-spatial-relation-label': relation.id,
+          x: (source.x + target.x) / 2,
+          y: (source.y + target.y) / 2,
+          fill: '#334155',
+          'font-size': 12,
+          'text-anchor': 'middle',
+          'dominant-baseline': 'middle',
+        },
+        text: relation.label,
+      })
+    }
   })
 
   if (markerDefs.length > 0) specs.unshift({ tag: 'defs', children: markerDefs })
@@ -1086,6 +1116,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   #locationId: string | undefined
   #options: Required<Pick<SpatialSurfaceHostOptions, 'minZoom' | 'maxZoom' | 'showControls' | 'showMinimap' | 'interactiveCamera'>> & SpatialSurfaceHostOptions
   #drag: { pointerId: number; x: number; y: number } | null = null
+  #documentPointersBound = false
   #surfaceAbortController: AbortController | null = null
   #queue: Promise<void> = Promise.resolve()
   #domPlayback = new DomPlaybackFreeze()
@@ -1232,8 +1263,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     }, { once: true })
     root.addEventListener('pointerdown', this.#handlePointerDown)
     root.addEventListener('dblclick', this.#handleDoubleClick)
-    dom.addEventListener('pointermove', this.#handlePointerMove)
-    dom.addEventListener('pointerup', this.#handlePointerUp)
+    this.#bindDocumentPointers()
     root.addEventListener('wheel', this.#handleWheel, { passive: false })
     root.addEventListener('keydown', this.#handleKeyDown)
     this.#updateCameraTransform()
@@ -1246,6 +1276,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       this.#active = true
       if (this.#root) this.#root.hidden = false
+      this.#bindDocumentPointers()
       for (const record of this.#visibleRecords) await this.#activateRecord(record, 'activate')
       this.#syncDomPlayback()
     })
@@ -1254,6 +1285,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   suspend(): Promise<void> {
     return this.#run(async () => {
       this.#active = false
+      this.#unbindDocumentPointers()
       for (const record of this.#visibleRecords) await this.#suspendRecord(record)
       this.#syncDomPlayback()
       if (this.#root) this.#root.hidden = true
@@ -1264,6 +1296,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
     return this.#run(async () => {
       this.#active = true
       if (this.#root) this.#root.hidden = false
+      this.#bindDocumentPointers()
       for (const record of this.#visibleRecords) await this.#activateRecord(record, 'resume')
       this.#syncDomPlayback()
     })
@@ -1379,13 +1412,11 @@ export class SpatialSurfaceHost implements SurfaceHost {
       this.#audioChangeDisposer = null
       this.#teacherControllerSession.clear()
       this.#surfaceAbortController?.abort('spatial-surface-destroyed')
-      const dom = this.#root?.ownerDocument
       this.#root?.removeEventListener('pointerdown', this.#handlePointerDown)
       this.#root?.removeEventListener('dblclick', this.#handleDoubleClick)
       this.#root?.removeEventListener('wheel', this.#handleWheel)
       this.#root?.removeEventListener('keydown', this.#handleKeyDown)
-      dom?.removeEventListener('pointermove', this.#handlePointerMove)
-      dom?.removeEventListener('pointerup', this.#handlePointerUp)
+      this.#unbindDocumentPointers()
       for (const record of [...this.#records.values()].reverse()) await this.#destroyRecord(record)
       this.#records.clear()
       this.#visibleRecords = []
@@ -1897,7 +1928,26 @@ export class SpatialSurfaceHost implements SurfaceHost {
     }
   }
 
+  #bindDocumentPointers(): void {
+    const dom = this.#root?.ownerDocument
+    if (!dom || this.#documentPointersBound) return
+    dom.addEventListener('pointermove', this.#handlePointerMove)
+    dom.addEventListener('pointerup', this.#handlePointerUp)
+    this.#documentPointersBound = true
+  }
+
+  #unbindDocumentPointers(): void {
+    const dom = this.#root?.ownerDocument
+    if (dom && this.#documentPointersBound) {
+      dom.removeEventListener('pointermove', this.#handlePointerMove)
+      dom.removeEventListener('pointerup', this.#handlePointerUp)
+    }
+    this.#documentPointersBound = false
+    this.#drag = null
+  }
+
   #handlePointerDown = (event: PointerEvent): void => {
+    if (!this.#active) return
     if (event.button !== 0 || !this.#root?.contains(event.target as Node)) return
     const target = event.target as Element
     if (target.closest?.('.spatial-controls, .spatial-minimap')) return
@@ -1943,6 +1993,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   }
 
   #handlePointerMove = (event: PointerEvent): void => {
+    if (!this.#active) return
     if (!this.#drag || event.pointerId !== this.#drag.pointerId) return
     const delta = { x: event.clientX - this.#drag.x, y: event.clientY - this.#drag.y }
     this.#drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
@@ -1950,6 +2001,7 @@ export class SpatialSurfaceHost implements SurfaceHost {
   }
 
   #handlePointerUp = (event: PointerEvent): void => {
+    if (!this.#active) return
     if (this.#drag?.pointerId === event.pointerId) this.#drag = null
   }
 

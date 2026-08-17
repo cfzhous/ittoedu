@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest'
 import type { TeacherControllerNode } from '../../src/shared/projectTypes'
 import { createTeacherControllerNode } from '../../src/renderer/project/createProject'
 import {
+  applyTeacherControllerResize,
   createTeacherControllerLayout,
   formatTeacherControllerProgress,
+  mapTeacherControllerRect,
+  TEACHER_CONTROLLER_AUTHORING_ACTIONS,
+  TEACHER_CONTROLLER_COLLAPSE_ACTION,
+  TEACHER_CONTROLLER_SPATIAL_LAYER,
   teacherControllerButtonDisplayLabel,
+  teacherControllerContentRect,
+  teacherControllerGestureFrame,
+  teacherControllerSelectionChrome,
+  teacherControllerViewTransformForSurface,
 } from '../../src/shared/teacherControllerLayout'
 
 function controller(
@@ -147,5 +156,65 @@ describe('createTeacherControllerLayout', () => {
       muted: false,
       fullscreen: true,
     })).toBe('退出全屏')
+  })
+})
+
+describe('teacher controller geometry contract', () => {
+  it('shares one canonical box for content and selection chrome', () => {
+    const start = { x: 190, y: 638, width: 900, height: 64 }
+    expect(teacherControllerContentRect(start)).toEqual(start)
+    expect(teacherControllerSelectionChrome(start)).toEqual(start)
+    const mapped = mapTeacherControllerRect(start, { scale: 2, offsetX: 10, offsetY: 20 })
+    expect(mapped).toEqual({
+      x: 10 + 190 * 2,
+      y: 20 + 638 * 2,
+      width: 1800,
+      height: 128,
+    })
+  })
+
+  it('keeps Spatial viewport chrome unscaled while Slide uses the stage transform', () => {
+    const stage = { scale: 2.5, offsetX: 40, offsetY: -12 }
+    expect(teacherControllerViewTransformForSurface('spatial-2d', stage)).toEqual({
+      scale: 1,
+      offsetX: 40,
+      offsetY: -12,
+    })
+    expect(teacherControllerViewTransformForSurface('slide', stage)).toEqual(stage)
+  })
+
+  it('resizes toward the dragged visual edge and uses the same geometry for preview and commit', () => {
+    const start = { x: 100, y: 80, width: 200, height: 60 }
+    const se = applyTeacherControllerResize(start, 'se', { x: 30, y: 20 })
+    expect(se).toEqual({ x: 100, y: 80, width: 230, height: 80 })
+    const nw = applyTeacherControllerResize(start, 'nw', { x: -20, y: -10 })
+    expect(nw).toEqual({ x: 80, y: 70, width: 220, height: 70 })
+    const pointer = {
+      kind: 'resize' as const,
+      handle: 'se' as const,
+      viewDelta: { x: 40, y: 20 },
+      transform: { scale: 2, offsetX: 0, offsetY: 0 },
+    }
+    expect(teacherControllerGestureFrame(start, pointer, 'preview'))
+      .toEqual(teacherControllerGestureFrame(start, pointer, 'commit'))
+    expect(teacherControllerGestureFrame(start, pointer, 'preview')).toEqual({
+      x: 100,
+      y: 80,
+      width: 220,
+      height: 70,
+    })
+  })
+
+  it('exposes the authoring action set without a locate-controller action', () => {
+    expect(TEACHER_CONTROLLER_AUTHORING_ACTIONS.map((action) => action.type)).toEqual([
+      'scene.previous',
+      'scene.next',
+      'scene.open-picker',
+      'scene.replay',
+      'audio.toggle-mute',
+      'player.fullscreen.toggle',
+    ])
+    expect(TEACHER_CONTROLLER_SPATIAL_LAYER).toBe('viewport')
+    expect(TEACHER_CONTROLLER_COLLAPSE_ACTION).toBe('collapse')
   })
 })

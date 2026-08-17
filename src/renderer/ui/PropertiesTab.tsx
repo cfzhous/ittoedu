@@ -1335,17 +1335,23 @@ const TEACHER_CONTROLLER_ACTION_OPTIONS: Array<{
 
 function defaultTeacherControllerAction(
   type: TeacherControllerAction['type'],
-  scenes: readonly SceneDocument[],
+  scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>,
 ): TeacherControllerAction {
   return type === 'scene.go'
     ? { type, sceneId: scenes[0]?.id ?? '' }
     : { type } as TeacherControllerAction
 }
 
-function TeacherControllerProperties({ node, scenes, update }: {
+function TeacherControllerProperties({
+  node,
+  scenes,
+  update,
+  ColorField = LegacyPropertyColorInput,
+}: {
   node: TeacherControllerNode
-  scenes: readonly SceneDocument[]
+  scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
   update(patch: DeepPartial<SceneNode>): void
+  ColorField?: PropertyColorInputComponent
 }) {
   const replaceButton = (
     index: number,
@@ -1378,7 +1384,7 @@ function TeacherControllerProperties({ node, scenes, update }: {
         disabled={!node.collapsible}
         onChange={(defaultCollapsed) => update({ defaultCollapsed })}
       />
-      <ColorInput id="controller-background" label="背景色" value={node.style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
+      <ColorField id="controller-background" label="背景色" value={node.style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
       <RangeField
         label="背景透明度"
         value={opacityToTransparencyPercent(node.style.backgroundOpacity)}
@@ -1389,8 +1395,8 @@ function TeacherControllerProperties({ node, scenes, update }: {
           style: { backgroundOpacity: transparencyPercentToOpacity(value) },
         })}
       />
-      <ColorInput id="controller-accent" label="强调色" value={node.style.accentColor} onChange={(accentColor) => update({ style: { accentColor } })} />
-      <ColorInput id="controller-text" label="文字色" value={node.style.textColor} onChange={(textColor) => update({ style: { textColor } })} />
+      <ColorField id="controller-accent" label="强调色" value={node.style.accentColor} onChange={(accentColor) => update({ style: { accentColor } })} />
+      <ColorField id="controller-text" label="文字色" value={node.style.textColor} onChange={(textColor) => update({ style: { textColor } })} />
       <RangeField label="圆角" value={node.style.cornerRadius} min={0} max={40} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
       <div className="form-field">
         <label>控制按钮</label>
@@ -1509,7 +1515,7 @@ function TeacherControllerProperties({ node, scenes, update }: {
         >添加按钮（{node.buttons.length}/12）</button>
       </div>
       <ToggleRow label="包含在 PDF/PPTX" checked={node.includeInStaticExports} onChange={(includeInStaticExports) => update({ includeInStaticExports })} />
-      <p className="property-hint">该元素属于画布全局层。开启折叠后，可直接点击画布中的“收/展”按钮临时预览，该临时状态不写入工程。</p>
+      <p className="property-hint">该元素属于画布全局层。开启折叠后，可直接点击画布中的“收/展”按钮临时预览，该临时状态不写入工程。属性折叠、画布预览、试运行和 Player 读取同一配置。</p>
     </section>
   )
 }
@@ -1933,6 +1939,8 @@ export interface PropertiesTabDocumentControl {
   readonly richTextUnavailableReason: string
   readonly mediaUnavailableReason: string
   readonly controllerUnavailableReason: string
+  /** Locations used by teacher-controller scene.go when the gate is not shown. */
+  readonly controllerScenes?: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
   /** Present only when the owner can edit the scene background from this tab. */
   readonly background?: PropertiesTabBackgroundControl
   /** Optional V9-backed click-rule editor shown below the common properties. */
@@ -2111,6 +2119,7 @@ function ControlledPropertiesTab({
     richTextUnavailableReason,
     mediaUnavailableReason,
     controllerUnavailableReason,
+    controllerScenes = [],
     interaction,
     onUpdateNode,
     onClearOverride,
@@ -2183,13 +2192,22 @@ function ControlledPropertiesTab({
       />
     )
     : node.type === 'teacher-controller'
-      ? (
-        <ControlledPropertiesGate
-          title="教师控制器属性"
-          reason={controllerUnavailableReason}
-          testId="controlled-properties-controller-gate"
-        />
-      )
+      ? controllerUnavailableReason
+        ? (
+          <ControlledPropertiesGate
+            title="教师控制器属性"
+            reason={controllerUnavailableReason}
+            testId="controlled-properties-controller-gate"
+          />
+        )
+        : (
+          <TeacherControllerProperties
+            node={node}
+            scenes={controllerScenes}
+            update={update}
+            ColorField={ControlledPropertyColorInput}
+          />
+        )
       : node.type === 'external-component'
         ? (
           <ControlledPropertiesGate
@@ -2378,11 +2396,12 @@ function LegacyPropertiesTabAdapter({ onReplaceImage }: { onReplaceImage(): void
                 value={project.playback.presenter}
                 onChange={(presenter) => updatePlayback({ presenter })}
               />
-              <button type="button" className="secondary-button" onClick={ensureTeacherController}>
-                <SlidersHorizontal size={14} />{project.playback.controls === 'none'
-                  ? '恢复并显示教师控制器'
-                  : '添加或定位教师控制器'}
-              </button>
+              {(project.playback.controls === 'none' ||
+                !project.globalLayer.some((item) => item.node.type === 'teacher-controller')) && (
+                <button type="button" className="secondary-button" onClick={ensureTeacherController}>
+                  <SlidersHorizontal size={14} />恢复教师控制器
+                </button>
+              )}
             </section>
             {editorMode === 'professional' && (
               <DesignTokensEditor

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+  copyFileSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -722,6 +723,28 @@ export async function verifyRepositorySnapshot(
   await verifyGoldenContracts(snapshot)
 }
 
+async function waitForStableStatusBar(
+  page: Awaited<ReturnType<Awaited<ReturnType<typeof electron.launch>>['firstWindow']>>,
+): Promise<void> {
+  // RecoveryWriteCoordinator delayMs is 1800. Capturing the first viewport
+  // before that write flips the status from “尚未保存” to “已自动保存本地恢复副本”
+  // produced a ~0.26% pixel flake against a just-recaptured golden.
+  let last = ''
+  let unchangedMs = 0
+  const recoveryDeadline = Date.now() + 4_500
+  await waitFor(async () => {
+    const text = (await page.locator('.status-bar').textContent()) ?? ''
+    if (text !== last) {
+      last = text
+      unchangedMs = 0
+    } else {
+      unchangedMs += 120
+    }
+    const recovered = text.includes('已自动保存') || text.includes('自动恢复副本写入失败')
+    return unchangedMs >= 720 && (recovered || Date.now() >= recoveryDeadline)
+  }, 'stable status bar after recovery write', 8_000)
+}
+
 async function waitFor<T>(
   predicate: () => Promise<T | null | false>,
   label: string,
@@ -823,7 +846,13 @@ async function compareMaskedGolden(
   goldenPath: string,
   diffPath: string,
   mask: RectSnapshot,
-): Promise<{ mismatchPixels: number; comparedPixels: number; mismatchRatio: number; meanAbsoluteError: number }> {
+): Promise<{
+  mismatchPixels: number
+  comparedPixels: number
+  mismatchRatio: number
+  meanAbsoluteError: number
+  updated?: boolean
+}> {
   const [current, golden] = await Promise.all([
     sharp(currentPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
     sharp(goldenPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
@@ -877,6 +906,10 @@ async function compareMaskedGolden(
   await sharp(diff, { raw: { width, height, channels: 4 } }).png().toFile(diffPath)
   const mismatchRatio = comparedPixels === 0 ? 0 : mismatchPixels / comparedPixels
   const meanAbsoluteError = comparedPixels === 0 ? 0 : absoluteError / (comparedPixels * 4)
+  if (process.env.UPDATE_EDITOR_PRESERVATION_GOLDENS === '1') {
+    copyFileSync(currentPath, goldenPath)
+    return { mismatchPixels: 0, comparedPixels, mismatchRatio: 0, meanAbsoluteError: 0, updated: true }
+  }
   invariant(
     mismatchRatio <= 0.0015,
     'LIVE_GOLDEN_PIXEL_DRIFT',
@@ -983,7 +1016,8 @@ async function runVisualVerification(
     )
     await page.getByRole('tab', { name: '图层', exact: true }).click()
     await page.evaluate(() => document.fonts.ready)
-    await page.waitForTimeout(650)
+    await waitForStableStatusBar(page)
+    await page.waitForTimeout(200)
 
     const captures = []
     for (let index = 0; index < goldenViewports.length; index += 1) {
@@ -1049,6 +1083,29 @@ async function runVisualVerification(
         golden.geometry.rectangles.canvasStage!,
       )
       captures.push({ viewport, resizeTrace, geometry, currentPath, diffPath, comparison })
+    }
+    if (process.env.UPDATE_EDITOR_PRESERVATION_GOLDENS === '1') {
+      const contractPath = resolve(snapshot.root, 'tests/contracts/v8-shell-baseline/geometry.json')
+      const nextContract = JSON.parse(readFileSync(contractPath, 'utf8')) as GoldenContract & {
+        capturedAt?: string
+        recaptureReason?: string
+      }
+      nextContract.capturedAt = new Date().toISOString()
+      nextContract.recaptureReason =
+        'Documented T12 recapture after waiting for recovery-status settle. ' +
+        'Previous 0.26% 1280 flake was the status bar flipping from 尚未保存 to 已自动保存本地恢复副本 ' +
+        'mid-capture (RecoveryWriteCoordinator delayMs=1800). Geometry rectangles unchanged.'
+      for (const capture of nextContract.captures) {
+        const goldenPath = resolve(
+          snapshot.root,
+          'tests/contracts/v8-shell-baseline',
+          capture.screenshotFile,
+        )
+        const image = readFileSync(goldenPath)
+        capture.bytes = image.byteLength
+        capture.sha256 = sha256(image)
+      }
+      writeFileSync(contractPath, `${JSON.stringify(nextContract, null, 2)}\n`, 'utf8')
     }
     invariant(pageErrors.length === 0, 'LIVE_PAGE_ERROR', pageErrors.join('; '))
     invariant(consoleErrors.length === 0, 'LIVE_CONSOLE_ERROR', consoleErrors.join('; '))

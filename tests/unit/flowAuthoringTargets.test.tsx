@@ -215,9 +215,9 @@ describe('Flow authoring targets', () => {
       interactions: session,
       inspectionMode: 'inspect',
     })
+    await host.activate()
 
-    // The inner SlideSurfaceHost mounts in playback and is then pushed into
-    // inspect, so its scene-rule engine must already be torn down.
+    // Inspection never runs scene rules. Playback requires an active host.
     expect(session.events.listenerCount('scene:enter')).toBe(0)
 
     await host.capture({ purpose: 'export' })

@@ -23,6 +23,7 @@ import {
 import {
   constrainTeacherControllerOffset,
   logicalDragDelta,
+  runtimeTeacherControllerButtons,
   teacherControllerGestureOutcome,
   TEACHER_CONTROLLER_KEYBOARD_FINE_STEP,
   TEACHER_CONTROLLER_KEYBOARD_STEP,
@@ -190,7 +191,10 @@ export function renderTeacherController(
   depth: number,
   context: RenderNodeContext,
 ): RenderedNodeHandle {
-  let node = initialNode
+  let node = {
+    ...initialNode,
+    buttons: runtimeTeacherControllerButtons(initialNode.buttons),
+  }
   let destroyed = false
   let currentSceneId: string | null = null
   let currentStateLabel: string | null = null
@@ -866,7 +870,10 @@ export function renderTeacherController(
       ) {
         return
       }
-      node = nextNode
+      node = {
+        ...nextNode,
+        buttons: runtimeTeacherControllerButtons(nextNode.buttons),
+      }
       if (!node.collapsible) collapsed = false
       sessionOffset = constrainTeacherControllerOffset(
         node,

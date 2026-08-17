@@ -238,3 +238,166 @@ export function teacherControllerButtonDisplayLabel(
   }
   return button.label
 }
+
+/** Authoring action set. Collapse is the chrome control, not a button type. */
+export const TEACHER_CONTROLLER_AUTHORING_ACTIONS = [
+  { type: 'scene.previous', label: '上一场景' },
+  { type: 'scene.next', label: '下一场景' },
+  { type: 'scene.open-picker', label: '场景目录' },
+  { type: 'scene.replay', label: '重播' },
+  { type: 'audio.toggle-mute', label: '声音' },
+  { type: 'player.fullscreen.toggle', label: '全屏' },
+] as const
+
+export const TEACHER_CONTROLLER_COLLAPSE_ACTION = 'collapse' as const
+
+/** Spatial hosts the controller on the viewport overlay, not the world camera. */
+export const TEACHER_CONTROLLER_SPATIAL_LAYER = 'viewport' as const
+
+export const TEACHER_CONTROLLER_RESIZE_HANDLES = [
+  'n',
+  'ne',
+  'e',
+  'se',
+  's',
+  'sw',
+  'w',
+  'nw',
+] as const
+
+export type TeacherControllerResizeHandle =
+  (typeof TEACHER_CONTROLLER_RESIZE_HANDLES)[number]
+
+export interface TeacherControllerViewTransform {
+  readonly scale: number
+  readonly offsetX: number
+  readonly offsetY: number
+}
+
+export type TeacherControllerGesturePhase = 'preview' | 'commit'
+
+const MIN_CONTROLLER_EDGE = 16
+
+function copyRect(rect: TeacherControllerRect): TeacherControllerRect {
+  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+}
+
+export function teacherControllerContentRect(
+  node: TeacherControllerRect,
+): TeacherControllerRect {
+  return copyRect(node)
+}
+
+/**
+ * Selection chrome uses the same canonical box as the controller content.
+ * Callers map both through the same viewport transform.
+ */
+export function teacherControllerSelectionChrome(
+  content: TeacherControllerRect,
+): TeacherControllerRect {
+  return copyRect(content)
+}
+
+export function teacherControllerViewTransformForSurface(
+  surfaceKind: 'slide' | 'flow' | 'spatial-2d',
+  stage: TeacherControllerViewTransform,
+): TeacherControllerViewTransform {
+  if (surfaceKind === 'spatial-2d') {
+    return {
+      scale: 1,
+      offsetX: stage.offsetX,
+      offsetY: stage.offsetY,
+    }
+  }
+  return stage
+}
+
+export function mapTeacherControllerRect(
+  rect: TeacherControllerRect,
+  transform: TeacherControllerViewTransform,
+): TeacherControllerRect {
+  const scale = transform.scale === 0 ? 1 : transform.scale
+  return {
+    x: transform.offsetX + rect.x * scale,
+    y: transform.offsetY + rect.y * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
+  }
+}
+
+export function viewDeltaToCanonical(
+  delta: { readonly x: number; readonly y: number },
+  transform: TeacherControllerViewTransform,
+): { x: number; y: number } {
+  const scale = transform.scale === 0 ? 1 : transform.scale
+  return {
+    x: delta.x / scale,
+    y: delta.y / scale,
+  }
+}
+
+export function previewTeacherControllerMove(
+  start: TeacherControllerRect,
+  canonicalDelta: { readonly x: number; readonly y: number },
+): TeacherControllerRect {
+  return {
+    x: start.x + canonicalDelta.x,
+    y: start.y + canonicalDelta.y,
+    width: start.width,
+    height: start.height,
+  }
+}
+
+export function applyTeacherControllerResize(
+  start: TeacherControllerRect,
+  handle: TeacherControllerResizeHandle,
+  canonicalDelta: { readonly x: number; readonly y: number },
+): TeacherControllerRect {
+  let { x, y, width, height } = start
+  const affectsWest = handle === 'w' || handle === 'nw' || handle === 'sw'
+  const affectsEast = handle === 'e' || handle === 'ne' || handle === 'se'
+  const affectsNorth = handle === 'n' || handle === 'ne' || handle === 'nw'
+  const affectsSouth = handle === 's' || handle === 'se' || handle === 'sw'
+
+  if (affectsEast) width += canonicalDelta.x
+  if (affectsWest) {
+    x += canonicalDelta.x
+    width -= canonicalDelta.x
+  }
+  if (affectsSouth) height += canonicalDelta.y
+  if (affectsNorth) {
+    y += canonicalDelta.y
+    height -= canonicalDelta.y
+  }
+
+  if (width < MIN_CONTROLLER_EDGE) {
+    if (affectsWest) x -= MIN_CONTROLLER_EDGE - width
+    width = MIN_CONTROLLER_EDGE
+  }
+  if (height < MIN_CONTROLLER_EDGE) {
+    if (affectsNorth) y -= MIN_CONTROLLER_EDGE - height
+    height = MIN_CONTROLLER_EDGE
+  }
+  return { x, y, width, height }
+}
+
+/**
+ * Geometry is identical for preview and commit. Callers apply this on
+ * pointermove without history, then write the same rect once on pointerup.
+ */
+export function teacherControllerGestureFrame(
+  start: TeacherControllerRect,
+  pointer: {
+    readonly kind: 'move' | 'resize'
+    readonly handle?: TeacherControllerResizeHandle
+    readonly viewDelta: { readonly x: number; readonly y: number }
+    readonly transform: TeacherControllerViewTransform
+  },
+  _phase: TeacherControllerGesturePhase,
+): TeacherControllerRect {
+  const delta = viewDeltaToCanonical(pointer.viewDelta, pointer.transform)
+  if (pointer.kind === 'resize' && pointer.handle) {
+    return applyTeacherControllerResize(start, pointer.handle, delta)
+  }
+  return previewTeacherControllerMove(start, delta)
+}

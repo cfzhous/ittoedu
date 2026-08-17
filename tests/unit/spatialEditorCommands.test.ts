@@ -8,16 +8,24 @@ import {
   updateCourseProject,
 } from '@/renderer/course/courseStudioModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { createEditorSelectionSnapshot } from '@/renderer/course/editorActionTypes'
 import {
   addSpatialWorldComponentLayer,
   addSpatialWorldFormulaLayer,
   addSpatialWorldImageLayer,
   addSpatialWorldShapeLayer,
   addSpatialWorldTextLayer,
+  deleteSpatialWorldLayers,
+  duplicateSpatialWorldLayers,
+  executeSpatialEditorAction,
+  reorderSpatialWorldLayers,
   selectSpatialEditorLayers,
+  setSpatialWorldLayerFlags,
   transformSpatialWorldLayers,
   type SpatialEditorSelection,
 } from '@/renderer/course/spatialEditorCommands'
+import { addSpatialPath, addSpatialRelation } from '@/renderer/course/spatialPathCommands'
+import { addSpatialEditorSemanticZoomRule } from '@/renderer/course/spatialCameraCommands'
 import { buildSpatialEditorView } from '@/renderer/course/spatialEditorView'
 import type { CourseProjectDocument, LayerItem } from '@/shared/courseProjectTypes'
 
@@ -397,5 +405,183 @@ describe('Spatial editor selection and world transform command', () => {
     if (!surfaceBefore || surfaceBefore.type !== 'spatial-2d') throw new Error('expected Spatial surface')
     expect(surfaceAfter.camera).toEqual(surfaceBefore.camera)
     expect(next.past).toEqual([history.present])
+  })
+})
+
+function snapshotFor(
+  project: CourseProjectDocument,
+  locationId: string,
+  surfaceId: string,
+  owner: 'spatial-world' | 'spatial-camera' | 'global',
+  layerItemIds: readonly string[],
+) {
+  return createEditorSelectionSnapshot({
+    sessionId: 'session-spatial',
+    projectId: project.id,
+    projectRevision: project.revision,
+    locationId,
+    surfaceId,
+    surfaceKind: 'spatial-2d',
+    owner,
+    targets: layerItemIds.map((layerItemId) => ({
+      owner,
+      layerItemId,
+      kind: owner === 'spatial-camera' ? 'spatial-camera' : owner === 'global' ? 'teacher-controller' : 'text',
+      label: layerItemId,
+    })),
+  })
+}
+
+describe('Spatial world delete/copy/lock/hide/sort and executeSpatialEditorAction', () => {
+  it('deletes world items in one history entry and cascades path/relation/semantic-zoom refs', () => {
+    const current = worldFixture()
+    let history = createCourseHistory(current.project)
+    history = addSpatialPath(history, {
+      surfaceId: current.surfaceId,
+      name: '路线',
+      layerItemIds: ['world-text', 'world-shape'],
+      id: 'path-1',
+      now: NOW,
+    })
+    history = addSpatialRelation(history, {
+      surfaceId: current.surfaceId,
+      sourceLayerItemId: 'world-text',
+      targetLayerItemId: 'world-shape',
+      kind: 'arrow',
+      label: '相连',
+      id: 'relation-1',
+      now: NOW,
+    })
+    history = addSpatialEditorSemanticZoomRule(history, current.surfaceId, {
+      id: 'sz-1',
+      layerItemIds: ['world-text', 'world-shape'],
+      minZoom: 0,
+      maxZoom: 2,
+      now: NOW,
+    })
+    const selected = selection(history.present, current.locationId, ['world-text'])
+    const next = deleteSpatialWorldLayers(history, selected, NOW)
+    expect(next.present.revision).toBe(history.present.revision + 1)
+    expect(worldItem(next.present, current.surfaceId, 'world-shape').layerItemId).toBe('world-shape')
+    expect(() => worldItem(next.present, current.surfaceId, 'world-text')).toThrow(/missing item/)
+    const surface = next.present.surfaces.find((candidate) => candidate.id === current.surfaceId)
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    expect(surface.world.paths).toEqual([
+      expect.objectContaining({ id: 'path-1', layerItemIds: ['world-shape'] }),
+    ])
+    expect(surface.world.relations).toEqual([])
+    expect(surface.semanticZoom).toEqual([
+      expect.objectContaining({ id: 'sz-1', layerItemIds: ['world-shape'] }),
+    ])
+  })
+
+  it('duplicates, locks, hides and reorders world items inside the owner list', () => {
+    const current = worldFixture()
+    const history = createCourseHistory(current.project)
+    const selected = selection(current.project, current.locationId, ['world-text'])
+    const duplicated = duplicateSpatialWorldLayers(history, selected, NOW)
+    expect(duplicated.history.present.revision).toBe(history.present.revision + 1)
+    expect(duplicated.createdLayerItemIds).toHaveLength(1)
+    const copyId = duplicated.createdLayerItemIds[0]!
+    expect(worldItem(duplicated.history.present, current.surfaceId, copyId).label).toContain('副本')
+
+    const locked = setSpatialWorldLayerFlags(
+      duplicated.history,
+      selection(duplicated.history.present, current.locationId, [copyId]),
+      { locked: true },
+      NOW,
+    )
+    expect(worldItem(locked.present, current.surfaceId, copyId).locked).toBe(true)
+
+    const hidden = setSpatialWorldLayerFlags(
+      history,
+      selected,
+      { visible: false },
+      NOW,
+    )
+    expect(worldItem(hidden.present, current.surfaceId, 'world-text').visible).toBe(false)
+
+    const reordered = reorderSpatialWorldLayers(history, selected, 'front', NOW)
+    const surface = reordered.present.surfaces.find((candidate) => candidate.id === current.surfaceId)
+    if (!surface || surface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    const orders = surface.world.layerItems
+      .slice()
+      .sort((left, right) => left.order - right.order)
+      .map((item) => item.layerItemId)
+    expect(orders.at(-1)).toBe('world-text')
+  })
+
+  it('executeSpatialEditorAction covers T02 delete/copy/duplicate/lock/hide/focus/fit/reset-view', () => {
+    const current = worldFixture()
+    const history = createCourseHistory(current.project)
+    const viewports: Array<{ x: number; y: number; zoom: number }> = []
+    const worldSnap = snapshotFor(
+      history.present,
+      current.locationId,
+      current.surfaceId,
+      'spatial-world',
+      ['world-text'],
+    )
+
+    const copied = executeSpatialEditorAction('copy', worldSnap, { history })
+    expect(copied.ok).toBe(true)
+    expect(copied.clipboard?.items).toHaveLength(1)
+    expect(copied.history).toBe(history)
+
+    const duplicated = executeSpatialEditorAction('duplicate', worldSnap, { history, now: NOW })
+    expect(duplicated.ok).toBe(true)
+    expect(duplicated.history.present.revision).toBe(history.present.revision + 1)
+
+    const locked = executeSpatialEditorAction('lock', worldSnap, { history, now: NOW })
+    expect(locked.ok).toBe(true)
+    expect(worldItem(locked.history.present, current.surfaceId, 'world-text').locked).toBe(true)
+
+    const hidden = executeSpatialEditorAction('hide', worldSnap, { history, now: NOW })
+    expect(hidden.ok).toBe(true)
+    expect(worldItem(hidden.history.present, current.surfaceId, 'world-text').visible).toBe(false)
+
+    const deleted = executeSpatialEditorAction('delete', worldSnap, { history, now: NOW })
+    expect(deleted.ok).toBe(true)
+    expect(() => worldItem(deleted.history.present, current.surfaceId, 'world-text')).toThrow(/missing item/)
+
+    const focused = executeSpatialEditorAction('focus', worldSnap, {
+      history,
+      sessionCamera: { x: 0, y: 0, zoom: 1 },
+      onViewportChange: (pose) => viewports.push(pose),
+    })
+    const textFrame = worldItem(history.present, current.surfaceId, 'world-text').frame
+    expect(focused.ok).toBe(true)
+    expect(focused.viewport).toEqual({
+      x: textFrame.x + textFrame.width / 2,
+      y: textFrame.y + textFrame.height / 2,
+      zoom: 1,
+    })
+
+    const fitted = executeSpatialEditorAction('fit', worldSnap, {
+      history,
+      viewportSize: { width: 800, height: 500 },
+      onViewportChange: (pose) => viewports.push(pose),
+    })
+    expect(fitted.ok).toBe(true)
+    expect(fitted.viewport?.zoom).toBeGreaterThan(0)
+
+    const reset = executeSpatialEditorAction('reset-view', worldSnap, {
+      history,
+      onViewportChange: (pose) => viewports.push(pose),
+    })
+    expect(reset.ok).toBe(true)
+    expect(reset.history).toBe(history)
+
+    const globalSnap = snapshotFor(
+      history.present,
+      current.locationId,
+      current.surfaceId,
+      'global',
+      [current.controllerId],
+    )
+    const refused = executeSpatialEditorAction('delete', globalSnap, { history, now: NOW })
+    expect(refused.ok).toBe(false)
+    expect(refused.reason).toContain('全局层')
+    expect(refused.history).toBe(history)
   })
 })

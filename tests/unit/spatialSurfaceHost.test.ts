@@ -356,4 +356,50 @@ describe('SpatialSurfaceHost screen-space and teacher-controller contract', () =
 
     await host.destroy()
   })
+
+  it('ignores document pointermove after suspend so Mixed leave cannot pan the camera', async () => {
+    const spatial = spatialDocument()
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const host = new SpatialSurfaceHost(spatial, { width: 400, height: 240 }, {
+      showControls: false,
+      showMinimap: false,
+    })
+    await host.mount(mountOptions(container))
+    await host.activate()
+
+    const root = container.querySelector<HTMLElement>('.spatial-surface')!
+    const before = { ...host.camera }
+    root.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      pointerId: 11,
+      clientX: 40,
+      clientY: 40,
+      bubbles: true,
+    }))
+    document.dispatchEvent(new PointerEvent('pointermove', {
+      pointerId: 11,
+      clientX: 120,
+      clientY: 40,
+      bubbles: true,
+    }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(host.camera.x).not.toBe(before.x)
+
+    const suspended = { ...host.camera }
+    await host.suspend()
+    document.dispatchEvent(new PointerEvent('pointermove', {
+      pointerId: 11,
+      clientX: 220,
+      clientY: 80,
+      bubbles: true,
+    }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(host.camera).toEqual(suspended)
+
+    await host.destroy()
+    container.remove()
+  })
 })

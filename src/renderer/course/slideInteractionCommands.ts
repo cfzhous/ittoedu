@@ -6,7 +6,10 @@ import {
   type InteractionRule,
 } from '../../shared/interactionTypes'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type {
+  CourseProjectDocument,
+  LayerItem,
+} from '../../shared/courseProjectTypes'
 import {
   commitCourseHistory,
   type CourseHistoryState,
@@ -19,6 +22,47 @@ export type SlideInteractionScope = 'scene' | 'global'
 export interface SlideInteractionTarget {
   readonly locationId: string
   readonly scope: SlideInteractionScope
+}
+
+export const LOCKED_INTERACTION_WRITE_REASON =
+  '锁定元素不能新增、修改或删除相关互动规则；请先解锁'
+
+export function interactionRuleNodeIds(rule: InteractionRule): string[] {
+  const ids: string[] = []
+  if ('nodeId' in rule.trigger) ids.push(rule.trigger.nodeId)
+  for (const step of rule.actions) {
+    if ('nodeId' in step.action) ids.push(step.action.nodeId)
+  }
+  return ids
+}
+
+function lockedLayerItemIds(project: CourseProjectDocument): ReadonlySet<string> {
+  const ids = new Set<string>()
+  const visit = (item: LayerItem): void => {
+    if (item.locked) ids.add(item.layerItemId)
+  }
+  for (const entry of project.globalLayerItems) visit(entry.item)
+  for (const surface of project.surfaces) {
+    for (const entry of surface.surfaceLayerItems) visit(entry.item)
+    if (surface.type === 'slide') {
+      for (const scene of surface.scenes) {
+        for (const item of scene.layerItems) visit(item)
+      }
+    } else if (surface.type === 'spatial-2d') {
+      for (const item of surface.world.layerItems) visit(item)
+    }
+  }
+  return ids
+}
+
+function assertRuleTargetsUnlocked(
+  project: CourseProjectDocument,
+  rule: InteractionRule,
+): void {
+  const locked = lockedLayerItemIds(project)
+  if (interactionRuleNodeIds(rule).some((id) => locked.has(id))) {
+    throw new Error(LOCKED_INTERACTION_WRITE_REASON)
+  }
 }
 
 function locateSceneInteractions(
@@ -112,6 +156,7 @@ export function addSlideInteractionRule(
     throw new Error(`当前范围最多 ${MAX_SCENE_INTERACTIONS} 条规则`)
   }
   validateRule({ ...rule, id })
+  assertRuleTargetsUnlocked(project, { ...rule, id })
   const next = updateCourseProject(project, (draft) => {
     const rules = target.scope === 'global'
       ? draft.globalInteractions
@@ -137,6 +182,8 @@ export function updateSlideInteractionRule(
   if (!current) throw new Error(emptyRuleScopeMessage(target.scope))
   const nextRule = { ...current, ...structuredClone(patch), id: ruleId }
   validateRule(nextRule)
+  assertRuleTargetsUnlocked(project, current)
+  assertRuleTargetsUnlocked(project, nextRule)
   const changed = (Object.keys(patch) as Array<keyof Omit<InteractionRule, 'id'>>)
     .some((key) => !valuesEqual(current[key], nextRule[key]))
   if (!changed) return history
@@ -157,9 +204,11 @@ export function deleteSlideInteractionRule(
   ruleId: string,
   now?: string,
 ): CourseHistoryState {
-  if (!locateRule(history.present, target, ruleId)) {
+  const current = locateRule(history.present, target, ruleId)
+  if (!current) {
     throw new Error(emptyRuleScopeMessage(target.scope))
   }
+  assertRuleTargetsUnlocked(history.present, current)
   const next = updateCourseProject(history.present, (draft) => {
     const rules = target.scope === 'global'
       ? draft.globalInteractions
@@ -178,6 +227,7 @@ export function duplicateSlideInteractionRule(
 ): CourseHistoryState {
   const current = locateRule(history.present, target, ruleId)
   if (!current) throw new Error(emptyRuleScopeMessage(target.scope))
+  assertRuleTargetsUnlocked(history.present, current)
   const next = updateCourseProject(history.present, (draft) => {
     const rules = target.scope === 'global'
       ? draft.globalInteractions
@@ -209,6 +259,8 @@ export function moveSlideInteractionRule(
     : locateSceneInteractions(project, target.locationId)
   const index = rules.findIndex((candidate) => candidate.id === ruleId)
   if (index < 0) throw new Error(emptyRuleScopeMessage(target.scope))
+  const current = rules[index]
+  if (current) assertRuleTargetsUnlocked(project, current)
   const swapIndex = index + direction
   if (swapIndex < 0 || swapIndex >= rules.length) return history
   const next = updateCourseProject(project, (draft) => {

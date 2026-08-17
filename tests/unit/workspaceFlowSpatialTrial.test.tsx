@@ -62,6 +62,7 @@ const flowView: FlowEditorView = {
   }],
   globalLayerItems: [],
   surfaceLayerItems: [],
+  effectiveLayers: [],
 }
 
 const spatialSurface: SpatialSurfaceDocument = {

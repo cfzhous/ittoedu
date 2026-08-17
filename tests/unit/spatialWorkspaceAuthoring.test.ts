@@ -14,7 +14,9 @@ import {
 } from '../../src/player/surfaces/spatial/spatialModel'
 import {
   clampZoom,
+  fitWorkspaceCamera,
   panCamera,
+  resetWorkspaceCamera,
   screenControlRect,
   worldGroupTransform,
   zoomCameraAt,
@@ -197,5 +199,109 @@ describe('SpatialWorkspace one-gesture callbacks', () => {
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalledWith(['t1', 't2'])
     expect(onTransformEnd).not.toHaveBeenCalled()
+  })
+
+  it('keeps selection handles at a constant viewport size after zoom', () => {
+    const spatial = createSpatial([createWorldText('t1', '标题', 100, 80)])
+    const { container, rerender } = render(h(SpatialWorkspace, {
+      spatial,
+      viewportSize: { width: 800, height: 500 },
+      selectedLayerItemIds: ['t1'],
+      onSelect: vi.fn(),
+      onTransformEnd: vi.fn(),
+    }))
+    const handle = () => container.querySelector<HTMLButtonElement>('[data-spatial-handle="resize-se"]')!
+    expect(handle().style.width).toBe('9px')
+    expect(handle().style.height).toBe('9px')
+
+    fireEvent.click(container.querySelector('button[aria-label="放大视图"]')!)
+    expect(handle().style.width).toBe('9px')
+    expect(handle().style.height).toBe('9px')
+    void rerender
+  })
+
+  it('renders viewport overlays outside the world group and does not create world items on select', () => {
+    const spatial = createSpatial([createWorldText('t1', '标题', 100, 80)])
+    const onSelect = vi.fn()
+    const onSelectViewportLayer = vi.fn()
+    const { container } = render(h(SpatialWorkspace, {
+      spatial,
+      viewportSize: { width: 800, height: 500 },
+      viewportOverlays: [{
+        source: 'global',
+        layerItemId: 'global-controller',
+        label: '教师控制器',
+        frame: { x: 24, y: 24, width: 180, height: 48 },
+        rotation: 0,
+        locked: false,
+        hidden: false,
+      }],
+      onSelect,
+      onSelectViewportLayer,
+      onTransformEnd: vi.fn(),
+    }))
+    const overlay = container.querySelector('[data-testid="spatial-viewport-overlay"]')!
+    const world = container.querySelector('[data-spatial-world]')!
+    expect(world.contains(overlay)).toBe(false)
+    fireEvent.pointerDown(overlay, { pointerId: 2, button: 0, buttons: 1, clientX: 40, clientY: 40 })
+    expect(onSelectViewportLayer).toHaveBeenCalledWith({
+      layerItemId: 'global-controller',
+      source: 'global',
+    })
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(spatial.world.layerItems.map((item) => item.layerItemId)).toEqual(['t1'])
+    expect(spatial.camera.frames).toEqual([])
+  })
+
+  it('does not reset a switched camera frame back to home on a home-stable rerender', () => {
+    const spatial = createSpatial([createWorldText('t1', '标题', 100, 80)])
+    spatial.camera.frames = [
+      { id: 'frame-1', name: '近景', x: 80, y: 90, zoom: 2 },
+    ]
+    const onCameraChange = vi.fn()
+    const props = {
+      spatial,
+      viewportSize: { width: 800, height: 500 },
+      onSelect: vi.fn(),
+      onTransformEnd: vi.fn(),
+      onCameraChange,
+    }
+    const { container, rerender } = render(h(SpatialWorkspace, {
+      ...props,
+      activeCameraFrameId: null,
+    }))
+    rerender(h(SpatialWorkspace, {
+      ...props,
+      activeCameraFrameId: 'frame-1',
+    }))
+    const root = container.querySelector('[data-testid="spatial-workspace"]')!
+    expect(root.getAttribute('data-camera-x')).toBe('80')
+    expect(root.getAttribute('data-camera-y')).toBe('90')
+    expect(root.getAttribute('data-camera-zoom')).toBe('2')
+
+    rerender(h(SpatialWorkspace, {
+      ...props,
+      activeCameraFrameId: 'frame-1',
+      spatial: {
+        ...spatial,
+        camera: {
+          home: { ...spatial.camera.home },
+          frames: spatial.camera.frames.map((frame) => ({ ...frame })),
+        },
+      },
+    }))
+    expect(root.getAttribute('data-camera-x')).toBe('80')
+    expect(root.getAttribute('data-camera-y')).toBe('90')
+    expect(root.getAttribute('data-camera-zoom')).toBe('2')
+  })
+
+  it('fits and resets the session camera without writing world items', () => {
+    const spatial = createSpatial([createWorldText('t1', '标题', 100, 80)])
+    const fitted = fitWorkspaceCamera(spatial, { width: 800, height: 500 })
+    expect(fitted.x).toBe(200)
+    expect(fitted.y).toBe(110)
+    expect(fitted.zoom).toBeGreaterThan(0)
+    const reset = resetWorkspaceCamera(spatial, { width: 800, height: 500 })
+    expect(reset).toMatchObject({ x: 0, y: 0, zoom: 1 })
   })
 })

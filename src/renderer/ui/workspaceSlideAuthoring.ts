@@ -26,6 +26,64 @@ export interface WorkspaceTextEditCommitEvent {
   readonly nodeId: string
   readonly text: string
   readonly runs: readonly TextRun[]
+  /** Stable V9 address; required for the injected backend commit path. */
+  readonly authoringAddress?: string
+  /** Project revision captured when the canvas session opened. */
+  readonly revision?: number
+}
+
+export type WorkspaceTextEditField = 'content.text' | 'content.formula'
+
+/** Commit key for one canvas text/formula session. Temporary node objects are not keys. */
+export interface WorkspaceTextEditSessionKey {
+  readonly sessionId: string
+  readonly authoringAddress: string
+  readonly revision: number
+  readonly locationId: string
+  readonly stateId: string | null
+  readonly editingScope: WorkspaceSlideEditingScope
+  readonly layerItemId: string
+  readonly field: WorkspaceTextEditField
+  readonly generation: number
+}
+
+export type WorkspaceTextEditSubmit = 'blur' | 'enter' | 'ctrl-enter'
+
+export type WorkspaceTextEditBoundary =
+  | { readonly kind: 'ignore' }
+  | { readonly kind: 'commit'; readonly submit: WorkspaceTextEditSubmit }
+  | { readonly kind: 'cancel' }
+  | { readonly kind: 'reject-stale' }
+
+export interface WorkspaceTextEditBoundaryEvent {
+  readonly type:
+    | 'compositionstart'
+    | 'compositionend'
+    | 'keydown'
+    | 'blur'
+    | 'cancel'
+    | 'external-selection'
+  readonly key?: string
+  readonly ctrlKey?: boolean
+  readonly metaKey?: boolean
+  readonly isComposing?: boolean
+}
+
+export interface WorkspaceSlideAuthoringTarget {
+  readonly source: WorkspaceSlideEditingScope
+  readonly layerItemId: string
+  readonly authoringAddress?: string
+}
+
+export interface WorkspaceRuntimeHitTarget {
+  readonly layerItemId: string
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly rotation: number
+  readonly visible: boolean
+  readonly locked: boolean
 }
 
 export interface WorkspaceSlidePreviewResources {
@@ -51,6 +109,13 @@ export interface WorkspaceSlideAuthoringInput {
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly previewResources: WorkspaceSlidePreviewResources
   readonly selectedNodeIds: readonly string[]
+  /**
+   * V9-only ownership map. Node ids are stable layerItemId values; callers
+   * omit this on the legacy V8 path.
+   */
+  readonly authoringTargets?: ReadonlyMap<string, WorkspaceSlideAuthoringTarget>
+  /** Runtime layers stay out of SceneNode lists; T10 mounts these as hit zones. */
+  readonly runtimeHitTargets?: readonly WorkspaceRuntimeHitTarget[]
   /** Labels owned by the injected document backend, never by the V8 shell. */
   readonly sceneName: string
   readonly stateName: string
@@ -182,6 +247,109 @@ export function workspaceTextEditTargetNode(
   return node?.type === 'text' && node.visible && !node.locked ? node : null
 }
 
+export function workspaceFormulaEditTargetNode(
+  injected: WorkspaceSlideAuthoringInput,
+  nodeId: string,
+): SceneNode | null {
+  const node = injected.document.nodes.find((candidate) => candidate.id === nodeId)
+  return node?.type === 'formula' && node.visible && !node.locked ? node : null
+}
+
+export function workspaceAuthoringTargetForNode(
+  injected: WorkspaceSlideAuthoringInput,
+  nodeId: string,
+): WorkspaceSlideAuthoringTarget | null {
+  const mapped = injected.authoringTargets?.get(nodeId)
+  if (mapped) return mapped
+  const node = injected.document.nodes.find((candidate) => candidate.id === nodeId)
+  if (!node) return null
+  return {
+    source: injected.editingScope,
+    layerItemId: node.id,
+  }
+}
+
+export function isWorkspaceTextEditSessionStale(
+  session: WorkspaceTextEditSessionKey,
+  current: Pick<
+    WorkspaceTextEditSessionKey,
+    'sessionId' | 'authoringAddress' | 'revision' | 'locationId' | 'stateId' | 'editingScope' | 'generation'
+  >,
+): boolean {
+  return session.sessionId !== current.sessionId ||
+    session.authoringAddress !== current.authoringAddress ||
+    session.revision !== current.revision ||
+    session.locationId !== current.locationId ||
+    session.stateId !== current.stateId ||
+    session.editingScope !== current.editingScope ||
+    session.generation !== current.generation
+}
+
+/**
+ * Classifies IME / blur / Enter / Ctrl+Enter / cancel / external selection.
+ * Returning `reject-stale` means the caller must drop the draft and not write.
+ */
+export function resolveWorkspaceTextEditBoundary(input: {
+  readonly session: WorkspaceTextEditSessionKey
+  readonly current: Pick<
+    WorkspaceTextEditSessionKey,
+    'sessionId' | 'authoringAddress' | 'revision' | 'locationId' | 'stateId' | 'editingScope' | 'generation'
+  >
+  readonly event: WorkspaceTextEditBoundaryEvent
+  readonly composing?: boolean
+}): WorkspaceTextEditBoundary {
+  if (isWorkspaceTextEditSessionStale(input.session, input.current)) {
+    return { kind: 'reject-stale' }
+  }
+  const event = input.event
+  if (event.type === 'compositionstart' || input.composing || event.isComposing) {
+    return { kind: 'ignore' }
+  }
+  if (event.type === 'compositionend') return { kind: 'ignore' }
+  if (event.type === 'cancel' || event.type === 'external-selection') {
+    return { kind: 'cancel' }
+  }
+  if (event.type === 'blur') return { kind: 'commit', submit: 'blur' }
+  if (event.type === 'keydown') {
+    if (event.key === 'Escape') return { kind: 'cancel' }
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      return { kind: 'commit', submit: 'ctrl-enter' }
+    }
+    if (event.key === 'Enter') return { kind: 'commit', submit: 'enter' }
+  }
+  return { kind: 'ignore' }
+}
+
+export function beginWorkspaceTextEditSession(input: {
+  readonly injected: WorkspaceSlideAuthoringInput
+  readonly nodeId: string
+  readonly locationId: string
+  readonly stateId: string | null
+  readonly revision: number
+  readonly authoringAddress: string
+  readonly field?: WorkspaceTextEditField
+  readonly generation: number
+}): WorkspaceTextEditSessionKey | null {
+  const field = input.field ?? 'content.text'
+  const node = field === 'content.formula'
+    ? workspaceFormulaEditTargetNode(input.injected, input.nodeId)
+    : workspaceTextEditTargetNode(input.injected, input.nodeId)
+  if (!node) return null
+  const target = workspaceAuthoringTargetForNode(input.injected, input.nodeId)
+  if (!target) return null
+  return {
+    sessionId: input.injected.sessionId,
+    authoringAddress: input.authoringAddress,
+    revision: input.revision,
+    locationId: input.locationId,
+    stateId: input.stateId,
+    editingScope: input.injected.editingScope,
+    layerItemId: target.layerItemId,
+    field,
+    generation: input.generation,
+  }
+}
+
 /** V9 accepts the complete visible Native/Component selection, including locked items. */
 export function workspaceSelectionAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
@@ -309,6 +477,12 @@ export function workspaceSlidePreviewGenerationIdentity(
     assetFiles: input.previewResources.assetFiles,
     componentPackages: input.componentPackages,
   }
+}
+
+export function workspaceOverlayHitTargets(
+  targets: readonly WorkspaceRuntimeHitTarget[] | undefined,
+): readonly WorkspaceRuntimeHitTarget[] {
+  return targets ?? []
 }
 
 export function workspaceSlidePreviewStateId(

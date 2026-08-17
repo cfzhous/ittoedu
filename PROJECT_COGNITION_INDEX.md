@@ -1,8 +1,8 @@
 # 项目认知索引
 
-> SOURCE_BASELINE: `8b4513c9081bf65a0f108627cc499914d4f9a969`
-> PRODUCT_CHECKPOINT: `b6d1787875339fff8ba03d80cfbf80187c009caa`
-> UPDATED: 2026-08-15
+> SOURCE_BASELINE: `e2e34aa29ddb72abb2c691e414a4d8f461f35b2c`
+> PRODUCT_CHECKPOINT: `7f04a8a4286280209e7cb04982001bf047d09126`
+> UPDATED: 2026-08-17
 > PURPOSE: 帮助新 Agent 用最少上下文进入真实代码
 
 本文件是导航，不是源码替代品。若索引与源码、Schema 或可复现证据冲突，以源码事实为准并在同一变更中修正索引。
@@ -12,26 +12,25 @@
 ## 1. 新 Agent 的最短启动顺序
 
 1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品合同、当前恢复点、并行任务板（§4.5）和验证预算。
-3. 协调者继续阅读当前阶段 [`docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md`](docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md)；执行者只读自己的任务行与对应阶段计划小节。
-4. 运行 `git status --short`，保留所有不属于当前任务的修改和未跟踪文件。
-5. 从本文件“改什么看哪里”进入相关源码，不先遍历全仓库。
-6. 修改前确认当前源码，而不是照搬索引中的示例或 donor 路径。
-7. 按根计划 L0–L4 选择最低充分验证，不默认运行全量测试。
+2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的目标、恢复基线、能力底线、实施 Gate 与完成定义（§1、§3、§5、§8、§11）。
+3. 从当前任务入口 [`docs/tasks/v9-editor/00_INDEX.md`](docs/tasks/v9-editor/00_INDEX.md) 领取一个任务，并阅读共享合同与该任务文档。
+4. `docs/plans/AI_NATIVE_*` 与旧 M3–M8 计划只作历史取证，不是当前执行入口；不得从中恢复“隐藏共享层、禁用既有能力或只做 FINAL”的旧路线。
+5. 运行 `git status --short`，保留所有不属于当前任务的修改和未跟踪文件。
+6. 从本文件“改什么看哪里”进入相关源码，不先遍历全仓库。
+7. 修改前确认当前源码，而不是照搬索引中的示例或 donor 路径；只运行任务文档列出的最小验证。
 
 ## 2. 真相优先级
 
 1. 用户当前明确要求与最近的 `AGENTS.md`。
 2. `src/shared/*Schema.ts`、当前源码和可复现运行证据。
-3. [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品合同和阶段状态。
-4. 当前阶段计划。
-5. 本索引及 `repo-index/*.json`。
-6. 历史计划、旧截图、示例构建脚本和 donor 代码。
+3. [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品决策和执行路线。
+4. 本索引及 `repo-index/*.json`。
+5. 历史阶段计划、评估原稿、旧截图、示例构建脚本和 donor 代码。
 
 索引基准 SHA 不必与每次 docs-only 提交完全相同。使用前运行：
 
 ```powershell
-git diff --name-only 8b4513c9081bf65a0f108627cc499914d4f9a969..HEAD -- src tests scripts agent-kit .agents package.json
+git diff --name-only e2e34aa29ddb72abb2c691e414a4d8f461f35b2c..HEAD -- src tests scripts agent-kit .agents package.json
 ```
 
 若输出触及本任务对应模块，先核对实际代码并更新相关索引条目；文档提交本身不会使整个索引失效。
@@ -132,15 +131,20 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前为 M5/M6 收口，恢复于产品检查点 `7f04a8a`（M4 Gate 已于 2026-08-15 通过）。
+当前阶段是 **T10 `integration candidate`，待 T12 全量 Gate**。T01–T11 已在恢复 worktree `output/worktrees/v9-parity-reconstruction` 交付；首选恢复基线仍是 `e2e34aa`，条件回退点是 `7f04a8a`。体验清单已冻结为 [`docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md`](docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md)。不得把 integration candidate 写成已通过全量验证或教师验收。
 
-M4 已成立（`7f04a8a`）：Published Slide 会话生命周期与异步 action await、教师控制器运行合同（收展/拖动/目录/静音/全屏/重播/重启单 owner）、Runtime API 2/3 与 Component API 4 全链、课程状态与恢复单一 owner（replay 单次进入、会话态不写 archive、checkpoint 无 history/dirty、隔离销毁无泄漏）；L3 证据全通过。
+全局层继续作为可见作者入口：四态左栏固定「共享内容 → 全局层（全课）」，`globalLayerItems` / `surfaceLayerItems` 仍是 V9 存储与发布能力。纯 Slide / Flow / Spatial / Mixed 只从 `locations` / `surfaces` 推导，不新增 `projectMode`。当前编辑器内仍没有可见 AI；`courseAiHandoff` / `courseAiPatch` 只是 internal/reserved、未挂载，不参与本轮完成判定。Focusky 级镜头化与自动结构编辑不是现有能力。
 
-M5/M6 任务板已全部 integrated（Flow/Spatial 作者命令、原壳工作区、镜头/语义缩放、路径/关系、Player 运行合同），但 2026-08-15 协调者审计发现 P1×2 与 P2×9（详见 `docs/plans/M5_M6_FLOW_SPATIAL_PLAN.md` §5 缺口登记），**M5/M6 Gate 未判定**。当前优先：
+T10 接线后仍须按源码诚实对待的缺口：V9 会话没有 `replaceCourseComponentPackage`；没有 `addCourseRuntimeLayer`（开发页不造假入口）；`executeFlowEditorAction` 未实现 paste/cut；全局层粘贴未提供。这些写在体验清单 §0，由 T12 记「受阻」或回派，不在文档里抹平。
 
-1. 收口任务板（根计划 §4.5）：先修两个 P1（Spatial 路径/关系全链渲染与发布、镜头会话相机接线），再修 P2（Flow 结构编辑入口、统一图层进生产画布、Spatial Inspector 击键历史、控制器三件套、混合工程表面导航、Flow/Spatial 试运行动线）。
-2. 全部收口任务 integrated 后按 L3 判定 M5/M6 Gate，再进入 M7（Mixed 与发布导出）与 M8（最终收敛）。
-3. 已处置的既有问题见总纲 §3.6（golden 重捕获、控制器测试校准、course-studio 陈旧 spec 退休）。
+当前优先顺序：
+
+1. T12 按任务文档跑唯一全量自动化，再按体验清单做三视口与十个交互场景。
+2. 失败按文件所有权回派；修复者只跑最小测试，再由 T12 复跑。
+3. 全量绿灯只证明项目级 `engineering candidate`；真实视觉/互动复核后才可称 `art candidate`。
+4. 继续保留全局层；继续不引入 `projectMode`；继续不把 reserved AI 接口宣传成可用工作流。
+
+当前结果不能高于 `engineering candidate`；真实 UI 与关键互动未复核前不称 `art candidate`。
 
 ## 7. 关键不变量
 
@@ -150,6 +154,9 @@ M5/M6 任务板已全部 integrated（Flow/Spatial 作者命令、原壳工作�
 - 选择和异步提交使用 session/location/state/scope/layer 的稳定 target，拒绝陈旧回调。
 - editor view、authoring proxy、Player preview 各自是只读投影，不可互相反序列化。
 - global/surface 作者态可显示 base 对象；Player 必须遵守 effective visibility。
+- global/surface 继续作为 V9 存储、作者与运行能力；四态左栏固定提供“共享内容 → 全局层（全课）”，统一有效图层不能取代该可见入口。
+- 纯 Slide/Flow/Spatial 与 Mixed 从 `locations/surfaces` 推导，不新增 `projectMode` 或 V10 迁移；新建工程和课程结构必须有三类 surface 的直接创建入口。
+- “轻量”只控制默认信息密度和渐进披露，不得删除、禁用或隐藏到不可发现 V8 已有能力。
 - 编辑态控制器 inert；试运行控制器可执行但只改会话。
 - Spatial world 与 viewport 控件使用不同坐标空间。
 - HTML/网页包无画布外旧导航。
@@ -162,13 +169,11 @@ M5/M6 任务板已全部 integrated（Flow/Spatial 作者命令、原壳工作�
 优先查询 [`repo-index/tests.json`](repo-index/tests.json)。通用原则：
 
 - docs/index：只查链接、JSON、diff。
-- 单函数/组件：一个最相关 Vitest 文件。
-- 类型边界变化：增加 `npm run typecheck`。
-- Player bundle变化：增加 `npm run build:player`。
-- 用户可见纵切：最多一个 Electron spec。
-- `npm test`、preservation、三尺寸 visual 只在阶段 Gate。
+- 单函数/组件：只运行任务文档列出的 1–4 个最相关 Vitest 文件。
+- T01–T11 不运行全量 typecheck、build、Vitest、Electron/Playwright 或 preservation visual，也不重捕截图。
+- 只有 [`T12`](docs/tasks/v9-editor/13_FINAL_FULL_GATE.md) 在最终整合后统一运行 `verify:full`、全部 V9 Playwright、course cases 和真实体验矩阵。
 
-不要因为存在 `npm run verify:full` 就在开发循环运行它。
+不要因为存在 `npm run verify:full` 就在开发循环运行它；中间类型或构建风险记录到 HANDOFF，由最终 Gate 一次性验证。
 
 ## 9. 高风险文件提示
 

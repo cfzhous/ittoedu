@@ -235,3 +235,54 @@ describe('ComponentsTab project component management', () => {
     }
   })
 })
+
+describe('ComponentsTab V9 catalog reachability', () => {
+  it('keeps replace reachable, locates slide instances, and does not copy the package', () => {
+    useEditorStore.getState().createNewCourseProject()
+    useEditorStore.setState({ editorMode: 'professional' })
+    const imported = componentPackage('1.0.0')
+    expect(useEditorStore.getState().importCourseComponentPackages([imported])).toBe(true)
+    expect(useEditorStore.getState().addCourseComponentLayer(PACKAGE_ID)).toBe(true)
+    const onReplaceComponent = vi.fn()
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab onReplaceComponent={onReplaceComponent} />)
+      const manager = screen.getByTestId(`component-package-${PACKAGE_ID}`)
+      expect(manager).toHaveTextContent('v1.0.0')
+      expect(manager).toHaveTextContent('场景 1 · 共用 0 · 全局 0')
+      fireEvent.click(screen.getByLabelText('管理可管理组件'))
+      const replaceButton = screen.getByRole('menuitem', { name: '替换组件包' })
+      expect(replaceButton).toBeEnabled()
+      fireEvent.click(replaceButton)
+      expect(onReplaceComponent).toHaveBeenCalledWith(PACKAGE_ID)
+
+      fireEvent.click(screen.getByTestId(`locate-component-${PACKAGE_ID}`))
+      const session = useEditorStore.getState().courseSession
+      expect(session).not.toBeNull()
+      expect(session!.selection.selectionIds.length).toBeGreaterThan(0)
+      expect(Object.keys(session!.componentPackages)).toEqual([PACKAGE_ID])
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+
+  it('explains why surface scope cannot insert without disabling package management', () => {
+    useEditorStore.getState().createNewCourseProject()
+    useEditorStore.setState({ editorMode: 'professional' })
+    useEditorStore.getState().importCourseComponentPackages([componentPackage('1.0.0')])
+    useEditorStore.getState().setCourseEditingScope('surface')
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = () => null
+    try {
+      render(<ComponentsTab onReplaceComponent={vi.fn()} />)
+      expect(screen.getByText('当前内容共用层暂不能插入组件；请在当前页面添加组件。'))
+        .toBeInTheDocument()
+      fireEvent.click(screen.getByLabelText('管理可管理组件'))
+      expect(screen.getByRole('menuitem', { name: '替换组件包' })).toBeEnabled()
+      expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeEnabled()
+    } finally {
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+    }
+  })
+})

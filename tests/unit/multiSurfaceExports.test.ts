@@ -14,6 +14,7 @@ import {
   buildFlowPrintHtml,
   buildMixedPrintPlan,
   buildSpatialPrintHtml,
+  uniqueFlowDocxFilename,
 } from '@/renderer/export/course'
 
 function exportFlow(): FlowSurfaceDocument {
@@ -210,6 +211,13 @@ describe('Flow DOCX OOXML export', () => {
       expect.stringContaining('layer-component'),
       expect.stringContaining('layer-runtime'),
     ]))
+  })
+
+  it('avoids overwriting an existing Flow DOCX filename', () => {
+    expect(uniqueFlowDocxFilename('函数复习')).toBe('函数复习.docx')
+    expect(uniqueFlowDocxFilename('函数复习', new Set(['函数复习.docx']))).toBe('函数复习-2.docx')
+    expect(uniqueFlowDocxFilename('函数复习', new Set(['函数复习.docx', '函数复习-2.docx'])))
+      .toBe('函数复习-3.docx')
   })
 })
 

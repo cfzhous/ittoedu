@@ -8,7 +8,10 @@
       ],
       "label": "Course Project V9",
       "limitations": [
-        "V1-V7 are not reopened by the current V9 path."
+        "V1-V7 are not reopened by the current V9 path.",
+        "V8 archives enter only through explicit import; new projects are V9.",
+        "Pure/Mixed layout is derived from locations/surfaces; no persisted projectMode.",
+        "globalLayerItems and surfaceLayerItems remain engine and authoring capabilities."
       ],
       "outputs": [
         ".h5lesson",
@@ -74,7 +77,7 @@
       ]
     },
     {
-      "authoringBoundary": "Block IDs remain stable across reorder, save, export and AI patching.",
+      "authoringBoundary": "Block IDs remain stable across reorder, save and export.",
       "id": "surface:flow",
       "inputs": [
         "FlowBlock[]"
@@ -107,7 +110,8 @@
       ],
       "label": "Spatial 2D surface",
       "limitations": [
-        "This is a 2D surface, not a general 3D scene editor."
+        "This is a 2D surface, not a general 3D scene editor.",
+        "Not a Focusky-class cinematic timeline or camera-path authoring suite."
       ],
       "outputs": [
         "interactive SVG world",
@@ -125,14 +129,16 @@
       ]
     },
     {
-      "authoringBoundary": "Locations reference existing surfaces and optional scene, block or camera-frame anchors.",
+      "authoringBoundary": "Locations reference existing surfaces and optional scene, block or camera-frame anchors. Layout is derived; do not persist projectMode.",
       "id": "surface:mixed",
       "inputs": [
         "CourseLocation[]",
         "CourseNavigationGuard[]"
       ],
       "label": "Mixed course navigation",
-      "limitations": [],
+      "limitations": [
+        "Not a cinematic Focusky-class presentation system."
+      ],
       "outputs": [
         "course directory",
         "cross-surface navigation"
@@ -155,7 +161,8 @@
       ],
       "label": "Runtime module",
       "limitations": [
-        "Use only when Native behavior is insufficient."
+        "Use only when Native behavior is insufficient.",
+        "The V9 Developer tab does not create a Runtime via addCourseRuntimeLayer; existing runtimes remain editable."
       ],
       "outputs": [
         "interactive layer item",
@@ -180,7 +187,8 @@
       ],
       "label": "Component API 4",
       "limitations": [
-        "Package admission and licensing remain separate product checks."
+        "Package admission and licensing remain separate product checks.",
+        "A V9 session has no replaceCourseComponentPackage command; replace or update fails with a visible reason."
       ],
       "outputs": [
         "interactive layer item",
@@ -223,29 +231,32 @@
       ]
     },
     {
-      "authoringBoundary": "A session hitId is diagnostic only; the persisted address and current revision identify the edit.",
+      "authoringBoundary": "A session hitId is diagnostic only; the persisted address and current revision identify the edit. Official App does not mount copy-reference or apply-patch UI.",
       "id": "authoring:stable-patch",
       "inputs": [
         "projectRevision",
         "authoringAddress",
         "replacement"
       ],
-      "label": "Stable authoring address patch",
+      "label": "Stable authoring address (reserved patch)",
       "limitations": [
+        "courseAiHandoff / courseAiPatch are internal/reserved and unmounted.",
+        "Official ProductApp to App has no visible AI copy-reference or apply-patch controls.",
+        "Disk CLI scripts exist but are not a teacher-facing editor workflow.",
         "A stale revision is rejected and must be reread."
       ],
       "outputs": [
         "revision-protected local edit"
       ],
-      "purpose": "Patch one selected text, asset or property without regenerating the course or overwriting later edits.",
+      "purpose": "Identify one selected text, asset or property by authoringAddress and revision. Do not treat this as a mounted visible-AI workflow.",
       "source": "../../src/shared/authoringAddress.ts",
-      "status": "stable",
+      "status": "reserved",
       "tags": [
         "authoringAddress",
         "patch",
+        "reserved",
         "revision",
-        "selection",
-        "ai"
+        "selection"
       ]
     },
     {

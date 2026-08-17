@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest'
+import {
+  createBlankFlowCourse,
+  createBlankSlideCourse,
+  createBlankSpatialCourse,
+} from '@/renderer/course/courseLocationCommands'
 import { createProject } from '@/renderer/project/createProject'
+import { openCourseProjectArchiveAsync } from '@/renderer/project/courseProjectArchive'
 import {
   createProjectArchiveAsync,
   openProjectArchiveAsync,
   type ProjectArchiveData,
 } from '@/renderer/project/projectArchive'
-import { saveProjectAsync } from '@/renderer/project/saveProject'
+import { saveCourseProjectAsync, saveProjectAsync } from '@/renderer/project/saveProject'
 
 function makeLargeArchiveData(byteLength = 12 * 1024 * 1024): ProjectArchiveData {
   const project = createProject({ includeDefaultController: false, controls: 'none' })
@@ -74,5 +80,29 @@ describe('asynchronous project archive', () => {
     expect((await openProjectArchiveAsync(saved.bytes)).project.updatedAt).toBe(
       '2026-07-22T01:02:03.000Z',
     )
+  })
+})
+
+describe('asynchronous Course Project V9 blank archives', () => {
+  it('saves and reopens T03 blank Slide/Flow/Spatial courses without writing V8', async () => {
+    const cases = [
+      createBlankSlideCourse({ id: 'async-slide', title: '异步演示', now: '2026-08-17T02:00:00.000Z' }),
+      createBlankFlowCourse({ id: 'async-flow', title: '异步讲义', now: '2026-08-17T02:00:00.000Z' }),
+      createBlankSpatialCourse({ id: 'async-spatial', title: '异步画布', now: '2026-08-17T02:00:00.000Z' }),
+    ]
+    for (const created of cases) {
+      const saved = await saveCourseProjectAsync({
+        project: created.project,
+        assetFiles: {},
+        componentFiles: {},
+      }, '2026-08-17T02:03:00.000Z')
+      expect(created.project.updatedAt).toBe('2026-08-17T02:00:00.000Z')
+      expect(saved.project.schemaVersion).toBe(9)
+      expect(saved.project.updatedAt).toBe('2026-08-17T02:03:00.000Z')
+      const reopened = await openCourseProjectArchiveAsync(saved.bytes)
+      expect(reopened.project.schemaVersion).toBe(9)
+      expect(reopened.project.id).toBe(created.project.id)
+      expect(reopened.project).not.toHaveProperty('projectMode')
+    }
   })
 })

@@ -51,6 +51,63 @@ const nodeIcon = {
   'external-component': Box,
 } as const
 
+const NODES_TAB_ROW_STYLE = {
+  display: 'flex',
+  flexDirection: 'row',
+  flexWrap: 'nowrap',
+  alignItems: 'center',
+  width: '100%',
+  minWidth: 0,
+  height: 32,
+  maxHeight: 32,
+  overflow: 'hidden',
+  writingMode: 'horizontal-tb',
+  textOrientation: 'mixed',
+} as const
+
+const NODES_TAB_NAME_STYLE = {
+  flex: '1 1 0',
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  writingMode: 'horizontal-tb',
+} as const
+
+const NODES_TAB_SOURCE_STYLE = {
+  flex: '0 0 auto',
+  maxWidth: '4.75em',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  writingMode: 'horizontal-tb',
+  color: 'var(--text-muted, #747d8c)',
+  fontSize: 11,
+} as const
+
+const NODES_TAB_SOURCE_LABELS: Record<string, string> = {
+  global: '全课',
+  surface: '当前内容',
+  scene: '本页',
+  location: '本页',
+  state: '当前状态',
+  flow: 'Flow',
+  world: '世界',
+  camera: '镜头',
+}
+
+/** Compact row model matching T04 fields without importing T04 files. */
+export interface NodesTabEffectiveRow {
+  readonly id: string
+  readonly name: string
+  readonly sourceKind: string
+  readonly ownerKey: string
+  readonly sourceLabel?: string
+  readonly selected?: boolean
+  readonly locked?: boolean
+  readonly hidden?: boolean
+}
+
 export interface NodesTabDocumentControl {
   readonly editingScope: 'scene' | 'surface' | 'global'
   /** Remounts transient row/DnD state whenever the owning document context changes. */
@@ -64,6 +121,8 @@ export interface NodesTabDocumentControl {
   readonly omittedItemsReason?: string
   /** Disables whole-list ordering until every effective item participates. */
   readonly reorderUnavailableReason?: string
+  /** Optional T04-compatible rows. When set, names stay on one horizontal line. */
+  readonly effectiveRows?: readonly NodesTabEffectiveRow[]
   /** The owner decides whether an additive request extends, toggles, or replaces selection. */
   onSelectNode(nodeId: string | null, additive: boolean): void
   onDeleteNode(nodeId: string): void
@@ -135,8 +194,9 @@ function SortableNode({
   return (
     <div
       ref={setNodeRef}
-      className={`node-item${selected ? ' node-item--selected' : ''}`}
+      className={`node-item nodes-tab-row${selected ? ' node-item--selected' : ''}`}
       style={{
+        ...NODES_TAB_ROW_STYLE,
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.55 : 1,
@@ -177,7 +237,8 @@ function SortableNode({
         />
       ) : (
         <span
-          className="node-name"
+          className="node-name nodes-tab-row__name"
+          style={NODES_TAB_NAME_STYLE}
           title={`${node.name}（双击改名，Ctrl / Shift 单击可多选）`}
           onClick={(event) => {
             const additive = event.ctrlKey || event.metaKey || event.shiftKey
@@ -308,6 +369,7 @@ function NodesTabView({
   deletionMode = 'delete',
   omittedItemsReason,
   reorderUnavailableReason,
+  effectiveRows,
   onSelectNode,
   onDeleteNode,
   onDuplicateNode,
@@ -351,7 +413,91 @@ function NodesTabView({
           {omittedItemsReason}
         </div>
       )}
-      {nodes.length === 0 ? (
+      {effectiveRows ? (
+        effectiveRows.length === 0 ? (
+          <div className="empty-state">
+            {editingScope === 'global' ? '全局层还没有组件' : '当前还没有图层'}
+          </div>
+        ) : (
+          <div className="nodes-list nodes-tab-effective-list" role="list" aria-label="有效图层">
+            {effectiveRows.map((row) => {
+              const source = row.sourceLabel ?? NODES_TAB_SOURCE_LABELS[row.sourceKind] ?? row.sourceKind
+              return (
+                <div
+                  key={row.id}
+                  className={`node-item nodes-tab-row${row.selected ? ' node-item--selected' : ''}`}
+                  style={NODES_TAB_ROW_STYLE}
+                  data-testid={`node-item-${row.id}`}
+                  data-owner-key={row.ownerKey}
+                  role="listitem"
+                  onClick={(event) => {
+                    onSelectNode(row.id, event.ctrlKey || event.metaKey || event.shiftKey)
+                  }}
+                >
+                  <span className="nodes-tab-row__source" style={NODES_TAB_SOURCE_STYLE} title={source}>
+                    {source}
+                  </span>
+                  <span
+                    className="node-name nodes-tab-row__name"
+                    style={NODES_TAB_NAME_STYLE}
+                    title={`${source} · ${row.name}`}
+                  >
+                    {row.name}
+                  </span>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title={row.hidden ? '显示图层' : '隐藏图层'}
+                    aria-label={`${row.hidden ? '显示' : '隐藏'}“${row.name}”`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onSetNodeVisible(row.id, Boolean(row.hidden))
+                    }}
+                  >
+                    {row.hidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title={row.locked ? '解锁图层' : '锁定图层'}
+                    aria-label={`${row.locked ? '解锁' : '锁定'}“${row.name}”`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onSetNodeLocked(row.id, !row.locked)
+                    }}
+                  >
+                    {row.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="复制图层"
+                    aria-label={`复制“${row.name}”`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDuplicateNode(row.id)
+                    }}
+                  >
+                    <Copy size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button icon-button--danger"
+                    title={`删除“${row.name}”`}
+                    aria-label={`删除“${row.name}”`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDeleteNode(row.id)
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )
+      ) : nodes.length === 0 ? (
         <div className="empty-state">
           {omittedItemsReason
             ? '当前幻灯片没有可在此编辑的元素'

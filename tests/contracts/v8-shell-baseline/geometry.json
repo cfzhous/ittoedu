@@ -1,16 +1,16 @@
 {
-  "capturedAt": "2026-08-16T04:32:24.267Z",
+  "capturedAt": "2026-08-16T23:30:10.286Z",
   "sourceCommit": "5799007345cb41917a82c2ccecc03a276b8c7aed",
   "executionParent": "5799007345cb41917a82c2ccecc03a276b8c7aed",
-  "recaptureReason": "Retire frozen P1 shell-height defect geometry (appShell pinned at 720px exposing window background below taller viewports). The same original shell now fills the viewport; replacement assertions live in tests/e2e/v9SlideVerticalSlice.spec.ts (expectAppShellFillsViewport).",
+  "recaptureReason": "Documented T12 recapture after wiring EffectiveLayerList onDelete (state-hide/delete) on the V9 layers tab. Compact action rail is 108px when delete is present. Geometry rectangles unchanged; chrome pixels in the right sidebar layer rows changed. Prior recapture (recovery-status settle) remains valid for status-bar timing.",
   "captures": [
     {
       "viewport": {
         "width": 1280,
         "height": 720
       },
-      "bytes": 94439,
-      "sha256": "66d8bf49b76103cf3afcba4381633ec42c34356479bed4b8b5ea191803f73702",
+      "bytes": 94512,
+      "sha256": "697031d757e76996e38f39d234bd885fda01bd80332977e30f0f24e19521602c",
       "resizeTrace": [
         {
           "width": 1427,
@@ -141,8 +141,8 @@
         "width": 1366,
         "height": 768
       },
-      "bytes": 102576,
-      "sha256": "ba8cb7c7a2dddc8f99c7066db09c4f9a39d460a29ed977c70d786fe63bd0f1b4",
+      "bytes": 102427,
+      "sha256": "d208f3866847140ddddacc75ec2e9d05394827fce6232a8332bb95c71bc62455",
       "resizeTrace": [
         {
           "width": 1280,
@@ -269,8 +269,8 @@
         "width": 1920,
         "height": 1080
       },
-      "bytes": 129828,
-      "sha256": "c9b911add199fe76956e3fc3af0ab642fc70efed5004d491623695b552c10054",
+      "bytes": 129010,
+      "sha256": "8ab7ad9c03ad0cae519b25bd2dfd4d989dbc2baecb06c625f5a9ebcf92ee7742",
       "resizeTrace": [
         {
           "width": 1366,

@@ -19,7 +19,7 @@ import type {
   SelectedImageBatchFile,
   SelectedMediaBatchFile,
 } from '../shared/ipcTypes'
-import type { AssetKind, AssetMeta } from '../shared/projectTypes'
+import type { AssetKind, AssetMeta, ProjectDesignTokens } from '../shared/projectTypes'
 import type {
   CourseProjectDocument,
   FlowBlock,
@@ -33,7 +33,7 @@ import { buildStandaloneHtml } from './export/buildStandaloneHtml'
 import { buildWebPackageFromProjectAsync } from './export/buildWebPackage'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
 import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
-import { buildFlowDocx, type FlowDocxLayerEntry } from './export/course/flowDocx'
+import { buildFlowDocx, uniqueFlowDocxFilename, type FlowDocxLayerEntry } from './export/course/flowDocx'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageAsync,
@@ -66,7 +66,34 @@ import {
 } from './course/courseProjectHealthCheck'
 import { buildSlideEditorView } from './course/slideEditorView'
 import { buildFlowEditorView } from './course/flowEditorView'
-import { buildSpatialEditorView } from './course/spatialEditorView'
+import {
+  buildSpatialEditorView,
+  buildSpatialViewportOverlays,
+} from './course/spatialEditorView'
+import {
+  buildCourseStructureViewModel,
+  courseWorkspaceShowsSceneStateStrip,
+  deriveCourseEditorLayout,
+} from './course/courseEditorLayout'
+import {
+  captureEditorMenuSnapshot,
+  isTextLikeEditorFocus,
+  type EditorActionId,
+  type EditorSelectionSnapshot,
+} from './course/editorActionTypes'
+import {
+  interpretEditorEntry,
+  listEditorActions,
+  resolveEditorActionAvailability,
+} from './course/editorActionRouting'
+import {
+  createEffectiveLayerListHandlers,
+  toEffectiveLayerListItems,
+} from './course/effectiveLayerCommands'
+import {
+  EditorContextMenu,
+  toEditorContextMenuActions,
+} from './ui/editor-actions/EditorContextMenu'
 import type { FlowEditorBlockInput } from './course/flowEditorCommands'
 import {
   v9InteractionSceneDocument,
@@ -97,6 +124,13 @@ import {
   UnsupportedCourseProjectVersionError,
   type CourseProjectArchiveData,
 } from './project/courseProjectArchive'
+import { saveCourseProjectAsync } from './project/saveProject'
+import { inspectCourseProjectHealth } from './project/courseProjectHealthInspect'
+import {
+  courseProjectRecoveryRevision,
+  resolveCloseDirtyState,
+  shouldOfferCourseProjectRecovery,
+} from './project/courseProjectLifecycle'
 import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
 import {
   selectActiveScene,
@@ -328,6 +362,11 @@ export default function App() {
   const v9SlideVerticalSlice = useEditorStore((state) => state.courseSession)
   const [busy, setBusy] = useState(false)
   const [spatialSessionCamera, setSpatialSessionCamera] = useState<SpatialCameraPose | null>(null)
+  const [editorMenu, setEditorMenu] = useState<{
+    snapshot: EditorSelectionSnapshot
+    point: { x: number; y: number }
+  } | null>(null)
+  const editorMenuFocusRef = useRef<HTMLElement | null>(null)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
     | {
       mode: 'replace'
@@ -359,7 +398,6 @@ export default function App() {
   const saveInFlightRef = useRef(false)
   const lifecycleOperationInFlightRef = useRef(false)
   const pendingLargeHtmlRef = useRef<string | null>(null)
-  const recoveryRevisionRef = useRef(0)
   const previousActiveDirtyRef = useRef(false)
   const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
     V9RecoverySnapshot,
@@ -495,9 +533,18 @@ export default function App() {
         : v9SpatialEditorView !== null
           ? 'spatial'
           : 'unavailable'
-  const v9CourseLocationUnavailableReason = activeCourseEditorRoute === 'unavailable'
-    ? '当前位置暂时无法编辑；工程仍可安全保存，现有内容不会改变。'
-    : undefined
+  const showSceneStateStrip = courseWorkspaceShowsSceneStateStrip(activeCourseEditorRoute)
+  const v9CourseLayout = v9CourseProject
+    ? deriveCourseEditorLayout(v9CourseProject)
+    : null
+  const v9CourseStructure = v9CourseProject
+    ? buildCourseStructureViewModel(v9CourseProject)
+    : null
+  const v9CourseLocationUnavailableReason = v9CourseLayout?.layout === 'unavailable'
+    ? v9CourseLayout.unavailable?.message
+    : activeCourseEditorRoute === 'unavailable'
+      ? '当前位置缺少可编辑表面；工程仍可安全保存，现有内容不会改变。'
+      : undefined
   const activeDocumentLocationLabel = v9SlideVerticalSlice === null
     ? `场景 ${project.scenes.findIndex((scene) => scene.id === activeScene.id) + 1} / ${project.scenes.length}`
     : v9ActiveSlideContext
@@ -795,7 +842,7 @@ export default function App() {
         useEditorStore.getState().activateCourseScene(sceneId)
       }, '无法切换场景'),
       onActivateGlobal: () => run(() => {
-        useEditorStore.getState().setCourseEditingScope('global')
+        useEditorStore.getState().selectGlobalLayerScope()
       }, '无法切换到全局层'),
       onRenameScene: (sceneId, name) => run(() => {
         useEditorStore.getState().renameCourseScene(sceneId, name)
@@ -820,6 +867,9 @@ export default function App() {
     SceneStateStripDocumentControl | undefined
   >(() => {
     if (v9SlideVerticalSlice === null) return undefined
+    if (activeCourseEditorRoute === 'flow' || activeCourseEditorRoute === 'spatial') {
+      return undefined
+    }
     if (v9CourseLocationUnavailableReason) {
       const unavailable = () => undefined
       return {
@@ -907,6 +957,7 @@ export default function App() {
       }, '无法删除命名状态'),
     }
   }, [
+    activeCourseEditorRoute,
     editorMode,
     v9ActiveSlideContext?.scene,
     v9CourseLocationUnavailableReason,
@@ -1178,8 +1229,8 @@ export default function App() {
             elements: {
               editingScope: 'scene' as const,
               editorMode,
-              mediaUnavailableReason: '声音与媒体素材库暂不能从此面板管理；图片和视频可直接添加。',
-              controllerUnavailableReason: '当前版本暂不能从此面板编辑教师控制器。',
+              mediaUnavailableReason: '',
+              controllerUnavailableReason: '',
               onAddText: (x, y) => run(() => {
                 useEditorStore.getState().addCourseTextLayer(x, y)
               }, '无法添加文字'),
@@ -1298,13 +1349,10 @@ export default function App() {
           propertyTarget &&
           activeState.layerItemOverrides[propertyTarget.layerItemId],
         ),
-        textContentUnavailableReason:
-          '文字内容暂不能在此编辑；当前可调整整段样式。',
-        richTextUnavailableReason: '局部文字格式暂不能在此编辑。',
-        mediaUnavailableReason:
-          '图片和视频的专属设置暂不可用；上方通用属性仍可修改。',
-        controllerUnavailableReason:
-          '教师控制器的专属设置暂不可用；上方通用属性仍可修改。',
+        textContentUnavailableReason: '',
+        richTextUnavailableReason: '',
+        mediaUnavailableReason: '',
+        controllerUnavailableReason: '',
         ...(editingScene
           ? {
               background: {
@@ -1380,10 +1428,8 @@ export default function App() {
         elements: editingScene
           ? undefined
           : '请先回到场景，再添加文字、公式或图形。',
-        layers: !editingScene
-          ? editingSurface
-            ? undefined
-            : '当前版本暂不能在此管理全局层；现有全局内容不会改变。'
+        layers: !editingScene && !editingSurface && editingScope !== 'global'
+          ? '请先选择场景、共用层或全局层，再管理图层。'
           : undefined,
         properties: undefined,
       },
@@ -1838,6 +1884,12 @@ export default function App() {
       onSelectLayer: (layerItemId) => runCourseCommand(() => {
         useEditorStore.getState().selectCourseFlowLayer(layerItemId)
       }, '无法选择 Flow 图层'),
+      onPatchBlock: (blockId, patch) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseFlowBlock(blockId, patch)
+      }, '无法更新 Flow 内容块'),
+      onStructuralCommand: (command) => runCourseCommand(() => {
+        useEditorStore.getState().applyCourseFlowStructuralCommand(command)
+      }, '无法更新 Flow 结构'),
     }
   }, [runCourseCommand, v9FlowEditorView, v9FlowStructuralCommands, v9SlideVerticalSlice])
 
@@ -1853,11 +1905,46 @@ export default function App() {
       viewportSize: { width: 1280, height: 720 },
       selectedLayerItemIds: v9SlideVerticalSlice.selection.spatialLayerItemIds,
       activeCameraFrameId: v9SpatialEditorView.activeCameraFrameId,
-      onCameraChange: (camera) => setSpatialSessionCamera(camera),
+      viewportOverlays: buildSpatialViewportOverlays(v9SpatialEditorView),
+      selectedViewportLayerId: v9SlideVerticalSlice.editingScope === 'global'
+        ? v9SlideVerticalSlice.selection.selectionIds[0] ?? null
+        : null,
+      onCameraChange: (camera) => {
+        setSpatialSessionCamera(camera)
+        useEditorStore.getState().setSpatialViewportCamera(camera)
+      },
       interactionDisabled: busy,
       onSelect: (ids) => runCourseCommand(() => {
         useEditorStore.getState().selectCourseSpatialLayers(ids)
       }, '无法选择空间图层'),
+      onSelectViewportLayer: (input) => runCourseCommand(() => {
+        if (input.source === 'global') {
+          useEditorStore.getState().selectGlobalLayerScope()
+          useEditorStore.getState().selectCourseLayers({
+            nodeIds: [input.layerItemId],
+            additive: false,
+          })
+          return
+        }
+        useEditorStore.getState().setCourseEditingScope('surface')
+        useEditorStore.getState().selectCourseLayers({
+          nodeIds: [input.layerItemId],
+          additive: false,
+        })
+      }, '无法选择视口图层'),
+      onCommitEdit: (input) => runCourseCommand(() => {
+        const store = useEditorStore.getState()
+        store.selectCourseSpatialLayers([input.layerItemId])
+        const snapshot = store.createLiveEditorSelectionSnapshot()
+        const result = store.routeEditorAction(
+          input.kind === 'formula' ? 'edit-formula' : 'edit-text',
+          snapshot ?? undefined,
+          input.kind === 'formula'
+            ? { editFormulaAccessibleText: input.value }
+            : { editText: input.value },
+        )
+        if (!result.ok) throw new Error(result.reason)
+      }, '无法提交空间文字'),
       onTransformEnd: (transforms) => runCourseCommand(() => {
         useEditorStore.getState().transformCourseSpatialLayers({
           nodes: transforms,
@@ -1865,6 +1952,180 @@ export default function App() {
       }, '无法变换空间图层'),
     }
   }, [busy, runCourseCommand, v9SlideVerticalSlice, v9SpatialEditorView])
+
+  const invokeEditorAction = useCallback((
+    actionId: EditorActionId,
+    snapshot?: EditorSelectionSnapshot,
+  ) => {
+    const result = useEditorStore.getState().routeEditorAction(actionId, snapshot)
+    if (!result.ok) {
+      useEditorStore.getState().setError(result.reason)
+    }
+    return result
+  }, [])
+
+  const openEditorMenuAt = useCallback((
+    point: { x: number; y: number },
+    focus?: EventTarget | null,
+  ) => {
+    const live = useEditorStore.getState().createLiveEditorSelectionSnapshot(focus)
+    if (!live) return
+    setEditorMenu({
+      snapshot: captureEditorMenuSnapshot(live),
+      point,
+    })
+  }, [])
+
+  const v9EffectiveLayers = useMemo(() => {
+    if (v9SlideVerticalSlice === null) return undefined
+    const session = v9SlideVerticalSlice
+    const project = session.history.present
+    const locationId = session.selection.locationId
+    const selectedIds = session.editingScope === 'global' || session.selection.surfaceKind === 'slide'
+      ? session.selection.selectionIds
+      : session.selection.surfaceKind === 'flow'
+        ? [
+            session.selection.flowLayerItemId,
+            session.selection.flowBlockId,
+          ].filter((id): id is string => Boolean(id))
+        : session.selection.spatialLayerItemIds ?? []
+    if (v9FlowEditorView) {
+      const items = v9FlowEditorView.effectiveLayers.map((layer) => ({
+        id: layer.id,
+        name: layer.name,
+        sourceKind: layer.source === 'flow-block' ? 'flow' : layer.source,
+        ownerKey: layer.ownerKey,
+        selected: selectedIds.includes(layer.id),
+        locked: layer.locked,
+        hidden: layer.hidden,
+        reorderDisabledReason: layer.canReorder ? undefined : '当前图层不能跨范围排序',
+      }))
+      return {
+        items,
+        onSelect: (event: { id: string; additive: boolean }) => {
+          const layer = v9FlowEditorView.effectiveLayers.find((candidate) => candidate.id === event.id)
+          if (layer?.source === 'global') {
+            useEditorStore.getState().selectGlobalLayerScope()
+            useEditorStore.getState().selectCourseLayers({
+              nodeIds: [event.id],
+              additive: event.additive,
+            })
+            return
+          }
+          if (layer?.source === 'flow-block') {
+            useEditorStore.getState().selectCourseFlowBlock(event.id)
+            return
+          }
+          useEditorStore.getState().selectCourseFlowLayer(event.id)
+        },
+        onRename: (id: string, name: string) => runCourseCommand(() => {
+          const layer = v9FlowEditorView.effectiveLayers.find((candidate) => candidate.id === id)
+          if (layer?.source === 'flow-block') {
+            useEditorStore.getState().updateCourseFlowBlock(id, { text: name })
+            return
+          }
+          const handlers = createEffectiveLayerListHandlers({
+            getProject: () => useEditorStore.getState().courseSession!.history.present,
+            locationId,
+            stateId: session.selection.stateId,
+            selectedIds,
+            apply: (result) => useEditorStore.getState().applyCourseLayerCommandResult(result),
+            onSelect: () => undefined,
+          })
+          handlers.onRename(id, name)
+        }, '无法重命名图层'),
+        onReorder: (event: {
+          fromId: string
+          toId: string
+          fromOwnerKey: string
+          toOwnerKey: string
+          placement: 'before' | 'after'
+        }) => runCourseCommand(() => {
+          const handlers = createEffectiveLayerListHandlers({
+            getProject: () => useEditorStore.getState().courseSession!.history.present,
+            locationId,
+            stateId: session.selection.stateId,
+            selectedIds,
+            apply: (result) => useEditorStore.getState().applyCourseLayerCommandResult(result),
+            onSelect: () => undefined,
+          })
+          handlers.onReorder(event)
+        }, '无法调整图层顺序'),
+        onToggleVisibility: (id: string) => runCourseCommand(() => {
+          const layer = v9FlowEditorView.effectiveLayers.find((candidate) => candidate.id === id)
+          if (layer && !layer.canHide) {
+            throw new Error('当前 Flow 块不支持隐藏')
+          }
+          const handlers = createEffectiveLayerListHandlers({
+            getProject: () => useEditorStore.getState().courseSession!.history.present,
+            locationId,
+            stateId: session.selection.stateId,
+            selectedIds,
+            apply: (result) => useEditorStore.getState().applyCourseLayerCommandResult(result),
+            onSelect: () => undefined,
+          })
+          handlers.onToggleVisibility(id)
+        }, '无法切换图层可见性'),
+        onToggleLock: (id: string) => runCourseCommand(() => {
+          const layer = v9FlowEditorView.effectiveLayers.find((candidate) => candidate.id === id)
+          if (layer && !layer.canLock) {
+            throw new Error('当前 Flow 块不支持锁定')
+          }
+          const handlers = createEffectiveLayerListHandlers({
+            getProject: () => useEditorStore.getState().courseSession!.history.present,
+            locationId,
+            stateId: session.selection.stateId,
+            selectedIds,
+            apply: (result) => useEditorStore.getState().applyCourseLayerCommandResult(result),
+            onSelect: () => undefined,
+          })
+          handlers.onToggleLock(id)
+        }, '无法切换图层锁定'),
+        onOpenMenu: (event: { clientX: number; clientY: number }) => {
+          openEditorMenuAt({ x: event.clientX, y: event.clientY })
+        },
+      }
+    }
+    const handlers = createEffectiveLayerListHandlers({
+      getProject: () => useEditorStore.getState().courseSession?.history.present ?? project,
+      locationId,
+      stateId: session.selection.stateId,
+      selectedIds,
+      apply: (result) => useEditorStore.getState().applyCourseLayerCommandResult(result),
+      onSelect: (id, additive) => {
+        if (session.editingScope === 'global') {
+          useEditorStore.getState().selectCourseLayers({ nodeIds: [id], additive })
+          return
+        }
+        if (session.selection.surfaceKind === 'spatial-2d') {
+          useEditorStore.getState().selectCourseSpatialLayers(
+            additive
+              ? [...(session.selection.spatialLayerItemIds ?? []), id]
+              : [id],
+          )
+          return
+        }
+        useEditorStore.getState().selectCourseLayers({ nodeIds: [id], additive })
+      },
+    })
+    return {
+      items: toEffectiveLayerListItems(handlers.items()),
+      onSelect: handlers.onSelect,
+      onRename: handlers.onRename,
+      onReorder: handlers.onReorder,
+      onToggleVisibility: handlers.onToggleVisibility,
+      onToggleLock: handlers.onToggleLock,
+      onDelete: handlers.onDelete,
+      deletionMode: session.selection.surfaceKind === 'slide' &&
+        session.editingScope === 'scene' &&
+        session.selection.stateId !== null
+        ? 'hide-in-state' as const
+        : 'delete' as const,
+      onOpenMenu: (event: { clientX: number; clientY: number }) => {
+        openEditorMenuAt({ x: event.clientX, y: event.clientY })
+      },
+    }
+  }, [openEditorMenuAt, runCourseCommand, v9FlowEditorView, v9SlideVerticalSlice])
 
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
@@ -1918,6 +2179,25 @@ export default function App() {
       const archive = captureV9SlideVerticalSliceArchive(current)
       const packages = current.componentPackages
       const result = await checkCourseProjectHealth(archive, packages)
+      const inspection = inspectCourseProjectHealth(archive.project)
+      const mergedHealth = inspection.items.length === 0
+        ? result
+        : {
+            ...result,
+            diagnostics: [
+              ...result.diagnostics,
+              ...inspection.items.map((item) => ({
+                severity: item.severity,
+                message: item.message,
+              })),
+            ],
+            summary: {
+              ...result.summary,
+              error: result.summary.error + inspection.error,
+              warning: result.summary.warning + inspection.warning,
+              canExport: result.summary.canExport && inspection.error === 0,
+            },
+          }
       const latest = useEditorStore.getState().courseSession
       if (
         latest === null ||
@@ -1936,7 +2216,7 @@ export default function App() {
         sessionId: current.sessionId,
         archive,
         componentPackages: packages,
-        result,
+        result: mergedHealth,
       })
       setProjectHealthOpen(true)
     }, '无法完成工程检查')
@@ -1959,19 +2239,32 @@ export default function App() {
   }, [])
 
   const confirmDiscardIfNeeded = useCallback(async () => {
-    if (!activeDocumentDirty) return true
-    return (await desktopApi().confirmDiscardChanges()) === 'discard'
+    if (!activeDocumentDirty) {
+      return resolveCloseDirtyState({ dirty: false, decision: 'cancel' }).allowClose
+    }
+    const raw = await desktopApi().confirmDiscardChanges()
+    return resolveCloseDirtyState({
+      dirty: true,
+      decision: raw === 'discard' ? 'abandon' : 'cancel',
+    }).allowClose
   }, [activeDocumentDirty])
 
-  const handleNew = useCallback(() => {
+  const createBlankCourse = useCallback((kind: 'slide' | 'flow' | 'spatial') => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       await clearRecoveryCopy().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
-      useEditorStore.getState().createNewCourseProject()
+      const store = useEditorStore.getState()
+      if (kind === 'flow') store.createBlankFlowCourse()
+      else if (kind === 'spatial') store.createBlankSpatialCourse()
+      else store.createBlankSlideCourse()
     }, '新建课件失败，请重试。')
   }, [clearRecoveryCopy, confirmDiscardIfNeeded, run])
+
+  const handleNew = useCallback(() => {
+    createBlankCourse('slide')
+  }, [createBlankCourse])
 
   const handleOpen = useCallback(() => {
     void run(async () => {
@@ -2010,17 +2303,25 @@ export default function App() {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().selectLegacyProject()
       if (!file) return
-      const archive = await importProjectV8ArchiveAsCourseProjectAsync(file.bytes)
+      const imported = await importProjectV8ArchiveAsCourseProjectAsync(file.bytes)
       await clearRecoveryCopy().catch((error) => {
         console.error('清理原恢复数据失败', error)
       })
-      useEditorStore.getState().loadCourseProject(archive, null, { markDirty: true })
+      useEditorStore.getState().loadCourseProject(imported, null, { markDirty: true })
       await desktopApi().removeRecentProject({ path: file.path }).catch((error) => {
         console.error('移除旧版最近工程失败', error)
       })
+      const reportNotes = [...imported.report.notes, ...imported.report.warnings]
       useEditorStore.getState().setStatus(
-        '已导入旧版工程；原文件未改写，请另存为新工程',
+        reportNotes.length > 0
+          ? `已导入旧版工程；${reportNotes.slice(0, 3).join('；')}`
+          : '已导入旧版工程；原文件未改写，请另存为新工程',
       )
+      if (imported.report.warnings.length > 0) {
+        useEditorStore.getState().setError(
+          `旧版导入提醒：\n${imported.report.warnings.slice(0, 8).join('\n')}`,
+        )
+      }
       await refreshRecentProjects().catch((error) => {
         console.error('刷新最近工程列表失败', error)
         useEditorStore.getState().setError('旧版工程已经导入，但最近工程列表未能刷新。')
@@ -2069,9 +2370,19 @@ export default function App() {
           const state = useEditorStore.getState()
           const courseSession = state.courseSession
           if (courseSession === null) throw new Error('当前课件状态不可用')
+          if (
+            !saveAs &&
+            courseSession.projectPath &&
+            !isV9SlideVerticalSliceDirty(courseSession)
+          ) {
+            useEditorStore.getState().setStatus('工程已是最新')
+            savedCurrentRevision = true
+            return
+          }
           const sessionId = courseSession.sessionId
           const savedSnapshot = captureV9SlideVerticalSliceArchive(courseSession)
-          const bytes = await createCourseProjectArchiveAsync(savedSnapshot)
+          const saved = await saveCourseProjectAsync(savedSnapshot)
+          const bytes = saved.bytes
           const result = await desktopApi().saveProject({
             path: saveAs ? undefined : (courseSession.projectPath ?? undefined),
             suggestedName: `${savedSnapshot.project.title}.h5lesson`,
@@ -2172,6 +2483,7 @@ export default function App() {
     await run(async () => {
       const batch = await desktopApi().selectAudios()
       if (!batch) return
+      const session = useEditorStore.getState().courseSession
       const prepared = await prepareAssetBatch<SelectedMediaBatchFile>(
         batch.accepted,
         'audio',
@@ -2180,8 +2492,18 @@ export default function App() {
           const imported = createMediaAssetImport(file, 'audio', metadata)
           return { meta: imported.meta, bytes: imported.bytes }
         },
+        session
+          ? {
+              assets: session.history.present.assets,
+              assetFiles: session.assetFiles,
+            }
+          : undefined,
       )
-      importSounds(prepared.additions)
+      if (useEditorStore.getState().courseSession !== null) {
+        useEditorStore.getState().importCourseSounds(prepared.additions)
+      } else {
+        importSounds(prepared.additions)
+      }
       reportBatchOutcome({
         label: '声音批量入库',
         completedCount: prepared.additions.length,
@@ -2301,10 +2623,6 @@ export default function App() {
 
   const handleReplaceComponent = useCallback((packageId: string) => {
     void run(async () => {
-      if (useEditorStore.getState().courseSession !== null) {
-        setStatus('组件替换将在组件宿主（M4-COMP）集成后提供；当前 V9 工程请勿替换组件包。')
-        return
-      }
       const file = await desktopApi().selectComponentPackage()
       if (!file) return
       const sha256 = await componentPackageSha256(file.bytes)
@@ -2321,6 +2639,10 @@ export default function App() {
           `所选包 ID 为“${imported.manifest.id}”，与工程组件“${packageId}”不一致。`,
           '请选择同一组件 ID 的新版本；需要并存的组件应作为新包导入。',
         )
+      }
+      if (useEditorStore.getState().courseSession !== null) {
+        useEditorStore.getState().replaceCourseComponentPackage(packageId, imported)
+        return
       }
       setComponentPackageRequest({
         mode: 'replace',
@@ -2398,7 +2720,14 @@ export default function App() {
         }))
       }
       if (mode === 'update') {
-        replacePackageInStore(updateEntry!.packageId, importedPackages[0]!)
+        if (stateBefore.courseSession !== null) {
+          useEditorStore.getState().replaceCourseComponentPackage(
+            updateEntry!.packageId,
+            importedPackages[0]!,
+          )
+        } else {
+          replacePackageInStore(updateEntry!.packageId, importedPackages[0]!)
+        }
         return true
       }
       const latestState = useEditorStore.getState()
@@ -2443,10 +2772,6 @@ export default function App() {
   const requestCatalogPackageUpdate = useCallback((
     entry: AvailableComponentCatalogPackage,
   ) => {
-    if (useEditorStore.getState().courseSession !== null) {
-      setStatus('组件更新将在组件宿主（M4-COMP）集成后提供；当前 V9 工程不会迁移实例版本。')
-      return
-    }
     setCatalogPackageRequest({ entries: [entry], mode: 'update' })
   }, [])
 
@@ -2662,7 +2987,7 @@ export default function App() {
         resolveAsset,
       })
       const result = await desktopApi().exportBinary({
-        suggestedName: `${project.title}.docx`,
+        suggestedName: uniqueFlowDocxFilename(surface.title),
         extension: 'docx',
         bytes: built.bytes,
       })
@@ -2826,7 +3151,6 @@ export default function App() {
       }
       return
     }
-    recoveryRevisionRef.current += 1
     if (
       recoveryCourseProject === null ||
       recoveryAssetFiles === null ||
@@ -2835,7 +3159,7 @@ export default function App() {
       coordinator.cancel()
       return
     }
-    coordinator.schedule(recoveryRevisionRef.current, {
+    coordinator.schedule(courseProjectRecoveryRevision(recoveryCourseProject), {
       backend: 'v9',
       project: recoveryCourseProject,
       assetFiles: recoveryAssetFiles,
@@ -2883,8 +3207,7 @@ export default function App() {
             coordinator !== null &&
             isV9SlideVerticalSliceDirty(session)
           ) {
-            recoveryRevisionRef.current += 1
-            coordinator.schedule(recoveryRevisionRef.current, {
+            coordinator.schedule(courseProjectRecoveryRevision(session.history.present), {
               backend: 'v9',
               project: session.history.present,
               assetFiles: session.assetFiles,
@@ -2901,121 +3224,130 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || isEditingTarget(event.target)) return
+      if (event.isComposing) return
       const key = event.key.toLowerCase()
-      if ((event.ctrlKey || event.metaKey) && key === 's') {
+      const modifier = event.ctrlKey || event.metaKey
+      if (modifier && key === 's') {
         event.preventDefault()
         void handleSave(event.shiftKey)
-      } else if ((event.ctrlKey || event.metaKey) && key === 'z') {
+        return
+      }
+      if (modifier && key === 'z') {
         event.preventDefault()
         if (event.shiftKey) redoActiveDocument()
         else undoActiveDocument()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'y') {
+        return
+      }
+      if (modifier && key === 'y') {
         event.preventDefault()
         redoActiveDocument()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'n') {
+        return
+      }
+      if (modifier && key === 'n') {
         event.preventDefault()
         handleNew()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'o') {
+        return
+      }
+      if (modifier && key === 'o') {
         event.preventDefault()
         handleOpen()
-      } else if ((event.ctrlKey || event.metaKey) && key === 'a') {
-        event.preventDefault()
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          if (!isActiveSlideEditorLocation(state.courseSession)) {
-            state.setStatus('当前位置暂不支持选择元素')
-            return
-          }
-          const snapshot = buildV9SlideWorkspaceSnapshot(state.courseSession)
-          state.selectCourseLayers({
-            nodeIds: snapshot.document.nodes
-              .filter((node) => node.visible)
-              .map((node) => node.id),
-            additive: false,
-          })
+        return
+      }
+      const state = useEditorStore.getState()
+      if (state.courseSession !== null) {
+        const snapshot = state.createLiveEditorSelectionSnapshot(event.target)
+        if (!snapshot) return
+        if (isTextLikeEditorFocus(snapshot.focus) && modifier && (
+          key === 'a' || key === 'c' || key === 'x' || key === 'v' || key === 'd'
+        )) {
           return
         }
+        const interpretation = interpretEditorEntry({
+          source: 'keyboard',
+          key: event.key,
+          shiftKey: event.shiftKey,
+          snapshot,
+        })
+        if (interpretation.kind === 'close-menu') {
+          if (editorMenu) {
+            event.preventDefault()
+            setEditorMenu(null)
+            editorMenuFocusRef.current?.focus()
+            return
+          }
+          return
+        }
+        if (interpretation.kind === 'open-menu') {
+          event.preventDefault()
+          editorMenuFocusRef.current = event.target instanceof HTMLElement
+            ? event.target
+            : null
+          openEditorMenuAt({
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 2,
+          }, event.target)
+          return
+        }
+        if (interpretation.kind === 'action') {
+          event.preventDefault()
+          invokeEditorAction(interpretation.actionId, snapshot)
+          return
+        }
+        if (modifier && (key === 'a' || key === 'c' || key === 'x' || key === 'v' || key === 'd')) {
+          const actionId = (
+            key === 'a' ? 'select-all' :
+            key === 'c' ? 'copy' :
+            key === 'x' ? 'cut' :
+            key === 'v' ? 'paste' :
+            'duplicate'
+          ) as EditorActionId
+          const availability = resolveEditorActionAvailability(actionId, snapshot)
+          event.preventDefault()
+          if (!availability.enabled) {
+            state.setError(availability.reason)
+            return
+          }
+          invokeEditorAction(actionId, snapshot)
+          return
+        }
+        if (event.key.startsWith('Arrow')) {
+          if (isInteractiveControlTarget(event.target) || isTextLikeEditorFocus(snapshot.focus)) {
+            return
+          }
+          const distance = event.shiftKey ? 10 : 1
+          const movement = {
+            ArrowLeft: [-distance, 0],
+            ArrowRight: [distance, 0],
+            ArrowUp: [0, -distance],
+            ArrowDown: [0, distance],
+          }[event.key]
+          if (movement && snapshot.surfaceKind === 'slide' && snapshot.targets.length > 0) {
+            event.preventDefault()
+            state.nudgeCourseLayers(movement[0], movement[1])
+          }
+          return
+        }
+        return
+      }
+      if (isEditingTarget(event.target)) return
+      if ((event.ctrlKey || event.metaKey) && key === 'a') {
+        event.preventDefault()
         state.selectNodes(selectEditingNodes(state).map((node) => node.id))
       } else if ((event.ctrlKey || event.metaKey) && key === 'c') {
         event.preventDefault()
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          state.setStatus('复制暂不可用')
-          return
-        }
         state.copySelectedNodes()
       } else if ((event.ctrlKey || event.metaKey) && key === 'v') {
         event.preventDefault()
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          state.setStatus('粘贴暂不可用')
-          return
-        }
         state.pasteNodes()
       } else if ((event.ctrlKey || event.metaKey) && key === 'd') {
         event.preventDefault()
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          if (!isActiveSlideEditorLocation(state.courseSession)) {
-            state.setStatus('当前位置暂不支持复制元素')
-            return
-          }
-          if (state.courseSession.editingScope === 'global') {
-            state.setStatus('全局元素暂不能复制；现有内容不会改变')
-            return
-          }
-          const [layerItemId] = state.courseSession.selection.selectionIds
-          if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
-            state.duplicateCourseLayer({
-              sessionId: state.courseSession.sessionId,
-              locationId: state.courseSession.selection.locationId,
-              stateId: state.courseSession.selection.stateId,
-              editingScope: state.courseSession.editingScope,
-              layerItemId,
-            })
-          } else if (state.courseSession.selection.selectionIds.length > 1) {
-            state.setStatus('请一次选择一个元素后复制')
-          }
-          return
-        }
         state.duplicateSelectedNodes()
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          if (!isActiveSlideEditorLocation(state.courseSession)) {
-            event.preventDefault()
-            state.setStatus('当前位置暂不支持删除元素')
-            return
-          }
-          if (state.courseSession.editingScope === 'global') {
-            event.preventDefault()
-            state.setStatus('全局元素暂不能删除；现有内容不会改变')
-            return
-          }
-          const [layerItemId] = state.courseSession.selection.selectionIds
-          if (layerItemId && state.courseSession.selection.selectionIds.length === 1) {
-            event.preventDefault()
-            state.deleteCourseLayer({
-              sessionId: state.courseSession.sessionId,
-              locationId: state.courseSession.selection.locationId,
-              stateId: state.courseSession.selection.stateId,
-              editingScope: state.courseSession.editingScope,
-              layerItemId,
-            })
-          } else if (state.courseSession.selection.selectionIds.length > 1) {
-            event.preventDefault()
-            state.setStatus('请一次选择一个元素后删除或隐藏')
-          }
-          return
-        }
         if (state.selectedNodeIds.length > 0 && !state.editingTextNodeId) {
           event.preventDefault()
           state.deleteSelectedNodes()
         }
       } else if (event.key.startsWith('Arrow')) {
-        // Direction keys belong to the focused control first. In particular,
-        // dnd-kit's keyboard layer reordering also uses ArrowUp / ArrowDown.
         if (isInteractiveControlTarget(event.target)) return
         const distance = event.shiftKey ? 10 : 1
         const movement = {
@@ -3024,32 +3356,38 @@ export default function App() {
           ArrowUp: [0, -distance],
           ArrowDown: [0, distance],
         }[event.key]
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          if (!isActiveSlideEditorLocation(state.courseSession)) return
-          if (movement && state.courseSession.selection.selectionIds.length > 0) {
-            event.preventDefault()
-            state.nudgeCourseLayers(movement[0], movement[1])
-          }
-          return
-        }
         if (movement && state.selectedNodeIds.length > 0) {
           event.preventDefault()
           state.nudgeSelection(movement[0], movement[1])
         }
       } else if (event.key === 'Escape') {
-        const state = useEditorStore.getState()
-        if (state.courseSession !== null) {
-          if (!isActiveSlideEditorLocation(state.courseSession)) return
-          state.selectCourseLayers({ nodeIds: [], additive: false })
-          return
-        }
         state.selectNodes([])
       }
     }
+    const onContextMenu = (event: MouseEvent) => {
+      if (useEditorStore.getState().courseSession === null) return
+      const snapshot = useEditorStore.getState().createLiveEditorSelectionSnapshot(event.target)
+      if (snapshot && isTextLikeEditorFocus(snapshot.focus)) return
+      event.preventDefault()
+      editorMenuFocusRef.current = event.target instanceof HTMLElement ? event.target : null
+      openEditorMenuAt({ x: event.clientX, y: event.clientY }, event.target)
+    }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleNew, handleOpen, handleSave, redoActiveDocument, undoActiveDocument])
+    window.addEventListener('contextmenu', onContextMenu)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('contextmenu', onContextMenu)
+    }
+  }, [
+    editorMenu,
+    handleNew,
+    handleOpen,
+    handleSave,
+    invokeEditorAction,
+    openEditorMenuAt,
+    redoActiveDocument,
+    undoActiveDocument,
+  ])
 
   return (
     <div className="app-shell">
@@ -3081,6 +3419,11 @@ export default function App() {
           onSetEditorMode: (mode) => useEditorStore.getState().setEditorMode(mode),
         }}
         onNew={handleNew}
+        onNewBlank={{
+          slide: () => createBlankCourse('slide'),
+          flow: () => createBlankCourse('flow'),
+          spatial: () => createBlankCourse('spatial'),
+        }}
         onOpen={handleOpen}
         onImportLegacy={handleImportLegacy}
         recentProjects={recentProjects}
@@ -3101,22 +3444,30 @@ export default function App() {
         inert={busy ? true : undefined}
       >
         <ScenePanel
+          courseStructure={v9CourseStructure ?? undefined}
+          authoringScope={v9SlideVerticalSlice?.editingScope === 'global'
+            ? 'global-layer'
+            : 'location'}
+          activeLocationId={v9SlideVerticalSlice?.selection.locationId}
           documentControl={
-            v9ScenePanelFlowDocumentControl || v9ScenePanelSpatialDocumentControl
-              ? undefined
-              : v9ScenePanelDocumentControl
+            v9CourseStructure?.pageTree.compact
+              ? v9ScenePanelDocumentControl
+              : undefined
           }
-          flowDocumentControl={v9ScenePanelFlowDocumentControl}
-          spatialDocumentControl={v9ScenePanelSpatialDocumentControl}
-          courseLocations={v9ScenePanelCourseLocations}
           onActivateLocation={(locationId) => runCourseCommand(() => {
             useEditorStore.getState().selectCourseLocation(locationId)
           }, '无法切换课程内容')}
-          onAddFlowSurface={() => runCourseCommand(() => {
-            useEditorStore.getState().addCourseSurface('flow')
+          onSelectGlobalLayer={() => runCourseCommand(() => {
+            useEditorStore.getState().selectGlobalLayerScope()
+          }, '无法切换到全局层')}
+          onAddSlidePage={() => runCourseCommand(() => {
+            useEditorStore.getState().addCoursePage('slide')
+          }, '无法新建演示页')}
+          onAddFlowPage={() => runCourseCommand(() => {
+            useEditorStore.getState().addCoursePage('flow')
           }, '无法新建 Flow 讲义')}
-          onAddSpatialSurface={() => runCourseCommand(() => {
-            useEditorStore.getState().addCourseSurface('spatial-2d')
+          onAddSpatialPage={() => runCourseCommand(() => {
+            useEditorStore.getState().addCoursePage('spatial-2d')
           }, '无法新建 Spatial 空间')}
         />
         <div className="editor-center">
@@ -3125,7 +3476,11 @@ export default function App() {
             flowAuthoring={v9FlowAuthoring}
             spatialAuthoring={v9SpatialAuthoring}
             courseLocationUnavailableReason={v9CourseLocationUnavailableReason}
+            locationSessionKey={v9SlideVerticalSlice
+              ? `${v9SlideVerticalSlice.sessionId}:${v9SlideVerticalSlice.selection.locationId}`
+              : undefined}
             interactionDisabled={busy}
+            onTrialRun={handlePreview}
             onAddImage={v9BackendActive
               ? (x, y) => void selectAndAddCourseMedia('image', 'add', { x, y })
               : (x, y) => void selectAndImportImage('add', { x, y })}
@@ -3134,21 +3489,35 @@ export default function App() {
               : (x, y) => void selectAndImportVideo('add', { x, y })}
             onSelectImageAsset={v9BackendActive
               ? async () => {
-                  setStatus('素材替换暂不可用')
-                  return null
+                  const imported = await selectImageAsset()
+                  if (!imported) return null
+                  useEditorStore.getState().importCourseAssets([imported])
+                  return imported
                 }
               : selectImageAsset}
           />
-          <SceneStateStrip documentControl={v9SceneStateStripDocumentControl} />
+          {showSceneStateStrip ? (
+            <SceneStateStrip documentControl={v9SceneStateStripDocumentControl} />
+          ) : null}
         </div>
         <RightSidebar
-          documentControl={
-            v9FlowDocumentControl || v9SpatialDocumentControl
-              ? undefined
-              : v9RightSidebarDocumentControl
-          }
+          documentControl={v9RightSidebarDocumentControl}
           flowDocumentControl={v9FlowDocumentControl}
           spatialDocumentControl={v9SpatialDocumentControl}
+          effectiveLayers={v9EffectiveLayers}
+          designTokens={v9SlideVerticalSlice ? {
+            value: v9SlideVerticalSlice.history.present.designTokens,
+            onChange: (tokens: ProjectDesignTokens) => runCourseCommand(() => {
+              useEditorStore.getState().updateCourseDesignTokens(tokens)
+            }, '无法更新设计令牌'),
+          } : undefined}
+          courseAudio={v9SlideVerticalSlice ? {
+            sounds: Object.values(v9SlideVerticalSlice.history.present.media.audio.sounds),
+            onImportAudio: () => void selectAndImportAudio(),
+          } : undefined}
+          onRestoreTeacherController={v9SlideVerticalSlice ? () => runCourseCommand(() => {
+            useEditorStore.getState().restoreCourseTeacherController()
+          }, '无法恢复教师控制器') : undefined}
           onAddImage={(x, y) =>
             void selectAndImportImage('add', { x, y })
           }
@@ -3165,6 +3534,55 @@ export default function App() {
           onUpdateCatalogComponent={requestCatalogPackageUpdate}
         />
       </div>
+      {editorMenu && (
+        <EditorContextMenu
+          snapshot={editorMenu.snapshot}
+          actions={toEditorContextMenuActions(
+            listEditorActions(editorMenu.snapshot).map((item) => ({
+              ...item,
+              label: {
+                'select-all': '全选',
+                copy: '复制',
+                cut: '剪切',
+                paste: '粘贴',
+                duplicate: '重复',
+                delete: '删除',
+                rename: '重命名',
+                'move-forward': '上移',
+                'move-backward': '下移',
+                'bring-front': '置顶',
+                'send-back': '置底',
+                show: '显示',
+                hide: '隐藏',
+                lock: '锁定',
+                unlock: '解锁',
+                'edit-text': '编辑文字',
+                'edit-formula': '编辑公式',
+                'replace-media': '替换媒体',
+                'insert-before': '在前方插入',
+                'insert-after': '在后方插入',
+                indent: '缩进',
+                outdent: '取消缩进',
+                focus: '聚焦',
+                fit: '适配视图',
+                'reset-view': '重置视图',
+              }[item.actionId] ?? item.actionId,
+            })),
+          )}
+          open
+          anchorPoint={editorMenu.point}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditorMenu(null)
+              editorMenuFocusRef.current?.focus()
+            }
+          }}
+          onInvoke={(actionId, snapshot) => {
+            invokeEditorAction(actionId as EditorActionId, snapshot)
+            setEditorMenu(null)
+          }}
+        />
+      )}
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
         <span>{busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
@@ -3299,21 +3717,38 @@ export default function App() {
           if (!recoveryProject) return
           void run(async () => {
             let archive: CourseProjectArchiveData
-            let importedLegacy = false
             try {
               archive = await openCourseProjectArchiveAsync(recoveryProject.bytes)
             } catch (error) {
               const cause = error instanceof UserFacingError ? error.cause : undefined
               if (
-                !(cause instanceof UnsupportedCourseProjectVersionError) ||
-                cause.schemaVersion !== 8
+                cause instanceof UnsupportedCourseProjectVersionError &&
+                cause.schemaVersion === 8
               ) {
-                throw error
+                throw new UserFacingError(
+                  '恢复副本是旧版工程',
+                  '系统不会把旧版恢复副本当作默认打开。',
+                  '请使用“导入旧版工程”显式转换，再另存为当前格式。',
+                )
               }
-              archive = await importProjectV8ArchiveAsCourseProjectAsync(
-                recoveryProject.bytes,
+              throw error
+            }
+            const offer = shouldOfferCourseProjectRecovery({
+              recovery: {
+                schemaVersion: archive.project.schemaVersion,
+                projectId: archive.project.id,
+                revision: archive.project.revision,
+                updatedAt: archive.project.updatedAt,
+                title: archive.project.title,
+              },
+              official: null,
+            })
+            if (offer === 'ignore-legacy-default') {
+              throw new UserFacingError(
+                '恢复副本不是当前工程格式',
+                '系统不会把旧版恢复副本当作默认打开。',
+                '请使用“导入旧版工程”显式转换。',
               )
-              importedLegacy = true
             }
             let recoveryClearFailed = false
             await clearRecoveryCopy().catch((error) => {
@@ -3323,11 +3758,6 @@ export default function App() {
             useEditorStore.getState().loadCourseProject(archive, null, {
               markDirty: true,
             })
-            if (importedLegacy) {
-              useEditorStore.getState().setStatus(
-                '已导入旧版恢复副本；原工程未改写，请另存为新工程',
-              )
-            }
             setRecoveryProject(null)
             setRecoveryDecisionComplete(true)
             if (recoveryClearFailed) {

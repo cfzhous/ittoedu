@@ -256,6 +256,9 @@ describe('Spatial path/relation rendering pipeline', () => {
     expect(path?.getAttribute('points')).toBe('150,110 270,170')
     expect(relation).not.toBeNull()
     expect(relation?.getAttribute('marker-end')).toContain('url(#spatial-relation-0-relation-1)')
+    expect(markup).toContain('data-spatial-relation-label="relation-1"')
+    expect(markup).toContain('从甲到乙')
+    expect(root.querySelector('[data-spatial-relation-label="relation-1"]')?.textContent).toBe('从甲到乙')
   })
 
   it('renders the same stable ids in the editor SpatialWorkspace world group', () => {
@@ -277,6 +280,7 @@ describe('Spatial path/relation rendering pipeline', () => {
     expect(relation).not.toBeNull()
     expect(relation?.getAttribute('marker-end')).toContain('url(#spatial-relation-0-relation-1)')
     expect(container.querySelector('[data-spatial-paths-relations]')).not.toBeNull()
+    expect(container.querySelector('[data-spatial-relation-label="relation-1"]')?.textContent).toBe('从甲到乙')
   })
 
   it('includes paths and relations in Spatial host capture and print-artifact HTML', async () => {

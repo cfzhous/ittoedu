@@ -113,4 +113,49 @@ describe('ScenePickerOverlay', () => {
     expect(onSelect).toHaveBeenLastCalledWith('scene_practice', true)
     picker.destroy()
   })
+
+  it('lists Slide, Flow and Spatial locations in course order', async () => {
+    const stage = createStage()
+    const onSelect = vi.fn()
+    const picker = new ScenePickerOverlay({
+      stage,
+      scenes: [],
+      locations: [
+        { id: 'loc-slide', locationId: 'loc-slide', name: '导入', kind: 'slide-scene', sceneId: 'scene_intro' },
+        { id: 'loc-flow', locationId: 'loc-flow', name: '讲义标题', kind: 'flow-block' },
+        { id: 'loc-spatial', locationId: 'loc-spatial', name: '镜头一', kind: 'spatial-camera' },
+      ],
+      onSelect,
+    })
+
+    picker.open('loc-flow')
+    await Promise.resolve()
+
+    const dialog = stage.querySelector('[role="dialog"][data-scene-picker]')
+    const buttons = [...stage.querySelectorAll<HTMLButtonElement>(
+      '.lesson-scene-picker__item',
+    )]
+    expect(dialog).toHaveAccessibleName('课程内容')
+    expect(buttons.map((button) => button.dataset.locationId)).toEqual([
+      'loc-slide',
+      'loc-flow',
+      'loc-spatial',
+    ])
+    expect(buttons.map((button) => button.dataset.kind)).toEqual([
+      'slide-scene',
+      'flow-block',
+      'spatial-camera',
+    ])
+    expect(buttons[0]?.dataset.sceneId).toBe('scene_intro')
+    expect(buttons[1]).toHaveAttribute('aria-current', 'page')
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      expect.stringContaining('幻灯片'),
+      expect.stringContaining('讲义'),
+      expect.stringContaining('空间'),
+    ])
+
+    fireEvent.click(buttons[2]!)
+    expect(onSelect).toHaveBeenCalledWith('loc-spatial', false)
+    picker.destroy()
+  })
 })

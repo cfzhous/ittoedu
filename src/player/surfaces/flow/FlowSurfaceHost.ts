@@ -18,6 +18,7 @@ import {
   SlideSurfaceHost,
   type ComponentSlideItemHostFactory,
   type RuntimeSlideItemHostFactory,
+  type SlideCourseProgressSource,
   type SlideInspectionMode,
   type SlideInteractionSession,
   type SlideLayerHit,
@@ -28,6 +29,11 @@ import {
   type FlowSurfaceDocument,
 } from './flowModel'
 import { DomPlaybackFreeze } from '../domPlaybackFreeze'
+import {
+  buildFlowRuntimeToc,
+  FlowRuntimeTocChrome,
+  flowRuntimeTocAnchorId,
+} from './flowRuntimeToc'
 
 export interface FlowRenderOptions {
   domDocument?: Document
@@ -65,6 +71,9 @@ export interface FlowBlockHit {
   field?: string
 }
 
+/** Aligns with SpatialCourseProgressSource / SlideCourseProgressSource. */
+export type FlowCourseProgressSource = SlideCourseProgressSource
+
 export interface FlowScopedLayerHostOptions {
   componentHostFactory?: ComponentSlideItemHostFactory
   runtimeHostFactory?: RuntimeSlideItemHostFactory
@@ -91,6 +100,12 @@ export interface FlowScopedLayerHostOptions {
    * Authoring inspect hosts and capture paths must omit it.
    */
   interactions?: SlideInteractionSession
+  /**
+   * Course session progress source for teacher-controller progress labels.
+   * Same shape as Spatial/Slide `courseProgressSource`. When omitted the
+   * overlay Slide host falls back to the fake `flow-overlay-*` scene.
+   */
+  courseProgressSource?: FlowCourseProgressSource
   onLayerHit?(hit: FlowLayerHit): void
 }
 
@@ -161,6 +176,7 @@ export class FlowScopedLayerHost {
       playbackControls: options.playbackControls,
       initialMuted: options.initialMuted,
       interactions: options.interactions,
+      courseProgressSource: options.courseProgressSource,
       onLayerHit: (hit) => {
         if (hit.source === 'scene') return
         options.onLayerHit?.({
@@ -250,6 +266,8 @@ function renderBlockDom(
   switch (block.type) {
     case 'heading':
       element = appendTextElement(dom, parent, `h${block.level}`, block.text)
+      element.id = flowRuntimeTocAnchorId(block.id)
+      element.dataset.flowTocAnchor = block.id
       break
     case 'paragraph':
       element = appendTextElement(dom, parent, 'p', block.text)
@@ -351,6 +369,8 @@ function renderBlockDom(
       details.appendChild(content)
       parent.appendChild(details)
       element = details
+      element.id = flowRuntimeTocAnchorId(block.id)
+      element.dataset.flowTocAnchor = block.id
       break
     }
     case 'component': {
@@ -561,6 +581,7 @@ export class FlowSurfaceHost implements SurfaceHost {
   #onBlockHit?: FlowSurfaceHostOptions['onBlockHit']
   #domPlayback = new DomPlaybackFreeze()
   #queue: Promise<void> = Promise.resolve()
+  #toc: FlowRuntimeTocChrome | null = null
 
   constructor(
     flow: FlowSurfaceDocument,
@@ -582,6 +603,15 @@ export class FlowSurfaceHost implements SurfaceHost {
   /** Stable authoring address for a semantic Flow block in this surface. */
   flowAuthoringAddress(blockId: string): string {
     return `surface:${this.id}/block:${blockId}`
+  }
+
+  /** Runtime-session TOC open state. Never written to the project or history. */
+  get tocOpen(): boolean {
+    return this.#toc?.open ?? false
+  }
+
+  setTocOpen(open: boolean): void {
+    this.#toc?.setOpen(open)
   }
 
   async updateDocument(flow: FlowSurfaceDocument): Promise<void> {
@@ -616,6 +646,13 @@ export class FlowSurfaceHost implements SurfaceHost {
       context.container.appendChild(root)
       this.#root = root
       this.#overlayMount = overlayMount
+      this.#toc = new FlowRuntimeTocChrome(root, {
+        getEntries: () => buildFlowRuntimeToc(this.#current),
+        onNavigate: (entry) => {
+          const target = this.#article?.querySelector<HTMLElement>(`#${entry.anchorId}`)
+          target?.scrollIntoView({ block: 'start' })
+        },
+      })
       this.#render()
       await this.#scopedLayers.mount({ ...context, container: overlayMount })
     })
@@ -691,6 +728,8 @@ export class FlowSurfaceHost implements SurfaceHost {
       const components = this.#renderedComponents
       this.#renderedComponents = []
       await Promise.all(components.map((component) => component.destroy?.()))
+      this.#toc?.destroy()
+      this.#toc = null
       await this.#scopedLayers.destroy()
       this.#root?.remove()
       this.#root = null
@@ -726,6 +765,7 @@ export class FlowSurfaceHost implements SurfaceHost {
     this.#article?.remove()
     root.insertBefore(next, this.#overlayMount)
     this.#article = next
+    this.#toc?.sync()
     for (const component of this.#renderedComponents) {
       void component.setInspectionMode?.(this.#mode)
       if (this.#active) void component.activate?.()

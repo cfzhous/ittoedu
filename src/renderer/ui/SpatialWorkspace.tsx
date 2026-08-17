@@ -17,9 +17,11 @@ import {
   worldToScreen,
   type SpatialCamera,
 } from '../../player/surfaces/spatial/spatialModel'
+import type { SpatialViewportOverlay } from '../course/spatialEditorView'
 import {
   buildWorkspaceMinimap,
   cullWorkspaceItems,
+  fitWorkspaceCamera,
   panCamera,
   screenPointToWorld,
   worldGroupTransform,
@@ -39,8 +41,19 @@ export interface SpatialWorkspaceProps {
   readonly selectedLayerItemIds?: readonly string[]
   readonly interactionDisabled?: boolean
   readonly activeCameraFrameId?: string | null
+  readonly viewportOverlays?: readonly SpatialViewportOverlay[]
+  readonly selectedViewportLayerId?: string | null
   readonly onCameraChange?: (pose: SpatialCameraPose) => void
   readonly onSelect: (ids: readonly string[]) => void
+  readonly onSelectViewportLayer?: (input: {
+    layerItemId: string
+    source: 'global' | 'surface'
+  }) => void
+  readonly onCommitEdit?: (input: {
+    layerItemId: string
+    kind: 'text' | 'formula'
+    value: string
+  }) => void
   readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
 }
 
@@ -107,13 +120,46 @@ function selectionScreenRect(
   camera: SpatialCamera,
   frame: SpatialWorkspaceFrame,
 ): { x: number; y: number; width: number; height: number } {
-  const center = frameScreenCenter(camera, frame)
+  const radians = frame.rotation * Math.PI / 180
+  const centerX = frame.x + frame.width / 2
+  const centerY = frame.y + frame.height / 2
+  const corners = [
+    { x: frame.x, y: frame.y },
+    { x: frame.x + frame.width, y: frame.y },
+    { x: frame.x + frame.width, y: frame.y + frame.height },
+    { x: frame.x, y: frame.y + frame.height },
+  ].map((point) => {
+    const dx = point.x - centerX
+    const dy = point.y - centerY
+    return worldToScreen(camera, {
+      x: centerX + dx * Math.cos(radians) - dy * Math.sin(radians),
+      y: centerY + dx * Math.sin(radians) + dy * Math.cos(radians),
+    })
+  })
+  const xs = corners.map((point) => point.x)
+  const ys = corners.map((point) => point.y)
+  const left = Math.min(...xs)
+  const top = Math.min(...ys)
   return {
-    x: center.x - frame.width * camera.zoom / 2,
-    y: center.y - frame.height * camera.zoom / 2,
-    width: frame.width * camera.zoom,
-    height: frame.height * camera.zoom,
+    x: left,
+    y: top,
+    width: Math.max(...xs) - left,
+    height: Math.max(...ys) - top,
   }
+}
+
+function editableWorldKind(item: LayerItem): 'text' | 'formula' | null {
+  if (item.kind !== 'native') return null
+  if (item.content.nativeType === 'text') return 'text'
+  if (item.content.nativeType === 'formula') return 'formula'
+  return null
+}
+
+function editableWorldValue(item: LayerItem): string {
+  if (item.kind !== 'native') return ''
+  if (item.content.nativeType === 'text') return item.content.data.text
+  if (item.content.nativeType === 'formula') return item.content.data.accessibleText
+  return ''
 }
 
 function resizeFrame(
@@ -291,8 +337,12 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     selectedLayerItemIds,
     interactionDisabled = false,
     activeCameraFrameId,
+    viewportOverlays = [],
+    selectedViewportLayerId = null,
     onCameraChange,
     onSelect,
+    onSelectViewportLayer,
+    onCommitEdit,
     onTransformEnd,
   } = props
   const rootRef = useRef<HTMLDivElement>(null)
@@ -302,6 +352,11 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
       : undefined
     return spatialCameraFromPose(activeFrame ?? spatial.camera.home, viewportSize)
   })
+  const [editing, setEditing] = useState<{
+    layerItemId: string
+    kind: 'text' | 'formula'
+    value: string
+  } | null>(null)
   const [drafts, setDrafts] = useState<Readonly<Record<string, SpatialWorkspaceFrame>>>({})
   const draftsRef = useRef<Readonly<Record<string, SpatialWorkspaceFrame>>>({})
   const gestureRef = useRef<SpatialGesture | null>(null)
@@ -627,7 +682,7 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     const target = event.target as Element
     if (target.closest('[data-spatial-item]')) return
     if (target.closest('[data-spatial-handle]')) return
-    if (target.closest('.spatial-workspace__controls, .spatial-workspace__minimap')) return
+    if (target.closest('.spatial-workspace__controls, .spatial-workspace__minimap, [data-spatial-viewport-overlay], [data-spatial-text-editor]')) return
     gestureRef.current = {
       kind: 'pan',
       pointerId: event.pointerId,
@@ -690,6 +745,20 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
   const resetCamera = useCallback((): void => {
     commitCamera(spatialCameraFromPose(spatial.camera.home, viewportSize))
   }, [commitCamera, spatial.camera.home, viewportSize])
+
+  const fitCamera = useCallback((): void => {
+    commitCamera(fitWorkspaceCamera(spatial, viewportSize))
+  }, [commitCamera, spatial, viewportSize])
+
+  const commitEditing = useCallback((): void => {
+    if (!editing) return
+    onCommitEdit?.({
+      layerItemId: editing.layerItemId,
+      kind: editing.kind,
+      value: editing.value,
+    })
+    setEditing(null)
+  }, [editing, onCommitEdit])
 
   const zoomPercent = Math.round(camera.zoom * 100)
 
@@ -773,25 +842,39 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
                 const targetPoint = spatialItemCenter(workspaceItemFrame(target, drafts))
                 const markerId = spatialRelationMarkerId(relation.id, index)
                 return (
-                  <line
-                    key={relation.id}
-                    data-spatial-relation-id={relation.id}
-                    x1={sourcePoint.x}
-                    y1={sourcePoint.y}
-                    x2={targetPoint.x}
-                    y2={targetPoint.y}
-                    fill="none"
-                    stroke="#64748b"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    markerStart={relation.kind === 'bidirectional' ? `url(#${markerId})` : undefined}
-                    markerEnd={relation.kind === 'line' ? undefined : `url(#${markerId})`}
-                  />
+                  <g key={relation.id}>
+                    <line
+                      data-spatial-relation-id={relation.id}
+                      x1={sourcePoint.x}
+                      y1={sourcePoint.y}
+                      x2={targetPoint.x}
+                      y2={targetPoint.y}
+                      fill="none"
+                      stroke="#64748b"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      markerStart={relation.kind === 'bidirectional' ? `url(#${markerId})` : undefined}
+                      markerEnd={relation.kind === 'line' ? undefined : `url(#${markerId})`}
+                    />
+                    {relation.label ? (
+                      <text
+                        data-spatial-relation-label={relation.id}
+                        x={(sourcePoint.x + targetPoint.x) / 2}
+                        y={(sourcePoint.y + targetPoint.y) / 2}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill="#334155"
+                        fontSize={12}
+                      >
+                        {relation.label}
+                      </text>
+                    ) : null}
+                  </g>
                 )
               })}
             </g>
           )}
-          {renderItems.map((item) => {
+          {renderItems.map((item, index) => {
             const frame = drafts[item.layerItemId] ?? workspaceFrameFromLayerItem(item)
             const centerX = frame.x + frame.width / 2
             const centerY = frame.y + frame.height / 2
@@ -802,7 +885,20 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
                 data-spatial-item
                 opacity={item.opacity}
                 transform={frame.rotation !== 0 ? `rotate(${frame.rotation} ${centerX} ${centerY})` : undefined}
+                data-spatial-paint-index={index}
                 onPointerDown={(event) => handleItemPointerDown(event, item)}
+                onDoubleClick={(event) => {
+                  if (interactionDisabled || item.locked) return
+                  const kind = editableWorldKind(item)
+                  if (!kind) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setEditing({
+                    layerItemId: item.layerItemId,
+                    kind,
+                    value: editableWorldValue(item),
+                  })
+                }}
                 style={{ cursor: item.locked ? 'default' : 'move' }}
               >
                 {renderWorldItemContent(item, frame)}
@@ -893,6 +989,77 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
         )
       })}
 
+      {viewportOverlays.map((overlay) => (
+        <div
+          key={overlay.layerItemId}
+          className="spatial-workspace__viewport-overlay"
+          data-spatial-viewport-overlay
+          data-layer-item-id={overlay.layerItemId}
+          data-layer-source={overlay.source}
+          data-testid="spatial-viewport-overlay"
+          onPointerDown={(event) => {
+            if (event.button !== 0 || interactionDisabled) return
+            event.preventDefault()
+            event.stopPropagation()
+            onSelectViewportLayer?.({
+              layerItemId: overlay.layerItemId,
+              source: overlay.source,
+            })
+          }}
+          style={{
+            position: 'absolute',
+            left: overlay.frame.x,
+            top: overlay.frame.y,
+            width: overlay.frame.width,
+            height: overlay.frame.height,
+            transform: overlay.rotation === 0 ? undefined : `rotate(${overlay.rotation}deg)`,
+            border: selectedViewportLayerId === overlay.layerItemId ? '1px solid #2563eb' : '1px dashed #94a3b8',
+            background: 'rgba(254, 242, 242, 0.92)',
+            boxSizing: 'border-box',
+            pointerEvents: 'auto',
+            zIndex: 4,
+          }}
+        >
+          <span style={{ fontSize: 12, padding: 6, display: 'block' }}>{overlay.label}</span>
+        </div>
+      ))}
+
+      {editing && (() => {
+        const item = itemById.get(editing.layerItemId)
+        if (!item) return null
+        const frame = drafts[item.layerItemId] ?? workspaceFrameFromLayerItem(item)
+        const rect = selectionScreenRect(camera, frame)
+        return (
+          <textarea
+            data-spatial-text-editor
+            data-testid="spatial-text-editor"
+            aria-label={editing.kind === 'formula' ? '编辑公式' : '编辑文字'}
+            value={editing.value}
+            onChange={(event) => setEditing({ ...editing, value: event.currentTarget.value })}
+            onBlur={commitEditing}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                commitEditing()
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setEditing(null)
+              }
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{
+              position: 'absolute',
+              left: rect.x,
+              top: rect.y,
+              width: Math.max(80, rect.width),
+              height: Math.max(32, rect.height),
+              zIndex: 5,
+            }}
+          />
+        )
+      })()}
+
       <svg
         className="spatial-workspace__minimap"
         data-testid="spatial-minimap"
@@ -959,6 +1126,7 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
           style={{ minWidth: 48, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}
         >{zoomPercent}%</output>
         <button type="button" onClick={() => zoomBy(1.25)} aria-label="放大视图">+</button>
+        <button type="button" onClick={fitCamera} aria-label="适配视图">适配</button>
         <button type="button" onClick={resetCamera} aria-label="回到总览">⌂</button>
       </div>
     </div>

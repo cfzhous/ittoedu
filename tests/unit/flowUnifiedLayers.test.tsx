@@ -282,7 +282,7 @@ describe('Flow unified authored layers', () => {
     const flow = project.surfaces.find((surface) => surface.id === 'flow-main')
     if (!flow || flow.type !== 'flow') throw new Error('Flow fixture missing')
     const headingId = flow.blocks[0]!.id
-    project = addFlowBlock(project, flow.id, { id: 'flow-next', type: 'paragraph', text: '第二个位置' })
+    project = addFlowBlock(project, flow.id, { id: 'flow-next', type: 'heading', level: 2, text: '第二个位置' })
     project = updateCourseProject(project, (draft) => {
       draft.startLocationId = headingId
       const controller = draft.globalLayerItems.find((entry) => (

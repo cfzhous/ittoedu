@@ -8,6 +8,8 @@ import {
   workspaceTransformAllowed,
   workspaceSelectionAllowed,
   workspaceTextEditTargetNode,
+  beginWorkspaceTextEditSession,
+  resolveWorkspaceTextEditBoundary,
   workspaceSlidePreviewAssetFiles,
   workspaceSlideCarrierScope,
   workspaceSlidePreviewGenerationIdentity,
@@ -801,5 +803,72 @@ describe('Workspace Slide authoring input boundary', () => {
     })
     expect(workspacePreviewNodeWithTransform(injected, 'missing-node')).toBeNull()
     expect(authorNode.visible).toBe(true)
+  })
+})
+
+describe('Workspace text edit session boundaries', () => {
+  it('keys the session by authoringAddress + revision and classifies IME/blur/Enter', () => {
+    const injected = input('text-session', [
+      createTextNode({ id: 'v9-text', text: 'V9', visible: true, locked: false }),
+    ])
+    const session = beginWorkspaceTextEditSession({
+      injected: injected.value,
+      nodeId: 'v9-text',
+      locationId: 'loc-1',
+      stateId: null,
+      revision: 3,
+      authoringAddress: 'courseware://authoring/p/scene/s/sc/native/v9-text?field=content.text',
+      generation: 0,
+    })
+    expect(session).toMatchObject({
+      layerItemId: 'v9-text',
+      authoringAddress: 'courseware://authoring/p/scene/s/sc/native/v9-text?field=content.text',
+      revision: 3,
+      generation: 0,
+    })
+    const current = {
+      sessionId: injected.value.sessionId,
+      authoringAddress: session!.authoringAddress,
+      revision: 3,
+      locationId: 'loc-1',
+      stateId: null,
+      editingScope: 'scene' as const,
+      generation: 0,
+    }
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current,
+      event: { type: 'keydown', key: 'Enter', isComposing: true },
+    })).toEqual({ kind: 'ignore' })
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current,
+      event: { type: 'keydown', key: 'Enter' },
+    })).toEqual({ kind: 'commit', submit: 'enter' })
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current,
+      event: { type: 'keydown', key: 'Enter', ctrlKey: true },
+    })).toEqual({ kind: 'commit', submit: 'ctrl-enter' })
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current,
+      event: { type: 'blur' },
+    })).toEqual({ kind: 'commit', submit: 'blur' })
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current,
+      event: { type: 'cancel' },
+    })).toEqual({ kind: 'cancel' })
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current,
+      event: { type: 'external-selection' },
+    })).toEqual({ kind: 'cancel' })
+    expect(resolveWorkspaceTextEditBoundary({
+      session: session!,
+      current: { ...current, revision: 4 },
+      event: { type: 'blur' },
+    })).toEqual({ kind: 'reject-stale' })
   })
 })

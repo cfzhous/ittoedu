@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createBlankSlideCourse } from '../../src/renderer/course/courseLocationCommands'
 import {
   createProject,
   createScene,
@@ -11,6 +12,9 @@ import type {
 } from '../../src/shared/projectTypes'
 import {
   hasDeliveryVisibleTeacherController,
+  isCourseDeliveryVisibleTeacherController,
+  restoreCourseTeacherControllerLayer,
+  synchronizeCourseTeacherControllerControls,
   synchronizeTeacherControllerControls,
 } from '../../src/shared/teacherControllerConsistency'
 
@@ -115,4 +119,39 @@ describe('teacher controller delivery consistency', () => {
       expect(project.playback.controls).toBe('none')
     },
   )
+})
+
+describe('V9 course teacher controller restore', () => {
+  it('restores a delivery-visible canvas controller after an explicit request', () => {
+    const created = createBlankSlideCourse({ id: 't06-controller', now: '2026-08-17T05:20:00.000Z' })
+    const entry = created.project.globalLayerItems.find(
+      (candidate) => candidate.item.kind === 'native'
+        && candidate.item.content.nativeType === 'teacher-controller',
+    )
+    expect(entry).toBeDefined()
+    if (
+      !entry ||
+      entry.item.kind !== 'native' ||
+      entry.item.content.nativeType !== 'teacher-controller'
+    ) {
+      return
+    }
+    entry.item.visible = false
+    entry.item.opacity = 0
+    entry.item.content.data.buttons.forEach((button) => {
+      button.visible = false
+    })
+    expect(isCourseDeliveryVisibleTeacherController(
+      entry,
+      created.project.locations.map((location) => location.id),
+    )).toBe(false)
+
+    expect(restoreCourseTeacherControllerLayer(entry)).toBe(true)
+    synchronizeCourseTeacherControllerControls(created.project)
+    expect(created.project.playback.controls).toBe('canvas')
+    expect(isCourseDeliveryVisibleTeacherController(
+      entry,
+      created.project.locations.map((location) => location.id),
+    )).toBe(true)
+  })
 })

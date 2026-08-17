@@ -334,4 +334,92 @@ describe('FlowOutlinePanel presentational renderer', () => {
     fireEvent.click(outlineButton('block-section')!)
     expect(onSelectBlock).toHaveBeenCalledWith('block-section')
   })
+
+  it('keeps the page as the only course-level parent and omits ordinary blocks', () => {
+    const view = renderFlowFixture()
+    const { container } = render(<FlowOutlinePanel view={view} />)
+    expect(container.querySelector('[data-flow-outline-kind="page"]')?.textContent).toContain('渲染讲义')
+    expect(container.querySelector('[data-flow-outline-block-id="block-paragraph"]')).toBeNull()
+    expect(container.querySelector('[data-flow-outline-block-id="block-h1"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="课程结构"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="讲义大纲"]')).toBeNull()
+  })
+})
+
+describe('FlowWorkspace inline text editing', () => {
+  it('commits heading/paragraph/list drafts to the same V9 fields as the property panel', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const onStructuralCommand = vi.fn()
+    const { container, rerender } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-h1"
+        onPatchBlock={onPatchBlock}
+        onStructuralCommand={onStructuralCommand}
+      />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-h1"]')!)
+    const headingEditor = container.querySelector<HTMLTextAreaElement>('[data-flow-inline-editor="true"]')!
+    expect(headingEditor).not.toBeNull()
+    fireEvent.change(headingEditor, { target: { value: '第一章 已改' } })
+    fireEvent.keyDown(headingEditor, { key: 'Enter' })
+    expect(onPatchBlock).toHaveBeenCalledWith('block-h1', { type: 'heading', text: '第一章 已改' })
+
+    rerender(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-paragraph"
+        onPatchBlock={onPatchBlock}
+        onStructuralCommand={onStructuralCommand}
+      />,
+    )
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-paragraph"]')!)
+    const paragraphEditor = container.querySelector<HTMLTextAreaElement>('[data-flow-inline-editor="true"]')!
+    fireEvent.change(paragraphEditor, { target: { value: '正文已改' } })
+    fireEvent.keyDown(paragraphEditor, { key: 'Enter', ctrlKey: true })
+    expect(onPatchBlock).toHaveBeenCalledWith('block-paragraph', { type: 'paragraph', text: '正文已改' })
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-list-item-id="list-item-1"]')!)
+    const listEditor = container.querySelector<HTMLTextAreaElement>('[data-flow-inline-editor="true"]')!
+    fireEvent.change(listEditor, { target: { value: '项目一已改' } })
+    fireEvent.blur(listEditor)
+    expect(onStructuralCommand).toHaveBeenCalledWith({
+      blockId: 'block-list',
+      kind: 'list.editItem',
+      itemId: 'list-item-1',
+      text: '项目一已改',
+    })
+  })
+
+  it('cancels on Escape and commits when the external selection changes', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container, rerender } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-quote"
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-quote"]')!)
+    const editor = container.querySelector<HTMLTextAreaElement>('[data-flow-inline-editor="true"]')!
+    fireEvent.change(editor, { target: { value: '不该提交' } })
+    fireEvent.keyDown(editor, { key: 'Escape' })
+    expect(onPatchBlock).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-flow-inline-editor="true"]')).toBeNull()
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-quote"]')!)
+    const nextEditor = container.querySelector<HTMLTextAreaElement>('[data-flow-inline-editor="true"]')!
+    fireEvent.change(nextEditor, { target: { value: '外部选择提交' } })
+    rerender(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-h1"
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+    expect(onPatchBlock).toHaveBeenCalledWith('block-quote', { type: 'quote', text: '外部选择提交' })
+  })
 })

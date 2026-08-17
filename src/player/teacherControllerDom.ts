@@ -15,6 +15,7 @@ import {
 import {
   constrainTeacherControllerOffset,
   logicalDragDelta,
+  runtimeTeacherControllerButtons,
   TEACHER_CONTROLLER_KEYBOARD_FINE_STEP,
   TEACHER_CONTROLLER_KEYBOARD_STEP,
   TEACHER_CONTROLLER_MOUSE_DRAG_THRESHOLD_PX,
@@ -125,7 +126,7 @@ export class TeacherControllerDom {
 
   constructor(options: TeacherControllerDomOptions) {
     this.#options = options
-    this.#node = options.node
+    this.#node = sanitizeRuntimeControllerNode(options.node)
     this.#session = options.getSession()
     const dom = options.container.ownerDocument
     const root = dom.createElement('nav')
@@ -172,7 +173,7 @@ export class TeacherControllerDom {
   /** Re-renders after a node/status/scene change; session is re-read from the host. */
   update(node: TeacherControllerRuntimeNode): void {
     if (this.#destroyed) return
-    this.#node = node
+    this.#node = sanitizeRuntimeControllerNode(node)
     this.#session = this.#options.getSession()
     this.#render()
   }
@@ -508,9 +509,18 @@ export function teacherControllerDomNode(
     style: TeacherControllerRuntimeNode['style']
   },
 ): TeacherControllerRuntimeNode {
-  return {
+  return sanitizeRuntimeControllerNode({
     ...frame,
     rotation,
     ...structuredClone(data),
+  })
+}
+
+function sanitizeRuntimeControllerNode(
+  node: TeacherControllerRuntimeNode,
+): TeacherControllerRuntimeNode {
+  return {
+    ...node,
+    buttons: runtimeTeacherControllerButtons(node.buttons),
   }
 }

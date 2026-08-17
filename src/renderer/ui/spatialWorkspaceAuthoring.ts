@@ -1,14 +1,18 @@
 import {
   buildSpatialMinimap,
   cullSpatialItems,
+  fitSpatialCamera,
   panSpatialCamera,
   screenToWorld,
+  spatialCameraFromPose,
+  spatialFiniteBounds,
   worldToScreen,
   zoomSpatialCameraAt,
   type SpatialCamera,
   type SpatialMinimapModel,
   type SpatialRect,
 } from '../../player/surfaces/spatial/spatialModel'
+import type { SpatialCameraPose } from '../../shared/courseProjectTypes'
 import type {
   LayerItem,
   SpatialSurfaceDocument,
@@ -169,4 +173,25 @@ export function workspaceFrameChanged(
     item.frame.width !== frame.width ||
     item.frame.height !== frame.height ||
     item.rotation !== frame.rotation
+}
+
+/** Fits the session camera to authored world bounds. Never writes the project. */
+export function fitWorkspaceCamera(
+  spatial: SpatialSurfaceDocument,
+  viewport: { width: number; height: number },
+  paddingPx = 32,
+): SpatialCamera {
+  return fitSpatialCamera(spatialFiniteBounds(spatial), viewport, paddingPx)
+}
+
+/** Resets the session camera to the persisted home pose. */
+export function resetWorkspaceCamera(
+  spatial: SpatialSurfaceDocument,
+  viewport: { width: number; height: number },
+): SpatialCamera {
+  return spatialCameraFromPose(spatial.camera.home, viewport)
+}
+
+export function workspaceCameraPose(camera: SpatialCamera): SpatialCameraPose {
+  return { x: camera.x, y: camera.y, zoom: camera.zoom }
 }

@@ -3,6 +3,8 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildCourseStructureViewModel } from '@/renderer/course/courseEditorLayout'
+import { createBlankSlideCourse } from '@/renderer/course/courseLocationCommands'
 import {
   ScenePanel,
   type ScenePanelCourseLocation,
@@ -202,5 +204,40 @@ describe('ScenePickerOverlay location entries', () => {
     expect(onSelect).toHaveBeenCalledWith('scene_intro', false)
 
     picker.destroy()
+  })
+})
+
+describe('ScenePanel course structure wiring', () => {
+  it('keeps 共享内容 and three add-page entries when courseStructure is provided', () => {
+    const onSelectGlobalLayer = vi.fn()
+    const onAddSlidePage = vi.fn()
+    const onAddFlowPage = vi.fn()
+    const onAddSpatialPage = vi.fn()
+    const courseStructure = buildCourseStructureViewModel(createBlankSlideCourse({ title: '未命名课件' }).project)
+
+    render(
+      <ScenePanel
+        courseStructure={courseStructure}
+        authoringScope="location"
+        activeLocationId={courseStructure.pageTree.nodes[0]?.locationId}
+        onSelectGlobalLayer={onSelectGlobalLayer}
+        onAddSlidePage={onAddSlidePage}
+        onAddFlowPage={onAddFlowPage}
+        onAddSpatialPage={onAddSpatialPage}
+      />,
+    )
+
+    expect(screen.getByTestId('shared-content-section')).toHaveTextContent('共享内容')
+    expect(screen.getByTestId('global-layer-entry')).toHaveTextContent('全局层')
+    expect(screen.getByTestId('global-layer-entry')).toHaveTextContent('全课')
+    fireEvent.click(screen.getByTestId('global-layer-entry'))
+    expect(onSelectGlobalLayer).toHaveBeenCalledOnce()
+
+    fireEvent.click(screen.getByTestId('add-slide-page'))
+    fireEvent.click(screen.getByTestId('add-flow-page'))
+    fireEvent.click(screen.getByTestId('add-spatial-page'))
+    expect(onAddSlidePage).toHaveBeenCalledOnce()
+    expect(onAddFlowPage).toHaveBeenCalledOnce()
+    expect(onAddSpatialPage).toHaveBeenCalledOnce()
   })
 })

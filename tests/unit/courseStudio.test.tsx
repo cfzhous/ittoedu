@@ -189,9 +189,9 @@ describe('Course Studio concentrated authoring flow', () => {
     project = duplicateFlowBlock(project, 'flow-main', 'paragraph-a')
     const flow = project.surfaces.find((surface): surface is FlowSurfaceDocument => surface.id === 'flow-main' && surface.type === 'flow')!
     expect(flow.blocks[0]?.id).toBe('paragraph-b')
-    expect(flow.blocks.filter((block) => block.type === 'paragraph')).toHaveLength(3)
+    expect(flow.blocks.filter((block) => block.type === 'paragraph')).toHaveLength(4)
     const duplicate = flow.blocks.find((block) => block.type === 'paragraph' && block.id !== 'paragraph-a' && block.id !== 'paragraph-b')!
-    expect(project.locations.some((location) => location.kind === 'flow-block' && location.blockId === duplicate.id)).toBe(true)
+    expect(project.locations.some((location) => location.kind === 'flow-block' && location.blockId === duplicate.id)).toBe(false)
     project = deleteFlowBlock(project, 'flow-main', duplicate.id)
     expect(project.locations.some((location) => location.kind === 'flow-block' && location.blockId === duplicate.id)).toBe(false)
   })

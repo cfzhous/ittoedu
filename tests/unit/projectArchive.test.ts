@@ -4,6 +4,13 @@ import { UserFacingError } from '@/shared/errors'
 import type { ComponentManifest } from '@/shared/componentTypes'
 import type { ProjectDocument } from '@/shared/projectTypes'
 import {
+  createBlankFlowCourse,
+  createBlankSlideCourse,
+  createBlankSpatialCourse,
+  selectCourseLocation,
+} from '@/renderer/course/courseLocationCommands'
+import { updateCourseProject } from '@/renderer/course/courseStudioModel'
+import {
   createExternalComponentNode,
   createImageNode,
   createProject,
@@ -12,14 +19,27 @@ import {
   createTextNode,
 } from '@/renderer/project/createProject'
 import {
+  importProjectV8ArchiveAsCourseProject,
+  inspectCourseProjectArchiveIdentity,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
+import { inspectCourseProjectHealth } from '@/renderer/project/courseProjectHealthInspect'
+import {
+  courseProjectRecoveryRevision,
+  isCourseProjectRevisionDirty,
+  resolveCloseDirtyState,
+  shouldMarkCourseProjectDirty,
+} from '@/renderer/project/courseProjectLifecycle'
+import {
   createProjectArchive,
   openProjectArchive,
   type ProjectArchiveData,
 } from '@/renderer/project/projectArchive'
-import { saveProject } from '@/renderer/project/saveProject'
+import { saveCourseProject, saveProject } from '@/renderer/project/saveProject'
 import { BlobUrlRegistry } from '@/renderer/project/blobUrlRegistry'
 import {
   createImageAssetImport,
+  createMediaAssetImport,
   createRuntimeAssetMap,
   fitImageSize,
 } from '@/renderer/project/assetManager'
@@ -635,5 +655,274 @@ describe('asset helpers and BlobUrlRegistry', () => {
         bytes: new Uint8Array([1]),
       }),
     ).toThrowError(expect.objectContaining({ title: '图片类型不支持' }))
+  })
+})
+
+const V9_NOW = '2026-08-17T00:00:00.000Z'
+
+function v9ComponentFiles() {
+  const manifest: ComponentManifest = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    renderMode: 'dom',
+    supportedScopes: ['scene', 'global'],
+    id: 'com.example.v9-sidecar',
+    name: '归档组件',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    thumbnail: 'thumbnail.png',
+    defaultSize: { width: 320, height: 180 },
+    minSize: { width: 160, height: 90 },
+    preserveAspectRatio: true,
+    assets: {},
+    defaultProps: {},
+  }
+  const files = {
+    'manifest.json': strToU8(JSON.stringify(manifest)),
+    'runtime.js': strToU8(
+      "window.CoursewareComponent.define({id:'com.example.v9-sidecar',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})",
+    ),
+    'thumbnail.png': new Uint8Array([137, 80, 78, 71]),
+  }
+  return parseComponentPackageFiles(files)
+}
+
+describe('Course Project V9 blank archives and V8 isolation', () => {
+  it('saves T03 blank Slide/Flow/Spatial courses as V9 archives without a projectMode field', () => {
+    const factories = [
+      ['slide', createBlankSlideCourse, 'slide'] as const,
+      ['flow', createBlankFlowCourse, 'flow'] as const,
+      ['spatial', createBlankSpatialCourse, 'spatial-2d'] as const,
+    ]
+    for (const [kind, createBlank, surfaceType] of factories) {
+      const { project } = createBlank({
+        id: `blank-${kind}`,
+        title: `空白${kind}`,
+        now: V9_NOW,
+      })
+      expect(project).not.toHaveProperty('projectMode')
+      const saved = saveCourseProject({
+        project,
+        assetFiles: {},
+        componentFiles: {},
+      }, V9_NOW)
+      const reopened = openCourseProjectArchive(saved.bytes)
+      expect(reopened.project.schemaVersion).toBe(9)
+      expect(reopened.project.id).toBe(`blank-${kind}`)
+      expect(reopened.project.revision).toBe(0)
+      expect(reopened.project.surfaces).toHaveLength(1)
+      expect(reopened.project.surfaces[0]?.type).toBe(surfaceType)
+      expect(reopened.project).not.toHaveProperty('projectMode')
+      expect(inspectCourseProjectArchiveIdentity(saved.bytes)).toMatchObject({
+        schemaVersion: 9,
+        projectId: `blank-${kind}`,
+        revision: 0,
+      })
+    }
+  })
+
+  it('rejects V8 on the default open path and only imports it with a report', () => {
+    const v8 = createProject({
+      id: 'legacy-open',
+      title: '旧版打开',
+      now: V9_NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const v8Bytes = createProjectArchive({
+      project: v8,
+      assetFiles: {},
+      componentFiles: {},
+    }, { mtime: V9_NOW })
+
+    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/显式迁移/)
+    expect(inspectCourseProjectArchiveIdentity(v8Bytes)).toMatchObject({
+      schemaVersion: 8,
+      projectId: 'legacy-open',
+    })
+
+    const imported = importProjectV8ArchiveAsCourseProject(v8Bytes)
+    expect(imported.project.schemaVersion).toBe(9)
+    expect(imported.report).toMatchObject({
+      sourceFormat: 'legacy-course',
+      targetFormat: 'current-course',
+      projectId: 'legacy-open',
+      surfaceCount: 1,
+    })
+    expect(imported.report.notes.join('\n')).toMatch(/另存为新文件/)
+    expect(imported.report.notes.join('\n')).not.toMatch(/\bV[89]\b/)
+
+    const saved = saveCourseProject(imported, V9_NOW)
+    const reopened = openCourseProjectArchive(saved.bytes)
+    expect(reopened.project.schemaVersion).toBe(9)
+    expect(inspectCourseProjectArchiveIdentity(saved.bytes).schemaVersion).toBe(9)
+  })
+
+  it('keeps dirty/revision aligned with one command and ignores UI navigation', () => {
+    const created = createBlankSlideCourse({
+      id: 'dirty-slide',
+      title: '脏状态',
+      now: V9_NOW,
+    })
+    expect(shouldMarkCourseProjectDirty('selection')).toBe(false)
+    expect(shouldMarkCourseProjectDirty('location')).toBe(false)
+    expect(shouldMarkCourseProjectDirty('global-scope')).toBe(false)
+    expect(shouldMarkCourseProjectDirty('document')).toBe(true)
+
+    const selected = selectCourseLocation(created.project, created.activatedLocationId)
+    expect(selected.activatedLocationId).toBe(created.activatedLocationId)
+    expect(isCourseProjectRevisionDirty({
+      currentProjectId: created.project.id,
+      currentRevision: created.project.revision,
+      savedProjectId: created.project.id,
+      savedRevision: created.project.revision,
+    })).toBe(false)
+
+    const edited = updateCourseProject(created.project, (draft) => {
+      draft.title = '一次命令'
+    }, '2026-08-17T00:01:00.000Z')
+    expect(edited.revision).toBe(created.project.revision + 1)
+    expect(isCourseProjectRevisionDirty({
+      currentProjectId: edited.id,
+      currentRevision: edited.revision,
+      savedProjectId: created.project.id,
+      savedRevision: created.project.revision,
+    })).toBe(true)
+    expect(courseProjectRecoveryRevision(edited)).toBe(`${edited.id}:${edited.revision}`)
+  })
+
+  it('keeps dirty when close-save fails and only clears after success or abandon', () => {
+    expect(resolveCloseDirtyState({ dirty: true, decision: 'cancel' })).toEqual({
+      allowClose: false, clearDirty: false, attemptSave: false,
+    })
+    expect(resolveCloseDirtyState({ dirty: true, decision: 'save', saveSucceeded: false }))
+      .toEqual({ allowClose: false, clearDirty: false, attemptSave: true })
+    expect(resolveCloseDirtyState({ dirty: true, decision: 'save', saveSucceeded: true }))
+      .toEqual({ allowClose: true, clearDirty: true, attemptSave: true })
+    expect(resolveCloseDirtyState({ dirty: true, decision: 'abandon' })).toEqual({
+      allowClose: true, clearDirty: true, attemptSave: false,
+    })
+    expect(resolveCloseDirtyState({ dirty: false, decision: 'save' })).toEqual({
+      allowClose: true, clearDirty: false, attemptSave: false,
+    })
+  })
+
+  it('round-trips image, audio, video and component sidecar paths on a blank Slide archive', () => {
+    const { project } = createBlankSlideCourse({
+      id: 'sidecar-slide',
+      title: '资源寻址',
+      now: V9_NOW,
+    })
+    const image = createImageAssetImport({
+      name: 'diagram.png',
+      mimeType: 'image/png',
+      bytes: new Uint8Array([137, 80, 78, 71, 1]),
+    }, { id: 'asset_diagram' })
+    const audio = createMediaAssetImport({
+      name: 'voice.mp3',
+      mimeType: 'audio/mpeg',
+      bytes: new Uint8Array([1, 2, 3, 4]),
+    }, 'audio', { duration: 1.5 }, { id: 'asset_voice' })
+    const video = createMediaAssetImport({
+      name: 'clip.mp4',
+      mimeType: 'video/mp4',
+      bytes: new Uint8Array([5, 6, 7, 8, 9]),
+    }, 'video', { duration: 2, width: 640, height: 360 }, { id: 'asset_clip' })
+    const component = v9ComponentFiles()
+    project.assets[image.meta.id] = image.meta
+    project.assets[audio.meta.id] = audio.meta
+    project.assets[video.meta.id] = video.meta
+    project.media.audio.sounds.voice = {
+      id: 'voice',
+      name: '旁白',
+      assetId: audio.meta.id,
+      channel: 'narration',
+      defaultVolume: 1,
+      defaultLoop: false,
+    }
+    project.componentPackages[component.metadata.packageId] = component.metadata
+
+    const saved = saveCourseProject({
+      project,
+      assetFiles: {
+        [image.meta.id]: image.bytes,
+        [audio.meta.id]: audio.bytes,
+        [video.meta.id]: video.bytes,
+      },
+      componentFiles: { [component.key]: component.files },
+    }, V9_NOW)
+    const reopened = openCourseProjectArchive(saved.bytes)
+    expect(reopened.project.assets.asset_diagram?.path).toBe('assets/asset_diagram.png')
+    expect(reopened.project.assets.asset_voice?.path).toBe('assets/asset_voice.mp3')
+    expect(reopened.project.assets.asset_clip?.path).toBe('assets/asset_clip.mp4')
+    expect(reopened.project.componentPackages[component.metadata.packageId]?.manifestPath)
+      .toBe(`components/${component.key}/manifest.json`)
+    expect([...reopened.assetFiles.asset_voice!]).toEqual([1, 2, 3, 4])
+    expect(reopened.componentFiles[component.key]?.['runtime.js']).toBeDefined()
+  })
+
+  it('reports missing locations and dangling owner, asset, sound and package addresses', () => {
+    const { project } = createBlankSlideCourse({
+      id: 'health-slide',
+      title: '健康检查',
+      now: V9_NOW,
+    })
+    expect(inspectCourseProjectHealth(project).error).toBe(0)
+
+    project.startLocationId = 'missing-location'
+    project.assets.orphan = {
+      id: 'other',
+      filename: 'orphan.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/orphan.png',
+      byteLength: 1,
+      width: 1,
+      height: 1,
+    }
+    project.media.audio.sounds.broken = {
+      id: 'broken',
+      name: '失效声音',
+      assetId: 'missing-audio',
+      channel: 'sfx',
+      defaultVolume: 1,
+      defaultLoop: false,
+    }
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    surface.scenes[0]!.layerItems.push({
+      layerItemId: 'dangling-component',
+      label: '失效组件',
+      frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 80 },
+      order: 2,
+      visible: true,
+      locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+      kind: 'component',
+      component: { packageId: 'missing.package', version: '4.0.0' },
+      props: {},
+    })
+    project.globalInteractions.push({
+      id: 'rule-missing-owner',
+      name: '失效互动',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: 'missing-owner' },
+      conditions: [],
+      actions: [],
+    })
+
+    const health = inspectCourseProjectHealth(project)
+    expect(health.error).toBeGreaterThan(0)
+    expect(health.items.map((item) => item.code)).toEqual(expect.arrayContaining([
+      'dangling-location',
+      'dangling-asset',
+      'dangling-sound',
+      'dangling-component',
+      'dangling-layer-item',
+    ]))
+    expect(health.items.map((item) => item.message).join('\n')).not.toMatch(/\bV[89]\b/)
   })
 })
