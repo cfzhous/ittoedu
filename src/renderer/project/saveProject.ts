@@ -1,4 +1,10 @@
+import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { ProjectDocument } from '@/shared/projectTypes'
+import {
+  createCourseProjectArchive,
+  createCourseProjectArchiveAsync,
+  type CourseProjectArchiveData,
+} from './courseProjectArchive'
 import {
   createProjectArchive,
   createProjectArchiveAsync,
@@ -7,6 +13,11 @@ import {
 
 export interface SavedProjectArchive {
   project: ProjectDocument
+  bytes: Uint8Array
+}
+
+export interface SavedCourseProjectArchive {
+  project: CourseProjectDocument
   bytes: Uint8Array
 }
 
@@ -49,4 +60,47 @@ export async function saveProjectAsync(
   }
 }
 
+export function saveCourseProject(
+  data: CourseProjectArchiveData,
+  now: string | Date = new Date(),
+): SavedCourseProjectArchive {
+  const updatedAt = typeof now === 'string' ? now : now.toISOString()
+  const project: CourseProjectDocument = {
+    ...structuredClone(data.project),
+    updatedAt,
+  }
+  return {
+    project,
+    bytes: createCourseProjectArchive({
+      project,
+      assetFiles: data.assetFiles,
+      componentFiles: data.componentFiles,
+    }),
+  }
+}
+
+export async function saveCourseProjectAsync(
+  data: CourseProjectArchiveData,
+  now: string | Date = new Date(),
+  options: { signal?: AbortSignal } = {},
+): Promise<SavedCourseProjectArchive> {
+  const updatedAt = typeof now === 'string' ? now : now.toISOString()
+  const project: CourseProjectDocument = {
+    ...structuredClone(data.project),
+    updatedAt,
+  }
+  return {
+    project,
+    bytes: await createCourseProjectArchiveAsync({
+      project,
+      assetFiles: data.assetFiles,
+      componentFiles: data.componentFiles,
+    }, options),
+  }
+}
+
 export { createProjectArchive, createProjectArchive as serializeProjectArchive }
+export {
+  createCourseProjectArchive,
+  createCourseProjectArchive as serializeCourseProjectArchive,
+}

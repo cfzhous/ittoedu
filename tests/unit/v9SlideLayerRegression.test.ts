@@ -355,7 +355,7 @@ describe('V9 Slide layer regressions', () => {
     expect(courseProjectDocumentSchema.safeParse(duplicated.history.present).success).toBe(true)
   })
 
-  it('removes the last sparse override when deleting a named-state-only hidden-base item', () => {
+  it('structurally deletes a named-state-owned item instead of leaving a hidden base', () => {
     const named = addV9SlidePresentationState(open(createTwoLayerProject()), '临时态', NOW)
     const inserted = addV9SlideShapeLayer(named, 'ellipse', 520, 300, NOW)
     const insertedId = inserted.selection.selectionIds[0]!
@@ -373,7 +373,7 @@ describe('V9 Slide layer regressions', () => {
       (candidate) => candidate.id === deleted.selection.stateId,
     )!
 
-    expect(scene.layerItems.find((item) => item.layerItemId === insertedId)?.visible).toBe(false)
+    expect(scene.layerItems.find((item) => item.layerItemId === insertedId)).toBeUndefined()
     expect(presentationState.layerItemOverrides[insertedId]).toBeUndefined()
     expect(deleted.selection.selectionIds).toEqual([])
     expect(courseProjectDocumentSchema.safeParse(deleted.history.present).success).toBe(true)

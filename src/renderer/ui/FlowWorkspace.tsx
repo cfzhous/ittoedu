@@ -1,4 +1,12 @@
-import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 import { compareStableStrings } from '../../shared/stableOrder'
 import { serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode } from '../../shared/projectTypes'
@@ -7,6 +15,7 @@ import type {
   FlowEditorLayerView,
   FlowEditorView,
 } from '../course/flowEditorView'
+import type { FlowBlockPatch, FlowStructuralCommand } from './FlowPropertiesTab'
 
 export type FlowBlockMoveDirection = 'up' | 'down' | 'left' | 'right'
 
@@ -23,7 +32,29 @@ export interface FlowWorkspaceProps extends FlowStructuralActionProps {
   readonly layers?: readonly FlowEditorLayerView[]
   readonly selectedLayerItemId?: string | null
   readonly onSelectLayer?: (layerItemId: string) => void
+  readonly onPatchBlock?: (blockId: string, patch: FlowBlockPatch) => void
+  readonly onStructuralCommand?: (command: FlowStructuralCommand) => void
+  readonly editingUnavailableReason?: string
   readonly readOnly?: boolean
+}
+
+interface FlowInlineEditState {
+  readonly blockId: string
+  readonly field: 'text'
+  readonly itemId?: string
+  readonly original: string
+  readonly draft: string
+  readonly composing: boolean
+}
+
+interface FlowInlineEditingController {
+  readonly state: FlowInlineEditState | null
+  readonly unavailableReason?: string
+  readonly begin: (blockId: string, itemId?: string) => boolean
+  readonly commit: () => void
+  readonly cancel: () => void
+  readonly changeDraft: (draft: string) => void
+  readonly changeComposing: (composing: boolean) => void
 }
 
 function sortFlowLayerViews(
@@ -119,12 +150,14 @@ function flowBlockFrameProps(
   selected: boolean,
   readOnly: boolean,
   onSelectBlock?: (blockId: string) => void,
+  onDoubleClick?: (event: MouseEvent<HTMLElement>) => void,
 ): {
     'data-flow-block-id': string
     'data-flow-parent-id': string
     className: string
     'aria-selected': boolean
     onClick?: (event: MouseEvent<HTMLElement>) => void
+    onDoubleClick?: (event: MouseEvent<HTMLElement>) => void
   } {
   return {
     'data-flow-block-id': blockView.blockId,
@@ -137,7 +170,66 @@ function flowBlockFrameProps(
         onSelectBlock(blockView.blockId)
       },
     }),
+    ...(onDoubleClick ? { onDoubleClick } : {}),
   }
+}
+
+function FlowInlineTextEditor({
+  blockView,
+  inlineEditing,
+}: {
+  blockView: FlowBlockView
+  inlineEditing?: FlowInlineEditingController
+}): ReactNode {
+  const state = inlineEditing?.state
+  if (!state) return null
+  const block = blockView.block
+  const label = block.type === 'heading'
+    ? '编辑标题文本'
+    : block.type === 'quote'
+      ? '编辑引用文本'
+      : block.type === 'list'
+        ? '编辑列表项文本'
+        : '编辑段落文本'
+  const commitOnEnter = block.type === 'heading' || block.type === 'list'
+  return (
+    <textarea
+      className="flow-inline-editor"
+      data-flow-inline-editor="true"
+      data-flow-inline-field={state.field}
+      data-flow-block-id={blockView.blockId}
+      data-flow-parent-id={blockView.parentId ?? ''}
+      data-flow-list-item-id={state.itemId}
+      aria-label={label}
+      value={state.draft}
+      rows={commitOnEnter ? 1 : 3}
+      autoFocus
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || state.composing) return
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          inlineEditing?.cancel()
+          return
+        }
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          inlineEditing?.commit()
+          return
+        }
+        if (event.key === 'Enter' && !event.shiftKey && commitOnEnter) {
+          event.preventDefault()
+          event.stopPropagation()
+          inlineEditing?.commit()
+        }
+      }}
+      onChange={(event) => inlineEditing?.changeDraft(event.currentTarget.value)}
+      onCompositionStart={() => inlineEditing?.changeComposing(true)}
+      onCompositionEnd={() => inlineEditing?.changeComposing(false)}
+      onBlur={() => inlineEditing?.commit()}
+    />
+  )
 }
 
 function FlowBlockActionToolbar({
@@ -235,6 +327,7 @@ function FlowListItem({
   onDeleteBlock,
   onDuplicateBlock,
   onMoveBlock,
+  inlineEditing,
 }: {
   blockView: FlowBlockView
   childrenByParent: Map<string | null, FlowBlockView[]>
@@ -244,10 +337,32 @@ function FlowListItem({
   onDeleteBlock?: (blockId: string) => void
   onDuplicateBlock?: (blockId: string) => void
   onMoveBlock?: (blockId: string, direction: FlowBlockMoveDirection) => void
+  inlineEditing?: FlowInlineEditingController
 }): ReactNode {
   const block = blockView.block
   const selected = blockView.blockId === selectedBlockId
-  const props = flowBlockFrameProps(blockView, selected, readOnly, onSelectBlock)
+  const editingHere = inlineEditing?.state != null &&
+    inlineEditing.state.blockId === blockView.blockId &&
+    inlineEditing.state.itemId === undefined
+  if (editingHere) {
+    return <FlowInlineTextEditor blockView={blockView} inlineEditing={inlineEditing} />
+  }
+  const blockDoubleClickEditable = (
+    block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote'
+  ) && !readOnly && !inlineEditing?.unavailableReason
+  const listItemEditable = block.type === 'list' && !readOnly && !inlineEditing?.unavailableReason
+  const props = flowBlockFrameProps(
+    blockView,
+    selected,
+    readOnly,
+    onSelectBlock,
+    blockDoubleClickEditable
+      ? (event) => {
+          event.stopPropagation()
+          inlineEditing?.begin(blockView.blockId)
+        }
+      : undefined,
+  )
 
   let rendered: ReactNode
   switch (block.type) {
@@ -273,11 +388,34 @@ function FlowListItem({
         </blockquote>
       )
       break
-    case 'list':
-      rendered = block.ordered
-        ? <ol {...props}>{block.items.map((item) => <li key={item.id} data-flow-list-item-id={item.id}>{item.text}</li>)}</ol>
-        : <ul {...props}>{block.items.map((item) => <li key={item.id} data-flow-list-item-id={item.id}>{item.text}</li>)}</ul>
+    case 'list': {
+      const items = block.items.map((item) => {
+        const editingThisItem = inlineEditing?.state?.blockId === blockView.blockId &&
+          inlineEditing.state.itemId === item.id
+        return editingThisItem
+          ? (
+              <li key={item.id} data-flow-list-item-id={item.id}>
+                <FlowInlineTextEditor blockView={blockView} inlineEditing={inlineEditing} />
+              </li>
+            )
+          : (
+              <li
+                key={item.id}
+                data-flow-list-item-id={item.id}
+                onDoubleClick={listItemEditable
+                  ? (event) => {
+                      event.stopPropagation()
+                      inlineEditing?.begin(blockView.blockId, item.id)
+                    }
+                  : undefined}
+              >
+                {item.text}
+              </li>
+            )
+      })
+      rendered = block.ordered ? <ol {...props}>{items}</ol> : <ul {...props}>{items}</ul>
       break
+    }
     case 'divider':
       rendered = <hr {...props} />
       break
@@ -358,6 +496,7 @@ function FlowListItem({
                 onDeleteBlock={onDeleteBlock}
                 onDuplicateBlock={onDuplicateBlock}
                 onMoveBlock={onMoveBlock}
+                inlineEditing={inlineEditing}
               />
             ))}
           </div>
@@ -402,6 +541,9 @@ export function FlowWorkspace({
   selectedLayerItemId,
   onSelectLayer,
   readOnly = false,
+  onPatchBlock,
+  onStructuralCommand,
+  editingUnavailableReason,
   onDeleteBlock,
   onDuplicateBlock,
   onMoveBlock,
@@ -414,8 +556,133 @@ export function FlowWorkspace({
   }
   const rootBlocks = childrenByParent.get(null) ?? []
 
+  const inlineEditRef = useRef<FlowInlineEditState | null>(null)
+  const composingRef = useRef(false)
+  const [inlineEdit, setInlineEdit] = useState<FlowInlineEditState | null>(null)
+
+  const updateInlineEdit = (next: FlowInlineEditState | null) => {
+    inlineEditRef.current = next
+    setInlineEdit(next)
+  }
+
+  const commitInlineEdit = () => {
+    const current = inlineEditRef.current
+    if (current === null) return
+    composingRef.current = false
+    updateInlineEdit(null)
+    if (current.draft === current.original) return
+    const blockView = view.blocks.find((entry) => entry.blockId === current.blockId)
+    if (!blockView) return
+    const block = blockView.block
+    if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') {
+      onPatchBlock?.(current.blockId, { type: block.type, text: current.draft })
+      return
+    }
+    if (block.type === 'list' && current.itemId !== undefined) {
+      onStructuralCommand?.({
+        blockId: current.blockId,
+        kind: 'list.editItem',
+        itemId: current.itemId,
+        text: current.draft,
+      })
+    }
+  }
+
+  const cancelInlineEdit = () => {
+    composingRef.current = false
+    updateInlineEdit(null)
+  }
+
+  const beginInlineEdit = (blockId: string, itemId?: string): boolean => {
+    if (readOnly || editingUnavailableReason) return false
+    if (
+      inlineEditRef.current?.blockId === blockId &&
+      inlineEditRef.current.itemId === itemId
+    ) return true
+    commitInlineEdit()
+    const blockView = view.blocks.find((entry) => entry.blockId === blockId)
+    if (!blockView) return false
+    const block = blockView.block
+    if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') {
+      if (itemId !== undefined) return false
+      updateInlineEdit({
+        blockId,
+        field: 'text',
+        original: block.text,
+        draft: block.text,
+        composing: false,
+      })
+      onSelectBlock?.(blockId)
+      return true
+    }
+    if (block.type === 'list') {
+      const item = block.items.find((candidate) => candidate.id === itemId)
+      if (!item) return false
+      updateInlineEdit({
+        blockId,
+        field: 'text',
+        itemId: item.id,
+        original: item.text,
+        draft: item.text,
+        composing: false,
+      })
+      onSelectBlock?.(blockId)
+      return true
+    }
+    return false
+  }
+
+  const inlineEditing: FlowInlineEditingController = {
+    state: inlineEdit,
+    unavailableReason: editingUnavailableReason,
+    begin: beginInlineEdit,
+    commit: commitInlineEdit,
+    cancel: cancelInlineEdit,
+    changeDraft: (draft) => {
+      const current = inlineEditRef.current
+      if (current === null) return
+      updateInlineEdit({ ...current, draft })
+    },
+    changeComposing: (composing) => {
+      composingRef.current = composing
+      const current = inlineEditRef.current
+      if (current === null || current.composing === composing) return
+      updateInlineEdit({ ...current, composing })
+    },
+  }
+
+  useEffect(() => {
+    if (readOnly || editingUnavailableReason) {
+      composingRef.current = false
+      inlineEditRef.current = null
+      setInlineEdit(null)
+    }
+  }, [editingUnavailableReason, readOnly])
+
+  useEffect(() => {
+    const current = inlineEditRef.current
+    if (!current) return
+    if (!view.blocks.some((entry) => entry.blockId === current.blockId)) {
+      cancelInlineEdit()
+      return
+    }
+    if (selectedBlockId && selectedBlockId !== current.blockId) {
+      commitInlineEdit()
+    }
+  }, [selectedBlockId, view.revision])
+
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (readOnly || !selectedBlockId) return
+    if (readOnly) return
+    if (event.nativeEvent.isComposing || composingRef.current || inlineEditRef.current !== null) return
+    const keySource = event.target
+    if (
+      keySource instanceof HTMLElement &&
+      (keySource.tagName === 'INPUT' ||
+        keySource.tagName === 'TEXTAREA' ||
+        keySource.tagName === 'SELECT' ||
+        keySource.isContentEditable)
+    ) return
+    if (!selectedBlockId) return
     const key = event.key
     const modifier = event.ctrlKey || event.metaKey
     if (key === 'Delete' || key === 'Backspace') {
@@ -442,6 +709,13 @@ export function FlowWorkspace({
       onMoveBlock(selectedBlockId, 'down')
       return
     }
+    if (key === 'Enter' && !modifier && !event.altKey && !event.shiftKey) {
+      const blockView = view.blocks.find((entry) => entry.blockId === selectedBlockId)
+      const firstListItemId = blockView?.block.type === 'list' && blockView.block.items.length > 0
+        ? blockView.block.items[0]!.id
+        : undefined
+      if (beginInlineEdit(selectedBlockId, firstListItemId)) event.preventDefault()
+    }
   }
 
   return (
@@ -467,6 +741,7 @@ export function FlowWorkspace({
           onDeleteBlock={onDeleteBlock}
           onDuplicateBlock={onDuplicateBlock}
           onMoveBlock={onMoveBlock}
+          inlineEditing={inlineEditing}
         />
       ))}
       {layers ? (

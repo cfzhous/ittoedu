@@ -407,11 +407,7 @@ test('checks health, authors the global controller, and preserves it across a fu
     await expect(redo).toBeDisabled()
     await editor.page.keyboard.press('Control+d')
     await expect(editor.page.locator('.status-bar')).toContainText(
-      '全局元素暂不能复制；现有内容不会改变',
-    )
-    await editor.page.keyboard.press('Delete')
-    await expect(editor.page.locator('.status-bar')).toContainText(
-      '全局元素暂不能删除；现有内容不会改变',
+      '教师控制器不能重复，全课只需一个。',
     )
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__

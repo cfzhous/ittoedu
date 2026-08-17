@@ -51,13 +51,13 @@ function layerTarget(
   }
 }
 
-function makeComponentPackage() {
+function makeComponentPackage(version = '4.0.0') {
   const manifest: ComponentManifest = {
     schemaVersion: 4,
     runtimeApiVersion: 4,
     id: 'com.example.store-owner',
     name: 'Store owner fixture',
-    version: '4.0.0',
+    version,
     entry: 'runtime.js',
     defaultSize: { width: 320, height: 180 },
     minSize: { width: 160, height: 90 },
@@ -499,6 +499,28 @@ describe('V9 ownership in the original editor Store', () => {
     expectLegacyTruthUnchanged(legacyBefore)
   })
 
+  it('replaces a V9 component package in one history entry via T09B command', () => {
+    const legacyBefore = captureLegacyTruth()
+    const store = useEditorStore.getState()
+    store.createNewCourseProject()
+    const original = makeComponentPackage('4.0.0')
+    store.importCourseComponentPackages([original])
+    const imported = useEditorStore.getState().courseSession!
+    const replacement = makeComponentPackage('4.1.0')
+
+    expect(store.replaceCourseComponentPackage(original.manifest.id, replacement)).toBe(true)
+    const replaced = useEditorStore.getState().courseSession!
+
+    expect(replaced.history.present.revision).toBe(imported.history.present.revision + 1)
+    expect(replaced.history.past).toHaveLength(imported.history.past.length + 1)
+    expect(replaced.history.present.componentPackages[original.manifest.id]?.version).toBe('4.1.0')
+    expect(replaced.componentPackages[original.manifest.id]?.manifest.version).toBe('4.1.0')
+    expect(replaced.componentFiles['com.example.store-owner@4.0.0']).toBeUndefined()
+    expect(replaced.componentFiles['com.example.store-owner@4.1.0']).toBeTruthy()
+    expect(useEditorStore.getState().errorMessage).toBeNull()
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
   it('creates a clean production Course Project without the test fixture', () => {
     const legacyBefore = captureLegacyTruth()
     useEditorStore.getState().createNewCourseProject()
@@ -537,5 +559,42 @@ describe('V9 ownership in the original editor Store', () => {
     expect(after.textEditSession).toBe(textEditSession)
     expect(after.courseSession).not.toBeNull()
     expect(after.activeTab).toBe('layers')
+  })
+
+  it('creates blank courses from T03 factories and keeps selection switches clean', () => {
+    const legacyBefore = captureLegacyTruth()
+    const store = useEditorStore.getState()
+    store.createBlankSlideCourse()
+    const slide = useEditorStore.getState().courseSession!
+    expect(slide.history.present.title).toBe('未命名课件')
+    expect(slide.history.present.surfaces[0]?.type).toBe('slide')
+    expect(isV9SlideVerticalSliceDirty(slide)).toBe(false)
+
+    store.createBlankFlowCourse()
+    const flow = useEditorStore.getState().courseSession!
+    expect(flow.history.present.surfaces[0]?.type).toBe('flow')
+    expect(flow.history.present.title).toBe('未命名课件')
+
+    store.createBlankSpatialCourse()
+    const spatial = useEditorStore.getState().courseSession!
+    expect(spatial.history.present.surfaces[0]?.type).toBe('spatial-2d')
+
+    store.createNewCourseProject()
+    const created = useEditorStore.getState().courseSession!
+    const locationId = created.selection.locationId
+    const revision = created.history.present.revision
+    store.selectGlobalLayerScope()
+    const global = useEditorStore.getState().courseSession!
+    expect(global.editingScope).toBe('global')
+    expect(global.selection.locationId).toBe(locationId)
+    expect(global.history.present.revision).toBe(revision)
+    expect(isV9SlideVerticalSliceDirty(global)).toBe(false)
+
+    store.selectCourseLocation(locationId)
+    const back = useEditorStore.getState().courseSession!
+    expect(back.editingScope).toBe('scene')
+    expect(back.selection.locationId).toBe(locationId)
+    expect(back.history.present.revision).toBe(revision)
+    expectLegacyTruthUnchanged(legacyBefore)
   })
 })

@@ -37,12 +37,28 @@ export interface FlowOutlineEntry {
 
 export type FlowEditorLayerScope = 'global' | 'surface'
 
+export type FlowEffectiveLayerSource = 'global' | 'surface' | 'flow-block'
+
 export interface FlowEditorLayerView {
   readonly source: FlowEditorLayerScope
   readonly scopedVisible: boolean
   readonly effectiveVisible: boolean
   readonly selectionId: string
   readonly item: DeepReadonly<LayerItem>
+}
+
+/** Unified effective-layer row for T10. Flow blocks are document items, not overlay LayerItems. */
+export interface FlowEffectiveLayerView {
+  readonly source: FlowEffectiveLayerSource
+  readonly id: string
+  readonly name: string
+  readonly ownerKey: string
+  readonly locked: boolean
+  readonly hidden: boolean
+  readonly canLock: boolean
+  readonly canHide: boolean
+  readonly canReorder: boolean
+  readonly authoringAddress: string
 }
 
 export interface FlowEditorView {
@@ -57,6 +73,7 @@ export interface FlowEditorView {
   readonly outline: readonly FlowOutlineEntry[]
   readonly globalLayerItems: readonly FlowEditorLayerView[]
   readonly surfaceLayerItems: readonly FlowEditorLayerView[]
+  readonly effectiveLayers: readonly FlowEffectiveLayerView[]
 }
 
 export interface BuildFlowEditorViewInput {
@@ -172,6 +189,58 @@ function sortLayerViews<T extends FlowEditorLayerView>(views: readonly T[]): T[]
   )
 }
 
+function overlayEffectiveLayer(
+  layer: FlowEditorLayerView,
+  surfaceId: string,
+): FlowEffectiveLayerView {
+  const canManage = true
+  return {
+    source: layer.source,
+    id: layer.selectionId,
+    name: layer.item.label || (layer.source === 'global' ? '全局图层' : '讲义图层'),
+    ownerKey: layer.source === 'global' ? 'global' : `surface:${surfaceId}`,
+    locked: layer.item.locked,
+    hidden: !layer.item.visible,
+    canLock: canManage,
+    canHide: canManage,
+    canReorder: canManage,
+    authoringAddress: layer.source === 'global'
+      ? `global/layer:${layer.selectionId}`
+      : `surface:${surfaceId}/layer:${layer.selectionId}`,
+  }
+}
+
+function flowBlockEffectiveLayer(
+  blockView: FlowBlockView,
+  surfaceId: string,
+): FlowEffectiveLayerView {
+  return {
+    source: 'flow-block',
+    id: blockView.blockId,
+    name: blockView.label.trim() || blockView.block.type,
+    ownerKey: `flow-block:${surfaceId}`,
+    locked: false,
+    hidden: false,
+    canLock: false,
+    canHide: false,
+    canReorder: true,
+    authoringAddress: blockView.stableAddress,
+  }
+}
+
+export function buildFlowEffectiveLayers(input: {
+  readonly surfaceId: string
+  readonly blocks: readonly FlowBlockView[]
+  readonly globalLayerItems: readonly FlowEditorLayerView[]
+  readonly surfaceLayerItems: readonly FlowEditorLayerView[]
+}): FlowEffectiveLayerView[] {
+  return [
+    ...input.blocks.map((blockView) => flowBlockEffectiveLayer(blockView, input.surfaceId)),
+    ...input.surfaceLayerItems.map((layer) => overlayEffectiveLayer(layer, input.surfaceId)),
+    ...input.globalLayerItems.map((layer) => overlayEffectiveLayer(layer, input.surfaceId)),
+  ]
+}
+
 export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditorView {
   const { project, locationId } = input
   const { location, surface, surfaceIndex } = resolveFlowLocation(project, locationId)
@@ -221,6 +290,13 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     surface.surfaceLayerItems.map((entry) => flowLayerView(entry, 'surface', locationId)),
   )
 
+  const effectiveLayers = buildFlowEffectiveLayers({
+    surfaceId: surface.id,
+    blocks,
+    globalLayerItems,
+    surfaceLayerItems,
+  })
+
   return deepFreeze({
     projectId: project.id,
     revision: project.revision,
@@ -233,5 +309,6 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     outline,
     globalLayerItems,
     surfaceLayerItems,
+    effectiveLayers,
   })
 }

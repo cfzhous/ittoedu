@@ -23,9 +23,16 @@ import type { ProjectHealthSummary } from '../../shared/projectHealth'
 import { APP_NAME } from '../../shared/constants'
 import { useEditorStore, type EditorMode } from '../store/editorStore'
 
+export interface TopToolbarNewBlankActions {
+  slide(): void
+  flow(): void
+  spatial(): void
+}
+
 interface TopToolbarBaseProps {
   busy: boolean
   onNew(): void
+  onNewBlank?: TopToolbarNewBlankActions
   onOpen(): void
   onImportLegacy(): void
   recentProjects: RecentProjectEntry[]
@@ -102,6 +109,7 @@ function TopToolbarView({
   busy,
   documentControl,
   onNew,
+  onNewBlank,
   onOpen,
   onImportLegacy,
   recentProjects,
@@ -181,9 +189,56 @@ function TopToolbarView({
       </div>
 
       <div className="toolbar__group">
-        <ToolButton label="新建" title="新建课件（Ctrl+N）" disabled={busy} onClick={onNew}>
-          <FilePlus2 size={18} />
-        </ToolButton>
+        {onNewBlank ? (
+          <details className="new-course-menu" data-testid="new-course-menu">
+            <summary className="tool-button" title="新建课件（Ctrl+N）" aria-label="新建课件">
+              <FilePlus2 size={18} />
+              <span>新建</span>
+            </summary>
+            <div className="new-course-menu__panel" role="menu" aria-label="新建课件">
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="new-blank-slide"
+                disabled={busy}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onNewBlank.slide()
+                }}
+              >
+                空白演示
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="new-blank-flow"
+                disabled={busy}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onNewBlank.flow()
+                }}
+              >
+                空白流式
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                data-testid="new-blank-spatial"
+                disabled={busy}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open')
+                  onNewBlank.spatial()
+                }}
+              >
+                空白无限画布
+              </button>
+            </div>
+          </details>
+        ) : (
+          <ToolButton label="新建" title="新建课件（Ctrl+N）" disabled={busy} onClick={onNew}>
+            <FilePlus2 size={18} />
+          </ToolButton>
+        )}
         <ToolButton label="打开" title="打开工程（Ctrl+O）" disabled={busy} onClick={onOpen}>
           <FolderOpen size={18} />
         </ToolButton>

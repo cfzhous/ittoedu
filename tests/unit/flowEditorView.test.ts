@@ -373,6 +373,25 @@ describe('Flow editor read projection', () => {
       item: { visible: false },
     })
 
+    expect(view.effectiveLayers.map((layer) => [layer.source, layer.id])).toEqual([
+      ...view.blocks.map((block) => ['flow-block', block.blockId]),
+      ['surface', 'surface-shared'],
+      ['surface', 'surface-hidden'],
+      ['global', 'global-hidden'],
+      ['global', fixture.controllerId],
+    ])
+    expect(view.effectiveLayers.find((layer) => layer.id === 'block-paragraph')).toMatchObject({
+      source: 'flow-block',
+      canLock: false,
+      canHide: false,
+      canReorder: true,
+      authoringAddress: 'surface:flow-surface/block:block-paragraph',
+    })
+    expect(view.effectiveLayers.find((layer) => layer.id === 'surface-shared')).toMatchObject({
+      source: 'surface',
+      canLock: true,
+      ownerKey: 'surface:flow-surface',
+    })
     expect(Object.isFrozen(view.globalLayerItems[0]?.item)).toBe(true)
     expect(Object.isFrozen(view.surfaceLayerItems[0]?.item)).toBe(true)
     expect(view.globalLayerItems[1]?.item).not.toBe(

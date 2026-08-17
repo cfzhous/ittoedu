@@ -10,6 +10,9 @@ import {
   clientToWorld,
   createStageViewportTransform,
   rotatedRectIntersectsStage,
+  resizeWorldFrameFromHandle,
+  stageOverlayCssTransform,
+  stageSelectionOverlayGeometry,
   worldDeltaToClient,
   worldRectToClient,
   worldToClient,
@@ -229,6 +232,32 @@ describe('stage viewport transform', () => {
     { viewport: { x: 0, y: 0, width: 1280, height: -1 } },
   ])('rejects non-positive viewport dimensions: $viewport', (options) => {
     expect(() => createStageViewportTransform(options)).toThrow(RangeError)
+  })
+
+  it('maps objects, selection box and eight handles through one viewport transform', () => {
+    const transform = createStageViewportTransform({
+      viewport: { x: 0, y: 0, width: 1280, height: 720 },
+      zoom: 2,
+    })
+    const geometry = stageSelectionOverlayGeometry(transform, [
+      { x: 100, y: 80, width: 200, height: 120 },
+    ])
+    expect(stageOverlayCssTransform(transform)).toContain('scale(2)')
+    expect(geometry?.selectionBox).toEqual(geometry?.objects[0])
+    expect(geometry?.handles.e.x).toBeGreaterThan(geometry!.handles.w.x)
+    expect(geometry?.handles.s.y).toBeGreaterThan(geometry!.handles.n.y)
+    const west = resizeWorldFrameFromHandle(
+      { x: 100, y: 80, width: 200, height: 120 },
+      'w',
+      { x: 60, y: 140 },
+    )
+    expect(west).toEqual({ x: 60, y: 80, width: 240, height: 120 })
+    const east = resizeWorldFrameFromHandle(
+      { x: 100, y: 80, width: 200, height: 120 },
+      'e',
+      { x: 360, y: 140 },
+    )
+    expect(east).toEqual({ x: 100, y: 80, width: 260, height: 120 })
   })
 
   it('rejects non-finite viewport, zoom, and pan values', () => {

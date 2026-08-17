@@ -1,6 +1,10 @@
 import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
-import { spatialFiniteBounds } from '../../player/surfaces/spatial/spatialModel'
+import {
+  isSpatialItemSemanticallyVisible,
+  spatialFiniteBounds,
+} from '../../player/surfaces/spatial/spatialModel'
 import type { SpatialRect } from '../../player/surfaces/spatial/spatialModel'
+import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -135,5 +139,98 @@ export function buildSpatialEditorView(input: BuildSpatialEditorViewInput): Spat
     semanticZoom: structuredClone(surface.semanticZoom),
     worldBounds: spatialFiniteBounds(surface),
     layers,
+  })
+}
+
+export function isSpatialTeacherController(item: DeepReadonly<LayerItem> | LayerItem): boolean {
+  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
+/** Global/surface teacher controllers belong on the viewport overlay, not the world group. */
+export function isSpatialViewportOverlayLayer(layer: SpatialEditorLayerView): boolean {
+  return layer.source !== 'world' && isSpatialTeacherController(layer.item)
+}
+
+export interface SpatialViewportOverlay {
+  readonly source: 'global' | 'surface'
+  readonly layerItemId: string
+  readonly label: string
+  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  readonly rotation: number
+  readonly locked: boolean
+  readonly hidden: boolean
+}
+
+export function buildSpatialViewportOverlays(
+  view: SpatialEditorView,
+): readonly SpatialViewportOverlay[] {
+  return Object.freeze(
+    view.layers
+      .filter((layer) => isSpatialViewportOverlayLayer(layer) && layer.effectiveVisible)
+      .map((layer) => Object.freeze({
+        source: layer.source === 'global' ? 'global' as const : 'surface' as const,
+        layerItemId: layer.selectionId,
+        label: layer.item.label,
+        frame: {
+          x: layer.item.frame.x,
+          y: layer.item.frame.y,
+          width: layer.item.frame.width,
+          height: layer.item.frame.height,
+        },
+        rotation: layer.item.rotation,
+        locked: layer.item.locked,
+        hidden: !layer.effectiveVisible,
+      })),
+  )
+}
+
+/**
+ * Back-to-front paint/hit order for world items at the given session zoom.
+ * Semantic-zoom rules that cover an item must all allow visibility; then
+ * `order` then stable id decide the sequence. The last id is the top hit.
+ */
+export function spatialSemanticZoomHitOrder(
+  view: SpatialEditorView,
+  zoom: number,
+): readonly string[] {
+  return Object.freeze(
+    view.layers
+      .filter((layer) => (
+        layer.source === 'world' &&
+        layer.effectiveVisible &&
+        isSpatialItemSemanticallyVisible(
+          layer.selectionId,
+          zoom,
+          view.semanticZoom as readonly SpatialSemanticZoomRule[],
+        )
+      ))
+      .sort((left, right) => (
+        left.item.order - right.item.order ||
+        compareStableStrings(left.selectionId, right.selectionId)
+      ))
+      .map((layer) => layer.selectionId),
+  )
+}
+
+export function spatialLayerAuthoringAddress(
+  view: SpatialEditorView,
+  layer: SpatialEditorLayerView,
+): string {
+  const kind = layer.item.kind
+  const nativeType = kind === 'native' ? layer.item.content.nativeType : undefined
+  const field = nativeType === 'text'
+    ? 'content.text'
+    : nativeType === 'formula'
+      ? 'content.formula'
+      : nativeType === 'image' || nativeType === 'video'
+        ? 'content.asset'
+        : 'item'
+  return makeAuthoringAddress({
+    projectId: view.projectId,
+    scope: layer.source === 'global' ? 'global' : 'surface',
+    surfaceId: view.surfaceId,
+    carrier: kind === 'runtime' ? 'runtime' : kind === 'component' ? 'component' : 'native',
+    layerItemId: layer.selectionId,
+    field,
   })
 }

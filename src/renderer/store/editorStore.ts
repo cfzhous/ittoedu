@@ -46,6 +46,7 @@ import type {
 import type {
   CourseProjectDocument,
   FlowBlock,
+  SpatialCameraPose,
   SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import {
@@ -111,12 +112,53 @@ import {
   validateComponentRuntimeSource,
 } from '../components/importComponentPackage'
 import type { CourseProjectArchiveData } from '../project/courseProjectArchive'
+import { replaceCourseComponentPackage as replaceCourseComponentPackageCommand } from '../project/courseComponentPackage'
 import {
-  addCourseSurface,
   commitCourseHistory,
   updateCourseProject,
   updateLayerItem,
 } from '../course/courseStudioModel'
+import {
+  addCoursePage as addCoursePageCommand,
+  createBlankFlowCourse,
+  createBlankSlideCourse,
+  createBlankSpatialCourse,
+  deleteCourseLocation as deleteCourseLocationCommand,
+  reorderCoursePages as reorderCoursePagesCommand,
+  selectCourseLocation as selectCourseLocationCommand,
+  selectGlobalLayerScope as selectGlobalLayerScopeCommand,
+  type CoursePageSurfaceType,
+} from '../course/courseLocationCommands'
+import {
+  createEditorSelectionSnapshot,
+  type EditorActionAdapters,
+  type EditorActionId,
+  type EditorActionResult,
+  type EditorAuthoringOwner,
+  type EditorFocusKind,
+  type EditorSelectedTargetInput,
+  type EditorSelectionSnapshot,
+} from '../course/editorActionTypes'
+import { routeEditorAction as routeEditorActionCore } from '../course/editorActionRouting'
+import { describeFlowEditorConstraints, executeFlowEditorAction } from '../course/flowEditorCommands'
+import {
+  applyEffectiveLayerDelete,
+  applyEffectiveLayerDuplicate,
+  applyEffectiveLayerToggleLock,
+  applyEffectiveLayerToggleVisibility,
+  listEffectiveLayerCommandItems,
+} from '../course/effectiveLayerCommands'
+import {
+  captureGlobalControllerTarget,
+  commitGlobalControllerTransform,
+  pasteGlobalLayerItems,
+  restoreDefaultTeacherController,
+  type LayerCommandResult,
+} from '../course/globalLayerCommands'
+import {
+  executeSpatialEditorAction,
+  type SpatialEditorClipboard,
+} from '../course/spatialEditorCommands'
 import {
   deleteFlowEditorBlock,
   duplicateFlowEditorBlock,
@@ -127,7 +169,10 @@ import {
   type FlowEditorBlockInput,
   type MoveFlowEditorBlockDestination,
 } from '../course/flowEditorCommands'
-import type { FlowEditorBlockTarget } from '../course/flowEditorSlice'
+import {
+  selectFlowEditorBlocks,
+  type FlowEditorBlockTarget,
+} from '../course/flowEditorSlice'
 import {
   addSpatialWorldComponentLayer,
   addSpatialWorldFormulaLayer,
@@ -181,12 +226,15 @@ import {
   addV9SlideTextLayer,
   clearV9SlideNativeNodeOverride,
   clearV9SlidePresentationStateOverrides,
+  commitV9SlideTextEdit,
   completeV9SlideVerticalSliceSave,
   createV9CourseEditorState,
+  createV9SlideTextEditSessionKey,
   createV9SlideVerticalSliceState,
   deleteV9SlideComponentPackage,
   deleteV9SlideScene,
   deleteV9SlideLayer,
+  executeSlideEditorAction,
   deleteV9SlidePresentationState,
   deleteV9SlideInteractionRule,
   duplicateV9SlideInteractionRule,
@@ -236,14 +284,23 @@ import {
   type V9SlideLayerOrderTarget,
   type V9SlideLayerTarget,
   type V9SlideNativeNodePatch,
+  type V9SlideClipboardPayload,
   type V9SlideNativeNodeTarget,
   type V9SlideRuntimePatch,
+  type V9SlideTextEditSessionKey,
   type V9SlideTransformInput,
   type V9SlideSelectionInput,
   type V9SlideVerticalSliceState,
 } from '../course/v9SlideVerticalSlice'
 
 enablePatches()
+
+let slideActionClipboard: V9SlideClipboardPayload | null = null
+let flowActionClipboard: readonly FlowBlock[] | null = null
+let globalActionClipboard: readonly string[] | null = null
+let spatialActionClipboard: SpatialEditorClipboard | null = null
+let spatialViewportCamera: SpatialCameraPose | null = null
+let spatialViewportSize: { width: number; height: number } | null = null
 
 const PROJECT_AUDIO_CHANNELS = [
   'music',
@@ -512,6 +569,9 @@ export interface EditorState {
 
   activateV9SlideFixture(): void
   createNewCourseProject(): void
+  createBlankSlideCourse(): void
+  createBlankFlowCourse(): void
+  createBlankSpatialCourse(): void
   loadCourseProject(
     archive: CourseProjectArchiveData,
     path: string | null,
@@ -546,6 +606,14 @@ export interface EditorState {
     target: V9SlideNativeNodeTarget,
     text: string,
     runs: TextRun[],
+  ): boolean
+  createCourseTextEditSessionKey(
+    layerItemId: string,
+    field?: 'content.text' | 'content.formula',
+  ): V9SlideTextEditSessionKey | null
+  commitCourseTextEditSession(
+    key: V9SlideTextEditSessionKey,
+    payload: { readonly text: string; readonly runs: readonly TextRun[] },
   ): boolean
   clearCourseNativeNodeOverride(target: V9SlideNativeNodeTarget): boolean
   updateCourseRuntimeContent(
@@ -610,10 +678,33 @@ export interface EditorState {
     presetId?: string,
   ): boolean
   importCourseComponentPackages(packageData: ComponentPackageData[]): boolean
+  replaceCourseComponentPackage(packageId: string, packageData: ComponentPackageData): boolean
   deleteCourseComponentPackage(packageId: string): boolean
 
   addCourseSurface(type: 'flow' | 'spatial-2d', title?: string): void
+  addCoursePage(type: CoursePageSurfaceType, title?: string): void
+  deleteCourseLocation(locationId: string): void
+  reorderCoursePages(surfaceIds: readonly string[]): void
   selectCourseLocation(locationId: string): void
+  selectGlobalLayerScope(): void
+  selectGlobalAuthoringOwner(): void
+  createLiveEditorSelectionSnapshot(
+    focus?: EditorFocusKind | EventTarget | null,
+  ): EditorSelectionSnapshot | null
+  routeEditorAction(
+    actionId: EditorActionId,
+    snapshot?: EditorSelectionSnapshot,
+    extras?: {
+      readonly editText?: string
+      readonly editFormulaAccessibleText?: string
+    },
+  ): EditorActionResult
+  applyCourseLayerCommandResult(result: LayerCommandResult): void
+  restoreCourseTeacherController(): void
+  updateCourseDesignTokens(tokens: ProjectDesignTokens): void
+  importCourseSounds(items: ImportedAssetBatchItem[]): void
+  setSpatialViewportCamera(pose: SpatialCameraPose | null): void
+  setSpatialViewportSize(size: { width: number; height: number } | null): void
   selectCourseFlowBlock(blockId: string): void
   selectCourseFlowLayer(layerItemId: string): void
   applyCourseFlowStructuralCommand(command: FlowStructuralCommand): void
@@ -2085,6 +2176,347 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
   }
 
+  function openBlankCourseSession(
+    project: CourseProjectDocument,
+    statusMessage: string,
+  ): void {
+    set({
+      courseSession: openV9SlideVerticalSliceState({
+        project,
+        assetFiles: {},
+        componentFiles: {},
+      }, null),
+      statusMessage,
+      errorMessage: null,
+    })
+  }
+
+  function withSceneScope(session: V9SlideVerticalSliceState): V9SlideVerticalSliceState {
+    return session.editingScope === 'scene'
+      ? session
+      : setV9SlideEditingScope(session, 'scene')
+  }
+
+  function applyLayerCommandResultToSession(
+    session: V9SlideVerticalSliceState,
+    result: LayerCommandResult,
+  ): V9SlideVerticalSliceState {
+    if (!result.ok) throw new Error(result.reason)
+    return replaceV9CourseHistory(
+      session,
+      commitCourseHistory(session.history, result.project),
+    )
+  }
+
+  function targetKindFromLayer(
+    item: { kind: string; content?: { nativeType?: string } },
+  ): EditorSelectedTargetInput['kind'] {
+    if (item.kind === 'runtime') return 'runtime'
+    if (item.kind === 'component') return 'component'
+    const nativeType = item.content?.nativeType
+    if (nativeType === 'text') return 'text'
+    if (nativeType === 'formula') return 'formula'
+    if (nativeType === 'image') return 'image'
+    if (nativeType === 'video') return 'video'
+    if (nativeType === 'teacher-controller') return 'teacher-controller'
+    return 'shape'
+  }
+
+  function resolveSnapshotOwner(session: V9SlideVerticalSliceState): EditorAuthoringOwner {
+    if (session.editingScope === 'global') return 'global'
+    if (session.editingScope === 'surface') return 'surface'
+    if (session.selection.surfaceKind === 'flow') {
+      const layerId = session.selection.flowLayerItemId
+      if (layerId) {
+        const global = session.history.present.globalLayerItems.some(
+          (entry) => entry.item.layerItemId === layerId,
+        )
+        return global ? 'global' : 'surface'
+      }
+      return 'flow-block'
+    }
+    if (session.selection.surfaceKind === 'spatial-2d') return 'spatial-world'
+    return 'scene'
+  }
+
+  function snapshotTargets(
+    session: V9SlideVerticalSliceState,
+    owner: EditorAuthoringOwner,
+  ): EditorSelectedTargetInput[] {
+    const project = session.history.present
+    if (owner === 'flow-block' && session.selection.flowBlockId) {
+      return [{
+        owner: 'flow-block',
+        layerItemId: session.selection.flowBlockId,
+        kind: 'flow-block',
+        label: 'Flow 块',
+      }]
+    }
+    const ids = session.selection.surfaceKind === 'spatial-2d'
+      ? session.selection.spatialLayerItemIds ?? []
+      : session.selection.surfaceKind === 'flow' && session.selection.flowLayerItemId
+        ? [session.selection.flowLayerItemId]
+        : session.selection.selectionIds
+    const items = listEffectiveLayerCommandItems({
+      project,
+      locationId: session.selection.locationId,
+      selectedIds: ids,
+      stateId: session.selection.stateId,
+    })
+    return ids.map((id) => {
+      const item = items.find((candidate) => candidate.id === id)
+      return {
+        owner: item?.owner ?? owner,
+        layerItemId: id,
+        locked: item?.locked,
+        hidden: item?.hidden,
+        kind: item ? targetKindFromLayer({
+          kind: item.sourceKind === 'world' ? 'native' : 'native',
+        }) : undefined,
+        label: item?.name ?? id,
+        authoringAddress: item?.authoringAddress,
+      }
+    })
+  }
+
+  function buildLiveEditorSelectionSnapshot(
+    session: V9SlideVerticalSliceState,
+    focus?: EditorFocusKind | EventTarget | null,
+  ): EditorSelectionSnapshot {
+    const project = session.history.present
+    const location = project.locations.find(
+      (candidate) => candidate.id === session.selection.locationId,
+    )
+    if (!location) throw new Error('当前课程位置已失效')
+    const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+    if (!surface) throw new Error('当前内容表面已失效')
+    const owner = resolveSnapshotOwner(session)
+    const clipboardAvailable = owner === 'global'
+      ? Boolean(globalActionClipboard && globalActionClipboard.length > 0)
+      : surface.type === 'slide'
+        ? Boolean(slideActionClipboard?.items.length)
+        : surface.type === 'flow'
+          ? Boolean(flowActionClipboard && flowActionClipboard.length > 0)
+          : Boolean(spatialActionClipboard)
+    const flowConstraints = surface.type === 'flow' && owner !== 'global'
+      ? describeFlowEditorConstraints(
+        project,
+        surface.id,
+        session.selection.flowBlockId ? [session.selection.flowBlockId] : [],
+      )
+      : null
+    return createEditorSelectionSnapshot({
+      sessionId: session.sessionId,
+      projectId: project.id,
+      projectRevision: project.revision,
+      locationId: location.id,
+      surfaceId: surface.id,
+      surfaceKind: surface.type,
+      owner,
+      sceneId: location.kind === 'slide-scene' ? location.sceneId : null,
+      focus,
+      targets: snapshotTargets(session, owner),
+      constraints: {
+        clipboardAvailable,
+        canDeleteActiveLocation: project.locations.length > 1,
+        canIndent: flowConstraints?.canIndent ?? false,
+        canOutdent: flowConstraints?.canOutdent ?? false,
+        canInsertBefore: flowConstraints?.canInsertBefore ?? false,
+        canInsertAfter: flowConstraints?.canInsertAfter ?? false,
+        canMoveForward: flowConstraints?.canMoveForward ?? true,
+        canMoveBackward: flowConstraints?.canMoveBackward ?? true,
+        canBringFront: flowConstraints?.canBringFront ?? true,
+        canSendBack: flowConstraints?.canSendBack ?? true,
+      },
+    })
+  }
+
+  function createCourseActionAdapters(extras?: {
+    readonly editText?: string
+    readonly editFormulaAccessibleText?: string
+  }): EditorActionAdapters {
+    return {
+      global: {
+        execute(actionId, snapshot) {
+          const session = get().courseSession
+          if (session === null) return { ok: false, reason: '当前课件会话已关闭' }
+          const ids = snapshot.targets.map((target) => target.layerItemId)
+          const now = new Date().toISOString()
+          try {
+            if (actionId === 'select-all') {
+              const nodeIds = session.history.present.globalLayerItems.map(
+                (entry) => entry.item.layerItemId,
+              )
+              get().selectCourseLayers({ nodeIds, additive: false })
+              return { ok: true, reason: '已全选全局层' }
+            }
+            if (actionId === 'copy') {
+              globalActionClipboard = ids.slice()
+              return { ok: true, reason: '已复制当前全局层选择' }
+            }
+            if (actionId === 'paste') {
+              if (!globalActionClipboard || globalActionClipboard.length === 0) {
+                return { ok: false, reason: '剪贴板为空，无法粘贴' }
+              }
+              const pasted = pasteGlobalLayerItems(
+                session.history.present,
+                globalActionClipboard,
+                now,
+              )
+              if (!pasted.ok) return { ok: false, reason: pasted.reason }
+              applyCourseCommand(
+                (current) => applyLayerCommandResultToSession(current, pasted),
+                pasted.reason,
+              )
+              return { ok: true, reason: pasted.reason }
+            }
+            if (actionId === 'rename') {
+              return { ok: true, reason: '请在属性栏完成重命名' }
+            }
+            if (
+              actionId === 'move-forward' ||
+              actionId === 'move-backward' ||
+              actionId === 'bring-front' ||
+              actionId === 'send-back'
+            ) {
+              return { ok: false, reason: '全局层层级请在图层列表中拖放调整' }
+            }
+            if (actionId === 'cut') {
+              globalActionClipboard = ids.slice()
+            }
+            let project = session.history.present
+            let lastReason = '已完成'
+            for (const id of ids) {
+              let result: LayerCommandResult
+              if (actionId === 'delete' || actionId === 'cut') {
+                result = applyEffectiveLayerDelete(
+                  project,
+                  { locationId: snapshot.locationId, stateId: session.selection.stateId },
+                  id,
+                  now,
+                )
+              } else if (actionId === 'duplicate') {
+                result = applyEffectiveLayerDuplicate(project, id, now)
+              } else if (actionId === 'lock') {
+                const item = project.globalLayerItems.find(
+                  (entry) => entry.item.layerItemId === id,
+                )?.item
+                result = item?.locked
+                  ? { ok: true, project, reason: '所选元素已锁定', layerItemId: id }
+                  : applyEffectiveLayerToggleLock(project, id, now)
+              } else if (actionId === 'unlock') {
+                const item = project.globalLayerItems.find(
+                  (entry) => entry.item.layerItemId === id,
+                )?.item
+                result = item && !item.locked
+                  ? { ok: true, project, reason: '所选元素未锁定', layerItemId: id }
+                  : applyEffectiveLayerToggleLock(project, id, now)
+              } else if (actionId === 'show' || actionId === 'hide') {
+                const item = project.globalLayerItems.find(
+                  (entry) => entry.item.layerItemId === id,
+                )?.item
+                const shouldHide = actionId === 'hide'
+                result = item && item.visible === !shouldHide
+                  ? { ok: true, project, reason: shouldHide ? '已隐藏' : '已显示', layerItemId: id }
+                  : applyEffectiveLayerToggleVisibility(
+                    project,
+                    { locationId: snapshot.locationId, stateId: session.selection.stateId },
+                    id,
+                    now,
+                  )
+              } else {
+                return { ok: false, reason: `全局层不支持该动作：${actionId}` }
+              }
+              if (!result.ok) return { ok: false, reason: result.reason }
+              project = result.project
+              lastReason = result.reason
+            }
+            if (project === session.history.present) {
+              return { ok: true, reason: lastReason }
+            }
+            applyCourseCommand(
+              (current) => applyLayerCommandResultToSession(current, {
+                ok: true,
+                project,
+                reason: lastReason,
+              }),
+              lastReason,
+            )
+            return { ok: true, reason: lastReason }
+          } catch (error) {
+            return { ok: false, reason: courseErrorMessage(error) }
+          }
+        },
+      },
+      surface: {
+        execute(actionId, snapshot) {
+          const session = get().courseSession
+          if (session === null) return { ok: false, reason: '当前课件会话已关闭' }
+          try {
+            if (snapshot.surfaceKind === 'slide') {
+              const result = executeSlideEditorAction(actionId, snapshot, {
+                session,
+                clipboard: slideActionClipboard,
+              })
+              slideActionClipboard = result.clipboard
+              if (result.ok && result.session !== session) {
+                applyCourseCommand(() => result.session, result.reason)
+              }
+              return { ok: result.ok, reason: result.reason }
+            }
+            if (snapshot.surfaceKind === 'flow') {
+              const result = executeFlowEditorAction(actionId, snapshot, session.history, {
+                clipboard: flowActionClipboard ?? undefined,
+              })
+              if (result.clipboard) flowActionClipboard = result.clipboard
+              if (result.ok && result.history !== session.history) {
+                applyCourseCommand(
+                  (current) => replaceV9CourseHistory(current, result.history),
+                  result.reason,
+                )
+              }
+              return { ok: result.ok, reason: result.reason }
+            }
+            if (snapshot.surfaceKind === 'spatial-2d') {
+              const result = executeSpatialEditorAction(actionId, snapshot, {
+                history: session.history,
+                sessionCamera: spatialViewportCamera ?? undefined,
+                viewportSize: spatialViewportSize ?? undefined,
+                clipboard: spatialActionClipboard,
+                editText: extras?.editText,
+                editFormulaAccessibleText: extras?.editFormulaAccessibleText,
+                onViewportChange: (pose) => {
+                  spatialViewportCamera = pose
+                },
+              })
+              if (result.clipboard) spatialActionClipboard = result.clipboard
+              if (result.viewport) spatialViewportCamera = result.viewport
+              if (result.ok && result.history !== session.history) {
+                applyCourseCommand(
+                  (current) => replaceV9CourseHistory(current, result.history),
+                  result.reason,
+                )
+              }
+              if (result.ok && result.selectedLayerItemIds) {
+                applyCourseCommand(
+                  (current) => selectV9CourseSpatialLayers(
+                    current,
+                    result.selectedLayerItemIds!,
+                  ),
+                  result.reason,
+                )
+              }
+              return { ok: result.ok, reason: result.reason }
+            }
+            return { ok: false, reason: '当前页面没有可用动作适配器' }
+          } catch (error) {
+            return { ok: false, reason: courseErrorMessage(error) }
+          }
+        },
+      },
+    }
+  }
+
   function findFlowBlockParent(
     blocks: readonly FlowBlock[],
     blockId: string,
@@ -2283,11 +2715,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     createNewCourseProject() {
-      set({
-        courseSession: createV9CourseEditorState(),
-        statusMessage: '已创建新课件',
-        errorMessage: null,
-      })
+      this.createBlankSlideCourse()
+    },
+
+    createBlankSlideCourse() {
+      const result = createBlankSlideCourse({ title: '未命名课件' })
+      openBlankCourseSession(result.project, '已创建空白演示课件')
+    },
+
+    createBlankFlowCourse() {
+      const result = createBlankFlowCourse({ title: '未命名课件' })
+      openBlankCourseSession(result.project, '已创建空白流式课件')
+    },
+
+    createBlankSpatialCourse() {
+      const result = createBlankSpatialCourse({ title: '未命名课件' })
+      openBlankCourseSession(result.project, '已创建空白无限画布课件')
     },
 
     loadCourseProject(archive, path, options = {}) {
@@ -2325,6 +2768,41 @@ export const useEditorStore = create<EditorState>((set, get) => {
       let accepted = false
       set((state) => {
         if (state.courseSession === null) return state
+        if (state.courseSession.editingScope === 'global' && input.nodes.length === 1) {
+          const node = input.nodes[0]!
+          const target = captureGlobalControllerTarget({
+            project: state.courseSession.history.present,
+            sessionId: state.courseSession.sessionId,
+            locationId: state.courseSession.selection.locationId,
+          })
+          if (target && target.layerItemId === node.nodeId) {
+            const result = commitGlobalControllerTransform(
+              state.courseSession.history.present,
+              target,
+              {
+                x: node.x,
+                y: node.y,
+                width: node.width,
+                height: node.height,
+                rotation: node.rotation ?? 0,
+              },
+            )
+            if (!result.ok) {
+              return { ...state, errorMessage: result.reason, statusMessage: null }
+            }
+            if (result.project === state.courseSession.history.present) {
+              accepted = false
+              return state
+            }
+            accepted = true
+            return {
+              ...state,
+              courseSession: applyLayerCommandResultToSession(state.courseSession, result),
+              statusMessage: result.reason,
+              errorMessage: null,
+            }
+          }
+        }
         const courseSession = transformV9SlideVerticalSlice(state.courseSession, input)
         accepted = courseSession !== state.courseSession
         return courseSession === state.courseSession
@@ -2537,31 +3015,45 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return accepted
     },
 
-    commitCourseTextEdit(target, text, runs) {
+    createCourseTextEditSessionKey(layerItemId, field = 'content.text') {
+      const session = get().courseSession
+      if (session === null) return null
+      try {
+        return createV9SlideTextEditSessionKey(session, layerItemId, field)
+      } catch (error) {
+        set({ errorMessage: courseErrorMessage(error), statusMessage: null })
+        return null
+      }
+    },
+
+    commitCourseTextEditSession(key, payload) {
       let accepted = false
       set((state) => {
-        if (
-          state.courseSession === null ||
-          !matchesCourseLayerContext(state.courseSession, target)
-        ) return state
-        try {
-          const courseSession = updateV9SlideNativeNode(
-            state.courseSession,
-            target.layerItemId,
-            { text, runs },
-          )
-          accepted = true
-          return courseSession === state.courseSession
-            ? state
-            : { ...state, courseSession, statusMessage: '文字已更新' }
-        } catch {
-          // The target left the current scope (deleted or scope/state switch).
-          // Report the stale session instead of crashing the transaction.
-          accepted = false
-          return state
+        if (state.courseSession === null) return state
+        const result = commitV9SlideTextEdit(state.courseSession, key, payload)
+        if (!result.ok) {
+          return { ...state, errorMessage: result.reason, statusMessage: null }
+        }
+        accepted = true
+        return {
+          ...state,
+          courseSession: result.session,
+          statusMessage: result.session === state.courseSession ? result.reason : '文字已更新',
+          errorMessage: null,
         }
       })
       return accepted
+    },
+
+    commitCourseTextEdit(target, text, runs) {
+      const session = get().courseSession
+      if (session === null || !matchesCourseLayerContext(session, target)) return false
+      try {
+        const key = createV9SlideTextEditSessionKey(session, target.layerItemId)
+        return this.commitCourseTextEditSession(key, { text, runs })
+      } catch {
+        return false
+      }
     },
 
     clearCourseNativeNodeOverride(target) {
@@ -3115,6 +3607,36 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return accepted
     },
 
+    replaceCourseComponentPackage(packageId, packageData) {
+      const session = get().courseSession
+      if (session === null) {
+        throw new UserFacingError(
+          '无法替换组件包',
+          '当前课件会话已关闭',
+          '请先打开或新建课件后再替换组件。',
+        )
+      }
+      const result = replaceCourseComponentPackageCommand({
+        project: session.history.present,
+        componentFiles: session.componentFiles,
+        packageId,
+        packageData,
+      })
+      applyCourseCommand((current) => {
+        const history = commitCourseHistory(current.history, result.project)
+        const next = replaceV9CourseHistory(current, history)
+        return Object.freeze({
+          ...next,
+          componentFiles: result.componentFiles,
+          componentPackages: Object.freeze({
+            ...next.componentPackages,
+            [packageId]: result.packageData,
+          }),
+        })
+      }, `已将组件替换为 ${result.replacementVersion}`)
+      return get().errorMessage === null
+    },
+
     deleteCourseComponentPackage(packageId) {
       let accepted = false
       set((state) => {
@@ -3134,20 +3656,174 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addCourseSurface(type, title) {
+      this.addCoursePage(type, title)
+    },
+
+    addCoursePage(type, title) {
+      const status = type === 'slide'
+        ? '已新建演示页'
+        : type === 'flow'
+          ? '已新建流式讲义表面'
+          : '已新建空间探索表面'
       applyCourseCommand((session) => {
-        const project = addCourseSurface(session.history.present, type, { title })
-        const history = commitCourseHistory(session.history, project)
-        const addedLocation = project.locations[project.locations.length - 1]
-        if (!addedLocation) throw new Error('新建内容表面失败，请重试')
-        return selectV9CourseLocation({ ...session, history }, addedLocation.id)
-      }, type === 'flow' ? '已新建流式讲义表面' : '已新建空间探索表面')
+        const result = addCoursePageCommand(session.history.present, type, { title })
+        const history = commitCourseHistory(session.history, result.project)
+        return withSceneScope(
+          selectV9CourseLocation({ ...session, history }, result.activatedLocationId),
+        )
+      }, status)
+    },
+
+    deleteCourseLocation(locationId) {
+      applyCourseCommand((session) => {
+        const result = deleteCourseLocationCommand(session.history.present, locationId, {
+          activeLocationId: session.selection.locationId,
+        })
+        const history = commitCourseHistory(session.history, result.project)
+        return withSceneScope(
+          selectV9CourseLocation({ ...session, history }, result.activatedLocationId),
+        )
+      }, '已删除课程位置')
+    },
+
+    reorderCoursePages(surfaceIds) {
+      applyCourseCommand((session) => {
+        const result = reorderCoursePagesCommand(session.history.present, surfaceIds, {
+          activeLocationId: session.selection.locationId,
+        })
+        const history = commitCourseHistory(session.history, result.project)
+        return selectV9CourseLocation({ ...session, history }, result.activatedLocationId)
+      }, '已调整课程页面顺序')
     },
 
     selectCourseLocation(locationId) {
       applyCourseCommand((session) => {
-        if (session.selection.locationId === locationId) return null
-        return selectV9CourseLocation(session, locationId)
+        selectCourseLocationCommand(session.history.present, locationId)
+        if (
+          session.selection.locationId === locationId &&
+          session.editingScope === 'scene'
+        ) {
+          return null
+        }
+        const next = session.selection.locationId === locationId
+          ? session
+          : selectV9CourseLocation(session, locationId)
+        return withSceneScope(next)
       }, '已切换课程位置')
+    },
+
+    selectGlobalLayerScope() {
+      applyCourseCommand((session) => {
+        selectGlobalLayerScopeCommand(
+          session.history.present,
+          session.selection.locationId,
+        )
+        if (session.editingScope === 'global') return null
+        return setV9SlideEditingScope(session, 'global')
+      }, '正在编辑全局层')
+    },
+
+    selectGlobalAuthoringOwner() {
+      this.selectGlobalLayerScope()
+    },
+
+    createLiveEditorSelectionSnapshot(focus) {
+      const session = get().courseSession
+      if (session === null) return null
+      try {
+        return buildLiveEditorSelectionSnapshot(session, focus)
+      } catch (error) {
+        set({ errorMessage: courseErrorMessage(error), statusMessage: null })
+        return null
+      }
+    },
+
+    routeEditorAction(actionId, snapshot, extras) {
+      const session = get().courseSession
+      if (session === null) {
+        const reason = '当前课件会话已关闭'
+        set({ errorMessage: reason, statusMessage: null })
+        return { actionId, ok: false, reason, adapter: 'none' }
+      }
+      try {
+        const live = snapshot ?? buildLiveEditorSelectionSnapshot(session)
+        const result = routeEditorActionCore({
+          actionId,
+          snapshot: live,
+          adapters: createCourseActionAdapters(extras),
+        })
+        if (!result.ok) {
+          set({ errorMessage: result.reason, statusMessage: null })
+        } else if (get().statusMessage !== result.reason) {
+          set({ statusMessage: result.reason, errorMessage: null })
+        }
+        return result
+      } catch (error) {
+        const reason = courseErrorMessage(error)
+        set({ errorMessage: reason, statusMessage: null })
+        return { actionId, ok: false, reason, adapter: 'none' }
+      }
+    },
+
+    applyCourseLayerCommandResult(result) {
+      applyCourseCommand(
+        (session) => applyLayerCommandResultToSession(session, result),
+        result.ok ? result.reason : result.reason,
+      )
+    },
+
+    restoreCourseTeacherController() {
+      applyCourseCommand((session) => {
+        const result = restoreDefaultTeacherController(session.history.present)
+        return applyLayerCommandResultToSession(session, result)
+      }, '已恢复教师控制器')
+    },
+
+    updateCourseDesignTokens(tokens) {
+      applyCourseCommand((session) => {
+        const project = updateCourseProject(session.history.present, (draft) => {
+          draft.designTokens = structuredClone(tokens)
+        })
+        return replaceV9CourseHistory(
+          session,
+          commitCourseHistory(session.history, project),
+        )
+      }, '设计令牌已更新')
+    },
+
+    importCourseSounds(items) {
+      if (items.length === 0) return
+      const itemsCopy = items.map((item) => ({
+        meta: structuredClone(item.meta),
+        bytes: item.bytes.slice(),
+      }))
+      applyCourseCommand((session) => {
+        const withAssets = importV9SlideAssets(session, itemsCopy)
+        const project = updateCourseProject(withAssets.history.present, (draft) => {
+          for (const item of itemsCopy) {
+            draft.media.audio.sounds[item.meta.id] = {
+              id: item.meta.id,
+              name: item.meta.filename.replace(/\.[^.]+$/, '') || item.meta.filename,
+              assetId: item.meta.id,
+              channel: 'sfx',
+              defaultVolume: 1,
+              defaultLoop: false,
+            }
+          }
+        })
+        return replaceV9CourseHistory(withAssets, {
+          ...withAssets.history,
+          present: project,
+        })
+      }, `已导入 ${itemsCopy.length} 个声音`)
+    },
+
+    setSpatialViewportCamera(pose) {
+      spatialViewportCamera = pose
+    },
+
+    setSpatialViewportSize(size) {
+      spatialViewportSize = size
     },
 
     selectCourseFlowBlock(blockId) {
@@ -3158,7 +3834,32 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ) {
           return null
         }
-        return selectV9CourseFlowBlock(session, blockId)
+        const location = session.history.present.locations.find(
+          (candidate) => candidate.id === session.selection.locationId,
+        )
+        if (!location || location.kind !== 'flow-block') {
+          throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
+        }
+        selectFlowEditorBlocks(session.history.present, location.id, [blockId])
+        const blockLocation = session.history.present.locations.find((candidate) =>
+          candidate.kind === 'flow-block' &&
+          candidate.surfaceId === location.surfaceId &&
+          candidate.blockId === blockId,
+        )
+        if (blockLocation) {
+          return selectV9CourseFlowBlock(session, blockId)
+        }
+        return replaceV9CourseHistory(
+          session,
+          session.history,
+          Object.freeze({
+            locationId: location.id,
+            stateId: null,
+            selectionIds: Object.freeze([]),
+            surfaceKind: 'flow' as const,
+            flowBlockId: blockId,
+          }),
+        )
       }, '已选择 Flow 内容块')
     },
 
@@ -3204,23 +3905,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (!surface || surface.type !== 'flow') {
           throw new Error('当前 Flow 表面已失效，请重新选择')
         }
+        const insertedBlockId = typeof request.id === 'string' && request.id.trim() !== ''
+          ? request.id
+          : `block-${nanoid(10)}`
         const history = insertFlowEditorBlock(session.history, {
           surfaceId: surface.id,
           parentId: options?.parentId ?? null,
           index: options?.index ?? surface.blocks.length,
-          block: request,
+          block: { ...request, id: insertedBlockId } as FlowEditorBlockInput,
           now: options?.now,
         })
-        const previousLocationIds = new Set(
-          session.history.present.locations.map((candidate) => candidate.id),
-        )
         const insertedLocation = history.present.locations.find((candidate) =>
-          !previousLocationIds.has(candidate.id) &&
           candidate.kind === 'flow-block' &&
-          candidate.surfaceId === surface.id,
+          candidate.surfaceId === surface.id &&
+          candidate.blockId === insertedBlockId,
         )
-        if (!insertedLocation) throw new Error('新建 Flow 内容块失败，请重试')
-        return selectV9CourseLocation({ ...session, history }, insertedLocation.id)
+        if (insertedLocation) {
+          return selectV9CourseLocation({ ...session, history }, insertedLocation.id)
+        }
+        return replaceV9CourseHistory(
+          session,
+          history,
+          Object.freeze({
+            locationId: location.id,
+            stateId: null,
+            selectionIds: Object.freeze([]),
+            surfaceKind: 'flow' as const,
+            flowBlockId: insertedBlockId,
+          }),
+        )
       }, '已插入 Flow 内容块')
     },
 

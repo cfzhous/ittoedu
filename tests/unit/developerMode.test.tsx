@@ -297,4 +297,21 @@ describe('专业开发模式', () => {
       },
     )).toThrow('缺少缩略图')
   })
+
+  it('V9 开发工作台保持可达并如实提示同场景 Runtime 限制', () => {
+    useEditorStore.getState().createNewCourseProject()
+    useEditorStore.setState({ editorMode: 'professional' })
+    render(<DeveloperTab />)
+
+    expect(screen.getByTestId('developer-tab')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-same-scene-limit')).toHaveTextContent(
+      '每个场景或共用层只投射第一个已启用的 Runtime API 2 层',
+    )
+    expect(screen.queryByRole('button', { name: '创建运行时模板' }))
+      .not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '试运行' }))
+    expect(useEditorStore.getState().canvasMode).toBe('run')
+    fireEvent.click(screen.getByRole('tab', { name: /组件代码/ }))
+    expect(screen.getByText('未选择互动组件')).toBeInTheDocument()
+  })
 })

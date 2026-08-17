@@ -29,6 +29,31 @@ export interface CourseProjectArchiveData {
   componentFiles: Record<string, Record<string, Uint8Array>>
 }
 
+export interface CourseProjectArchiveIdentity {
+  schemaVersion: number | null
+  projectId: string | null
+  revision: number | null
+  updatedAt: string | null
+  title: string | null
+}
+
+export interface CourseProjectV8ImportReport {
+  sourceFormat: 'legacy-course'
+  targetFormat: 'current-course'
+  projectId: string
+  title: string
+  surfaceCount: number
+  locationCount: number
+  assetCount: number
+  componentPackageCount: number
+  warnings: readonly string[]
+  notes: readonly string[]
+}
+
+export interface CourseProjectV8ImportResult extends CourseProjectArchiveData {
+  report: CourseProjectV8ImportReport
+}
+
 export interface CreateCourseProjectArchiveOptions {
   /** Optional deterministic ZIP timestamp, primarily used by fixtures/exporters. */
   mtime?: Date | string | number
@@ -80,6 +105,85 @@ function declaredSchemaVersion(value: unknown): number | null {
   if (typeof value !== 'object' || value === null) return null
   const version = Reflect.get(value, 'schemaVersion')
   return typeof version === 'number' && Number.isInteger(version) ? version : null
+}
+
+function emptyArchiveIdentity(): CourseProjectArchiveIdentity {
+  return {
+    schemaVersion: null,
+    projectId: null,
+    revision: null,
+    updatedAt: null,
+    title: null,
+  }
+}
+
+function identityFromProjectJson(value: unknown): CourseProjectArchiveIdentity {
+  if (typeof value !== 'object' || value === null) return emptyArchiveIdentity()
+  const record = value as Record<string, unknown>
+  const schemaVersion = declaredSchemaVersion(value)
+  return {
+    schemaVersion,
+    projectId: typeof record.id === 'string' && record.id.length > 0 ? record.id : null,
+    revision: typeof record.revision === 'number' && Number.isInteger(record.revision)
+      ? record.revision
+      : null,
+    updatedAt: typeof record.updatedAt === 'string' && record.updatedAt.length > 0
+      ? record.updatedAt
+      : null,
+    title: typeof record.title === 'string' && record.title.length > 0 ? record.title : null,
+  }
+}
+
+/** Peeks archive identity without opening V8 as the default backend. */
+export function inspectCourseProjectArchiveIdentity(
+  bytes: Uint8Array,
+): CourseProjectArchiveIdentity {
+  if (bytes.byteLength === 0) return emptyArchiveIdentity()
+  let files: Record<string, Uint8Array>
+  try {
+    files = unzipSync(bytes, archiveFilter())
+  } catch {
+    return emptyArchiveIdentity()
+  }
+  const projectBytes = files[PROJECT_DOCUMENT_PATH]
+  if (!projectBytes) return emptyArchiveIdentity()
+  try {
+    return identityFromProjectJson(decodeJson(projectBytes))
+  } catch {
+    return emptyArchiveIdentity()
+  }
+}
+
+function buildV8ImportReport(
+  source: { id: string; title: string; assets: object; componentPackages: object },
+  migrated: CourseProjectDocument,
+): CourseProjectV8ImportReport {
+  const warnings: string[] = []
+  if (Object.keys(source.assets).length !== Object.keys(migrated.assets).length) {
+    warnings.push('部分素材未能带入新工程，请核对媒体是否完整。')
+  }
+  if (
+    Object.keys(source.componentPackages).length !==
+    Object.keys(migrated.componentPackages).length
+  ) {
+    warnings.push('部分互动组件未能带入新工程，请核对组件是否完整。')
+  }
+  return {
+    sourceFormat: 'legacy-course',
+    targetFormat: 'current-course',
+    projectId: migrated.id,
+    title: migrated.title,
+    surfaceCount: migrated.surfaces.length,
+    locationCount: migrated.locations.length,
+    assetCount: Object.keys(migrated.assets).length,
+    componentPackageCount: Object.keys(migrated.componentPackages).length,
+    warnings,
+    notes: [
+      '已从旧版课件转换为当前课程工程。',
+      '导入后请另存为新文件，原文件不会被改写。',
+      '之后保存、最近工程和恢复都只使用当前格式。',
+    ],
+  }
 }
 
 function readCourseProject(bytes: Uint8Array): CourseProjectDocument {
@@ -468,12 +572,14 @@ export async function openCourseProjectArchiveAsync(
  */
 export function importProjectV8ArchiveAsCourseProject(
   bytes: Uint8Array,
-): CourseProjectArchiveData {
+): CourseProjectV8ImportResult {
   const legacy = openProjectArchive(bytes)
+  const project = migrateProjectV8ToCourseProjectV9(legacy.project)
   return {
-    project: migrateProjectV8ToCourseProjectV9(legacy.project),
+    project,
     assetFiles: legacy.assetFiles,
     componentFiles: legacy.componentFiles,
+    report: buildV8ImportReport(legacy.project, project),
   }
 }
 
@@ -481,12 +587,14 @@ export function importProjectV8ArchiveAsCourseProject(
 export async function importProjectV8ArchiveAsCourseProjectAsync(
   bytes: Uint8Array,
   options: { signal?: AbortSignal } = {},
-): Promise<CourseProjectArchiveData> {
+): Promise<CourseProjectV8ImportResult> {
   const legacy = await openProjectArchiveAsync(bytes, options)
+  const project = migrateProjectV8ToCourseProjectV9(legacy.project)
   return {
-    project: migrateProjectV8ToCourseProjectV9(legacy.project),
+    project,
     assetFiles: legacy.assetFiles,
     componentFiles: legacy.componentFiles,
+    report: buildV8ImportReport(legacy.project, project),
   }
 }
 

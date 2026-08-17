@@ -32,6 +32,7 @@ import type {
   VideoNode,
 } from '../../shared/projectTypes'
 import { requestNodeMotionPreview } from '../phaser/elementAnimationPreviewBus'
+import { LOCKED_INTERACTION_WRITE_REASON, interactionRuleNodeIds } from '../course/slideInteractionCommands'
 
 const ALL_STATES = '__all_states__'
 const MULTIPLE_STATES = '__multiple_states__'
@@ -417,6 +418,20 @@ function namedReference(
   fallback: string,
 ): string {
   return values.get(id) ?? `${fallback}（${id || '未设置'}）`
+}
+
+function ruleTargetsLockedNode(
+  rule: InteractionRule,
+  nodes: ReadonlyArray<SceneNode>,
+): boolean {
+  const locked = new Set(
+    nodes.filter((node) => node.locked).map((node) => node.id),
+  )
+  return interactionRuleNodeIds(rule).some((id) => locked.has(id))
+}
+
+function unlockedNodeId(nodes: ReadonlyArray<SceneNode>): string | undefined {
+  return nodes.find((node) => !node.locked)?.id ?? nodes[0]?.id
 }
 
 function describeTrigger(
@@ -1467,6 +1482,7 @@ export function InteractionEditor({
       rule.trigger.nodeId === selectedNode.id,
   )
   const isVideoNode = selectedNode.type === 'video'
+  const writeLocked = selectedNode.locked
   const videoOwnsClick = isVideoNode && (
     selectedNode.clickToToggle || selectedNode.showControls
   )
@@ -1488,10 +1504,15 @@ export function InteractionEditor({
     nodeId: availableNodes[0]?.id,
   }
 
+  const addRule = writeLocked ? () => undefined : onAddRule
+  const updateRule = writeLocked ? () => undefined : onUpdateRule
+  const deleteRule = writeLocked ? () => undefined : onDeleteRule
+
   const addQuickStateRule = () => {
+    if (writeLocked) return
     const target = states.find((state) => state.id === quickTargetId)
     if (!target) return
-    onAddRule({
+    addRule({
       id: `interaction_${nanoid()}`,
       name: `${selectedNode.name} → ${target.name}`,
       enabled: true,
@@ -1524,6 +1545,11 @@ export function InteractionEditor({
           ? '视频表面点击默认只用于播放控制。状态、声音和场景变化请在专业模式的“互动与动画”中使用视频开始、暂停、结束或时间点触发。'
           : `为“${selectedNode.name}”配置单击后按顺序执行的动作。`}
       </p>
+      {writeLocked ? (
+        <p className="property-hint" role="status">
+          {LOCKED_INTERACTION_WRITE_REASON}
+        </p>
+      ) : null}
 
       {!isVideoNode ? (
         <>
@@ -1533,7 +1559,7 @@ export function InteractionEditor({
               id={`interaction-${selectedNode.id}-quick-target`}
               className="form-input"
               value={quickTargetId}
-              disabled={states.length === 0}
+              disabled={states.length === 0 || writeLocked}
               onChange={(event) => setQuickTargetId(event.currentTarget.value)}
             >
               {states.map((state) => (
@@ -1545,7 +1571,8 @@ export function InteractionEditor({
             type="button"
             className="secondary-button"
             style={{ width: '100%', marginBottom: 12 }}
-            disabled={!quickTargetId}
+            disabled={!quickTargetId || writeLocked}
+            title={writeLocked ? LOCKED_INTERACTION_WRITE_REASON : undefined}
             onClick={addQuickStateRule}
           >
             <Link2 size={14} />连接到状态
@@ -1578,6 +1605,7 @@ export function InteractionEditor({
           <fieldset
             key={rule.id}
             aria-label={`单击规则 ${ruleIndex + 1}`}
+            disabled={writeLocked}
             style={{ border: '1px solid var(--border-color, #cbd5e1)', borderRadius: 10, padding: 10, margin: '0 0 12px' }}
           >
             <legend>{rule.name || `单击规则 ${ruleIndex + 1}`}</legend>
@@ -1587,7 +1615,7 @@ export function InteractionEditor({
                 id={`interaction-${rule.id}-enabled`}
                 type="checkbox"
                 checked={rule.enabled}
-                onChange={(event) => onUpdateRule(rule.id, {
+                onChange={(event) => updateRule(rule.id, {
                   enabled: event.currentTarget.checked,
                 })}
               />
@@ -1599,7 +1627,7 @@ export function InteractionEditor({
                   id={`interaction-${rule.id}-scene-scope`}
                   className="form-input"
                   value={activeSceneScope}
-                  onChange={(event) => onUpdateRule(rule.id, {
+                  onChange={(event) => updateRule(rule.id, {
                     conditions: setRuleSceneScope(rule, event.currentTarget.value),
                   })}
                 >
@@ -1619,7 +1647,7 @@ export function InteractionEditor({
                 id={`interaction-${rule.id}-scope`}
                 className="form-input"
                 value={scope}
-                onChange={(event) => onUpdateRule(rule.id, {
+                onChange={(event) => updateRule(rule.id, {
                   conditions: setRuleStateScope(rule, event.currentTarget.value),
                 })}
               >
@@ -1645,12 +1673,12 @@ export function InteractionEditor({
                 videos={videoNodes}
                 nodes={availableNodes}
                 referencedByCompletion={completionActionIds.has(step.id)}
-                onChange={(nextStep) => onUpdateRule(rule.id, {
+                onChange={(nextStep) => updateRule(rule.id, {
                   actions: rule.actions.map((item, index) => (
                     index === actionIndex ? nextStep : item
                   )),
                 })}
-                onRemove={() => onUpdateRule(rule.id, {
+                onRemove={() => updateRule(rule.id, {
                   actions: rule.actions.filter((_, index) => index !== actionIndex),
                 })}
               />
@@ -1672,7 +1700,7 @@ export function InteractionEditor({
                     0,
                     nextStep,
                   )
-                  onUpdateRule(rule.id, { actions })
+                  updateRule(rule.id, { actions })
                 }}
               >
                 <Plus size={13} />添加动作
@@ -1685,7 +1713,7 @@ export function InteractionEditor({
                 title={rule.actions.some((step) => completionActionIds.has(step.id))
                   ? '该规则的动画正被“动画完成”规则引用，请先更改触发器。'
                   : undefined}
-                onClick={() => onDeleteRule(rule.id)}
+                onClick={() => deleteRule(rule.id)}
               >
                 <Trash2 size={13} />删除规则
               </button>
@@ -1762,10 +1790,29 @@ export function SceneAutomationEditor({
     [sounds],
   )
   const rules = allRules.filter(isAutomationRule)
+  const commitRule = (
+    current: InteractionRule,
+    patch: Partial<Omit<InteractionRule, 'id'>>,
+  ): void => {
+    if (ruleTargetsLockedNode(current, availableNodes)) return
+    onUpdateRule(current.id, patch)
+  }
+  const removeRule = (current: InteractionRule): void => {
+    if (ruleTargetsLockedNode(current, availableNodes)) return
+    onDeleteRule(current.id)
+  }
+  const copyRule = (current: InteractionRule): void => {
+    if (ruleTargetsLockedNode(current, availableNodes)) return
+    onDuplicateRule?.(current.id)
+  }
+  const shiftRule = (current: InteractionRule, direction: -1 | 1): void => {
+    if (ruleTargetsLockedNode(current, availableNodes)) return
+    onMoveRule?.(current.id, direction)
+  }
   const suggestedStateId = states.find((state) => state.id !== activeStateId)?.id ??
     states[0]?.id ?? ''
   const visibleMotionNodes = useMemo(
-    () => availableNodes.filter((node) => node.visible).slice(0, 6),
+    () => availableNodes.filter((node) => node.visible && !node.locked).slice(0, 6),
     [availableNodes],
   )
   const descriptionContext = useMemo<RuleDescriptionContext>(() => ({
@@ -1788,7 +1835,7 @@ export function SceneAutomationEditor({
     soundId: soundList[0]?.id,
     videoId: videoNodes[0]?.id,
     componentId: componentNodes[0]?.id,
-    nodeId: availableNodes[0]?.id,
+    nodeId: unlockedNodeId(availableNodes),
     actionId: animationSteps[0]?.id,
   }
   const actionTargets = {
@@ -1796,7 +1843,7 @@ export function SceneAutomationEditor({
     sceneId: scenes[0]?.id,
     soundId: soundList[0]?.id,
     videoId: videoNodes[0]?.id,
-    nodeId: availableNodes[0]?.id,
+    nodeId: unlockedNodeId(availableNodes),
   }
   const triggerCounts = {
     states: states.length,
@@ -1841,6 +1888,9 @@ export function SceneAutomationEditor({
       if (rule.actions.some((step) => step.id === completedActionId)) {
         warnings.push('该规则正在等待自身动画完成，会形成无法启动的循环。')
       }
+    }
+    if (ruleTargetsLockedNode(rule, availableNodes)) {
+      warnings.push(LOCKED_INTERACTION_WRITE_REASON)
     }
     return [rule.id, [...new Set(warnings)]] as const
   })), [availableNodes, ruleWarnings, rules])
@@ -2188,6 +2238,7 @@ export function SceneAutomationEditor({
               rule.enabled ? '' : ' interaction-rule-card--disabled'
             }${warnings.length > 0 ? ' interaction-rule-card--warning' : ''}`}
             aria-label={`规则 ${ruleIndex + 1}`}
+            disabled={ruleTargetsLockedNode(rule, availableNodes)}
           >
             <legend>{rule.name || `规则 ${ruleIndex + 1}`}</legend>
             <div
@@ -2211,7 +2262,7 @@ export function SceneAutomationEditor({
                 className="form-input"
                 maxLength={120}
                 value={rule.name ?? ''}
-                onChange={(event) => onUpdateRule(rule.id, {
+                onChange={(event) => commitRule(rule, {
                   name: event.currentTarget.value,
                 })}
               />
@@ -2222,7 +2273,7 @@ export function SceneAutomationEditor({
                 id={`automation-${rule.id}-enabled`}
                 type="checkbox"
                 checked={rule.enabled}
-                onChange={(event) => onUpdateRule(rule.id, {
+                onChange={(event) => commitRule(rule, {
                   enabled: event.currentTarget.checked,
                 })}
               />
@@ -2238,7 +2289,7 @@ export function SceneAutomationEditor({
                 components={componentNodes}
                 nodes={availableNodes}
                 animationSteps={animationSteps}
-                onChange={(trigger) => onUpdateRule(rule.id, { trigger })}
+                onChange={(trigger) => commitRule(rule, { trigger })}
               />
 
               {sourceScope === 'global' ? (
@@ -2248,7 +2299,7 @@ export function SceneAutomationEditor({
                     id={`automation-${rule.id}-scene-scope`}
                     className="form-input"
                     value={activeSceneScope}
-                    onChange={(event) => onUpdateRule(rule.id, {
+                    onChange={(event) => commitRule(rule, {
                       conditions: setRuleSceneScope(rule, event.currentTarget.value),
                     })}
                   >
@@ -2269,7 +2320,7 @@ export function SceneAutomationEditor({
                   id={`automation-${rule.id}-scope`}
                   className="form-input"
                   value={scope}
-                  onChange={(event) => onUpdateRule(rule.id, {
+                  onChange={(event) => commitRule(rule, {
                     conditions: setRuleStateScope(rule, event.currentTarget.value),
                   })}
                 >
@@ -2304,12 +2355,12 @@ export function SceneAutomationEditor({
                   videos={videoNodes}
                   nodes={availableNodes}
                   referencedByCompletion={completionActionIds.has(step.id)}
-                  onChange={(nextStep) => onUpdateRule(rule.id, {
+                  onChange={(nextStep) => commitRule(rule, {
                     actions: rule.actions.map((item, index) => (
                       index === actionIndex ? nextStep : item
                     )),
                   })}
-                  onRemove={() => onUpdateRule(rule.id, {
+                  onRemove={() => commitRule(rule, {
                     actions: rule.actions.filter((_, index) => index !== actionIndex),
                   })}
                 />
@@ -2331,7 +2382,7 @@ export function SceneAutomationEditor({
                       0,
                       nextStep,
                     )
-                    onUpdateRule(rule.id, { actions })
+                    commitRule(rule, { actions })
                   }}
                 >
                   <Plus size={13} />添加动作
@@ -2341,7 +2392,7 @@ export function SceneAutomationEditor({
                     type="button"
                     className="secondary-button"
                     aria-label={`复制规则 ${ruleIndex + 1}`}
-                    onClick={() => onDuplicateRule(rule.id)}
+                    onClick={() => copyRule(rule)}
                   >
                     <Copy size={13} />复制规则
                   </button>
@@ -2353,7 +2404,7 @@ export function SceneAutomationEditor({
                       className="secondary-button"
                       aria-label={`上移规则 ${ruleIndex + 1}`}
                       disabled={ruleIndex <= 0}
-                      onClick={() => onMoveRule(rule.id, -1)}
+                      onClick={() => shiftRule(rule, -1)}
                     >
                       <ArrowUp size={13} />上移
                     </button>
@@ -2362,7 +2413,7 @@ export function SceneAutomationEditor({
                       className="secondary-button"
                       aria-label={`下移规则 ${ruleIndex + 1}`}
                       disabled={ruleIndex >= rules.length - 1}
-                      onClick={() => onMoveRule(rule.id, 1)}
+                      onClick={() => shiftRule(rule, 1)}
                     >
                       <ArrowDown size={13} />下移
                     </button>
@@ -2376,7 +2427,7 @@ export function SceneAutomationEditor({
                   title={rule.actions.some((step) => completionActionIds.has(step.id))
                     ? '该规则的动画正被“动画完成”规则引用，请先更改触发器。'
                     : undefined}
-                  onClick={() => onDeleteRule(rule.id)}
+                  onClick={() => removeRule(rule)}
                 >
                   <Trash2 size={13} />删除规则
                 </button>

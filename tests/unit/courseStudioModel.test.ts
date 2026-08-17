@@ -7,6 +7,9 @@ import {
   applyCourseAuthoringPatch,
   commitCourseHistory,
   CourseRevisionConflictError,
+  createBlankFlowCourseProject,
+  createBlankSlideCourseProject,
+  createBlankSpatialCourseProject,
   createCourseHistory,
   createCourseProject,
   deleteSlidePresentationState,
@@ -361,5 +364,26 @@ describe('Course Studio product model', () => {
       { id: 'state_initial', name: '初始', layerItemOverrides: {} },
     ])
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+  })
+
+  it('creates blank Flow and Spatial documents from the same project shell', () => {
+    const slide = createBlankSlideCourseProject({ id: 'blank-model-slide', title: '直接 V9', now: NOW })
+    expect(courseProjectDocumentSchema.parse(slide)).toEqual(slide)
+    expect(slide.surfaces.map((surface) => surface.type)).toEqual(['slide'])
+    expect(slide.locations[0]?.kind).toBe('slide-scene')
+
+    const flow = createBlankFlowCourseProject({ id: 'blank-model-flow', title: '空白讲义', now: NOW })
+    expect(courseProjectDocumentSchema.parse(flow)).toEqual(flow)
+    expect(flow.revision).toBe(0)
+    expect(flow.surfaces.map((surface) => surface.type)).toEqual(['flow'])
+    expect(flow.locations).toHaveLength(1)
+    const flowSurface = flow.surfaces[0]
+    if (flowSurface?.type !== 'flow') throw new Error('expected flow')
+    expect(flowSurface.blocks.map((block) => block.type)).toEqual(['heading', 'paragraph'])
+
+    const spatial = createBlankSpatialCourseProject({ id: 'blank-model-spatial', title: '空白画布', now: NOW })
+    expect(courseProjectDocumentSchema.parse(spatial)).toEqual(spatial)
+    expect(spatial.surfaces.map((surface) => surface.type)).toEqual(['spatial-2d'])
+    expect(spatial.locations[0]?.kind).toBe('spatial-camera')
   })
 })

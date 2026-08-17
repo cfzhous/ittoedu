@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/projectTypes'
+import { createBlankSlideCourse } from '@/renderer/course/courseLocationCommands'
+import {
+  createImageAssetImport,
+  createMediaAssetImport,
+} from '@/renderer/project/assetManager'
+import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import {
   createExternalComponentNode,
   createImageNode,
   createProject,
 } from '@/renderer/project/createProject'
+import { saveCourseProject } from '@/renderer/project/saveProject'
 import { useEditorStore } from '@/renderer/store/editorStore'
 
 function meta(
@@ -161,5 +168,49 @@ describe('asset deletion safety', () => {
 
     expect(useEditorStore.getState().deleteAsset('possible')).toBe(false)
     expect(useEditorStore.getState().errorMessage).toContain('组件 com.test.missing')
+  })
+})
+
+describe('V9 course archive asset sidecar transactions', () => {
+  it('keeps image, audio and video sidecar paths stable across save and reopen', () => {
+    const { project } = createBlankSlideCourse({
+      id: 'asset-tx',
+      title: '资源事务',
+      now: '2026-08-17T08:00:00.000Z',
+    })
+    const image = createImageAssetImport({
+      name: 'photo.png',
+      mimeType: 'image/png',
+      bytes: new Uint8Array([10, 11, 12]),
+    }, { id: 'asset_photo' })
+    const audio = createMediaAssetImport({
+      name: 'narration.mp3',
+      mimeType: 'audio/mpeg',
+      bytes: new Uint8Array([13, 14]),
+    }, 'audio', { duration: 3 }, { id: 'asset_narration' })
+    const video = createMediaAssetImport({
+      name: 'demo.webm',
+      mimeType: 'video/webm',
+      bytes: new Uint8Array([15, 16, 17]),
+    }, 'video', { duration: 4, width: 320, height: 180 }, { id: 'asset_demo' })
+    project.assets[image.meta.id] = image.meta
+    project.assets[audio.meta.id] = audio.meta
+    project.assets[video.meta.id] = video.meta
+
+    const saved = saveCourseProject({
+      project,
+      assetFiles: {
+        [image.meta.id]: image.bytes,
+        [audio.meta.id]: audio.bytes,
+        [video.meta.id]: video.bytes,
+      },
+      componentFiles: {},
+    }, '2026-08-17T08:00:00.000Z')
+    const reopened = openCourseProjectArchive(saved.bytes)
+    expect(reopened.project.schemaVersion).toBe(9)
+    expect(reopened.project.assets.asset_photo?.path).toBe('assets/asset_photo.png')
+    expect(reopened.project.assets.asset_narration?.path).toBe('assets/asset_narration.mp3')
+    expect(reopened.project.assets.asset_demo?.path).toBe('assets/asset_demo.webm')
+    expect([...reopened.assetFiles.asset_photo!]).toEqual([10, 11, 12])
   })
 })

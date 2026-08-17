@@ -5,6 +5,8 @@ import {
   collectUnusedProjectAssetIds,
 } from '@/shared/assetReferences'
 import type { AssetMeta } from '@/shared/projectTypes'
+import { createBlankSlideCourse } from '@/renderer/course/courseLocationCommands'
+import { inspectCourseProjectHealth } from '@/renderer/project/courseProjectHealthInspect'
 import {
   createExternalComponentNode,
   createImageNode,
@@ -217,5 +219,26 @@ describe('project asset reference graph', () => {
     expect(deleteBlocked).toEqual(new Set(graphIds))
     expect(healthUnused).toEqual(new Set(['unused']))
     expect(publishedIds).toEqual(new Set(graphIds))
+  })
+})
+
+describe('Course Project V9 reference health', () => {
+  it('flags dangling surface, location, asset and owner addresses without hiding them', () => {
+    const { project } = createBlankSlideCourse({
+      id: 'ref-health',
+      title: '引用检查',
+      now: '2026-08-17T09:00:00.000Z',
+    })
+    expect(inspectCourseProjectHealth(project).error).toBe(0)
+
+    project.locations[0]!.surfaceId = 'missing-surface'
+    project.startLocationId = 'missing-location'
+    const health = inspectCourseProjectHealth(project)
+    expect(health.items.map((item) => item.code)).toEqual(expect.arrayContaining([
+      'dangling-surface',
+      'dangling-location',
+    ]))
+    expect(health.items.every((item) => item.severity === 'error')).toBe(true)
+    expect(health.items.map((item) => item.message).join('\n')).not.toMatch(/\b(?:V8|V9|API)\b/)
   })
 })

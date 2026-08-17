@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import type { InteractionRule } from '@/shared/interactionTypes'
 import {
-  createCourseProject,
+  addSlideTextLayer,
   createCourseHistory,
+  createCourseProject,
+  updateCourseProject,
   type CourseHistoryState,
 } from '@/renderer/course/courseStudioModel'
 import {
   addSlideInteractionRule,
   deleteSlideInteractionRule,
   duplicateSlideInteractionRule,
+  LOCKED_INTERACTION_WRITE_REASON,
   moveSlideInteractionRule,
   type SlideInteractionTarget,
   updateSlideInteractionRule,
 } from '@/renderer/course/slideInteractionCommands'
+import { collectV9InteractionRuleWarnings } from '@/renderer/course/slideInteractionView'
 
 function fixture(): {
   target: SlideInteractionTarget
@@ -144,5 +148,73 @@ describe('Slide interaction commands', () => {
       locationId: 'not-a-location',
       scope: 'scene',
     }, rule())).toThrow(/失效/)
+  })
+
+  it('refuses write rules that target a locked layer item and keeps history stable', () => {
+    const { target, history } = fixture()
+    const location = history.present.locations.find(
+      (candidate) => candidate.id === target.locationId,
+    )
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected Slide location')
+    const withText = addSlideTextLayer(
+      history.present,
+      location.surfaceId,
+      location.sceneId,
+      '锁定文字',
+      { id: 'locked_text' },
+    )
+    const lockedProject = updateCourseProject(withText, (draft) => {
+      const surface = draft.surfaces.find((candidate) => candidate.id === location.surfaceId)
+      if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
+      const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+      const item = scene?.layerItems.find((candidate) => candidate.layerItemId === 'locked_text')
+      if (!item) throw new Error('expected locked text layer')
+      item.locked = true
+    })
+    const lockedHistory = createCourseHistory(lockedProject)
+    const lockedRule: InteractionRule = {
+      ...rule('locked_rule', 'action_locked'),
+      actions: [{
+        id: 'action_locked',
+        start: 'after-previous',
+        delayMs: 0,
+        action: {
+          type: 'node.enter',
+          nodeId: 'locked_text',
+          effect: 'fade',
+          durationMs: 320,
+          easing: 'ease-out',
+        },
+      }],
+    }
+    expect(() => addSlideInteractionRule(lockedHistory, target, lockedRule))
+      .toThrow(LOCKED_INTERACTION_WRITE_REASON)
+    expect(lockedHistory.present).toBe(lockedProject)
+
+    const added = addSlideInteractionRule(lockedHistory, target, rule())
+    expect(added.present.revision).toBe(lockedProject.revision + 1)
+    expect(added.past).toEqual([lockedProject])
+  })
+
+  it('diagnoses rules that still reference deleted V9 targets', () => {
+    const { history } = fixture()
+    const warnings = collectV9InteractionRuleWarnings(history.present, [{
+      ...rule('missing_node', 'action_missing'),
+      actions: [{
+        id: 'action_missing',
+        start: 'after-previous',
+        delayMs: 0,
+        action: {
+          type: 'node.enter',
+          nodeId: 'gone',
+          effect: 'fade',
+          durationMs: 240,
+          easing: 'ease-out',
+        },
+      }],
+    }])
+    expect(warnings.missing_node).toEqual([
+      expect.stringMatching(/已删除的元素/),
+    ])
   })
 })

@@ -261,6 +261,42 @@ describe('MediaTab', () => {
       useEditorStore.getState().project.media.audio.sounds[soundId],
     ).toBeUndefined()
   })
+
+  it('lists interaction references and refuses to delete a used sound', () => {
+    const soundId = seedAssets()
+    useEditorStore.setState((state) => ({
+      project: {
+        ...state.project,
+        scenes: state.project.scenes.map((scene, index) => (
+          index === 0
+            ? {
+                ...scene,
+                interactions: [{
+                  id: 'rule-rain',
+                  name: '雨声结束翻页',
+                  enabled: true,
+                  trigger: { type: 'audio.ended', soundId },
+                  conditions: [],
+                  actions: [{
+                    id: 'step-next',
+                    start: 'after-previous',
+                    delayMs: 0,
+                    action: { type: 'scene.next' },
+                  }],
+                }],
+              }
+            : scene
+        )),
+      },
+    }))
+    render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
+
+    fireEvent.click(screen.getByLabelText('删除声音“雨声”'))
+    expect(useEditorStore.getState().project.media.audio.sounds[soundId]).toBeDefined()
+    expect(screen.getByRole('alert')).toHaveTextContent('该声音仍被引用，不能删除')
+    expect(screen.getByRole('alert')).toHaveTextContent('雨声结束翻页')
+    expect(screen.queryByText('暂不能')).not.toBeInTheDocument()
+  })
 })
 
 describe('media formatting', () => {

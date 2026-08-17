@@ -1,6 +1,7 @@
-import { Shapes, Sigma, Type } from 'lucide-react'
+import { Music2, Shapes, Sigma, Type } from 'lucide-react'
 import { compareStableStrings } from '../../shared/stableOrder'
 import type { FlowEditorLayerView } from '../course/flowEditorView'
+import type { ProjectDesignTokens, SoundDefinition } from '../../shared/projectTypes'
 import { ElementsTab, type ElementsTabDocumentControl } from './ElementsTab'
 import { NodesTab, type NodesTabDocumentControl } from './NodesTab'
 import {
@@ -10,6 +11,11 @@ import {
 import { AutomationTab } from './AutomationTab'
 import { DeveloperTab } from './DeveloperTab'
 import { ComponentsTab } from './ComponentsTab'
+import { DesignTokensEditor } from './DesignTokensEditor'
+import {
+  EffectiveLayerList,
+  type EffectiveLayerListProps,
+} from './editor-actions/EffectiveLayerList'
 import { useEditorStore, type SidebarTab } from '../store/editorStore'
 import type {
   AvailableComponentCatalogPackage,
@@ -77,6 +83,16 @@ export interface RightSidebarSpatialDocumentControl {
   }
 }
 
+export interface RightSidebarCourseAudioControl {
+  readonly sounds: readonly SoundDefinition[]
+  onImportAudio(): void
+}
+
+export interface RightSidebarDesignTokensControl {
+  readonly value: ProjectDesignTokens
+  onChange(value: ProjectDesignTokens): void
+}
+
 interface RightSidebarProps {
   /**
    * Keeps the original shell/tabs available while preventing an unsupported
@@ -87,6 +103,10 @@ interface RightSidebarProps {
   documentControl?: RightSidebarDocumentControl
   flowDocumentControl?: RightSidebarFlowDocumentControl
   spatialDocumentControl?: RightSidebarSpatialDocumentControl
+  effectiveLayers?: EffectiveLayerListProps
+  designTokens?: RightSidebarDesignTokensControl
+  courseAudio?: RightSidebarCourseAudioControl
+  onRestoreTeacherController?: () => void
   onAddImage(x?: number, y?: number): void
   onReplaceImage(): void
   onAddVideo(x?: number, y?: number): void
@@ -249,6 +269,10 @@ export function RightSidebar({
   documentControl,
   flowDocumentControl,
   spatialDocumentControl,
+  effectiveLayers,
+  designTokens,
+  courseAudio,
+  onRestoreTeacherController,
   onAddImage,
   onReplaceImage,
   onAddVideo,
@@ -266,26 +290,29 @@ export function RightSidebar({
   const editorMode = useEditorStore((state) => state.editorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const tabs = editorMode === 'professional' ? professionalTabs : simpleTabs
-  const controlledTabAvailable = flowDocumentControl
+  const professionalTabOpen = activeTab === 'components' ||
+    activeTab === 'automation' ||
+    activeTab === 'developer'
+  const controlledTabAvailable = professionalTabOpen
+    ? documentControl
+      ? Boolean(documentControl[activeTab])
+      : editorMode === 'professional'
+    : effectiveLayers && activeTab === 'layers'
+    ? true
+    : flowDocumentControl
     ? activeTab === 'elements' ||
       activeTab === 'properties' ||
-      (activeTab === 'layers' && Boolean(flowDocumentControl.layers))
+      (activeTab === 'layers' && Boolean(flowDocumentControl.layers || effectiveLayers))
     : spatialDocumentControl
       ? activeTab === 'elements' || activeTab === 'layers' || activeTab === 'properties'
       : documentControl
         ? activeTab === 'elements'
           ? Boolean(documentControl.elements)
           : activeTab === 'layers'
-            ? Boolean(documentControl.layers)
+            ? Boolean(documentControl.layers || effectiveLayers)
             : activeTab === 'properties'
               ? Boolean(documentControl.properties)
-              : activeTab === 'components'
-                ? Boolean(documentControl.components)
-                : activeTab === 'automation'
-                  ? Boolean(documentControl.automation)
-                  : activeTab === 'developer'
-                    ? Boolean(documentControl.developer)
-                    : false
+              : false
         : false
   const activeUnavailableReason = flowDocumentControl
     ? controlledTabAvailable
@@ -341,37 +368,84 @@ export function RightSidebar({
             <strong>{tabs.find((tab) => tab.id === activeTab)?.label ?? '编辑'}面板暂不可用</strong>
             <p>{activeUnavailableReason}</p>
           </div>
-        ) : flowDocumentControl ? (
+        ) : flowDocumentControl && activeTab !== 'layers' ? (
           activeTab === 'elements' ? (
             <FlowElementsTab {...flowDocumentControl.elements} />
           ) : activeTab === 'properties' ? (
-            <FlowPropertiesTab {...flowDocumentControl.properties} />
-          ) : activeTab === 'layers' && flowDocumentControl.layers ? (
-            <FlowLayerList {...flowDocumentControl.layers} />
+            <>
+              <FlowPropertiesTab {...flowDocumentControl.properties} />
+              {designTokens && (
+                <DesignTokensEditor
+                  value={designTokens.value}
+                  onChange={designTokens.onChange}
+                />
+              )}
+            </>
           ) : null
-        ) : spatialDocumentControl ? (
+        ) : spatialDocumentControl && activeTab !== 'layers' ? (
           activeTab === 'elements' ? (
             <SpatialElementsPanel control={spatialDocumentControl.elements} />
-          ) : activeTab === 'layers' ? (
-            <SpatialLayerInspector {...spatialDocumentControl.layers} />
           ) : activeTab === 'properties' ? (
             <>
               <SpatialCameraPanel {...spatialDocumentControl.properties.camera} />
               <SpatialPathEditor {...spatialDocumentControl.properties.paths} />
+              {designTokens && (
+                <DesignTokensEditor
+                  value={designTokens.value}
+                  onChange={designTokens.onChange}
+                />
+              )}
             </>
           ) : null
         ) : activeTab === 'elements' ? (
-          documentControl?.elements ? (
-            <ElementsTab documentControl={documentControl.elements} />
-          ) : (
-            <ElementsTab
-              onAddImage={onAddImage}
-              onAddVideo={onAddVideo}
-              onImportImage={onImportImage}
-              onImportAudio={onImportAudio}
-              onImportVideo={onImportVideo}
-            />
-          )
+          <>
+            {documentControl?.elements ? (
+              <ElementsTab documentControl={documentControl.elements} />
+            ) : (
+              <ElementsTab
+                onAddImage={onAddImage}
+                onAddVideo={onAddVideo}
+                onImportImage={onImportImage}
+                onImportAudio={onImportAudio}
+                onImportVideo={onImportVideo}
+              />
+            )}
+            {courseAudio && (
+              <section className="course-audio-panel" data-testid="course-audio-panel">
+                <div className="section-heading section-heading--spaced">
+                  <span>声音</span>
+                  <Music2 size={14} aria-hidden="true" />
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  data-testid="import-course-audio"
+                  onClick={courseAudio.onImportAudio}
+                >
+                  导入声音
+                </button>
+                {courseAudio.sounds.length === 0 ? (
+                  <div className="empty-state" role="status">还没有声音素材。</div>
+                ) : (
+                  <ul className="course-audio-panel__list">
+                    {courseAudio.sounds.map((sound) => (
+                      <li key={sound.id}>{sound.name}</li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+            {onRestoreTeacherController && (
+              <button
+                type="button"
+                className="secondary-button"
+                data-testid="restore-teacher-controller"
+                onClick={onRestoreTeacherController}
+              >
+                恢复教师控制器
+              </button>
+            )}
+          </>
         ) : activeTab === 'components' && editorMode === 'professional' ? (
           <ComponentsTab
             componentCatalog={componentCatalog}
@@ -382,13 +456,29 @@ export function RightSidebar({
             onReplaceComponent={onReplaceComponent}
           />
         ) : activeTab === 'layers' ? (
-          <NodesTab documentControl={documentControl?.layers} />
-        ) : activeTab === 'properties' ? (
-          documentControl?.properties ? (
-            <PropertiesTab documentControl={documentControl.properties} />
+          effectiveLayers ? (
+            <EffectiveLayerList {...effectiveLayers} />
+          ) : flowDocumentControl?.layers ? (
+            <FlowLayerList {...flowDocumentControl.layers} />
+          ) : spatialDocumentControl ? (
+            <SpatialLayerInspector {...spatialDocumentControl.layers} />
           ) : (
-            <PropertiesTab onReplaceImage={onReplaceImage} />
+            <NodesTab documentControl={documentControl?.layers} />
           )
+        ) : activeTab === 'properties' ? (
+          <>
+            {documentControl?.properties ? (
+              <PropertiesTab documentControl={documentControl.properties} />
+            ) : (
+              <PropertiesTab onReplaceImage={onReplaceImage} />
+            )}
+            {designTokens && (
+              <DesignTokensEditor
+                value={designTokens.value}
+                onChange={designTokens.onChange}
+              />
+            )}
+          </>
         ) : activeTab === 'automation' && editorMode === 'professional' ? (
           <AutomationTab />
         ) : activeTab === 'developer' && editorMode === 'professional' ? (

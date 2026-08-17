@@ -13,6 +13,7 @@ import type {
   ProjectAudioSettings,
   SoundDefinition,
 } from '../../shared/projectTypes'
+import type { InteractionRule } from '../../shared/interactionTypes'
 import {
   useEditorStore,
   type ProjectAudioSettingsPatch,
@@ -71,6 +72,77 @@ export function formatMediaSize(byteLength: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
+export interface SoundUsageReference {
+  readonly label: string
+}
+
+function ruleUsesSound(rule: InteractionRule, soundId: string): boolean {
+  if (rule.trigger.type === 'audio.ended' && rule.trigger.soundId === soundId) return true
+  return rule.actions.some(({ action }) => {
+    if (action.type === 'audio.play') return action.soundId === soundId
+    if (
+      action.type === 'audio.pause' ||
+      action.type === 'audio.resume' ||
+      action.type === 'audio.stop' ||
+      action.type === 'audio.toggle-mute'
+    ) {
+      return action.target.kind === 'sound' && action.target.soundId === soundId
+    }
+    return false
+  })
+}
+
+export function listSoundReferencesFromRules(
+  rules: readonly InteractionRule[],
+  soundId: string,
+  scopeLabel: string,
+): SoundUsageReference[] {
+  return rules
+    .filter((rule) => ruleUsesSound(rule, soundId))
+    .map((rule) => ({
+      label: `${scopeLabel} · 规则「${rule.name ?? rule.id}」`,
+    }))
+}
+
+export function listProjectSoundReferences(
+  project: {
+    readonly scenes?: ReadonlyArray<{
+      readonly name: string
+      readonly interactions: readonly InteractionRule[]
+    }>
+    readonly globalInteractions?: readonly InteractionRule[]
+    readonly surfaces?: ReadonlyArray<{
+      readonly type: string
+      readonly title: string
+      readonly scenes?: ReadonlyArray<{
+        readonly name: string
+        readonly interactions: readonly InteractionRule[]
+      }>
+    }>
+  },
+  soundId: string,
+): SoundUsageReference[] {
+  const refs: SoundUsageReference[] = []
+  refs.push(...listSoundReferencesFromRules(
+    project.globalInteractions ?? [],
+    soundId,
+    '全局互动',
+  ))
+  for (const scene of project.scenes ?? []) {
+    refs.push(...listSoundReferencesFromRules(scene.interactions, soundId, scene.name))
+  }
+  for (const surface of project.surfaces ?? []) {
+    for (const scene of surface.scenes ?? []) {
+      refs.push(...listSoundReferencesFromRules(
+        scene.interactions,
+        soundId,
+        `${surface.title} · ${scene.name}`,
+      ))
+    }
+  }
+  return refs
+}
+
 function useAudioPreviewUrl(
   asset: AssetMeta | undefined,
   bytes: Uint8Array | undefined,
@@ -103,6 +175,7 @@ interface SoundEntryProps {
   asset: AssetMeta | undefined
   bytes: Uint8Array | undefined
   showAdvancedSettings: boolean
+  deleteBlocked?: readonly SoundUsageReference[]
   onUpdate(patch: Partial<Omit<SoundDefinition, 'id'>>): void
   onDelete(): void
 }
@@ -114,6 +187,7 @@ function SoundEntry({
   onUpdate,
   onDelete,
   showAdvancedSettings,
+  deleteBlocked,
 }: SoundEntryProps) {
   const [draftName, setDraftName] = useState(sound.name)
   const previewUrl = useAudioPreviewUrl(asset, bytes)
@@ -155,6 +229,22 @@ function SoundEntry({
           <Trash2 size={15} />
         </button>
       </div>
+
+      {deleteBlocked && deleteBlocked.length > 0 && (
+        <div
+          className="media-preview-unavailable"
+          role="alert"
+          data-testid={`sound-delete-blocked-${sound.id}`}
+        >
+          该声音仍被引用，不能删除：
+          <ul>
+            {deleteBlocked.map((reference) => (
+              <li key={reference.label}>{reference.label}</li>
+            ))}
+          </ul>
+          请先删除或改写这些互动动作。
+        </div>
+      )}
 
       <div className="media-entry__meta">
         {asset
@@ -385,9 +475,10 @@ export function MediaTab({
   showAdvancedAudioSettings = true,
   filterQuery = '',
 }: MediaTabProps) {
-  const assets = useEditorStore((state) => state.project.assets)
+  const project = useEditorStore((state) => state.project)
+  const assets = project.assets
   const assetFiles = useEditorStore((state) => state.assetFiles)
-  const audioSettings = useEditorStore((state) => state.project.media.audio)
+  const audioSettings = project.media.audio
   const sounds = audioSettings.sounds
   const updateAudioSettings = useEditorStore((state) => state.updateAudioSettings)
   const updateSound = useEditorStore((state) => state.updateSound)
@@ -395,6 +486,7 @@ export function MediaTab({
   const deleteAsset = useEditorStore((state) => state.deleteAsset)
   const addImageNode = useEditorStore((state) => state.addImageNode)
   const addVideoNode = useEditorStore((state) => state.addVideoNode)
+  const [blockedDeletes, setBlockedDeletes] = useState<Record<string, SoundUsageReference[]>>({})
 
   const normalizedFilter = filterQuery.trim().toLocaleLowerCase()
   const matchesFilter = (value: string): boolean =>
@@ -474,8 +566,24 @@ export function MediaTab({
                 asset={assets[sound.assetId]}
                 bytes={assetFiles[sound.assetId]}
                 showAdvancedSettings={showAdvancedAudioSettings}
+                deleteBlocked={blockedDeletes[sound.id]}
                 onUpdate={(patch) => updateSound(sound.id, patch)}
-                onDelete={() => deleteSound(sound.id)}
+                onDelete={() => {
+                  const references = listProjectSoundReferences(project, sound.id)
+                  if (references.length > 0) {
+                    setBlockedDeletes((current) => ({
+                      ...current,
+                      [sound.id]: references,
+                    }))
+                    return
+                  }
+                  setBlockedDeletes((current) => {
+                    const next = { ...current }
+                    delete next[sound.id]
+                    return next
+                  })
+                  deleteSound(sound.id)
+                }}
               />
             ))}
           </div>

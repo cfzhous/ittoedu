@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createBlankSlideCourse } from '@/renderer/course/courseLocationCommands'
+import { updateCourseProject } from '@/renderer/course/courseStudioModel'
+import { courseProjectRecoveryRevision } from '@/renderer/project/courseProjectLifecycle'
 import { RecoveryWriteCoordinator } from '@/renderer/project/recoveryWriteCoordinator'
 
 function abortFailure(): Error {
@@ -144,6 +147,37 @@ describe('RecoveryWriteCoordinator', () => {
     expect(onError).toHaveBeenCalledTimes(1)
     expect(onError.mock.calls[0]?.[0]).toMatchObject({ message: 'disk unavailable' })
     expect(onError.mock.calls[0]?.[1]).toBe('latest')
+    coordinator.dispose()
+  })
+
+  it('uses project id and revision so selection-only snapshots do not rewrite recovery', async () => {
+    vi.useFakeTimers()
+    const build = vi.fn(async (value: string) => value)
+    const write = vi.fn(async () => {})
+    const coordinator = new RecoveryWriteCoordinator({
+      delayMs: 10,
+      build,
+      write,
+    })
+    const created = createBlankSlideCourse({
+      id: 'recovery-rev',
+      title: '恢复修订',
+      now: '2026-08-17T03:00:00.000Z',
+    })
+    const revision = courseProjectRecoveryRevision(created.project)
+    coordinator.schedule(revision, 'blank')
+    coordinator.schedule(revision, 'selection-only')
+    await vi.runAllTimersAsync()
+    expect(build).toHaveBeenCalledTimes(1)
+    expect(write).toHaveBeenCalledTimes(1)
+
+    const edited = updateCourseProject(created.project, (draft) => {
+      draft.title = '已编辑'
+    }, '2026-08-17T03:01:00.000Z')
+    coordinator.schedule(courseProjectRecoveryRevision(edited), 'after-command')
+    await vi.runAllTimersAsync()
+    expect(build).toHaveBeenCalledTimes(2)
+    expect(write).toHaveBeenCalledWith('after-command', 'after-command')
     coordinator.dispose()
   })
 })

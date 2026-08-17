@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { projectDocumentSchema } from '../../src/shared/projectSchema'
 import { createProject } from '../../src/renderer/project/createProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
+import { DesignTokensEditor } from '../../src/renderer/ui/DesignTokensEditor'
 import { PropertiesTab } from '../../src/renderer/ui/PropertiesTab'
 
 afterEach(cleanup)
@@ -90,5 +91,14 @@ describe('minimal project design tokens', () => {
     expect(useEditorStore.getState().project.designTokens.colors).toHaveLength(32)
     expect(projectDocumentSchema.safeParse(useEditorStore.getState().project).success)
       .toBe(true)
+  })
+
+  it('does not present design tokens as an AI workflow', () => {
+    const tokens = useEditorStore.getState().project.designTokens
+    render(<DesignTokensEditor value={tokens} onChange={vi.fn()} />)
+    expect(screen.getByText(/便于统一取色与字体/)).toBeInTheDocument()
+    expect(screen.queryByText(/AI/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加字体' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '添加颜色' })).toBeEnabled()
   })
 })

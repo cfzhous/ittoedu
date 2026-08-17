@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
+import { strFromU8, unzipSync } from 'fflate'
 import { app } from 'electron'
 import type {
   RecentProjectEntry,
@@ -21,12 +22,23 @@ interface RecentProjectsFile {
   projects: RecentProjectEntry[]
 }
 
+interface RecoveryArchiveIdentity {
+  schemaVersion: number | null
+  projectId: string | null
+  revision: number | null
+  updatedAt: string | null
+}
+
 interface RecoveryMetadataFile {
   version: typeof RECOVERY_METADATA_VERSION
   projectName: string
   projectPath?: string
   savedAt: number
   sha256: string
+  projectId?: string
+  revision?: number
+  updatedAt?: string
+  schemaVersion?: number
 }
 
 let persistenceQueue: Promise<void> = Promise.resolve()
@@ -103,6 +115,17 @@ function parseRecentProject(value: unknown): RecentProjectEntry | null {
   }
 }
 
+function parseOptionalIdentityField(
+  value: unknown,
+  kind: 'id' | 'revision' | 'updatedAt' | 'schemaVersion',
+): string | number | undefined {
+  if (value === undefined) return undefined
+  if (kind === 'revision' || kind === 'schemaVersion') {
+    return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined
+  }
+  return typeof value === 'string' && value.length > 0 && value.length <= 260 ? value : undefined
+}
+
 function parseRecoveryMetadata(value: unknown): RecoveryMetadataFile | null {
   if (typeof value !== 'object' || value === null) return null
   const candidate = value as Record<string, unknown>
@@ -127,6 +150,10 @@ function parseRecoveryMetadata(value: unknown): RecoveryMetadataFile | null {
   ) {
     return null
   }
+  const projectId = parseOptionalIdentityField(candidate.projectId, 'id')
+  const revision = parseOptionalIdentityField(candidate.revision, 'revision')
+  const updatedAt = parseOptionalIdentityField(candidate.updatedAt, 'updatedAt')
+  const schemaVersion = parseOptionalIdentityField(candidate.schemaVersion, 'schemaVersion')
   return {
     version: RECOVERY_METADATA_VERSION,
     projectName: candidate.projectName,
@@ -136,6 +163,87 @@ function parseRecoveryMetadata(value: unknown): RecoveryMetadataFile | null {
         : undefined,
     savedAt: candidate.savedAt,
     sha256: candidate.sha256,
+    ...(typeof projectId === 'string' ? { projectId } : {}),
+    ...(typeof revision === 'number' ? { revision } : {}),
+    ...(typeof updatedAt === 'string' ? { updatedAt } : {}),
+    ...(typeof schemaVersion === 'number' ? { schemaVersion } : {}),
+  }
+}
+
+function peekProjectIdentityFromArchive(bytes: Uint8Array): RecoveryArchiveIdentity | null {
+  try {
+    const files = unzipSync(bytes, {
+      filter(file) {
+        return file.name === 'project.json'
+      },
+    })
+    const raw = files['project.json']
+    if (!raw) return null
+    const value = JSON.parse(strFromU8(raw)) as unknown
+    if (typeof value !== 'object' || value === null) return null
+    const record = value as Record<string, unknown>
+    const schemaVersion = typeof record.schemaVersion === 'number' &&
+      Number.isInteger(record.schemaVersion)
+      ? record.schemaVersion
+      : null
+    return {
+      schemaVersion,
+      projectId: typeof record.id === 'string' && record.id.length > 0 ? record.id : null,
+      revision: typeof record.revision === 'number' && Number.isInteger(record.revision)
+        ? record.revision
+        : null,
+      updatedAt: typeof record.updatedAt === 'string' && record.updatedAt.length > 0
+        ? record.updatedAt
+        : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function officialIsNewerThanRecovery(
+  official: RecoveryArchiveIdentity,
+  recovery: RecoveryArchiveIdentity,
+): boolean {
+  if (official.schemaVersion !== 9 || recovery.schemaVersion !== 9) return false
+  if (!official.projectId || !recovery.projectId || official.projectId !== recovery.projectId) {
+    return false
+  }
+  if (
+    official.revision !== null &&
+    recovery.revision !== null &&
+    official.revision > recovery.revision
+  ) {
+    return true
+  }
+  if (
+    official.revision !== null &&
+    recovery.revision !== null &&
+    official.revision < recovery.revision
+  ) {
+    return false
+  }
+  if (official.updatedAt && recovery.updatedAt) {
+    const officialTime = Date.parse(official.updatedAt)
+    const recoveryTime = Date.parse(recovery.updatedAt)
+    return Number.isFinite(officialTime) &&
+      Number.isFinite(recoveryTime) &&
+      officialTime > recoveryTime
+  }
+  return false
+}
+
+async function peekOfficialIdentity(projectPath: string): Promise<RecoveryArchiveIdentity | null> {
+  try {
+    const stats = await fs.stat(projectPath)
+    if (!stats.isFile() || stats.size <= 0 || stats.size > MAX_RECOVERY_PROJECT_BYTES) {
+      return null
+    }
+    const bytes = new Uint8Array(await fs.readFile(projectPath))
+    if (!hasZipSignature(bytes)) return null
+    return peekProjectIdentityFromArchive(bytes)
+  } catch {
+    return null
   }
 }
 
@@ -298,6 +406,16 @@ export function writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
       )
     }
 
+    const identity = peekProjectIdentityFromArchive(input.bytes)
+    if (identity?.schemaVersion === 8) {
+      throw new DesktopOperationError(
+        'RECOVERY_BACKEND_UNSUPPORTED',
+        '自动恢复保存失败',
+        '旧版课件不能作为默认恢复副本。',
+        '请通过“导入旧版工程”显式迁移后另存，再继续编辑。',
+      )
+    }
+
     const savedAt = Date.now()
     const digest = crypto.createHash('sha256').update(input.bytes).digest('hex')
     const metadata: RecoveryMetadataFile = {
@@ -306,6 +424,14 @@ export function writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
       projectPath: input.projectPath ? path.resolve(input.projectPath) : undefined,
       savedAt,
       sha256: digest,
+      ...(identity?.projectId ? { projectId: identity.projectId } : {}),
+      ...(identity?.revision !== null && identity?.revision !== undefined
+        ? { revision: identity.revision }
+        : {}),
+      ...(identity?.updatedAt ? { updatedAt: identity.updatedAt } : {}),
+      ...(identity?.schemaVersion !== null && identity?.schemaVersion !== undefined
+        ? { schemaVersion: identity.schemaVersion }
+        : {}),
     }
 
     try {
@@ -360,6 +486,17 @@ export function readRecoveryProject(): Promise<RecoveryProjectResult | null> {
     const rawMetadata = await readJsonFile(recoveryMetadataPath(), MAX_RECENT_FILE_BYTES)
     const metadata = parseRecoveryMetadata(rawMetadata)
     const matchingMetadata = metadata?.sha256 === digest ? metadata : null
+    const identity = peekProjectIdentityFromArchive(bytes)
+    if (identity?.schemaVersion === 8) {
+      return null
+    }
+    if (matchingMetadata?.projectPath && identity?.schemaVersion === 9) {
+      const official = await peekOfficialIdentity(matchingMetadata.projectPath)
+      if (official && officialIsNewerThanRecovery(official, identity)) {
+        await clearRecoveryProjectUnsafe()
+        return null
+      }
+    }
     return {
       projectName: matchingMetadata?.projectName ?? '恢复的课件.h5lesson',
       projectPath: matchingMetadata?.projectPath,

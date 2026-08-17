@@ -12,6 +12,7 @@ export interface FlowEditorSelection {
   readonly locationId: string
   readonly surfaceId: string
   readonly selectedBlockId: string
+  readonly selectedBlockIds: readonly string[]
 }
 
 /** A block target whose parent is `null` for top-level blocks or a section id. */
@@ -84,10 +85,16 @@ function assertNonEmpty(value: string, message: string): void {
 }
 
 function freezeSelection(selection: FlowEditorSelection): FlowEditorSelection {
+  const selectedBlockIds = Object.freeze(
+    selection.selectedBlockIds.length > 0
+      ? [...selection.selectedBlockIds]
+      : [selection.selectedBlockId],
+  )
   return Object.freeze({
     locationId: selection.locationId,
     surfaceId: selection.surfaceId,
     selectedBlockId: selection.selectedBlockId,
+    selectedBlockIds,
   })
 }
 
@@ -118,6 +125,7 @@ export function createFlowEditorSelection(
       locationId: projectOrLocationId,
       surfaceId: locationIdOrSurfaceId,
       selectedBlockId,
+      selectedBlockIds: [selectedBlockId],
     })
   }
   return selectFlowEditorBlock(
@@ -146,17 +154,45 @@ export function selectFlowEditorBlock(
   if (location.kind !== 'flow-block') {
     throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
   }
-  const surface = flowSurfaceIn(project, location.surfaceId)
-  validateBlockIdUnique(surface, blockId)
-  if (location.blockId !== blockId) {
-    throw new Error('所选 Flow 块与课程位置不一致，请重新选择')
+  return selectFlowEditorBlocks(project, locationId, [blockId])
+}
+
+/**
+ * Editor-only multi-select. The course location stays the page/heading anchor;
+ * ordinary blocks are selected without becoming course-level nodes.
+ */
+export function selectFlowEditorBlocks(
+  project: CourseProjectDocument,
+  locationId: string,
+  blockIds: readonly string[],
+): FlowEditorSelection {
+  assertNonEmpty(locationId, '课程位置不能为空')
+  if (blockIds.length === 0) throw new Error('所选 Flow 块不能为空')
+
+  const matches = project.locations.filter((candidate) => candidate.id === locationId)
+  if (matches.length === 0) throw new Error(`找不到课程位置：${locationId}`)
+  if (matches.length > 1) throw new Error(`课程位置 ID 重复：${locationId}`)
+  const location = matches[0]!
+  if (location.kind !== 'flow-block') {
+    throw new Error('当前课程位置不是 Flow 内容块，请重新选择')
   }
-  const found = findFlowBlockRecursive(surface.blocks, blockId)
-  if (!found) throw new Error(`找不到 Flow 块：${blockId}`)
+  const surface = flowSurfaceIn(project, location.surfaceId)
+  const uniqueIds: string[] = []
+  const seen = new Set<string>()
+  for (const blockId of blockIds) {
+    assertNonEmpty(blockId, '所选 Flow 块不能为空')
+    if (seen.has(blockId)) throw new Error(`所选 Flow 块重复：${blockId}`)
+    seen.add(blockId)
+    validateBlockIdUnique(surface, blockId)
+    const found = findFlowBlockRecursive(surface.blocks, blockId)
+    if (!found) throw new Error(`找不到 Flow 块：${blockId}`)
+    uniqueIds.push(found.block.id)
+  }
 
   return freezeSelection({
     locationId,
     surfaceId: location.surfaceId,
-    selectedBlockId: found.block.id,
+    selectedBlockId: uniqueIds[uniqueIds.length - 1]!,
+    selectedBlockIds: uniqueIds,
   })
 }

@@ -115,7 +115,7 @@ describe('multi-surface editorStore commands', () => {
     expect(session.history.past).toHaveLength(4)
     const duplicateId = session.selection.flowBlockId!
     expect(duplicateId).not.toBe(paragraphId)
-    expect(flowSurface(session).blocks).toHaveLength(3)
+    expect(flowSurface(session).blocks).toHaveLength(4)
 
     store.reorderCourseFlowBlock(duplicateId, 0)
     session = courseSession()
@@ -325,7 +325,7 @@ describe('multi-surface editorStore commands', () => {
     useEditorStore.getState().loadCourseProject(archive, null)
     const reopened = courseSession()
     expect(reopened.history.present.surfaces).toHaveLength(2)
-    expect(reopened.history.present.locations).toHaveLength(3)
+    expect(reopened.history.present.locations).toHaveLength(2)
     expect(reopened.selection).toMatchObject({
       surfaceKind: 'slide',
       flowBlockId: null,
@@ -333,7 +333,7 @@ describe('multi-surface editorStore commands', () => {
     expect(
       reopened.history.present.surfaces.find((surface) => surface.type === 'flow')!
         .blocks,
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(isV9SlideVerticalSliceDirty(reopened)).toBe(false)
 
     const flowLocation = reopened.history.present.locations.find(

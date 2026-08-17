@@ -147,6 +147,17 @@ export interface SlideSurfaceHostOptions {
   playbackControls?: 'canvas' | 'none'
   /** Course session mute seed (`project.media.audio.defaultMuted`). */
   initialMuted?: boolean
+  /**
+   * Course session progress source for teacher-controller progress labels.
+   * When omitted the host uses this surface's scenes.
+   */
+  courseProgressSource?: SlideCourseProgressSource
+}
+
+export interface SlideCourseProgressSource {
+  getLocations(): TeacherControllerSceneInfo[]
+  getCurrentLocationId(): string | null
+  getStateLabel?(): string | null
 }
 
 type EffectiveLayerEntry = {
@@ -601,6 +612,7 @@ function renderTeacherController(
   controller.appendChild(title)
   for (const button of data.buttons) {
     if (!button.visible) continue
+    if (button.label.trim() === '定位' || button.label.includes('试运行')) continue
     const element = dom.createElement('button')
     element.type = 'button'
     element.dataset.controllerButtonId = button.id
@@ -941,6 +953,7 @@ export class SlideSurfaceHost implements SurfaceHost {
   #teacherControllerSession = new Map<string, TeacherControllerDomSession>()
   #controllerMuted: boolean
   #audioChangeDisposer: (() => void) | null = null
+  #progressDisposer: (() => void) | null = null
   #surfaceAbortController: AbortController | null = null
   #queue: Promise<void> = Promise.resolve()
   #domPlayback = new DomPlaybackFreeze()
@@ -1002,6 +1015,9 @@ export class SlideSurfaceHost implements SurfaceHost {
             this.#refreshControllerStatuses()
           },
         )
+        this.#progressDisposer = interactions.events.on('course:location', () => {
+          this.#refreshControllerStatuses()
+        })
       }
       await this.#reconcile()
       // Mount stays quiet: the Published boot always follows with navigate →
@@ -1123,6 +1139,7 @@ export class SlideSurfaceHost implements SurfaceHost {
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'activate', () => record.host.activate?.())
       }
+      this.#syncInteractionEngine()
       this.#syncDomPlayback()
     })
   }
@@ -1130,6 +1147,8 @@ export class SlideSurfaceHost implements SurfaceHost {
   suspend(): Promise<void> {
     return this.#run(async () => {
       this.#active = false
+      this.#emitSceneExited(undefined)
+      this.#syncInteractionEngine()
       for (const record of this.#orderedRecords) {
         await this.#invoke(record, 'suspend', () => record.host.suspend?.())
       }
@@ -1148,6 +1167,7 @@ export class SlideSurfaceHost implements SurfaceHost {
           else await record.host.activate?.()
         })
       }
+      this.#syncInteractionEngine()
       this.#syncDomPlayback()
     })
   }
@@ -1320,6 +1340,8 @@ export class SlideSurfaceHost implements SurfaceHost {
       this.#interactionEngine = null
       this.#audioChangeDisposer?.()
       this.#audioChangeDisposer = null
+      this.#progressDisposer?.()
+      this.#progressDisposer = null
       this.#teacherControllerSession.clear()
       this.#surfaceAbortController?.abort('slide-surface-destroyed')
       for (const record of [...this.#orderedRecords].reverse()) {
@@ -1470,7 +1492,7 @@ export class SlideSurfaceHost implements SurfaceHost {
     this.#interactionEngine?.destroy()
     this.#interactionEngine = null
     const session = this.#options.interactions
-    if (!session || this.#destroyed || this.#mode !== 'playback') return
+    if (!session || this.#destroyed || this.#mode !== 'playback' || !this.#active) return
     const scene = this.#currentScene()
     this.#interactionEngine = new InteractionEngine({
       sceneId: scene.id,
@@ -1905,11 +1927,14 @@ export class SlideSurfaceHost implements SurfaceHost {
 
   /** Session bundle the DOM controller reads and reports back through. */
   #teacherControllerContext(): TeacherControllerDomContext {
+    const progressSource = this.#options.courseProgressSource
     return {
       canvas: this.#document.canvas,
-      scenes: this.#document.scenes.map((scene) => ({ id: scene.id, name: scene.name })),
-      getCurrentSceneId: () => this.#sceneId,
+      scenes: progressSource?.getLocations()
+        ?? this.#document.scenes.map((scene) => ({ id: scene.id, name: scene.name })),
+      getCurrentSceneId: () => progressSource?.getCurrentLocationId() ?? this.#sceneId,
       getStateLabel: () => {
+        if (progressSource) return progressSource.getStateLabel?.() ?? null
         const scene = this.#currentScene()
         const state = this.#stateId
           ? scene.presentation?.states.find((candidate) => candidate.id === this.#stateId)

@@ -264,6 +264,34 @@ describe('TeacherControllerDom collapse and drag sessions', () => {
     expect(onSessionChange).not.toHaveBeenCalled()
   })
 
+  it('omits 定位 and in-console 试运行 from the runtime action set', () => {
+    const container = document.createElement('div')
+    const controller = new TeacherControllerDom({
+      node: node({
+        buttons: [
+          { id: 'previous', action: { type: 'scene.previous' }, label: '上一场景', visible: true },
+          { id: 'locate', action: { type: 'scene.go', sceneId: 'scene-1' }, label: '定位', visible: true },
+          { id: 'trial', action: { type: 'scene.replay' }, label: '试运行当前页', visible: true },
+          { id: 'picker', action: { type: 'scene.open-picker' }, label: '场景目录', visible: true },
+        ],
+      }),
+      container,
+      canvas: { width: 1280, height: 720 },
+      scenes: [],
+      getCurrentSceneId: () => null,
+      getStateLabel: () => null,
+      getStatus: () => ({ muted: false, fullscreen: false }),
+      getSession: () => ({ offset: { dx: 0, dy: 0 }, collapsed: false }),
+      onSessionChange: vi.fn(),
+      onAction: vi.fn(),
+      getInteractive: () => true,
+    })
+    expect([...container.querySelectorAll('[data-controller-button-id]')].map(
+      (button) => (button as HTMLElement).dataset.controllerButtonId,
+    )).toEqual(['previous', 'picker'])
+    controller.destroy()
+  })
+
   it('destroys the controller and releases the fullscreenchange listener', () => {
     const { controller, container, root, setStatus } = harness()
     controller.destroy()

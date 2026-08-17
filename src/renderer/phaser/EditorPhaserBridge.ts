@@ -41,6 +41,17 @@ export interface NodesTransformEndEvent {
   nodes: NodeTransformEndEvent[]
 }
 
+export interface EditorOverlayHitTarget {
+  readonly nodeId: string
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly rotation: number
+  readonly visible: boolean
+  readonly locked: boolean
+}
+
 export type NodesTransformPreviewEvent = NodesTransformEndEvent
 
 type Handler<T> = (event: T) => void
@@ -53,6 +64,7 @@ export class EditorPhaserBridge {
     | {
         document: SceneDocument
         components: Record<string, ComponentPackageData>
+        hitTargets?: readonly EditorOverlayHitTarget[]
       }
     | undefined
 
@@ -70,7 +82,7 @@ export class EditorPhaserBridge {
     this.scene = scene
     if (this.pending) {
       const { document, components } = this.pending
-      this.loadDocument(scene, document, components)
+      this.loadDocument(scene, document, components, this.pending.hitTargets)
       this.pending = undefined
     }
   }
@@ -79,8 +91,9 @@ export class EditorPhaserBridge {
     scene: EditorScene,
     document: SceneDocument,
     components: Record<string, ComponentPackageData>,
+    hitTargets?: readonly EditorOverlayHitTarget[],
   ): void {
-    scene.loadDocument(document, components)
+    scene.loadDocument(document, components, hitTargets)
     if (this.scene !== scene) return
 
     // Loading a document recreates every proxy and intentionally clears the
@@ -92,12 +105,13 @@ export class EditorPhaserBridge {
   loadScene(
     document: SceneDocument,
     components: Record<string, ComponentPackageData>,
+    hitTargets?: readonly EditorOverlayHitTarget[],
   ): void {
     if (!this.scene) {
-      this.pending = { document, components }
+      this.pending = { document, components, hitTargets }
       return
     }
-    this.loadDocument(this.scene, document, components)
+    this.loadDocument(this.scene, document, components, hitTargets)
   }
 
   applyNode(node: SceneNode): void {

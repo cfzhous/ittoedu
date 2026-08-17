@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Copy, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ensureScenePresentation } from '../../shared/presentation'
 import { useEditorStore } from '../store/editorStore'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -27,6 +27,14 @@ import {
 } from './SceneThumbnail'
 import { hasUnrepresentedRuntime } from './sceneThumbnailComposition'
 import type { FlowEditorView } from '../course/flowEditorView'
+import type {
+  CoursePageTreeNode,
+  CourseStructureViewModel,
+} from '../course/courseEditorLayout'
+import {
+  GLOBAL_LAYER_ENTRY_ID,
+  SHARED_CONTENT_SECTION_ID,
+} from '../course/courseEditorLayout'
 import { FlowOutlinePanel } from './FlowOutlinePanel'
 import {
   SpatialCameraPanel,
@@ -384,12 +392,14 @@ function ScenePanelContent({
   onActivateLocation,
   onAddFlowSurface,
   onAddSpatialSurface,
+  footer,
 }: {
   documentControl: ScenePanelDocumentControl
   courseLocations?: readonly ScenePanelCourseLocation[]
   onActivateLocation?: (locationId: string) => void
   onAddFlowSurface?: () => void
   onAddSpatialSurface?: () => void
+  footer?: ReactNode
 }) {
   const [pendingDelete, setPendingDelete] = useState<ScenePanelSceneRow | null>(null)
   const sensors = useSensors(
@@ -430,12 +440,18 @@ function ScenePanelContent({
           新建场景
         </button>
       </div>
-      <div className="global-layer-entry-wrap">
+      <div
+        className="global-layer-entry-wrap"
+        data-testid="shared-content-section"
+        aria-label="共享内容"
+      >
         <button
           type="button"
           className={`global-layer-entry${documentControl.editingScope === 'global' ? ' global-layer-entry--active' : ''}`}
           aria-pressed={documentControl.editingScope === 'global'}
           data-testid="global-layer-entry"
+          data-entry-id={GLOBAL_LAYER_ENTRY_ID}
+          data-section-id={SHARED_CONTENT_SECTION_ID}
           disabled={documentControl.globalEditingDisabled}
           title={documentControl.globalEditingUnavailableReason}
           onClick={documentControl.onActivateGlobal}
@@ -515,6 +531,7 @@ function ScenePanelContent({
           setPendingDelete(null)
         }}
       />
+      {footer}
     </aside>
   )
 }
@@ -582,12 +599,259 @@ export function LegacyScenePanelAdapter() {
   }} />
 }
 
+function SharedContentSection({
+  active,
+  globalElementCount,
+  globalHasRuntime,
+  onSelect,
+}: {
+  active: boolean
+  globalElementCount?: number
+  globalHasRuntime?: boolean
+  onSelect(): void
+}) {
+  return (
+    <section
+      className="shared-content-section"
+      data-testid="shared-content-section"
+      aria-label="共享内容"
+    >
+      <div className="panel-header">
+        <h2 className="panel-title">共享内容</h2>
+      </div>
+      <button
+        type="button"
+        className={`global-layer-entry${active ? ' global-layer-entry--active' : ''}`}
+        aria-pressed={active}
+        data-testid="global-layer-entry"
+        data-entry-id={GLOBAL_LAYER_ENTRY_ID}
+        data-section-id={SHARED_CONTENT_SECTION_ID}
+        onClick={onSelect}
+      >
+        <span className="global-layer-entry__icon"><Globe2 size={19} /></span>
+        <span className="global-layer-entry__content">
+          <strong>全局层</strong>
+          <small>
+            全课
+            {globalElementCount !== undefined ? ` · ${globalElementCount} 个元素` : ''}
+            {globalHasRuntime ? ' · 自定义动态内容' : ''}
+          </small>
+        </span>
+        <Layers3 size={16} />
+      </button>
+    </section>
+  )
+}
+
+function CoursePageTreeItem({
+  node,
+  activeLocationId,
+  onActivate,
+}: {
+  node: CoursePageTreeNode
+  activeLocationId?: string | null
+  onActivate(locationId: string): void
+}) {
+  const active = Boolean(node.locationId && node.locationId === activeLocationId)
+  return (
+    <div
+      className="course-page-tree__node"
+      data-kind={node.kind}
+      data-testid={`course-page-node-${node.id}`}
+    >
+      <button
+        type="button"
+        className={`course-page-tree__label${active ? ' is-active' : ''}`}
+        disabled={!node.locationId}
+        aria-current={active ? 'page' : undefined}
+        onClick={() => {
+          if (node.locationId) onActivate(node.locationId)
+        }}
+      >
+        <span>{node.label}</span>
+      </button>
+      {node.children.length > 0 && (
+        <div className="course-page-tree__children">
+          {node.children.map((child) => (
+            <CoursePageTreeItem
+              key={child.id}
+              node={child}
+              activeLocationId={activeLocationId}
+              onActivate={onActivate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AddContentMenu({
+  onAddSlidePage,
+  onAddFlowPage,
+  onAddSpatialPage,
+}: {
+  onAddSlidePage?(): void
+  onAddFlowPage?(): void
+  onAddSpatialPage?(): void
+}) {
+  return (
+    <details className="add-content-menu" data-testid="add-content-menu">
+      <summary className="secondary-button">
+        <Plus size={14} />
+        新增内容
+      </summary>
+      <div className="add-content-menu__panel" role="menu" aria-label="新增内容">
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="add-slide-page"
+          onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open')
+            onAddSlidePage?.()
+          }}
+        >
+          空白演示
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="add-flow-page"
+          onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open')
+            onAddFlowPage?.()
+          }}
+        >
+          空白流式
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="add-spatial-page"
+          onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open')
+            onAddSpatialPage?.()
+          }}
+        >
+          空白无限画布
+        </button>
+      </div>
+    </details>
+  )
+}
+
+function CompactSlideList({
+  documentControl,
+}: {
+  documentControl: ScenePanelDocumentControl
+}) {
+  const [pendingDelete, setPendingDelete] = useState<ScenePanelSceneRow | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    const oldIndex = documentControl.scenes.findIndex((scene) => scene.id === active.id)
+    const newIndex = documentControl.scenes.findIndex((scene) => scene.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    documentControl.onReorderScenes(
+      arrayMove([...documentControl.scenes], oldIndex, newIndex)
+        .map((scene) => scene.id),
+    )
+  }
+  return (
+    <>
+      <div className="panel-header">
+        <h2 className="panel-title">幻灯片</h2>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={documentControl.onAddScene}
+          data-testid="add-scene"
+        >
+          <Plus size={14} />
+          新建场景
+        </button>
+      </div>
+      {documentControl.surfaceLayer && (
+        <button
+          type="button"
+          className={`global-layer-entry global-layer-entry--surface${documentControl.editingScope === 'surface' ? ' global-layer-entry--active' : ''}`}
+          aria-pressed={documentControl.editingScope === 'surface'}
+          data-testid="surface-layer-entry"
+          disabled={documentControl.surfaceLayer.editingDisabled}
+          title={documentControl.surfaceLayer.editingUnavailableReason}
+          onClick={documentControl.surfaceLayer.onActivate}
+        >
+          <span className="global-layer-entry__icon"><Layers3 size={19} /></span>
+          <span className="global-layer-entry__content">
+            <strong>当前内容共用</strong>
+            <small>
+              {documentControl.surfaceLayer.elementCount} 个元素 · 场景间共享
+              {documentControl.surfaceLayer.hasDynamicContent ? ' · 含动态内容' : ''}
+            </small>
+          </span>
+        </button>
+      )}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={onDragEnd}
+      >
+        <SortableContext
+          items={documentControl.scenes.map((scene) => scene.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="scene-list">
+            {documentControl.scenes.map((scene, index) => (
+              <SortableScene
+                key={scene.id}
+                scene={scene}
+                index={index}
+                canDelete={documentControl.scenes.length > 1}
+                onActivate={() => documentControl.onActivateScene(scene.id)}
+                onRename={(name) => documentControl.onRenameScene(scene.id, name)}
+                onDelete={() => setPendingDelete(scene)}
+                onDuplicate={() => documentControl.onDuplicateScene(scene.id)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title="删除场景？"
+        message={
+          pendingDelete
+            ? `“${pendingDelete.name}”及其中的全部节点将被删除。此操作可以撤销。`
+            : ''
+        }
+        confirmLabel="删除场景"
+        danger
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) documentControl.onDeleteScene(pendingDelete.id)
+          setPendingDelete(null)
+        }}
+      />
+    </>
+  )
+}
+
 export function ScenePanel({
   documentControl,
   flowDocumentControl,
   spatialDocumentControl,
   courseLocations,
+  courseStructure,
+  authoringScope,
+  activeLocationId,
   onActivateLocation,
+  onSelectGlobalLayer,
+  onAddSlidePage,
+  onAddFlowPage,
+  onAddSpatialPage,
   onAddFlowSurface,
   onAddSpatialSurface,
 }: {
@@ -595,10 +859,83 @@ export function ScenePanel({
   flowDocumentControl?: ScenePanelFlowDocumentControl
   spatialDocumentControl?: ScenePanelSpatialDocumentControl
   courseLocations?: readonly ScenePanelCourseLocation[]
+  courseStructure?: CourseStructureViewModel
+  authoringScope?: 'location' | 'global-layer'
+  activeLocationId?: string | null
   onActivateLocation?: (locationId: string) => void
+  onSelectGlobalLayer?: () => void
+  onAddSlidePage?: () => void
+  onAddFlowPage?: () => void
+  onAddSpatialPage?: () => void
   onAddFlowSurface?: () => void
   onAddSpatialSurface?: () => void
 } = {}) {
+  if (courseStructure) {
+    const unavailable = courseStructure.layout.layout === 'unavailable'
+    const compactSlide = courseStructure.pageTree.compact && Boolean(documentControl)
+    if (compactSlide && documentControl) {
+      return (
+        <ScenePanelContent
+          documentControl={documentControl}
+          footer={(
+            <AddContentMenu
+              onAddSlidePage={onAddSlidePage}
+              onAddFlowPage={onAddFlowPage ?? onAddFlowSurface}
+              onAddSpatialPage={onAddSpatialPage ?? onAddSpatialSurface}
+            />
+          )}
+        />
+      )
+    }
+    return (
+      <aside className="panel scene-panel" aria-label={courseStructure.shell.leftPanelLabel}>
+        <SharedContentSection
+          active={authoringScope === 'global-layer'}
+          globalElementCount={documentControl?.globalElementCount}
+          globalHasRuntime={documentControl?.globalHasRuntime}
+          onSelect={() => onSelectGlobalLayer?.()}
+        />
+        {unavailable ? (
+          <div
+            className="right-sidebar-capability-gate"
+            role="status"
+            data-testid="scene-panel-course-location-gate"
+          >
+            <strong>当前内容暂不可编辑</strong>
+            <p>{courseStructure.layout.unavailable?.message ?? '当前位置不可用'}</p>
+          </div>
+        ) : (
+          <section
+            className="course-page-tree"
+            data-testid="course-page-tree"
+            aria-label="课程结构"
+          >
+            <div className="panel-header">
+              <h2 className="panel-title">
+                {courseStructure.shell.leftPanelLabel === '幻灯片' ? '幻灯片' : '课程结构'}
+              </h2>
+            </div>
+            <div className="course-page-tree__list">
+              {courseStructure.pageTree.nodes.map((node) => (
+                <CoursePageTreeItem
+                  key={node.id}
+                  node={node}
+                  activeLocationId={activeLocationId}
+                  onActivate={(locationId) => onActivateLocation?.(locationId)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+        <AddContentMenu
+          onAddSlidePage={onAddSlidePage}
+          onAddFlowPage={onAddFlowPage ?? onAddFlowSurface}
+          onAddSpatialPage={onAddSpatialPage ?? onAddSpatialSurface}
+        />
+      </aside>
+    )
+  }
+
   const courseLocationNav = courseLocations ? (
     <CourseLocationNav
       courseLocations={courseLocations}

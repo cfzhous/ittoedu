@@ -3,6 +3,7 @@ import { createTeacherControllerNode } from '@/renderer/project/createProject'
 import {
   constrainTeacherControllerOffset,
   logicalDragDelta,
+  runtimeTeacherControllerButtons,
   teacherControllerGestureOutcome,
 } from '@/player/teacherControllerRuntimeSession'
 import { createTeacherControllerLayout } from '@/shared/teacherControllerLayout'
@@ -63,5 +64,14 @@ describe('teacher controller runtime session geometry', () => {
 
     expect(constrained.dx).toBeGreaterThan(-1000)
     expect(constrained.dy).toBeGreaterThan(-1000)
+  })
+
+  it('drops authoring-only 定位 and 试运行 buttons from the runtime console', () => {
+    expect(runtimeTeacherControllerButtons([
+      { id: 'previous', action: { type: 'scene.previous' as const }, label: '上一场景', visible: true },
+      { id: 'locate', action: { type: 'scene.go' as const, sceneId: 'scene-1' }, label: '定位', visible: true },
+      { id: 'trial', action: { type: 'scene.replay' as const }, label: '试运行', visible: true },
+      { id: 'picker', action: { type: 'scene.open-picker' as const }, label: '场景目录', visible: true },
+    ]).map((button) => button.id)).toEqual(['previous', 'picker'])
   })
 })

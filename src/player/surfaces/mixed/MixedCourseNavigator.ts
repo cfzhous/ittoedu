@@ -29,6 +29,8 @@ export interface MixedCoursePlayerPort {
   activateSurface(surfaceId: string): Promise<SurfaceOperationResult>
   resetSurface(surfaceId: string, scope?: 'surface' | 'course'): Promise<SurfaceOperationResult>
   resetCourse(): Promise<readonly SurfaceOperationResult[]>
+  /** Optional: release the previous Mixed surface session without destroying the host. */
+  releaseSurfaceSession?(surfaceId: string): Promise<SurfaceOperationResult>
 }
 
 export interface MixedCourseNavigatorOptions {
@@ -127,9 +129,12 @@ export class MixedCourseNavigator {
     const surface = this.#surfaceMap.get(link.surfaceId)
     if (!surface) throw new Error(`Unknown mixed-course surface: ${link.surfaceId}`)
     if (link.targetId !== undefined) assertStableId(link.targetId, 'targetId')
+    const previous = this.#current
+    if (previous && previous.surfaceId !== link.surfaceId) {
+      await this.#player.releaseSurfaceSession?.(previous.surfaceId)
+    }
     const activation = await this.#player.activateSurface(link.surfaceId)
     if (!activation.ok) throw activation.failure?.error ?? new Error('Surface activation failed')
-    const previous = this.#current
     if (previous && options.recordHistory !== false) this.#history.push(previous)
     this.#current = { ...link }
     await this.#onTarget?.(link.surfaceId, link.targetId)

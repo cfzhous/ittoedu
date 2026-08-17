@@ -200,3 +200,115 @@ export function rotatedRectIntersectsStage(
     centerX - extentX < STAGE_VIEWPORT_WIDTH &&
     centerY - extentY < STAGE_VIEWPORT_HEIGHT
 }
+
+export const STAGE_RESIZE_HANDLE_DIRECTIONS = [
+  'nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w',
+] as const
+
+export type StageResizeHandleDirection = (typeof STAGE_RESIZE_HANDLE_DIRECTIONS)[number]
+
+/**
+ * CSS transform T10 must apply to both the Player stage and the Phaser
+ * overlay so objects, the selection box and eight handles share one matrix.
+ */
+export function stageOverlayCssTransform(transform: StageViewportTransform): string {
+  return `translate(${transform.stageRect.x}px, ${transform.stageRect.y}px) scale(${transform.scale})`
+}
+
+export interface StageSelectionOverlayItem {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+export interface StageSelectionOverlayGeometry {
+  readonly objects: readonly StageRect[]
+  readonly selectionBox: StageRect
+  readonly handles: Readonly<Record<StageResizeHandleDirection, StagePoint>>
+}
+
+function unionWorldRect(items: readonly StageSelectionOverlayItem[]): StageRect {
+  const left = Math.min(...items.map((item) => item.x))
+  const top = Math.min(...items.map((item) => item.y))
+  const right = Math.max(...items.map((item) => item.x + item.width))
+  const bottom = Math.max(...items.map((item) => item.y + item.height))
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
+function handleWorldPoint(
+  box: StageRect,
+  direction: StageResizeHandleDirection,
+): StagePoint {
+  const midX = box.x + box.width / 2
+  const midY = box.y + box.height / 2
+  const right = box.x + box.width
+  const bottom = box.y + box.height
+  switch (direction) {
+    case 'nw': return { x: box.x, y: box.y }
+    case 'n': return { x: midX, y: box.y }
+    case 'ne': return { x: right, y: box.y }
+    case 'e': return { x: right, y: midY }
+    case 'se': return { x: right, y: bottom }
+    case 's': return { x: midX, y: bottom }
+    case 'sw': return { x: box.x, y: bottom }
+    case 'w': return { x: box.x, y: midY }
+  }
+}
+
+/**
+ * Maps authored objects, the selection box and eight handles through the
+ * same viewport transform. Visual handle direction stays aligned with data.
+ */
+export function stageSelectionOverlayGeometry(
+  transform: StageViewportTransform,
+  items: readonly StageSelectionOverlayItem[],
+): StageSelectionOverlayGeometry | null {
+  if (items.length === 0) return null
+  if (items.some((item) => item.width <= 0 || item.height <= 0)) return null
+  const worldBox = items.length === 1
+    ? {
+        x: items[0]!.x,
+        y: items[0]!.y,
+        width: items[0]!.width,
+        height: items[0]!.height,
+      }
+    : unionWorldRect(items)
+  const handles = Object.fromEntries(
+    STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => [
+      direction,
+      worldToClient(transform, handleWorldPoint(worldBox, direction)),
+    ]),
+  ) as Record<StageResizeHandleDirection, StagePoint>
+  return {
+    objects: items.map((item) => worldRectToClient(transform, item)),
+    selectionBox: worldRectToClient(transform, worldBox),
+    handles,
+  }
+}
+
+/**
+ * Applies one handle drag in world space. West/north grow by moving origin
+ * opposite the pointer so the visual edge and stored frame stay aligned.
+ */
+export function resizeWorldFrameFromHandle(
+  start: StageRect,
+  direction: StageResizeHandleDirection,
+  worldPointer: StagePoint,
+  minimumSize = 16,
+): StageRect {
+  let left = start.x
+  let top = start.y
+  let right = start.x + start.width
+  let bottom = start.y + start.height
+  if (direction.includes('w')) left = Math.min(worldPointer.x, right - minimumSize)
+  if (direction.includes('e')) right = Math.max(worldPointer.x, left + minimumSize)
+  if (direction.includes('n')) top = Math.min(worldPointer.y, bottom - minimumSize)
+  if (direction.includes('s')) bottom = Math.max(worldPointer.y, top + minimumSize)
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  }
+}

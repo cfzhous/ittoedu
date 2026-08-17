@@ -180,3 +180,22 @@ export function teacherControllerHitBounds(
 ): { left: number; top: number; right: number; bottom: number } {
   return rotatedBounds(node, offset, collapsed)
 }
+
+/**
+ * Runtime consoles keep the authored action set minus authoring-only labels.
+ * “定位” and in-console “试运行” belong to the editor shell, not playback.
+ */
+export function isRuntimeTeacherControllerButton(button: {
+  label: string
+  visible?: boolean
+}): boolean {
+  if (button.visible === false) return false
+  const label = button.label.trim()
+  return label !== '定位' && !label.includes('试运行')
+}
+
+export function runtimeTeacherControllerButtons<T extends { label: string; visible: boolean }>(
+  buttons: readonly T[],
+): T[] {
+  return buttons.filter((button) => isRuntimeTeacherControllerButton(button))
+}

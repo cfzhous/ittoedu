@@ -12,7 +12,6 @@ import { componentManifestSchema } from '../../shared/componentSchema'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
 import { sceneNodeSchema } from '../../shared/projectSchema'
 import { runtimeDocumentSchema } from '../../shared/runtimeSchema'
-import { courseRuntimeDefinitionSchema } from '../../shared/courseProjectSchema'
 import type { CourseRuntimeDefinition } from '../../shared/courseProjectTypes'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import type { SceneNode, AssetMeta } from '../../shared/projectTypes'
@@ -28,6 +27,7 @@ import {
   selectSelectedNode,
   useEditorStore,
 } from '../store/editorStore'
+import { runtimeSameSceneLimitMessage } from '../authoring/runtimeAuthoringContext'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
 type ComponentDocument = 'manifest' | 'runtime'
@@ -520,8 +520,10 @@ function V9DeveloperTab() {
     (state) => state.replaceCourseObjectJson,
   )
   const updateRuntime = useEditorStore((state) => state.updateCourseRuntime)
+  const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
   const [activeSection, setActiveSection] = useState<DeveloperSection>('runtime')
   const [selectedRuleId, setSelectedRuleId] = useState<string>('')
+  const [componentDocument, setComponentDocument] = useState<ComponentDocument>('runtime')
   const snapshot = useMemo(
     () => courseSession === null
       ? null
@@ -532,11 +534,22 @@ function V9DeveloperTab() {
     () => courseSession === null ? null : v9ScopedRuntimeView(courseSession),
     [courseSession],
   )
+  const locationKind = courseSession === null
+    ? null
+    : courseSession.history.present.locations.find(
+        (candidate) => candidate.id === courseSession.selection.locationId,
+      )?.kind ?? null
   const scopeName = courseSession === null
     ? ''
     : courseSession.editingScope === 'global'
       ? '全局层'
-      : '当前幻灯片'
+      : courseSession.editingScope === 'surface'
+        ? '当前内容共用层'
+        : locationKind === 'flow-block'
+          ? '流式页面'
+          : locationKind === 'spatial-camera'
+            ? '无限画布'
+            : '当前页面'
   const project = courseSession?.history.present ?? null
   const editingScope = courseSession?.editingScope ?? 'scene'
   const activeScene = project === null
@@ -560,15 +573,18 @@ function V9DeveloperTab() {
       setSelectedRuleId(rules[0]?.id ?? '')
     }
   }, [rules, selectedRuleId])
-  if (courseSession === null || snapshot === null) return null
-
-  const selectedRule = rules.find((rule) => rule.id === selectedRuleId)
-  const selectedNodeId = courseSession.selection.selectionIds.at(-1) ?? null
-  const node = snapshot.document.nodes.find((candidate) => candidate.id === selectedNodeId) ?? null
+  const selectedNodeId = courseSession?.selection.selectionIds.at(-1) ?? null
+  const node = snapshot?.document.nodes.find((candidate) => candidate.id === selectedNodeId) ?? null
   const nodeJson = useMemo(
     () => node ? JSON.stringify(node, null, 2) : '',
     [node],
   )
+  const selectedComponent = node?.type === 'external-component'
+    ? snapshot?.componentPackages[node.component.packageId]
+    : undefined
+  if (courseSession === null || snapshot === null) return null
+
+  const selectedRule = rules.find((rule) => rule.id === selectedRuleId)
   const applyObjectJson = (value: string): void => {
     if (!node || selectedNodeId === null) throw new Error('未选择对象')
     const parsed = sceneNodeSchema.safeParse(JSON.parse(value))
@@ -614,7 +630,7 @@ function V9DeveloperTab() {
     {
       id: 'component',
       label: '组件代码',
-      status: '接入中',
+      status: selectedComponent ? '可查看' : '未选择',
     },
   ]
 
@@ -634,8 +650,7 @@ function V9DeveloperTab() {
           <button
             type="button"
             className="secondary-button"
-            disabled
-            title="当前位置试运行请使用画布下方的试运行按钮。"
+            onClick={() => setCanvasMode('run')}
           >
             <Play size={13} />试运行
           </button>
@@ -669,19 +684,24 @@ function V9DeveloperTab() {
       >
         {activeSection === 'runtime' && (
           runtimeView ? (
-            <V9RuntimeEditor
-              runtime={runtimeView.runtime}
-              assets={courseSession.history.present.assets}
-              onUpdate={updateRuntime}
-            />
+            <>
+              <p className="property-hint" data-testid="runtime-same-scene-limit">
+                {runtimeSameSceneLimitMessage()}
+              </p>
+              <V9RuntimeEditor
+                runtime={runtimeView.runtime}
+                assets={courseSession.history.present.assets}
+                onUpdate={updateRuntime}
+              />
+            </>
           ) : (
             <section className="developer-empty-card">
               <Code2 size={20} />
               <strong>当前作用域没有自定义运行时</strong>
-              <span>运行时的创建和宿主接入将在 Runtime 宿主（M4-RT）集成后提供；现有运行时源码仍可直接修改。</span>
-              <button type="button" className="secondary-button" disabled>
-                创建运行时模板
-              </button>
+              <span data-testid="runtime-same-scene-limit">
+                {runtimeSameSceneLimitMessage()}
+                已有运行时的源码、内容值和素材绑定仍可在此编辑。
+              </span>
             </section>
           )
         )}
@@ -738,11 +758,65 @@ function V9DeveloperTab() {
         )}
 
         {activeSection === 'component' && (
-          <section className="developer-empty-card">
-            <Code2 size={20} />
-            <strong>组件代码查看接入中</strong>
-            <span>组件作者目标进入统一图层后，可在这里查看和受控修改组件 Manifest 与 Runtime；第三方组件修改仍走工程副本流程。</span>
-          </section>
+          selectedComponent && node?.type === 'external-component' ? (
+            <div className="developer-component-workspace">
+              <section className="developer-component-heading">
+                <div>
+                  <strong>{selectedComponent.manifest.name}</strong>
+                  <span>
+                    第三方组件包默认只读。这里查看已嵌入工程的 Manifest 与 Runtime；替换包请使用组件页。
+                  </span>
+                </div>
+              </section>
+              <div
+                className="developer-document-tabs"
+                role="tablist"
+                aria-label="组件文档"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={componentDocument === 'runtime'}
+                  className={componentDocument === 'runtime' ? 'is-active' : ''}
+                  onClick={() => setComponentDocument('runtime')}
+                >
+                  Runtime.js
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={componentDocument === 'manifest'}
+                  className={componentDocument === 'manifest' ? 'is-active' : ''}
+                  onClick={() => setComponentDocument('manifest')}
+                >
+                  Manifest.json
+                </button>
+              </div>
+              {componentDocument === 'manifest' ? (
+                <CodeDocumentEditor
+                  title="组件 Manifest"
+                  description="只读查看当前工程嵌入的组件清单。"
+                  value={JSON.stringify(selectedComponent.manifest, null, 2)}
+                  language="json"
+                  readOnly
+                />
+              ) : (
+                <CodeDocumentEditor
+                  title="组件 Runtime"
+                  description="只读查看当前工程嵌入的组件运行时源码。"
+                  value={selectedComponent.runtimeSource}
+                  language="javascript"
+                  readOnly
+                />
+              )}
+            </div>
+          ) : (
+            <section className="developer-empty-card">
+              <Code2 size={20} />
+              <strong>未选择互动组件</strong>
+              <span>在画布或图层面板选择互动组件后，可查看其 Manifest 与 Runtime。</span>
+            </section>
+          )
         )}
       </div>
     </div>
@@ -931,7 +1005,7 @@ function V9RuntimeEditor({ runtime, assets, onUpdate }: V9RuntimeEditorProps) {
         </section>
       )}
       <p className="developer-card__message">
-        Runtime API 2/3 的执行与预览由运行时宿主（M4-RT）负责；这里只修改工程中的运行时定义。
+        {runtimeSameSceneLimitMessage()} Runtime API 2/3 定义仍可在此编辑；播放与预览由运行时宿主执行。
       </p>
     </>
   )

@@ -8,11 +8,16 @@ import {
   undoCourseHistory,
   updateCourseProject,
 } from '@/renderer/course/courseStudioModel'
+import { createEditorSelectionSnapshot } from '@/renderer/course/editorActionTypes'
 import {
   deleteFlowEditorBlock,
+  deleteFlowEditorBlocks,
   duplicateFlowEditorBlock,
+  executeFlowEditorAction,
+  indentFlowEditorBlock,
   insertFlowEditorBlock,
   moveFlowEditorBlock,
+  outdentFlowEditorBlock,
   reorderFlowEditorBlock,
   updateFlowEditorBlock,
 } from '@/renderer/course/flowEditorCommands'
@@ -150,7 +155,7 @@ describe('Flow editor commands', () => {
     )).toBe(true)
     expect(history.present.locations.some((location) =>
       location.kind === 'flow-block' && location.blockId === 'nested-insert',
-    )).toBe(true)
+    )).toBe(false)
   })
 
   it('updates top-level and nested blocks with one history each and refreshes labels', () => {
@@ -375,5 +380,150 @@ describe('Flow editor commands', () => {
     }
     expect(history.past).toHaveLength(commands.length)
     expect(history.present.revision).toBe(project.revision + commands.length)
+  })
+
+  it('does not promote ordinary blocks to course locations and keeps heading anchors', () => {
+    const project = createFlowProject()
+    let history = createCourseHistory(project)
+    history = insertFlowEditorBlock(history, {
+      surfaceId: 'flow',
+      parentId: null,
+      index: 0,
+      block: { id: 'plain-p', type: 'paragraph', text: '普通段落' },
+    }, NOW)
+    expect(history.present.locations.some((location) =>
+      location.kind === 'flow-block' && location.blockId === 'plain-p',
+    )).toBe(false)
+    history = insertFlowEditorBlock(history, {
+      surfaceId: 'flow',
+      parentId: null,
+      index: 0,
+      block: { id: 'anchor-h', type: 'heading', level: 2, text: '目录标题' },
+    }, NOW)
+    expect(history.present.locations.some((location) =>
+      location.kind === 'flow-block' && location.blockId === 'anchor-h',
+    )).toBe(true)
+  })
+
+  it('indents into the previous section and outdents back with one history each', () => {
+    const project = createFlowProject()
+    let history = createCourseHistory(project)
+    history = indentFlowEditorBlock(history, target('flow', 'sec-2', null), NOW)
+    expectOneHistory(createCourseHistory(project), history)
+    let flow = history.present.surfaces.find((surface) => surface.id === 'flow')
+    const sec1 = flow?.type === 'flow' ? flow.blocks.find((block) => block.id === 'sec-1') : undefined
+    expect(sec1?.type === 'section' ? sec1.blocks.map((block) => block.id) : []).toContain('sec-2')
+    history = outdentFlowEditorBlock(history, target('flow', 'sec-2', 'sec-1'), NOW)
+    flow = history.present.surfaces.find((surface) => surface.id === 'flow')
+    expect(flow?.type === 'flow' ? flow.blocks.map((block) => block.id) : []).toContain('sec-2')
+  })
+
+  it('deletes a multi-selection in one history and repairs interaction refs', () => {
+    const project = createFlowProject()
+    const prepared = updateCourseProject(project, (draft) => {
+      draft.courseState.push({ key: 'flowUnlocked', valueType: 'boolean', defaultValue: false })
+      draft.navigationGuards.push({
+        id: 'guard-top',
+        effect: 'block',
+        toLocationIds: ['top-a'],
+        match: 'all',
+        conditions: [{ type: 'exists', key: 'flowUnlocked', exists: true }],
+        message: '先完成',
+      })
+      draft.globalInteractions.push({
+        id: 'go-top',
+        enabled: true,
+        trigger: { type: 'presenter.command', command: 'next' },
+        conditions: [],
+        actions: [{
+          id: 'step-go',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'scene.go', sceneId: 'top-a' },
+        }],
+      })
+    }, NOW)
+    let history = createCourseHistory(prepared)
+    history = deleteFlowEditorBlocks(history, [
+      target('flow', 'top-a', null),
+      target('flow', 'top-list', null),
+    ], NOW)
+    expect(history.past).toHaveLength(1)
+    expect(history.present.revision).toBe(prepared.revision + 1)
+    expect(history.present.locations.some((location) => location.id === 'top-a')).toBe(false)
+    expect(history.present.navigationGuards).toEqual([])
+    expect(history.present.globalInteractions).toEqual([])
+  })
+
+  it('executes T02 actionIds and returns ok/reason for the T10 adapter', () => {
+    const project = createFlowProject()
+    const history = createCourseHistory(project)
+    const snapshot = createEditorSelectionSnapshot({
+      sessionId: 'session-flow',
+      projectId: project.id,
+      projectRevision: project.revision,
+      locationId: 'top-a',
+      surfaceId: 'flow',
+      surfaceKind: 'flow',
+      owner: 'flow-block',
+      targets: [{
+        owner: 'flow-block',
+        layerItemId: 'top-a',
+        kind: 'flow-block',
+        label: '顶部段落 A',
+      }],
+    })
+    const copied = executeFlowEditorAction('copy', snapshot, history, { now: NOW })
+    expect(copied).toMatchObject({ ok: true, reason: '已复制当前选择' })
+    expect(copied.history).toBe(history)
+    expect(copied.clipboard?.[0]).toMatchObject({ id: 'top-a', type: 'paragraph' })
+
+    const pasted = executeFlowEditorAction('paste', snapshot, history, {
+      now: NOW,
+      clipboard: copied.clipboard,
+    })
+    expect(pasted.ok).toBe(true)
+    expect(pasted.history.past).toHaveLength(1)
+    const flow = pasted.history.present.surfaces.find((surface) => surface.id === 'flow')
+    const knownIds = new Set(['top-a', 'top-list', 'sec-1', 'sec-2'])
+    const created = flow?.type === 'flow'
+      ? flow.blocks.filter((block) => !knownIds.has(block.id))
+      : []
+    expect(created).toHaveLength(1)
+    expect(created[0]).toMatchObject({ type: 'paragraph', text: '顶部段落 A' })
+    expect(pasted.history.present.locations.some((location) =>
+      location.kind === 'flow-block' && location.blockId === created[0]!.id,
+    )).toBe(false)
+
+    const cut = executeFlowEditorAction('cut', snapshot, history, { now: NOW })
+    expect(cut.ok).toBe(true)
+    expect(cut.clipboard?.[0]).toMatchObject({ id: 'top-a', type: 'paragraph' })
+    expect(cut.history.present.locations.some((location) => location.id === 'top-a')).toBe(false)
+
+    const deleted = executeFlowEditorAction('delete', snapshot, history, { now: NOW })
+    expect(deleted.ok).toBe(true)
+    expect(deleted.history.past).toHaveLength(1)
+    expect(deleted.history.present.revision).toBe(project.revision + 1)
+
+    const globalSnapshot = createEditorSelectionSnapshot({
+      sessionId: 'session-flow',
+      projectId: project.id,
+      projectRevision: project.revision,
+      locationId: 'top-a',
+      surfaceId: 'flow',
+      surfaceKind: 'flow',
+      owner: 'global',
+      targets: [{
+        owner: 'global',
+        layerItemId: 'global-1',
+        kind: 'shape',
+      }],
+    })
+    const blocked = executeFlowEditorAction('delete', globalSnapshot, history, { now: NOW })
+    expect(blocked).toMatchObject({
+      ok: false,
+      reason: '全局层选择不能改动 Flow 页面目录',
+    })
+    expect(blocked.history).toBe(history)
   })
 })

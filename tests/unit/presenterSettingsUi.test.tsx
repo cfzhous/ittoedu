@@ -26,7 +26,7 @@ describe('presenter settings editor', () => {
     expect(useEditorStore.getState().project.playback.controls).toBe('none')
 
     fireEvent.click(screen.getByRole('button', {
-      name: '恢复并显示教师控制器',
+      name: '恢复教师控制器',
     }))
     expect(useEditorStore.getState().project.playback.controls).toBe('canvas')
     expect(screen.queryByTestId('controller-consistency-notice')).not.toBeInTheDocument()

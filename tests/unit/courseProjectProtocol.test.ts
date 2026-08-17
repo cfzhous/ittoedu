@@ -24,9 +24,22 @@ import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import type { ProjectDocument } from '@/shared/projectTypes'
 import {
+  createBlankFlowCourse,
+  createBlankSlideCourse,
+  createBlankSpatialCourse,
+} from '@/renderer/course/courseLocationCommands'
+import {
+  importProjectV8ArchiveAsCourseProject,
+  inspectCourseProjectArchiveIdentity,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
+import { shouldOfferCourseProjectRecovery } from '@/renderer/project/courseProjectLifecycle'
+import {
   createProject,
   createTextNode,
 } from '@/renderer/project/createProject'
+import { createProjectArchive } from '@/renderer/project/projectArchive'
+import { saveCourseProject } from '@/renderer/project/saveProject'
 
 const HASH = 'a'.repeat(64)
 
@@ -597,5 +610,69 @@ describe('Course Project V9 multi-surface protocol', () => {
 
     expect(publishedCourseV2Schema.safeParse(published).success).toBe(true)
     expect(publishedCourseV2Schema.safeParse({ ...published, createdAt: 'author-only' }).success).toBe(false)
+  })
+
+  it('saves T03 blank courses as schema 9 and keeps V8 behind an explicit import report', () => {
+    for (const created of [
+      createBlankSlideCourse({ id: 'proto-slide', now: '2026-08-17T11:00:00.000Z' }),
+      createBlankFlowCourse({ id: 'proto-flow', now: '2026-08-17T11:00:00.000Z' }),
+      createBlankSpatialCourse({ id: 'proto-spatial', now: '2026-08-17T11:00:00.000Z' }),
+    ]) {
+      expect(created.project.schemaVersion).toBe(9)
+      expect(created.project).not.toHaveProperty('projectMode')
+      const saved = saveCourseProject({
+        project: created.project,
+        assetFiles: {},
+        componentFiles: {},
+      }, '2026-08-17T11:00:00.000Z')
+      const reopened = openCourseProjectArchive(saved.bytes)
+      expect(reopened.project.schemaVersion).toBe(9)
+      expect(reopened.project.id).toBe(created.project.id)
+    }
+
+    const v8 = createProject({
+      id: 'course-stable',
+      title: '多表面协议',
+      now: '2026-08-14T00:00:00.000Z',
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const v8Bytes = createProjectArchive({
+      project: v8,
+      assetFiles: {},
+      componentFiles: {},
+    })
+    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/显式迁移/)
+    const imported = importProjectV8ArchiveAsCourseProject(v8Bytes)
+    expect(imported.report).toMatchObject({
+      sourceFormat: 'legacy-course',
+      targetFormat: 'current-course',
+      projectId: 'course-stable',
+      surfaceCount: 1,
+      locationCount: 1,
+    })
+    expect(imported.report.notes.some((note) => note.includes('另存为新文件'))).toBe(true)
+    expect(inspectCourseProjectArchiveIdentity(saveCourseProject(imported).bytes).schemaVersion)
+      .toBe(9)
+    expect(shouldOfferCourseProjectRecovery({
+      recovery: { schemaVersion: 8, projectId: 'course-stable', revision: 0, updatedAt: null, title: null },
+      official: null,
+    })).toBe('ignore-legacy-default')
+    expect(shouldOfferCourseProjectRecovery({
+      recovery: {
+        schemaVersion: 9,
+        projectId: 'course-stable',
+        revision: 0,
+        updatedAt: '2026-08-17T11:00:00.000Z',
+        title: null,
+      },
+      official: {
+        schemaVersion: 9,
+        projectId: 'course-stable',
+        revision: 2,
+        updatedAt: '2026-08-17T12:00:00.000Z',
+        title: null,
+      },
+    })).toBe('ignore-stale-official')
   })
 })

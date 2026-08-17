@@ -298,6 +298,7 @@ describe('Published Course V2 product pipeline', () => {
     ])
     const published = buildPublishedCourseV2Payload(sources)
     expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+    expect(published.sourceSchemaVersion).toBe(9)
     expect(published.surfaces.map((surface) => surface.type)).toEqual(['slide', 'flow', 'spatial-2d'])
     expect(Object.keys(published.assets).sort()).toEqual([
       'component-fallback', 'flow-image', 'instance-cover', 'runtime-fallback', 'state-cover',
@@ -310,6 +311,20 @@ describe('Published Course V2 product pipeline', () => {
     if (publishedSlide.type !== 'slide') throw new Error('expected Slide')
     const runtime = publishedSlide.scenes[0]!.layerItems.find((item) => item.kind === 'runtime')
     expect(runtime?.kind === 'runtime' ? runtime.runtime.source : '').toContain('CoursewareRuntime.define')
+  })
+
+  it('rejects a raw V8 project as the default publish input', () => {
+    const v8 = createProject({
+      id: 'v8-raw',
+      title: 'V8 工程',
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    expect(() => buildPublishedCourseV2Payload({
+      project: v8 as unknown as CourseProjectDocument,
+      assetFiles: {},
+      components: {},
+    })).toThrow()
   })
 
   it('builds a genuinely self-contained single HTML and file-relative web package', () => {
@@ -814,6 +829,38 @@ describe('Published Course V2 product pipeline', () => {
     ;(root.querySelector<HTMLButtonElement>('[data-scene-id="slide-scene-2"]')!).click()
     await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
     expect(root.querySelector('.lesson-scene-picker-layer')).not.toBeVisible()
+
+    await app.destroy()
+    root.remove()
+  })
+
+  it('lists Slide, Flow and Spatial locations in the published scene directory', async () => {
+    const sources = fixture()
+    sources.project.globalLayerItems.push(teacherControllerLayer())
+    sources.project.playback.controls = 'canvas'
+    const published = buildPublishedCourseV2Payload(sources)
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(published, root)
+
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="picker"]')!.click()
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-location-id="location-flow"]')).not.toBeNull()
+    })
+    const items = [...root.querySelectorAll<HTMLButtonElement>('.lesson-scene-picker__item')]
+    expect(items.map((button) => button.dataset.locationId)).toEqual([
+      'location-slide',
+      'location-flow',
+      'location-spatial',
+    ])
+    expect(items.map((button) => button.dataset.kind)).toEqual([
+      'slide-scene',
+      'flow-block',
+      'spatial-camera',
+    ])
+    items[2]!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-spatial'))
+    expect(root.querySelector('[data-surface-id="spatial-surface"]')).toBeVisible()
 
     await app.destroy()
     root.remove()

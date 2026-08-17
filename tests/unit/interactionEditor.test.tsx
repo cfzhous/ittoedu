@@ -568,6 +568,25 @@ describe('InteractionEditor', () => {
     )
     expect(onAddRule).not.toHaveBeenCalled()
   })
+
+  it('refuses click-rule writes on a locked target', () => {
+    const lockedButton = { ...button, locked: true }
+    const { onAddRule, onUpdateRule, onDeleteRule } = renderEditor({
+      selectedNode: lockedButton,
+      scene: makeScene([clickRule('locked-rule', [{ type: 'scene.next' }])]),
+    })
+
+    expect(screen.getByText('锁定元素不能新增、修改或删除相关互动规则；请先解锁'))
+      .toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '连接到状态' }))
+    expect(onAddRule).not.toHaveBeenCalled()
+
+    const group = screen.getByRole('group', { name: '单击规则 1' })
+    fireEvent.click(within(group).getByLabelText('启用规则'))
+    fireEvent.click(within(group).getByRole('button', { name: '删除单击规则 1' }))
+    expect(onUpdateRule).not.toHaveBeenCalled()
+    expect(onDeleteRule).not.toHaveBeenCalled()
+  })
 })
 
 describe('SceneAutomationEditor', () => {
@@ -1021,5 +1040,35 @@ describe('SceneAutomationEditor', () => {
         }),
       ],
     })
+  })
+
+  it('locks automation writes that still target a locked element', () => {
+    const lockedButton = { ...button, locked: true }
+    const lockedRule = automationRule(
+      'locked-motion',
+      { type: 'node.activated', nodeId: lockedButton.id },
+      [{
+        type: 'node.exit',
+        nodeId: lockedButton.id,
+        effect: 'fade',
+        durationMs: 240,
+        easing: 'ease-in',
+      }],
+    )
+    const { onUpdateRule, onDeleteRule } = renderAutomationEditor({
+      scene: {
+        ...makeScene([lockedRule]),
+        nodes: [lockedButton, video, component],
+      },
+    })
+
+    expect(screen.getByText('锁定元素不能新增、修改或删除相关互动规则；请先解锁'))
+      .toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '删除规则 1' }))
+    expect(onDeleteRule).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByLabelText('规则名称'), {
+      target: { value: '不应写入' },
+    })
+    expect(onUpdateRule).not.toHaveBeenCalled()
   })
 })

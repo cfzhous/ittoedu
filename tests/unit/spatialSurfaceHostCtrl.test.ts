@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CourseEventBus } from '@/player/CourseEventBus'
 import {
+  createSpatialPlayerSessionSources,
   SpatialSurfaceHost,
   type SpatialSurfaceDocument,
 } from '@/player/surfaces'
@@ -254,5 +255,18 @@ describe('SpatialSurfaceHost teacher-controller session controls', () => {
     expect(wrapper.style.left).toBe('24px')
 
     await host.destroy()
+  })
+
+  it('exposes audio and progress sources for PublishedCourseApp wiring', () => {
+    const events = new CourseEventBus()
+    const sources = createSpatialPlayerSessionSources({
+      audioChangeSource: events,
+      courseProgressSource: {
+        getLocations: () => [{ id: 'intro', name: '导入' }],
+        getCurrentLocationId: () => 'intro',
+      },
+    })
+    expect(sources.audioChangeSource).toBe(events)
+    expect(sources.courseProgressSource?.getCurrentLocationId()).toBe('intro')
   })
 })

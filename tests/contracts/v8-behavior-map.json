@@ -819,7 +819,7 @@
       "path": "tests/unit/stageViewportTransform.test.ts",
       "contract": "1280x720 design space, 50%-200% zoom, fit, pan, and coordinate transforms",
       "disposition": "keep",
-      "sha256": "2de169e95a16c9f1cbdfbcd8b5fdde1a44eb3f164718ae25cbdca502cfb69aaa",
+      "sha256": "3f1378e9cf74cd78706ddef522ef178163069ea887a35fcba53b78e048128deb",
       "staticDefinitionCount": 14,
       "expandedCaseCount": 23,
       "definitions": [
@@ -1265,7 +1265,7 @@
       "path": "tests/unit/developerMode.test.tsx",
       "contract": "Runtime/Component developer workspace and history",
       "disposition": "keep",
-      "sha256": "7fba8cbf9ef67a7668399b68e5f21ca8b4b39094aa19fa8d80c2832f72a913ed",
+      "sha256": "4dae7163612df04a4ec4d5fb6348b969a21c5d370849c8279b0de06fadf0edb1",
       "staticDefinitionCount": 10,
       "expandedCaseCount": 10,
       "definitions": [
@@ -1385,7 +1385,7 @@
       "path": "tests/unit/mediaTab.test.tsx",
       "contract": "assets, sound, video, and audio settings",
       "disposition": "keep",
-      "sha256": "0a85712152944d201686401c650bb12af852002f6244df7d47093b5bef627b46",
+      "sha256": "33412561d24100a30f05ea9682e92082398ea0fada4feebb91f9870eadab9d00",
       "staticDefinitionCount": 7,
       "expandedCaseCount": 7,
       "definitions": [
@@ -1537,7 +1537,7 @@
       "path": "tests/unit/presenterSettingsUi.test.tsx",
       "contract": "teacher controller, shortcuts, and repair entry",
       "disposition": "keep",
-      "sha256": "b9f23cb9908f4219fa7fd61578ed7fc882afe111ee9feb867fc6f437d9c2a54c",
+      "sha256": "b496a1c5eb9bf5ed2ce91da6b123b2c89b8a4c7ab50420ccfe5926430b28fb47",
       "staticDefinitionCount": 5,
       "expandedCaseCount": 5,
       "definitions": [
@@ -1602,7 +1602,7 @@
       "path": "tests/unit/interactionEditor.test.tsx",
       "contract": "interactions, actions, rules, and scene/state/media targets",
       "disposition": "keep",
-      "sha256": "0d39b8f6a5d953dfbf41462b9b66ba724b1f86ab13b4e30e8c0a8af7539425ed",
+      "sha256": "5c126f235b8af14ef4c3e9bf17e9838e3639754512e4ea863d1ac7d56e247537",
       "staticDefinitionCount": 20,
       "expandedCaseCount": 20,
       "definitions": [

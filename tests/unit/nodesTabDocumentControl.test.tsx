@@ -209,4 +209,73 @@ describe('NodesTab document control', () => {
     expect(onSetNodeVisible).toHaveBeenCalledWith(text.id, false)
     expect(screen.getByText(reorderUnavailableReason)).toBeInTheDocument()
   })
+
+  it('keeps long layer names on a single horizontal line', () => {
+    const longName = '这是一段需要在窄侧栏里保持单行并截断的超长图层名称'.repeat(3)
+    const text = createTextNode({ id: 'long-name', name: longName })
+    render(
+      <div style={{ width: 280 }}>
+        <NodesTab documentControl={{
+          editingScope: 'scene',
+          contextKey: 'horizontal-name',
+          scopeLabel: '本页',
+          nodes: [text],
+          selectedNodeIds: [],
+          onSelectNode: vi.fn(),
+          onDeleteNode: vi.fn(),
+          onDuplicateNode: vi.fn(),
+          onRenameNode: vi.fn(),
+          onSetNodeVisible: vi.fn(),
+          onSetNodeLocked: vi.fn(),
+          onReorderNodes: vi.fn(),
+        }} />
+      </div>,
+    )
+    const name = screen.getByText(longName)
+    expect(name.querySelector('br')).toBeNull()
+    expect(name).toHaveStyle({
+      writingMode: 'horizontal-tb',
+      whiteSpace: 'nowrap',
+      textOverflow: 'ellipsis',
+    })
+    expect(screen.getByTestId('node-item-long-name')).toHaveStyle({
+      display: 'flex',
+      flexWrap: 'nowrap',
+      writingMode: 'horizontal-tb',
+    })
+    expect(screen.queryByText('定位控制器')).not.toBeInTheDocument()
+  })
+
+  it('renders T04-shaped effective rows without importing the T04 list', () => {
+    const onSelectNode = vi.fn()
+    render(<NodesTab documentControl={{
+      editingScope: 'scene',
+      contextKey: 'effective-rows',
+      scopeLabel: '有效图层',
+      nodes: [],
+      selectedNodeIds: ['banner'],
+      effectiveRows: [{
+        id: 'banner',
+        name: '全课横幅标题',
+        sourceKind: 'global',
+        ownerKey: 'global',
+        sourceLabel: '全课',
+        selected: true,
+        locked: false,
+        hidden: false,
+      }],
+      onSelectNode,
+      onDeleteNode: vi.fn(),
+      onDuplicateNode: vi.fn(),
+      onRenameNode: vi.fn(),
+      onSetNodeVisible: vi.fn(),
+      onSetNodeLocked: vi.fn(),
+      onReorderNodes: vi.fn(),
+    }} />)
+
+    expect(screen.getByText('全课')).toBeInTheDocument()
+    expect(screen.getByText('全课横幅标题')).toHaveStyle({ writingMode: 'horizontal-tb' })
+    fireEvent.click(screen.getByText('全课横幅标题'))
+    expect(onSelectNode).toHaveBeenCalledWith('banner', false)
+  })
 })

@@ -7,6 +7,7 @@ import {
 import {
   createFlowEditorSelection,
   selectFlowEditorBlock,
+  selectFlowEditorBlocks,
 } from '@/renderer/course/flowEditorSlice'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseLocation, FlowBlock } from '@/shared/courseProjectTypes'
@@ -63,6 +64,7 @@ describe('Flow editor slice', () => {
       locationId: 'top-a',
       surfaceId: 'flow',
       selectedBlockId: 'top-a',
+      selectedBlockIds: ['top-a'],
     })
     expect(Object.isFrozen(selection)).toBe(true)
     expect(() => createFlowEditorSelection('', 'flow', 'top-a')).toThrow('课程位置不能为空')
@@ -77,6 +79,7 @@ describe('Flow editor slice', () => {
       locationId: 'nested-a',
       surfaceId: 'flow',
       selectedBlockId: 'nested-a',
+      selectedBlockIds: ['nested-a'],
     })
     expect(Object.isFrozen(selection)).toBe(true)
   })
@@ -89,8 +92,12 @@ describe('Flow editor slice', () => {
     const slideLocation = project.locations.find((location) => location.kind === 'slide-scene')!
     expect(() => selectFlowEditorBlock(project, slideLocation.id, 'top-a'))
       .toThrow('当前课程位置不是 Flow 内容块')
-    expect(() => selectFlowEditorBlock(project, 'top-a', 'nested-a'))
-      .toThrow('所选 Flow 块与课程位置不一致')
+    expect(selectFlowEditorBlock(project, 'top-a', 'nested-a')).toMatchObject({
+      locationId: 'top-a',
+      surfaceId: 'flow',
+      selectedBlockId: 'nested-a',
+      selectedBlockIds: ['nested-a'],
+    })
     expect(() => selectFlowEditorBlock(project, 'top-a', 'ghost'))
       .toThrow('找不到 Flow 块')
 
@@ -121,7 +128,17 @@ describe('Flow editor slice', () => {
       locationId: 'top-a',
       surfaceId: 'flow',
       selectedBlockId: 'top-a',
+      selectedBlockIds: ['top-a'],
     })
     expect(project).toEqual(before)
+  })
+
+  it('selects multiple blocks without promoting them to course locations', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'top-a', ['top-a', 'nested-a'])
+    expect(selection.selectedBlockIds).toEqual(['top-a', 'nested-a'])
+    expect(selection.selectedBlockId).toBe('nested-a')
+    expect(selection.locationId).toBe('top-a')
+    expect(project.locations.filter((location) => location.id === 'top-a')).toHaveLength(1)
   })
 })

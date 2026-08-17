@@ -3,6 +3,7 @@ import type {
   CourseLocation,
   CourseProjectDocument,
   CourseStateScalar,
+  FlowBlock,
   ScopedLayerItem,
   SlideSurfaceDocument,
 } from '../shared/courseProjectTypes'
@@ -25,7 +26,7 @@ import { SpatialSurfaceHost } from './surfaces/spatial/SpatialSurfaceHost'
 import type { SurfaceDiagnostic, SurfaceHost } from './surfaces/SurfaceHost'
 import {
   ScenePickerOverlay,
-  type ScenePickerScene,
+  type ScenePickerLocation,
 } from './ScenePickerOverlay'
 
 export interface PublishedCourseAppOptions {
@@ -61,6 +62,90 @@ function startStateFromUrl(): string | undefined {
   return params.get('state') ?? undefined
 }
 
+function findFlowBlock(
+  blocks: readonly FlowBlock[],
+  blockId: string,
+): FlowBlock | undefined {
+  for (const block of blocks) {
+    if (block.id === blockId) return block
+    if (block.type === 'section') {
+      const nested = findFlowBlock(block.blocks, blockId)
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+function isPrimarySlideLocation(
+  locations: readonly CourseLocation[],
+  location: Extract<CourseLocation, { kind: 'slide-scene' }>,
+): boolean {
+  const siblings = locations.filter((candidate): candidate is Extract<CourseLocation, { kind: 'slide-scene' }> => (
+    candidate.kind === 'slide-scene' &&
+    candidate.surfaceId === location.surfaceId &&
+    candidate.sceneId === location.sceneId
+  ))
+  const withoutState = siblings.filter((candidate) => candidate.stateId === undefined)
+  const primary = withoutState.length > 0 ? withoutState : siblings
+  return primary[0]?.id === location.id
+}
+
+function isNavigableFlowLocation(
+  project: CourseProjectDocument,
+  location: Extract<CourseLocation, { kind: 'flow-block' }>,
+): boolean {
+  const surface = project.surfaces.find((entry) => entry.id === location.surfaceId)
+  if (surface?.type !== 'flow') return false
+  const block = findFlowBlock(surface.blocks, location.blockId)
+  if (block?.type === 'heading' || block?.type === 'section') return true
+  const surfaceLocations = project.locations.filter((candidate) => (
+    candidate.kind === 'flow-block' && candidate.surfaceId === location.surfaceId
+  ))
+  const hasAnchor = surfaceLocations.some((candidate) => {
+    if (candidate.kind !== 'flow-block') return false
+    const candidateBlock = findFlowBlock(surface.blocks, candidate.blockId)
+    return candidateBlock?.type === 'heading' || candidateBlock?.type === 'section'
+  })
+  return !hasAnchor && surfaceLocations[0]?.id === location.id
+}
+
+/** Course-directory / prev-next / progress order: Slide scenes, Flow anchors, Spatial cameras. */
+function navigablePublishedLocations(project: CourseProjectDocument): CourseLocation[] {
+  return project.locations.filter((location) => {
+    if (location.kind === 'slide-scene') return isPrimarySlideLocation(project.locations, location)
+    if (location.kind === 'spatial-camera') return true
+    if (location.kind === 'flow-block') return isNavigableFlowLocation(project, location)
+    return false
+  })
+}
+
+function locationDisplayName(
+  project: CourseProjectDocument,
+  location: CourseLocation,
+): string {
+  if (location.kind === 'slide-scene') {
+    const surface = project.surfaces.find((entry) => entry.id === location.surfaceId)
+    const scene = surface?.type === 'slide'
+      ? surface.scenes.find((entry) => entry.id === location.sceneId)
+      : undefined
+    return scene?.name ?? location.label
+  }
+  if (location.kind === 'flow-block') {
+    const surface = project.surfaces.find((entry) => entry.id === location.surfaceId)
+    if (surface?.type === 'flow') {
+      const block = findFlowBlock(surface.blocks, location.blockId)
+      if (block?.type === 'heading') return block.text.trim() || location.label
+      if (block?.type === 'section') return block.title.trim() || location.label
+    }
+    return location.label
+  }
+  const surface = project.surfaces.find((entry) => entry.id === location.surfaceId)
+  const frame = surface?.type === 'spatial-2d'
+    ? surface.camera.frames.find((entry) => entry.id === location.cameraFrameId)
+    : undefined
+  return frame?.name ?? location.label
+}
+
 function mergeGlobalLayers(
   surface: SlideSurfaceDocument,
   globalLayerItems: readonly ScopedLayerItem[],
@@ -87,6 +172,7 @@ export class PublishedCourseApp {
   readonly #flowHosts = new Map<string, FlowSurfaceHost>()
   readonly #spatialHosts = new Map<string, SpatialSurfaceHost>()
   readonly #locations: CourseLocation[]
+  readonly #navigationLocations: CourseLocation[]
   readonly #locationMap: Map<string, CourseLocation>
   readonly #diagnostics: SurfaceDiagnostic[] = []
   readonly #dynamicHosts: PublishedDynamicHostRegistry
@@ -94,6 +180,7 @@ export class PublishedCourseApp {
   #currentLocationId: string | null = null
   #muted: boolean
   #scenePicker: ScenePickerOverlay | null = null
+  #teacherActionChain: Promise<void> = Promise.resolve()
   #destroyed = false
 
   private constructor(
@@ -115,6 +202,7 @@ export class PublishedCourseApp {
     this.#root = root
     this.#options = options
     this.#locations = structuredClone(this.project.locations)
+    this.#navigationLocations = navigablePublishedLocations(this.project)
     this.#locationMap = new Map(this.#locations.map((entry) => [entry.id, entry]))
     this.#dynamicHosts = new PublishedDynamicHostRegistry({
       payload: this.payload,
@@ -192,34 +280,49 @@ export class PublishedCourseApp {
       return false
     }
 
+    const previousLocationId = this.#currentLocationId
+    const previous = previousLocationId ? this.#locationMap.get(previousLocationId) : undefined
+    if (previous && previous.surfaceId !== target.surfaceId) {
+      const leaveId = previous.kind === 'slide-scene' ? previous.sceneId : previous.id
+      this.events.emit('scene:leave', { sceneId: leaveId })
+    }
+
     const activation = await this.#player.activateSurface(target.surfaceId)
     if (!activation.ok) {
       this.#showNotice('课件页面加载失败，其他页面仍可使用。')
       return false
     }
-    if (target.kind === 'slide-scene') {
-      await this.#slideHosts.get(target.surfaceId)?.setScene(
-        target.sceneId,
-        target.stateId ?? startStateId,
-      )
-    } else if (target.kind === 'flow-block') {
-      await this.#flowHosts.get(target.surfaceId)?.setLocationId(target.id)
-      const container = this.#surfaceContainers.get(target.surfaceId)
-      container?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(target.blockId)}"]`)
-        ?.scrollIntoView?.({ block: 'start' })
-    } else {
-      const surface = this.project.surfaces.find((entry) => entry.id === target.surfaceId)
-      const host = this.#spatialHosts.get(target.surfaceId)
-      if (surface?.type === 'spatial-2d' && host) {
-        const frame = surface.camera.frames.find((entry) => entry.id === target.cameraFrameId)
-        if (!frame) throw new Error(`Unknown Spatial camera frame: ${target.cameraFrameId}`)
-        await host.setLocationId(target.id)
-        await host.setCamera(spatialCameraFromPose(frame, { width: 1120, height: 760 }))
-      }
-    }
+
+    // Progress sources read this.#currentLocationId during host rebuilds.
     this.#currentLocationId = locationId
+    try {
+      if (target.kind === 'slide-scene') {
+        await this.#slideHosts.get(target.surfaceId)?.setScene(
+          target.sceneId,
+          target.stateId ?? startStateId,
+        )
+      } else if (target.kind === 'flow-block') {
+        await this.#flowHosts.get(target.surfaceId)?.setLocationId(target.id)
+        const container = this.#surfaceContainers.get(target.surfaceId)
+        container?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(target.blockId)}"]`)
+          ?.scrollIntoView?.({ block: 'start' })
+      } else {
+        const surface = this.project.surfaces.find((entry) => entry.id === target.surfaceId)
+        const host = this.#spatialHosts.get(target.surfaceId)
+        if (surface?.type === 'spatial-2d' && host) {
+          const frame = surface.camera.frames.find((entry) => entry.id === target.cameraFrameId)
+          if (!frame) throw new Error(`Unknown Spatial camera frame: ${target.cameraFrameId}`)
+          await host.setLocationId(target.id)
+          await host.setCamera(spatialCameraFromPose(frame, { width: 1120, height: 760 }))
+        }
+      }
+    } catch (error) {
+      this.#currentLocationId = previousLocationId
+      throw error
+    }
     this.#syncContainers(target.surfaceId)
     replaceUrlLocation(locationId)
+    this.events.emit('course:location', { locationId })
     return true
   }
 
@@ -235,14 +338,14 @@ export class PublishedCourseApp {
   }
 
   async next(entryPoint: CourseNavigationEntryPoint = 'presenter'): Promise<boolean> {
-    const index = this.#locationIndex()
-    const next = this.#locations[index + 1]
+    const index = this.#navigationIndex()
+    const next = this.#navigationLocations[index + 1]
     return next ? this.navigate(next.id, entryPoint) : false
   }
 
   async previous(entryPoint: CourseNavigationEntryPoint = 'presenter'): Promise<boolean> {
-    const index = this.#locationIndex()
-    const previous = this.#locations[index - 1]
+    const index = this.#navigationIndex()
+    const previous = this.#navigationLocations[index - 1]
     return previous ? this.navigate(previous.id, entryPoint) : false
   }
 
@@ -286,6 +389,7 @@ export class PublishedCourseApp {
       this.#currentLocationId = target.id
       this.#syncContainers(target.surfaceId)
       replaceUrlLocation(target.id)
+      this.events.emit('course:location', { locationId: target.id })
       return
     }
     this.#currentLocationId = null
@@ -329,6 +433,7 @@ export class PublishedCourseApp {
     if (location) {
       this.#currentLocationId = location.id
       replaceUrlLocation(location.id)
+      this.events.emit('course:location', { locationId: location.id })
     }
   }
 
@@ -375,6 +480,7 @@ export class PublishedCourseApp {
           executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
           playbackControls: this.project.playback.controls,
           initialMuted: this.#muted,
+          courseProgressSource: this.#courseProgressSource(),
         })
         this.#slideHosts.set(surface.id, slide)
         return slide
@@ -394,6 +500,13 @@ export class PublishedCourseApp {
           executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
           playbackControls: this.project.playback.controls,
           initialMuted: this.#muted,
+          interactions: {
+            events: this.events,
+            hostActions: this.#interactionHostActions(),
+          },
+          // Same course location source as Slide/Spatial so the overlay
+          // controller never falls back to the fake flow-overlay scene.
+          courseProgressSource: this.#courseProgressSource(),
         })
         this.#flowHosts.set(surface.id, flow)
         return flow
@@ -414,6 +527,8 @@ export class PublishedCourseApp {
         executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
         playbackControls: this.project.playback.controls,
         initialMuted: this.#muted,
+        audioChangeSource: this.events,
+        courseProgressSource: this.#courseProgressSource(),
       })
       this.#spatialHosts.set(surface.id, spatial)
       return spatial
@@ -429,6 +544,9 @@ export class PublishedCourseApp {
     shell.className = 'course-shell'
     const stage = dom.createElement('section')
     stage.className = 'course-stage'
+    const linked = locationFromUrl()
+    const initial = linked && this.#locationMap.has(linked) ? linked : this.project.startLocationId
+    this.#currentLocationId = this.#locationMap.has(initial) ? initial : null
     for (const surface of this.project.surfaces) {
       const container = dom.createElement('div')
       container.className = 'course-surface-host'
@@ -443,18 +561,16 @@ export class PublishedCourseApp {
 
     this.#scenePicker = new ScenePickerOverlay({
       stage: this.#root,
-      scenes: this.#pickerScenes(),
-      onSelect: (sceneId, bypassNavigationGuards) => {
-        void this.goToScene(
-          sceneId,
-          undefined,
+      scenes: [],
+      locations: this.#pickerLocations(),
+      onSelect: (locationId, bypassNavigationGuards) => {
+        void this.navigate(
+          locationId,
           bypassNavigationGuards ? 'author-force' : 'teacher-controller',
         )
       },
     })
 
-    const linked = locationFromUrl()
-    const initial = linked && this.#locationMap.has(linked) ? linked : this.project.startLocationId
     const started = await this.navigate(initial, 'initial-entry', startStateFromUrl())
     if (!started) {
       const firstHealthy = this.#locations.find((location) => this.#player.statusOf(location.surfaceId) !== 'failed')
@@ -462,20 +578,37 @@ export class PublishedCourseApp {
     }
   }
 
-  /** Slide-scene locations, deduplicated by scene id, in course order. */
-  #pickerScenes(): ScenePickerScene[] {
-    const scenes: ScenePickerScene[] = []
-    const seen = new Set<string>()
-    for (const location of this.#locations) {
-      if (location.kind !== 'slide-scene' || seen.has(location.sceneId)) continue
-      seen.add(location.sceneId)
-      const surface = this.project.surfaces.find((entry) => entry.id === location.surfaceId)
-      const scene = surface?.type === 'slide'
-        ? surface.scenes.find((entry) => entry.id === location.sceneId)
-        : undefined
-      scenes.push({ id: location.sceneId, name: scene?.name ?? location.sceneId })
+  /** Every navigable published location, in the canonical course navigation order. */
+  #pickerLocations(): ScenePickerLocation[] {
+    return this.#navigationLocations.map((location) => ({
+      id: location.id,
+      locationId: location.id,
+      name: locationDisplayName(this.project, location),
+      kind: location.kind,
+      ...(location.kind === 'slide-scene' ? { sceneId: location.sceneId } : {}),
+    }))
+  }
+
+  #courseProgressSource() {
+    return {
+      getLocations: () => this.#navigationLocations.map((location) => ({
+        id: location.id,
+        name: locationDisplayName(this.project, location),
+      })),
+      getCurrentLocationId: () => this.#currentLocationId,
+      getStateLabel: () => this.#currentSlideStateLabel(),
     }
-    return scenes
+  }
+
+  #currentSlideStateLabel(): string | null {
+    const locationId = this.#currentLocationId
+    if (!locationId) return null
+    const location = this.#locationMap.get(locationId)
+    if (!location || location.kind !== 'slide-scene') return null
+    const host = this.#slideHosts.get(location.surfaceId)
+    if (!host || host.sceneId !== location.sceneId || !host.stateId) return null
+    const scene = host.document.scenes.find((entry) => entry.id === host.sceneId)
+    return scene?.presentation?.states.find((entry) => entry.id === host.stateId)?.name ?? null
   }
 
   /**
@@ -508,13 +641,25 @@ export class PublishedCourseApp {
 
   #syncContainers(activeSurfaceId: string): void {
     for (const [surfaceId, container] of this.#surfaceContainers) {
-      container.hidden = surfaceId !== activeSurfaceId
+      const active = surfaceId === activeSurfaceId
+      container.hidden = !active
+      container.style.pointerEvents = active ? '' : 'none'
     }
   }
 
-  #locationIndex(): number {
+  #navigationIndex(): number {
     if (!this.#currentLocationId) return -1
-    return this.#locations.findIndex((location) => location.id === this.#currentLocationId)
+    const direct = this.#navigationLocations.findIndex((location) => location.id === this.#currentLocationId)
+    if (direct >= 0) return direct
+    const fullIndex = this.#locations.findIndex((location) => location.id === this.#currentLocationId)
+    if (fullIndex < 0) return -1
+    for (let index = fullIndex; index >= 0; index -= 1) {
+      const mapped = this.#navigationLocations.findIndex((location) => (
+        location.id === this.#locations[index]?.id
+      ))
+      if (mapped >= 0) return mapped
+    }
+    return -1
   }
 
   /**
@@ -524,6 +669,15 @@ export class PublishedCourseApp {
    * teacher-understandable notice instead of an internal identifier.
    */
   async #handleCourseTeacherAction(action: TeacherControllerAction): Promise<void> {
+    // Serialize clicks instead of dropping them. A blocked next() is still an
+    // in-flight await; the next click must run after that decision settles so
+    // a just-updated course state can unblock the same action.
+    const run = this.#teacherActionChain.then(() => this.#runCourseTeacherAction(action))
+    this.#teacherActionChain = run.then(() => undefined, () => undefined)
+    await run
+  }
+
+  async #runCourseTeacherAction(action: TeacherControllerAction): Promise<void> {
     try {
       if (action.type === 'scene.previous') await this.previous('teacher-controller')
       else if (action.type === 'scene.next') await this.next('teacher-controller')
@@ -535,12 +689,7 @@ export class PublishedCourseApp {
         'teacher-controller',
       )
       else if (action.type === 'scene.open-picker') {
-        const current = this.#currentLocationId
-          ? this.#locationMap.get(this.#currentLocationId)
-          : undefined
-        this.#scenePicker?.open(
-          current?.kind === 'slide-scene' ? current.sceneId : null,
-        )
+        this.#scenePicker?.open(this.#currentLocationId)
       } else if (action.type === 'audio.toggle-mute') {
         this.#muted = !this.#muted
         this.#root.querySelectorAll<HTMLMediaElement>('audio, video')

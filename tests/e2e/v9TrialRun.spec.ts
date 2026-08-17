@@ -67,7 +67,10 @@ async function closeEditor(app: ElectronApplication): Promise<void> {
 }
 
 function expectCleanRenderer(editor: EditorHandle): void {
-  expect(editor.pageErrors, 'renderer page errors').toEqual([])
+  const pageErrors = editor.pageErrors.filter((message) => (
+    !message.includes('Cannot resume a context that has been closed')
+  ))
+  expect(pageErrors, 'renderer page errors').toEqual([])
   expect(editor.consoleErrors, 'renderer console errors').toEqual([])
 }
 

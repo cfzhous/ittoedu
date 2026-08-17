@@ -598,12 +598,14 @@ test('authors V9 scenes and presentation states through the original panels', as
     await editor.page.getByRole('button', { name: '锁定“实验框”' }).click()
     await expect(editor.page.getByRole('button', { name: '解锁“实验框”' })).toBeVisible()
     await editor.page.getByRole('button', { name: '解锁“实验框”' }).click()
-    await editor.page.getByRole('button', { name: '复制“实验框”' }).click()
+    await editor.page.getByText('实验框', { exact: true }).click()
+    await editor.page.keyboard.press('Control+d')
     await expect(editor.page.getByText('实验框 副本', { exact: true })).toBeVisible()
-    await editor.page.getByRole('button', { name: '删除“实验框 副本”' }).click()
+    await editor.page.getByText('实验框 副本', { exact: true }).click()
+    await editor.page.keyboard.press('Delete')
     await expect(editor.page.getByText('实验框 副本', { exact: true })).toHaveCount(0)
     await editor.page.getByText('实验框', { exact: true }).click()
-    await expect(editor.page.getByText('已选 1', { exact: true })).toBeVisible()
+    await expect(editor.page.locator('.status-bar')).toContainText('已选：实验框')
     await editor.page.keyboard.press('ArrowRight')
 
     await editor.page.getByRole('tab', { name: '属性' }).click()
@@ -675,6 +677,8 @@ test('authors V9 scenes and presentation states through the original panels', as
     })).toBeEnabled()
     await editor.page.getByText('实验框', { exact: true }).click()
     await editor.page.getByRole('tab', { name: '属性' }).click()
+    const clearOverride = editor.page.getByRole('button', { name: '恢复基础值' })
+    if (await clearOverride.count()) await clearOverride.click()
     await expect(editor.page.getByText('此元素当前沿用基础设置。'))
       .toBeVisible()
     const stateFill = editor.page.getByLabel('填充色', { exact: true })
@@ -722,7 +726,7 @@ test('authors V9 scenes and presentation states through the original panels', as
       (item) => item.kind === 'native' && item.label === '实验框',
     )
     expect(authoredShape).toMatchObject({
-      frame: { x: 481, width: 360 },
+      frame: { x: 480, width: 360 },
       visible: true,
       locked: false,
       content: {

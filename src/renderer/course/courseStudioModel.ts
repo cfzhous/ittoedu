@@ -6,6 +6,7 @@ import {
 } from '../../shared/courseProjectModel'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
+  type CourseLocation,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
@@ -103,57 +104,141 @@ function createDefaultTeacherControllerLayer(): LayerItem {
   }
 }
 
-export function createCourseProject(input: {
+export interface CourseProjectCreateInput {
   id?: string
   title?: string
   now?: string
-} = {}): CourseProjectDocument {
+}
+
+function createCourseProjectShell(input: CourseProjectCreateInput = {}) {
   const now = input.now ?? new Date().toISOString()
   const projectId = input.id ?? stableId('course')
   const title = input.title ?? '未命名课程'
-  const sceneId = stableId('scene')
-  const surfaceId = `slide:${projectId}`
-  const project: CourseProjectDocument = {
-    schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
-    id: projectId,
-    revision: 0,
+  return {
+    now,
+    projectId,
     title,
-    createdAt: now,
-    updatedAt: now,
-    assets: {},
-    componentPackages: {},
-    designTokens: {
-      fonts: [{
-        id: 'body',
-        label: '正文',
-        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+    document: {
+      schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+      id: projectId,
+      revision: 0 as const,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      assets: {},
+      componentPackages: {},
+      designTokens: {
+        fonts: [{
+          id: 'body',
+          label: '正文',
+          fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+        }],
+        colors: [
+          { id: 'background', label: '背景', color: '#ffffff' },
+          { id: 'text', label: '正文', color: '#1f2937' },
+          { id: 'accent', label: '强调', color: '#2563eb' },
+        ],
+      },
+      media: {
+        audio: {
+          defaultMuted: false,
+          masterVolume: 1,
+          channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+          sounds: {},
+          narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+        },
+      },
+      playback: {
+        controls: 'canvas' as const,
+        keyboardNavigation: true,
+        presenter: {
+          enabled: true,
+          strategy: 'scene-navigation' as const,
+          additionalBindings: [],
+        },
+      },
+      courseState: [],
+      navigationGuards: [],
+      globalLayerItems: [{
+        item: createDefaultTeacherControllerLayer(),
+        visibility: { mode: 'all' as const, locationIds: [] },
       }],
-      colors: [
-        { id: 'background', label: '背景', color: '#ffffff' },
-        { id: 'text', label: '正文', color: '#1f2937' },
-        { id: 'accent', label: '强调', color: '#2563eb' },
+      globalInteractions: [],
+    },
+  }
+}
+
+function createBlankFlowSurface(input: {
+  id: string
+  title: string
+  headingId?: string
+  paragraphId?: string
+}): {
+  surface: Extract<CourseSurfaceDocument, { type: 'flow' }>
+  location: Extract<CourseLocation, { kind: 'flow-block' }>
+} {
+  const headingId = stableId('block', input.headingId)
+  const paragraphId = stableId('block', input.paragraphId)
+  return {
+    surface: {
+      id: input.id,
+      type: 'flow',
+      title: input.title,
+      surfaceLayerItems: [],
+      layout: { readingWidth: 760, wideContentWidth: 1120 },
+      blocks: [
+        { id: headingId, type: 'heading', level: 1, text: '新讲义' },
+        { id: paragraphId, type: 'paragraph', text: '' },
       ],
     },
-    media: {
-      audio: {
-        defaultMuted: false,
-        masterVolume: 1,
-        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
-        sounds: {},
-        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
-      },
+    location: {
+      id: headingId,
+      label: input.title,
+      kind: 'flow-block',
+      surfaceId: input.id,
+      blockId: headingId,
     },
-    playback: {
-      controls: 'canvas',
-      keyboardNavigation: true,
-      presenter: {
-        enabled: true,
-        strategy: 'scene-navigation',
-        additionalBindings: [],
+  }
+}
+
+function createBlankSpatialSurface(input: {
+  id: string
+  title: string
+  cameraId?: string
+}): {
+  surface: Extract<CourseSurfaceDocument, { type: 'spatial-2d' }>
+  location: Extract<CourseLocation, { kind: 'spatial-camera' }>
+} {
+  const cameraId = stableId('camera', input.cameraId)
+  return {
+    surface: {
+      id: input.id,
+      type: 'spatial-2d',
+      title: input.title,
+      surfaceLayerItems: [],
+      world: { bounds: { mode: 'infinite' }, layerItems: [] },
+      camera: {
+        home: { x: 0, y: 0, zoom: 1 },
+        frames: [{ id: cameraId, name: '总览', x: 0, y: 0, zoom: 1 }],
       },
+      semanticZoom: [],
     },
-    courseState: [],
-    navigationGuards: [],
+    location: {
+      id: cameraId,
+      label: `${input.title} · 总览`,
+      kind: 'spatial-camera',
+      surfaceId: input.id,
+      cameraFrameId: cameraId,
+    },
+  }
+}
+
+export function createCourseProject(input: CourseProjectCreateInput = {}): CourseProjectDocument {
+  const { projectId, title, document } = createCourseProjectShell(input)
+  const sceneId = stableId('scene')
+  const surfaceId = `slide:${projectId}`
+  return courseProjectDocumentSchema.parse({
+    ...document,
     locations: [{
       id: sceneId,
       label: '场景 1',
@@ -162,11 +247,6 @@ export function createCourseProject(input: {
       sceneId,
     }],
     startLocationId: sceneId,
-    globalLayerItems: [{
-      item: createDefaultTeacherControllerLayer(),
-      visibility: { mode: 'all', locationIds: [] },
-    }],
-    globalInteractions: [],
     surfaces: [{
       id: surfaceId,
       title,
@@ -183,8 +263,45 @@ export function createCourseProject(input: {
         interactions: [],
       }],
     }],
-  }
-  return courseProjectDocumentSchema.parse(project)
+  })
+}
+
+export function createBlankSlideCourseProject(
+  input: CourseProjectCreateInput = {},
+): CourseProjectDocument {
+  return createCourseProject(input)
+}
+
+export function createBlankFlowCourseProject(
+  input: CourseProjectCreateInput = {},
+): CourseProjectDocument {
+  const { projectId, title, document } = createCourseProjectShell(input)
+  const { surface, location } = createBlankFlowSurface({
+    id: `flow:${projectId}`,
+    title,
+  })
+  return courseProjectDocumentSchema.parse({
+    ...document,
+    locations: [location],
+    startLocationId: location.id,
+    surfaces: [surface],
+  })
+}
+
+export function createBlankSpatialCourseProject(
+  input: CourseProjectCreateInput = {},
+): CourseProjectDocument {
+  const { projectId, title, document } = createCourseProjectShell(input)
+  const { surface, location } = createBlankSpatialSurface({
+    id: `spatial:${projectId}`,
+    title,
+  })
+  return courseProjectDocumentSchema.parse({
+    ...document,
+    locations: [location],
+    startLocationId: location.id,
+    surfaces: [surface],
+  })
 }
 
 function cloneAndCommit(
@@ -554,43 +671,19 @@ export function addCourseSurface(
         sceneId,
       })
     } else if (type === 'flow') {
-      const headingId = stableId('block')
-      surface = {
+      const created = createBlankFlowSurface({
         id,
-        type,
         title: options.title ?? `流式讲义 ${ordinal}`,
-        surfaceLayerItems: [],
-        layout: { readingWidth: 760, wideContentWidth: 1120 },
-        blocks: [{ id: headingId, type: 'heading', level: 1, text: '新讲义' }],
-      }
-      draft.locations.push({
-        id: headingId,
-        label: surface.title,
-        kind: 'flow-block',
-        surfaceId: id,
-        blockId: headingId,
       })
+      surface = created.surface
+      draft.locations.push(created.location)
     } else {
-      const cameraId = stableId('camera')
-      surface = {
+      const created = createBlankSpatialSurface({
         id,
-        type,
         title: options.title ?? `空间探索 ${ordinal}`,
-        surfaceLayerItems: [],
-        world: { bounds: { mode: 'infinite' }, layerItems: [] },
-        camera: {
-          home: { x: 0, y: 0, zoom: 1 },
-          frames: [{ id: cameraId, name: '总览', x: 0, y: 0, zoom: 1 }],
-        },
-        semanticZoom: [],
-      }
-      draft.locations.push({
-        id: cameraId,
-        label: `${surface.title} · 总览`,
-        kind: 'spatial-camera',
-        surfaceId: id,
-        cameraFrameId: cameraId,
       })
+      surface = created.surface
+      draft.locations.push(created.location)
     }
     draft.surfaces.push(surface)
     if (draft.surfaces.length > 1) {
@@ -620,6 +713,46 @@ export function deleteCourseSurface(
     if (draft.surfaces.length === 1) delete draft.mixedPrintPlan
     else if (draft.mixedPrintPlan) {
       draft.mixedPrintPlan.entries = draft.surfaces.map(defaultMixedPrintEntry)
+    }
+  }, now)
+}
+
+export function reorderCoursePageGroups(
+  project: CourseProjectDocument,
+  surfaceIds: readonly string[],
+  now?: string,
+): CourseProjectDocument {
+  return cloneAndCommit(project, (draft) => {
+    const groups = new Map<string, CourseLocation[]>()
+    const currentOrder: string[] = []
+    for (const location of draft.locations) {
+      if (!groups.has(location.surfaceId)) {
+        groups.set(location.surfaceId, [])
+        currentOrder.push(location.surfaceId)
+      }
+      groups.get(location.surfaceId)!.push(location)
+    }
+    if (
+      surfaceIds.length !== currentOrder.length ||
+      new Set(surfaceIds).size !== surfaceIds.length ||
+      surfaceIds.some((surfaceId) => !groups.has(surfaceId))
+    ) {
+      throw new Error('页面排序必须且只能包含当前课程中的全部页面')
+    }
+    draft.locations = surfaceIds.flatMap((surfaceId) => groups.get(surfaceId)!)
+    const referenced = new Set(surfaceIds)
+    const byId = new Map(draft.surfaces.map((surface) => [surface.id, surface]))
+    draft.surfaces = [
+      ...surfaceIds.map((surfaceId) => byId.get(surfaceId)!).filter(Boolean),
+      ...draft.surfaces.filter((surface) => !referenced.has(surface.id)),
+    ]
+    if (draft.mixedPrintPlan) {
+      const entriesBySurface = new Map(
+        draft.mixedPrintPlan.entries.map((entry) => [entry.surfaceId, entry]),
+      )
+      draft.mixedPrintPlan.entries = draft.surfaces.map((surface) =>
+        entriesBySurface.get(surface.id) ?? defaultMixedPrintEntry(surface),
+      )
     }
   }, now)
 }
