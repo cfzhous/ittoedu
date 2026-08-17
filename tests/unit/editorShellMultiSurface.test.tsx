@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { FlowEditorView } from '@/renderer/course/flowEditorView'
 import type { SpatialSurfaceDocument } from '@/shared/courseProjectTypes'
+import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import { useEditorStore } from '@/renderer/store/editorStore'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { RightSidebar } from '@/renderer/ui/RightSidebar'
+import type { PropertiesTabDocumentControl } from '@/renderer/ui/PropertiesTab'
 
 vi.mock('@/renderer/phaser/createEditorGame', () => ({
   createEditorGame: vi.fn(),
@@ -97,7 +100,100 @@ function toolbarDocumentControl(unavailableExports?: Record<string, string>) {
   }
 }
 
-afterEach(cleanup)
+function spatialDocumentControl(
+  controllerProperties?: PropertiesTabDocumentControl,
+) {
+  return {
+    elements: {
+      onAddText: () => undefined,
+      onAddShape: () => undefined,
+      onAddFormula: () => undefined,
+    },
+    layers: {
+      layer: null,
+      onPatch: () => undefined,
+    },
+    properties: {
+      camera: {
+        surfaceTitle: spatialSurface.title,
+        frames: spatialSurface.camera.frames,
+        home: spatialSurface.camera.home,
+        sessionCamera: spatialSurface.camera.home,
+        activeCameraFrameId: 'frame-1',
+        worldLayerItems: spatialSurface.world.layerItems,
+        semanticZoomRules: spatialSurface.semanticZoom,
+        onAddFrame: () => undefined,
+        onRenameFrame: () => undefined,
+        onReorderFrame: () => undefined,
+        onDeleteFrame: () => undefined,
+        onSetHome: () => undefined,
+        onActivateFrame: () => undefined,
+        onAddSemanticZoomRule: () => undefined,
+        onUpdateSemanticZoomRule: () => undefined,
+        onDeleteSemanticZoomRule: () => undefined,
+      },
+      paths: {
+        surfaceTitle: spatialSurface.title,
+        worldLayerItems: spatialSurface.world.layerItems,
+        paths: [],
+        relations: [],
+        onAddPath: () => undefined,
+        onRenamePath: () => undefined,
+        onUpdatePathStyle: () => undefined,
+        onDeletePath: () => undefined,
+        onAddRelation: () => undefined,
+        onUpdateRelationLabel: () => undefined,
+        onUpdateRelationKind: () => undefined,
+        onDeleteRelation: () => undefined,
+      },
+    },
+    ...(controllerProperties ? { controllerProperties } : {}),
+  }
+}
+
+function globalControllerProperties(
+  onUpdateNode = vi.fn(() => true),
+): PropertiesTabDocumentControl {
+  const node = createTeacherControllerNode({
+    id: 'global-controller',
+    title: '全课控制器',
+    x: 120,
+    y: 42,
+    width: 300,
+    height: 72,
+  })
+  return {
+    editingScope: 'scene',
+    editorMode: 'simple',
+    selectedNodes: [node],
+    target: {
+      sessionId: 'session-spatial',
+      locationId: 'location-spatial-1',
+      stateId: null,
+      editingScope: 'scene',
+      source: 'global',
+      projectRevision: 7,
+      layerItemId: node.id,
+    },
+    scopeLabel: '全课控制器',
+    scopeDescription: '本次修改将应用到整门课。',
+    overrideActive: false,
+    textContentUnavailableReason: '不可用',
+    richTextUnavailableReason: '不可用',
+    mediaUnavailableReason: '不可用',
+    controllerUnavailableReason: '不可用',
+    controllerScenes: [],
+    onUpdateNode,
+    onClearOverride: () => false,
+  }
+}
+
+afterEach(() => {
+  cleanup()
+  act(() => {
+    useEditorStore.getState().setActiveTab('elements')
+  })
+})
 
 describe('editor shell multi-surface integration', () => {
   it('renders the DOCX export menu item and honors unavailableExports.docx', () => {
@@ -190,49 +286,86 @@ describe('editor shell multi-surface integration', () => {
 
     rerender(
       <RightSidebar
+        spatialDocumentControl={spatialDocumentControl()}
+        onAddImage={() => undefined}
+        onReplaceImage={() => undefined}
+        onAddVideo={() => undefined}
+        onImportAudio={() => undefined}
+        onImportVideo={() => undefined}
+      />,
+    )
+    expect(screen.getByTestId('spatial-elements-tab')).toBeInTheDocument()
+  })
+
+  it('routes a selected Spatial global controller to the shared full-course properties view', () => {
+    const onUpdateNode = vi.fn(() => true)
+    act(() => {
+      useEditorStore.getState().setActiveTab('properties')
+    })
+    render(
+      <RightSidebar
+        spatialDocumentControl={spatialDocumentControl(globalControllerProperties(onUpdateNode))}
+        onAddImage={() => undefined}
+        onReplaceImage={() => undefined}
+        onAddVideo={() => undefined}
+        onImportAudio={() => undefined}
+        onImportVideo={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('全课控制器')).toBeInTheDocument()
+    expect(screen.getByText('本次修改将应用到整门课。')).toBeInTheDocument()
+    expect(screen.queryByTestId('spatial-camera-panel')).not.toBeInTheDocument()
+
+    const title = screen.getByLabelText('控制器标题')
+    fireEvent.change(title, { target: { value: 'Spatial 全课控制' } })
+    fireEvent.blur(title)
+    expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'global',
+      layerItemId: 'global-controller',
+    }), { title: 'Spatial 全课控制' })
+  })
+
+  it('forwards the Spatial controller locator with its explicit stable source and ID', () => {
+    const onLocateController = vi.fn()
+    act(() => {
+      useEditorStore.getState().setActiveTab('layers')
+    })
+    render(
+      <RightSidebar
         spatialDocumentControl={{
-          elements: {
-            onAddText: () => undefined,
-            onAddShape: () => undefined,
-            onAddFormula: () => undefined,
-          },
-          layers: {
-            layer: null,
-            onPatch: () => undefined,
-          },
-          properties: {
-            camera: {
-              surfaceTitle: spatialSurface.title,
-              frames: spatialSurface.camera.frames,
-              home: spatialSurface.camera.home,
-              sessionCamera: spatialSurface.camera.home,
-              activeCameraFrameId: 'frame-1',
-              worldLayerItems: spatialSurface.world.layerItems,
-              semanticZoomRules: spatialSurface.semanticZoom,
-              onAddFrame: () => undefined,
-              onRenameFrame: () => undefined,
-              onReorderFrame: () => undefined,
-              onDeleteFrame: () => undefined,
-              onSetHome: () => undefined,
-              onActivateFrame: () => undefined,
-              onAddSemanticZoomRule: () => undefined,
-              onUpdateSemanticZoomRule: () => undefined,
-              onDeleteSemanticZoomRule: () => undefined,
-            },
-            paths: {
-              surfaceTitle: spatialSurface.title,
-              worldLayerItems: spatialSurface.world.layerItems,
-              paths: [],
-              relations: [],
-              onAddPath: () => undefined,
-              onRenamePath: () => undefined,
-              onUpdatePathStyle: () => undefined,
-              onDeletePath: () => undefined,
-              onAddRelation: () => undefined,
-              onUpdateRelationLabel: () => undefined,
-              onUpdateRelationKind: () => undefined,
-              onDeleteRelation: () => undefined,
-            },
+          ...spatialDocumentControl(),
+          layerList: {
+            layers: [{
+              source: 'global',
+              scopedVisible: true,
+              effectiveVisible: true,
+              selectionId: 'global-controller',
+              item: {
+                layerItemId: 'global-controller',
+                label: '教师控制器',
+                kind: 'native',
+                visible: true,
+                locked: false,
+                order: 1,
+                content: { nativeType: 'teacher-controller' },
+              },
+            }, {
+              source: 'global',
+              scopedVisible: false,
+              effectiveVisible: false,
+              selectionId: 'hidden-global-controller',
+              item: {
+                layerItemId: 'hidden-global-controller',
+                label: '隐藏教师控制器',
+                kind: 'native',
+                visible: false,
+                locked: true,
+                order: 2,
+                content: { nativeType: 'teacher-controller' },
+              },
+            }] as never,
+            onLocateController,
           },
         }}
         onAddImage={() => undefined}
@@ -242,7 +375,68 @@ describe('editor shell multi-surface integration', () => {
         onImportVideo={() => undefined}
       />,
     )
-    expect(screen.getByTestId('spatial-elements-tab')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('locate-controller-global-global-controller'))
+    expect(onLocateController).toHaveBeenCalledWith({
+      source: 'global',
+      layerItemId: 'global-controller',
+    })
+    expect(
+      screen.getByTestId('locate-controller-global-hidden-global-controller'),
+    ).toBeDisabled()
+    expect(
+      screen.getByTestId('locate-controller-global-hidden-global-controller'),
+    ).toHaveAttribute('title', '控制器当前不可见，无法定位到画布')
+  })
+
+  it('marks a shared Spatial row through a local source-explicit inspection target', () => {
+    const onSelectLayer = vi.fn()
+    act(() => {
+      useEditorStore.getState().setActiveTab('layers')
+    })
+    render(
+      <RightSidebar
+        spatialDocumentControl={{
+          ...spatialDocumentControl(),
+          layerList: {
+            layers: [{
+              source: 'surface',
+              scopedVisible: false,
+              effectiveVisible: false,
+              selectionId: 'shared-spatial-note',
+              item: {
+                layerItemId: 'shared-spatial-note',
+                label: '空间共用说明',
+                kind: 'native',
+                visible: true,
+                locked: false,
+                order: 1,
+                content: { nativeType: 'text' },
+              },
+            }] as never,
+            onSelectLayer,
+          },
+        }}
+        onAddImage={() => undefined}
+        onReplaceImage={() => undefined}
+        onAddVideo={() => undefined}
+        onImportAudio={() => undefined}
+        onImportVideo={() => undefined}
+      />,
+    )
+
+    const sharedItem = screen.getByTestId('spatial-layer-list-item-surface-shared-spatial-note')
+    expect(sharedItem).not.toHaveClass('spatial-layer-list-item--selected')
+    expect(sharedItem).toHaveAttribute('data-layer-view-only', 'true')
+    expect(sharedItem).toHaveAttribute('data-layer-effective-visible', 'false')
+
+    fireEvent.click(sharedItem)
+    expect(sharedItem).toHaveClass('spatial-layer-list-item--selected')
+    expect(sharedItem).toHaveAttribute('aria-pressed', 'true')
+    expect(onSelectLayer).toHaveBeenCalledWith({
+      source: 'surface',
+      layerItemId: 'shared-spatial-note',
+    })
   })
 
   it('routes Workspace to FlowWorkspace and SpatialWorkspace before the Phaser slide editor', () => {
@@ -269,6 +463,22 @@ describe('editor shell multi-surface integration', () => {
           interactionDisabled: false,
           onSelect: () => undefined,
           onTransformEnd: () => undefined,
+          screenController: {
+            source: 'global',
+            layerItemId: 'global-controller',
+            label: '教师控制器',
+            title: '课堂导航',
+            compact: false,
+            locked: false,
+            opacity: 1,
+            frame: { x: 120, y: 42, width: 300, height: 72, rotation: 0 },
+          },
+          selectedScreenControllerTarget: {
+            source: 'global',
+            layerItemId: 'global-controller',
+          },
+          onSelectScreenController: () => undefined,
+          onScreenControllerTransformEnd: () => undefined,
         }}
         onAddImage={() => undefined}
         onAddVideo={() => undefined}
@@ -276,5 +486,6 @@ describe('editor shell multi-surface integration', () => {
       />,
     )
     expect(screen.getByTestId('workspace-spatial-authoring')).toBeInTheDocument()
+    expect(screen.getByTestId('spatial-screen-controller')).toBeInTheDocument()
   })
 })

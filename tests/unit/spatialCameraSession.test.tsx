@@ -73,7 +73,7 @@ describe('SpatialWorkspace session camera', () => {
     vi.unstubAllGlobals()
   })
 
-  it('moves the session camera when activeCameraFrameId changes to a persisted frame', () => {
+  it('moves the session camera from one persisted frame to another exactly once', () => {
     const onCameraChange = vi.fn()
     const onSelect = vi.fn()
     const onTransformEnd = vi.fn()
@@ -81,16 +81,16 @@ describe('SpatialWorkspace session camera', () => {
     const { container, rerender } = render(h(SpatialWorkspace, {
       spatial,
       viewportSize: { width: 800, height: 500 },
-      activeCameraFrameId: null,
+      activeCameraFrameId: 'frame-1',
       onSelect,
       onTransformEnd,
       onCameraChange,
     }))
 
     const root = container.querySelector('[data-testid="spatial-workspace"]')!
-    expect(root.getAttribute('data-camera-x')).toBe('0')
-    expect(root.getAttribute('data-camera-y')).toBe('0')
-    expect(root.getAttribute('data-camera-zoom')).toBe('1')
+    expect(root.getAttribute('data-camera-x')).toBe('100')
+    expect(root.getAttribute('data-camera-y')).toBe('200')
+    expect(root.getAttribute('data-camera-zoom')).toBe('2')
 
     rerender(h(SpatialWorkspace, {
       spatial,

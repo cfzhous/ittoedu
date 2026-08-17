@@ -1,6 +1,14 @@
 import { Shapes, Sigma, Type } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { compareStableStrings } from '../../shared/stableOrder'
-import type { FlowEditorLayerView } from '../course/flowEditorView'
+import type {
+  FlowEditorLayerTarget,
+  FlowEditorLayerView,
+} from '../course/flowEditorView'
+import type {
+  SpatialEditorLayerScope,
+  SpatialEditorLayerView,
+} from '../course/spatialEditorView'
 import { ElementsTab, type ElementsTabDocumentControl } from './ElementsTab'
 import { NodesTab, type NodesTabDocumentControl } from './NodesTab'
 import {
@@ -50,13 +58,16 @@ export interface RightSidebarDocumentControl {
 
 export interface RightSidebarFlowLayerControl {
   readonly layers: readonly FlowEditorLayerView[]
-  readonly selectedLayerItemId?: string | null
-  onSelectLayer?(layerItemId: string): void
+  readonly selectedLayerTarget?: FlowEditorLayerTarget | null
+  onSelectLayer?(target: FlowEditorLayerTarget): void
+  onLocateController?(target: FlowEditorLayerTarget): void
 }
 
 export interface RightSidebarFlowDocumentControl {
   readonly elements: FlowElementsTabProps
   readonly properties: FlowPropertiesTabProps
+  /** Selected global controller reuses the V9 controlled property editor. */
+  readonly controllerProperties?: PropertiesTabDocumentControl
   /** When present, the layers tab shows the same teacher-facing Flow layer list. */
   readonly layers?: RightSidebarFlowLayerControl
 }
@@ -68,13 +79,29 @@ export interface RightSidebarSpatialElementsControl {
   readonly disabledReason?: string
 }
 
+export interface RightSidebarSpatialLayerTarget {
+  readonly source: SpatialEditorLayerScope
+  readonly layerItemId: string
+}
+
+export interface RightSidebarSpatialLayerControl {
+  readonly layers: readonly SpatialEditorLayerView[]
+  readonly selectedLayerTarget?: RightSidebarSpatialLayerTarget | null
+  onSelectLayer?(target: RightSidebarSpatialLayerTarget): void
+  onLocateController?(target: RightSidebarSpatialLayerTarget): void
+}
+
 export interface RightSidebarSpatialDocumentControl {
   readonly elements: RightSidebarSpatialElementsControl
   readonly layers: SpatialLayerInspectorProps
+  /** Current-page source-explicit list; the inspector remains world-only. */
+  readonly layerList?: RightSidebarSpatialLayerControl
   readonly properties: {
     readonly camera: SpatialCameraPanelProps
     readonly paths: SpatialPathEditorProps
   }
+  /** Selected global controller reuses the V9 controlled property editor. */
+  readonly controllerProperties?: PropertiesTabDocumentControl
 }
 
 interface RightSidebarProps {
@@ -127,7 +154,7 @@ function SpatialElementsPanel({
   return (
     <div className="elements-scroll" data-testid="spatial-elements-tab" aria-disabled={disabled}>
       <div className="section-heading section-heading--spaced">
-        <span>Spatial 内容</span>
+        <span>空间画布内容</span>
         <Type size={14} aria-hidden="true" />
       </div>
       {control.disabledReason && (
@@ -135,7 +162,7 @@ function SpatialElementsPanel({
           {control.disabledReason}
         </div>
       )}
-      <div className="element-grid" role="group" aria-label="Spatial 内容类型">
+      <div className="element-grid" role="group" aria-label="空间画布内容类型">
         <button
           type="button"
           className="element-card"
@@ -188,9 +215,17 @@ function sortFlowLayerViews(
 
 function FlowLayerList({
   layers,
-  selectedLayerItemId,
+  selectedLayerTarget,
   onSelectLayer,
+  onLocateController,
 }: RightSidebarFlowLayerControl) {
+  // The right-side list remains an inspection surface: unlike the canvas
+  // overlay, it must retain hidden/scoped-out rows and report their state.
+  const [inspectedSharedLayer, setInspectedSharedLayer] =
+    useState<FlowEditorLayerTarget | null>(null)
+  useEffect(() => {
+    setInspectedSharedLayer(null)
+  }, [layers])
   const sortedLayers = sortFlowLayerViews(layers)
   return (
     <div className="flow-layer-list" data-testid="flow-layer-list">
@@ -205,37 +240,192 @@ function FlowLayerList({
         <div className="flow-layer-list__items" role="list">
           {sortedLayers.map((layer) => {
             const layerLabel = layer.item.label || (
-              layer.source === 'global' ? '全局图层' : '讲义图层'
+              layer.source === 'global' ? '全课内容' : '当前讲义共用'
             )
-            const sourceLabel = layer.source === 'global' ? '全局' : '讲义'
-            const selected = layer.selectionId === selectedLayerItemId
+            const sourceLabel = layer.source === 'global' ? '全课内容' : '当前讲义共用'
+            const target: FlowEditorLayerTarget = {
+              source: layer.source,
+              layerItemId: layer.selectionId,
+            }
+            const controller = layer.source === 'global' &&
+              layer.item.kind === 'native' &&
+              layer.item.content.nativeType === 'teacher-controller'
+            const viewOnly = !controller
+            const selected = inspectedSharedLayer === null
+              ? selectedLayerTarget?.source === target.source &&
+                selectedLayerTarget.layerItemId === target.layerItemId
+              : inspectedSharedLayer.source === target.source &&
+                inspectedSharedLayer.layerItemId === target.layerItemId
             const clickable = Boolean(onSelectLayer)
             return (
-              <button
-                key={layer.selectionId}
-                type="button"
+              <div
+                key={`${layer.source}:${layer.selectionId}`}
                 role="listitem"
-                className={`flow-layer-list-item${selected ? ' flow-layer-list-item--selected' : ''}`}
-                data-layer-item-id={layer.selectionId}
-                data-layer-source={layer.source}
-                data-layer-visible={layer.item.visible}
-                data-layer-locked={layer.item.locked}
-                data-layer-scoped-visible={layer.scopedVisible}
-                data-layer-effective-visible={layer.effectiveVisible}
-                data-testid={`flow-layer-list-item-${layer.selectionId}`}
-                disabled={!clickable}
-                onClick={
-                  clickable
-                    ? () => onSelectLayer?.(layer.selectionId)
-                    : undefined
-                }
+                className="flow-layer-list-item-wrap"
               >
-                <span className="flow-layer-list-item__label">{layerLabel}</span>
-                <span className="flow-layer-list-item__source">{sourceLabel}</span>
-                <span className="flow-layer-list-item__state">
-                  {layer.item.visible ? '显示' : '隐藏'} · {layer.item.locked ? '锁定' : '未锁定'}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  className={`flow-layer-list-item${selected ? ' flow-layer-list-item--selected' : ''}`}
+                  data-layer-item-id={layer.selectionId}
+                  data-layer-source={layer.source}
+                  data-layer-visible={layer.item.visible}
+                  data-layer-locked={layer.item.locked}
+                  data-layer-scoped-visible={layer.scopedVisible}
+                  data-layer-effective-visible={layer.effectiveVisible}
+                  data-testid={`flow-layer-list-item-${layer.source}-${layer.selectionId}`}
+                  disabled={!clickable}
+                  onClick={
+                    clickable
+                      ? () => {
+                          setInspectedSharedLayer(viewOnly ? target : null)
+                          onSelectLayer?.(target)
+                        }
+                      : undefined
+                  }
+                >
+                  <span className="flow-layer-list-item__label">{layerLabel}</span>
+                  <span className="flow-layer-list-item__source">{sourceLabel}</span>
+                  <span className="flow-layer-list-item__state">
+                    {layer.item.visible ? '显示' : '隐藏'} · {layer.item.locked ? '锁定' : '未锁定'}
+                  </span>
+                </button>
+                {controller && onLocateController ? (
+                  <button
+                    type="button"
+                    className="secondary-button flow-layer-list-item__locate-controller"
+                    data-testid={`locate-controller-${layer.source}-${layer.selectionId}`}
+                    aria-label={`定位控制器“${layerLabel}”`}
+                    title={layer.effectiveVisible
+                      ? '在当前讲义画布中定位控制器'
+                      : '控制器当前不可见，无法定位到画布'}
+                    disabled={!layer.effectiveVisible}
+                    onClick={() => {
+                      setInspectedSharedLayer(null)
+                      onLocateController(target)
+                    }}
+                  >
+                    定位控制器
+                  </button>
+                ) : viewOnly ? (
+                  <span className="flow-layer-list-item__impact" role="status">
+                    {layer.source === 'global'
+                      ? '会在整门课中出现；当前仅可查看影响范围'
+                      : '会在当前讲义的多个页面中出现；当前仅可查看影响范围'}
+                  </span>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function sortSpatialLayerViews(
+  layers: readonly SpatialEditorLayerView[],
+): SpatialEditorLayerView[] {
+  return [...layers].sort((left, right) =>
+    left.item.order - right.item.order ||
+    compareStableStrings(left.selectionId, right.selectionId),
+  )
+}
+
+function spatialSourceLabel(source: SpatialEditorLayerScope): string {
+  switch (source) {
+    case 'global': return '全课内容'
+    case 'surface': return '当前空间共用'
+    case 'world': return '空间内容'
+  }
+}
+
+function SpatialLayerList({
+  layers,
+  selectedLayerTarget,
+  onSelectLayer,
+  onLocateController,
+}: RightSidebarSpatialLayerControl) {
+  // Keep parity with Flow: visibility affects the canvas proxy, not whether a
+  // teacher can inspect the current source-explicit layer row here.
+  const [inspectedSharedLayer, setInspectedSharedLayer] =
+    useState<RightSidebarSpatialLayerTarget | null>(null)
+  useEffect(() => {
+    setInspectedSharedLayer(null)
+  }, [layers])
+  const sortedLayers = sortSpatialLayerViews(layers)
+  return (
+    <div className="spatial-layer-list" data-testid="spatial-layer-list">
+      <div className="section-heading section-heading--spaced">
+        <span>当前页面图层</span>
+      </div>
+      {sortedLayers.length === 0 ? (
+        <div className="empty-state" role="status">当前页面没有可查看的图层。</div>
+      ) : (
+        <div className="spatial-layer-list__items" role="list">
+          {sortedLayers.map((layer) => {
+            const sourceLabel = spatialSourceLabel(layer.source)
+            const target: RightSidebarSpatialLayerTarget = {
+              source: layer.source,
+              layerItemId: layer.selectionId,
+            }
+            const controller = layer.source === 'global' &&
+              layer.item.kind === 'native' &&
+              layer.item.content.nativeType === 'teacher-controller'
+            const viewOnly = layer.source !== 'world' && !controller
+            const selected = inspectedSharedLayer === null
+              ? selectedLayerTarget?.source === target.source &&
+                selectedLayerTarget.layerItemId === target.layerItemId
+              : inspectedSharedLayer.source === target.source &&
+                inspectedSharedLayer.layerItemId === target.layerItemId
+            return (
+              <div
+                key={`${layer.source}:${layer.selectionId}`}
+                className="spatial-layer-list-item-wrap"
+                role="listitem"
+              >
+                <button
+                  type="button"
+                  className={`spatial-layer-list-item${selected ? ' spatial-layer-list-item--selected' : ''}`}
+                  data-testid={`spatial-layer-list-item-${layer.source}-${layer.selectionId}`}
+                  data-layer-source={layer.source}
+                  data-layer-item-id={layer.selectionId}
+                  data-layer-effective-visible={layer.effectiveVisible}
+                  data-layer-view-only={viewOnly ? 'true' : 'false'}
+                  aria-pressed={selected}
+                  onClick={() => {
+                    setInspectedSharedLayer(viewOnly ? target : null)
+                    onSelectLayer?.(target)
+                  }}
+                >
+                  <span className="spatial-layer-list-item__label">{layer.item.label}</span>
+                  <span className="spatial-layer-list-item__source">{sourceLabel}</span>
+                  <span className="spatial-layer-list-item__state">
+                    {layer.item.visible ? '显示' : '隐藏'} · {layer.item.locked ? '锁定' : '未锁定'}
+                  </span>
+                </button>
+                {controller && onLocateController ? (
+                  <button
+                    type="button"
+                    className="secondary-button spatial-layer-list-item__locate-controller"
+                    data-testid={`locate-controller-${layer.source}-${layer.selectionId}`}
+                    aria-label={`定位控制器“${layer.item.label}”`}
+                    title={layer.effectiveVisible
+                      ? '在当前空间画布中定位控制器'
+                      : '控制器当前不可见，无法定位到画布'}
+                    disabled={!layer.effectiveVisible}
+                    onClick={() => {
+                      setInspectedSharedLayer(null)
+                      onLocateController(target)
+                    }}
+                  >
+                    定位控制器
+                  </button>
+                ) : viewOnly ? (
+                  <span className="spatial-layer-list-item__impact" role="status">
+                    当前仅可查看影响范围
+                  </span>
+                ) : null}
+              </div>
             )
           })}
         </div>
@@ -290,7 +480,7 @@ export function RightSidebar({
   const activeUnavailableReason = flowDocumentControl
     ? controlledTabAvailable
       ? undefined
-      : 'Flow 讲义暂不提供此面板；现有内容不会改变。'
+      : '讲义暂不提供此面板；现有内容不会改变。'
     : spatialDocumentControl
       ? controlledTabAvailable
         ? undefined
@@ -345,7 +535,9 @@ export function RightSidebar({
           activeTab === 'elements' ? (
             <FlowElementsTab {...flowDocumentControl.elements} />
           ) : activeTab === 'properties' ? (
-            <FlowPropertiesTab {...flowDocumentControl.properties} />
+            flowDocumentControl.controllerProperties
+              ? <PropertiesTab documentControl={flowDocumentControl.controllerProperties} />
+              : <FlowPropertiesTab {...flowDocumentControl.properties} />
           ) : activeTab === 'layers' && flowDocumentControl.layers ? (
             <FlowLayerList {...flowDocumentControl.layers} />
           ) : null
@@ -353,12 +545,21 @@ export function RightSidebar({
           activeTab === 'elements' ? (
             <SpatialElementsPanel control={spatialDocumentControl.elements} />
           ) : activeTab === 'layers' ? (
-            <SpatialLayerInspector {...spatialDocumentControl.layers} />
+            spatialDocumentControl.layerList ? (
+              <>
+                <SpatialLayerList {...spatialDocumentControl.layerList} />
+                {spatialDocumentControl.layers.layer && (
+                  <SpatialLayerInspector {...spatialDocumentControl.layers} />
+                )}
+              </>
+            ) : <SpatialLayerInspector {...spatialDocumentControl.layers} />
           ) : activeTab === 'properties' ? (
-            <>
-              <SpatialCameraPanel {...spatialDocumentControl.properties.camera} />
-              <SpatialPathEditor {...spatialDocumentControl.properties.paths} />
-            </>
+            spatialDocumentControl.controllerProperties
+              ? <PropertiesTab documentControl={spatialDocumentControl.controllerProperties} />
+              : <>
+                <SpatialCameraPanel {...spatialDocumentControl.properties.camera} />
+                <SpatialPathEditor {...spatialDocumentControl.properties.paths} />
+              </>
           ) : null
         ) : activeTab === 'elements' ? (
           documentControl?.elements ? (

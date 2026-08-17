@@ -40,6 +40,16 @@ describe('minimal project design tokens', () => {
     expect(projectDocumentSchema.safeParse(project)).toMatchObject({ success: false })
   })
 
+  it('renders an AI-free hint describing only stable token IDs, names and values', () => {
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+
+    const hint = screen.getByText(
+      /只保存稳定 ID、名称和值，便于统一取色与字体；不承载叙述性美术方向，也不会自动改写已有节点/,
+    )
+    expect(hint).toBeTruthy()
+    expect(hint.textContent).not.toMatch(/AI|Codex/)
+  })
+
   it('edits font and color tokens through undoable project commands', () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 

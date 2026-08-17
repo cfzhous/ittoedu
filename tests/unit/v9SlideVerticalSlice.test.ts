@@ -7,6 +7,7 @@ import type { LayerItem } from '@/shared/courseProjectTypes'
 import { createShapeNode } from '@/renderer/project/createProject'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import {
+  addCourseSurface,
   addNativeVisualLayer,
   updateCourseProject,
 } from '@/renderer/course/courseStudioModel'
@@ -20,6 +21,7 @@ import {
   addV9SlideInteractionRule,
   addV9SlidePresentationState,
   buildV9SlideWorkspaceSnapshot,
+  captureCourseGlobalControllerTarget,
   captureV9SlideVerticalSliceArchive,
   completeV9SlideVerticalSliceSave,
   createV9SlideVerticalSliceState,
@@ -32,10 +34,14 @@ import {
   renameV9SlideVerticalSlice,
   replaceV9SlideNativeNode,
   resolveEditorStartupBackend,
+  selectCourseGlobalController,
+  selectV9CourseLocation,
   selectV9SlideVerticalSlice,
   setV9SlideEditingScope,
+  transformCourseGlobalController,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
+  updateCourseGlobalController,
   updateV9SlideInteractionRule,
   updateV9SlideMotionTargets,
   updateV9SlideNativeNode,
@@ -121,8 +127,9 @@ describe('test-only V9 Slide vertical slice', () => {
     })
     expect(snapshot.selectedNodeIds).toEqual([])
     expect(snapshot.componentPackages).toEqual({})
-    expect(snapshot.document.nodes).toHaveLength(1)
-    expect(snapshot.document.nodes[0]).toMatchObject({
+    expect(snapshot.document.nodes).toHaveLength(2)
+    expect(snapshot.document.nodes.find((node) => node.id === V9_SLIDE_TEST_TEXT_ID))
+      .toMatchObject({
       id: V9_SLIDE_TEST_TEXT_ID,
       name: 'V9 可移动文字',
       type: 'text',
@@ -132,10 +139,62 @@ describe('test-only V9 Slide vertical slice', () => {
       height: 80,
       text: 'V9 可移动文字',
     })
+    const controller = snapshot.document.nodes.find((node) => node.type === 'teacher-controller')
+    expect(controller).toBeDefined()
+    expect(snapshot.authoringTargets.get(V9_SLIDE_TEST_TEXT_ID)).toMatchObject({
+      source: 'scene',
+      layerItemId: V9_SLIDE_TEST_TEXT_ID,
+    })
+    expect(controller && snapshot.authoringTargets.get(controller.id)).toMatchObject({
+      source: 'global',
+      layerItemId: controller?.id,
+    })
     expect(snapshot.previewDocument.nodes.map((node) => node.type)).toEqual([
       'teacher-controller',
       'text',
     ])
+  })
+
+  it('projects an effective global controller into the scene canvas without creating a scene copy', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const controller = initial.history.present.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' &&
+        entry.item.content.nativeType === 'teacher-controller',
+    )?.item
+    if (!controller || controller.kind !== 'native') throw new Error('expected controller')
+
+    const projected = buildV9SlideWorkspaceSnapshot(initial)
+    expect(projected.document.nodes.find((node) => node.id === controller.layerItemId))
+      .toMatchObject({ type: 'teacher-controller' })
+    expect(projected.authoringTargets.get(controller.layerItemId)).toEqual({
+      source: 'global',
+      layerItemId: controller.layerItemId,
+    })
+    const location = initial.history.present.locations.find(
+      (candidate) => candidate.id === initial.selection.locationId,
+    )
+    if (!location || location.kind !== 'slide-scene') throw new Error('expected slide location')
+    const surface = initial.history.present.surfaces.find(
+      (candidate) => candidate.id === location.surfaceId,
+    )
+    if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+    expect(surface.scenes.find((scene) => scene.id === location.sceneId)?.layerItems)
+      .not.toContainEqual(expect.objectContaining({ layerItemId: controller.layerItemId }))
+
+    const hiddenProject = updateCourseProject(initial.history.present, (draft) => {
+      const item = draft.globalLayerItems.find(
+        (entry) => entry.item.layerItemId === controller.layerItemId,
+      )?.item
+      if (!item) throw new Error('expected controller')
+      item.visible = false
+    }, MOVE_NOW)
+    const hidden = openV9SlideVerticalSliceState({
+      project: hiddenProject,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    expect(buildV9SlideWorkspaceSnapshot(hidden).document.nodes)
+      .not.toContainEqual(expect.objectContaining({ id: controller.layerItemId }))
   })
 
   it('authors the global teacher controller in one history entry and preserves its frame on reopen', () => {
@@ -199,6 +258,191 @@ describe('test-only V9 Slide vertical slice', () => {
       y: controller.frame.y - 18,
     })
     expect(isV9SlideVerticalSliceDirty(reopened)).toBe(false)
+  })
+
+  it('targets and edits one global controller from Slide, Flow and Spatial without changing local arrays', () => {
+    const initial = createV9SlideVerticalSliceState()
+    let project = addCourseSurface(initial.history.present, 'flow', { id: 'p2-global-flow' })
+    project = addCourseSurface(project, 'spatial-2d', { id: 'p2-global-spatial' })
+    const state = openV9SlideVerticalSliceState({
+      project,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    const locations = state.history.present.locations
+    const flowLocation = locations.find((location) => location.kind === 'flow-block')
+    const spatialLocation = locations.find((location) => location.kind === 'spatial-camera')
+    if (!flowLocation || !spatialLocation) throw new Error('expected mixed locations')
+
+    const slideTarget = captureCourseGlobalControllerTarget(state)
+    const flow = selectV9CourseLocation(state, flowLocation.id)
+    const flowTarget = captureCourseGlobalControllerTarget(flow)
+    const spatial = selectV9CourseLocation(flow, spatialLocation.id)
+    const spatialTarget = captureCourseGlobalControllerTarget(spatial)
+    if (!slideTarget || !flowTarget || !spatialTarget) throw new Error('expected controller targets')
+
+    expect([slideTarget, flowTarget, spatialTarget].map((target) => target.layerItemId))
+      .toEqual([slideTarget.layerItemId, slideTarget.layerItemId, slideTarget.layerItemId])
+    expect([slideTarget, flowTarget, spatialTarget].map((target) => target.source))
+      .toEqual(['global', 'global', 'global'])
+
+    const controller = flow.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === flowTarget.layerItemId,
+    )?.item
+    const slideSurface = flow.history.present.surfaces.find((surface) => surface.type === 'slide')
+    const flowSurface = flow.history.present.surfaces.find((surface) => surface.type === 'flow')
+    const spatialSurface = flow.history.present.surfaces.find(
+      (surface) => surface.type === 'spatial-2d',
+    )
+    if (
+      !controller ||
+      !slideSurface || slideSurface.type !== 'slide' ||
+      !flowSurface || flowSurface.type !== 'flow' ||
+      !spatialSurface || spatialSurface.type !== 'spatial-2d'
+    ) {
+      throw new Error('expected mixed course surfaces')
+    }
+    const localLayerArrays = (candidateProject: typeof flow.history.present) => {
+      const candidateSlide = candidateProject.surfaces.find(
+        (surface) => surface.type === 'slide' && surface.id === slideSurface.id,
+      )
+      const candidateSpatial = candidateProject.surfaces.find(
+        (surface) => surface.type === 'spatial-2d' && surface.id === spatialSurface.id,
+      )
+      const candidateFlow = candidateProject.surfaces.find(
+        (surface) => surface.type === 'flow' && surface.id === flowSurface.id,
+      )
+      if (
+        !candidateSlide || candidateSlide.type !== 'slide' ||
+        !candidateSpatial || candidateSpatial.type !== 'spatial-2d' ||
+        !candidateFlow || candidateFlow.type !== 'flow'
+      ) {
+        throw new Error('expected stable local surfaces')
+      }
+      return structuredClone({
+        sceneLayerItems: candidateSlide.scenes.map((scene) => scene.layerItems),
+        flowBlocks: candidateFlow.blocks,
+        surfaceLayerItems: candidateProject.surfaces.map((surface) => surface.surfaceLayerItems),
+        spatialWorldLayerItems: candidateSpatial.world.layerItems,
+      })
+    }
+    const localBefore = localLayerArrays(flow.history.present)
+
+    const selected = selectCourseGlobalController(flow, flowTarget)
+    const moved = transformCourseGlobalController(selected, flowTarget, {
+      x: controller.frame.x + 28,
+      y: controller.frame.y - 16,
+      width: controller.frame.width,
+      height: controller.frame.height,
+      rotation: controller.rotation,
+    }, MOVE_NOW)
+
+    expect(selected.history).toBe(flow.history)
+    expect(selected.selection.locationId).toBe(flowLocation.id)
+    expect(selected.editingScope).toBe(flow.editingScope)
+    expect(selected.selection.globalController).toEqual({
+      source: 'global',
+      layerItemId: flowTarget.layerItemId,
+    })
+    expect(moved.history.present.revision).toBe(flow.history.present.revision + 1)
+    expect(moved.history.past).toEqual([flow.history.present])
+    expect(moved.history.present.globalLayerItems).toHaveLength(
+      flow.history.present.globalLayerItems.length,
+    )
+    expect(moved.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === flowTarget.layerItemId,
+    )?.item.frame).toMatchObject({
+      x: controller.frame.x + 28,
+      y: controller.frame.y - 16,
+    })
+    expect(localLayerArrays(moved.history.present)).toEqual(localBefore)
+
+    const revisitedSlide = selectV9CourseLocation(moved, state.selection.locationId)
+    expect(buildV9SlideWorkspaceSnapshot(revisitedSlide).document.nodes.find(
+      (node) => node.id === flowTarget.layerItemId,
+    )).toMatchObject({
+      type: 'teacher-controller',
+      x: controller.frame.x + 28,
+      y: controller.frame.y - 16,
+    })
+
+    const updatedTarget = captureCourseGlobalControllerTarget(moved)
+    if (!updatedTarget) throw new Error('expected refreshed target')
+    const updated = updateCourseGlobalController(moved, updatedTarget, { title: '全课控制器' })
+    expect(updated.history.present.revision).toBe(moved.history.present.revision + 1)
+    expect(updated.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === spatialTarget.layerItemId,
+    )?.item).toMatchObject({
+      content: { data: { title: '全课控制器' } },
+    })
+    expect(undoV9SlideVerticalSlice(moved).history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === spatialTarget.layerItemId,
+    )?.item.frame).toEqual(controller.frame)
+    expect(redoV9SlideVerticalSlice(undoV9SlideVerticalSlice(moved)).history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === spatialTarget.layerItemId,
+    )?.item.frame).toMatchObject({
+      x: controller.frame.x + 28,
+      y: controller.frame.y - 16,
+    })
+  })
+
+  it('rejects stale, non-controller and locked global-controller commands without writing history', () => {
+    const initial = createV9SlideVerticalSliceState()
+    const target = captureCourseGlobalControllerTarget(initial)
+    if (!target) throw new Error('expected controller target')
+    const selected = selectCourseGlobalController(initial, target)
+    const controller = selected.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item
+    if (!controller) throw new Error('expected controller')
+    const transform = {
+      x: controller.frame.x + 12,
+      y: controller.frame.y,
+      width: controller.frame.width,
+      height: controller.frame.height,
+      rotation: controller.rotation,
+    }
+
+    expect(transformCourseGlobalController(initial, target, transform)).toBe(initial)
+    expect(transformCourseGlobalController(selected, { ...target, sessionId: 'stale-session' }, transform))
+      .toBe(selected)
+    expect(transformCourseGlobalController(selected, { ...target, locationId: 'stale-location' }, transform))
+      .toBe(selected)
+    expect(transformCourseGlobalController(selected, {
+      ...target,
+      source: 'scene',
+    } as unknown as typeof target, transform)).toBe(selected)
+    expect(transformCourseGlobalController(selected, {
+      ...target,
+      layerItemId: V9_SLIDE_TEST_TEXT_ID,
+    }, transform)).toBe(selected)
+
+    const moved = transformCourseGlobalController(selected, target, transform)
+    expect(transformCourseGlobalController(moved, target, transform)).toBe(moved)
+
+    const lockedProject = updateCourseProject(initial.history.present, (draft) => {
+      const item = draft.globalLayerItems.find(
+        (entry) => entry.item.layerItemId === target.layerItemId,
+      )?.item
+      if (!item) throw new Error('expected controller')
+      item.locked = true
+    })
+    const locked = openV9SlideVerticalSliceState({
+      project: lockedProject,
+      assetFiles: {},
+      componentFiles: {},
+    }, null)
+    const lockedTarget = captureCourseGlobalControllerTarget(locked)
+    if (!lockedTarget) throw new Error('expected locked controller target')
+    const lockedSelected = selectCourseGlobalController(locked, lockedTarget)
+    expect(transformCourseGlobalController(lockedSelected, lockedTarget, transform)).toBe(lockedSelected)
+    expect(updateCourseGlobalController(lockedSelected, lockedTarget, { title: '不应写入' }))
+      .toBe(lockedSelected)
+    const unlocked = updateCourseGlobalController(lockedSelected, lockedTarget, { locked: false })
+    expect(unlocked.history.present.revision).toBe(lockedSelected.history.present.revision + 1)
+    expect(unlocked.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === lockedTarget.layerItemId,
+    )?.item.locked).toBe(false)
   })
 
   it('flattens global, surface, and scene Native layers by unified order while proxies stay scope-local', () => {
@@ -273,7 +517,12 @@ describe('test-only V9 Slide vertical slice', () => {
 
     expect(sceneSnapshot.document.nodes.map((node) => node.id)).toEqual([
       V9_SLIDE_TEST_TEXT_ID,
+      controllerId,
     ])
+    expect(sceneSnapshot.authoringTargets.get(controllerId)).toEqual({
+      source: 'global',
+      layerItemId: controllerId,
+    })
     expect(globalSnapshot.document.nodes.map((node) => node.id)).toEqual([
       'global-native-text',
       controllerId,
@@ -303,7 +552,9 @@ describe('test-only V9 Slide vertical slice', () => {
       additive: false,
     })
     const transformed = transformV9SlideVerticalSlice(selected, {
-      nodes: snapshot.document.nodes.map((node) => ({
+      nodes: snapshot.document.nodes
+        .filter((node) => snapshot.authoringTargets.get(node.id)?.source === 'scene')
+        .map((node) => ({
         nodeId: node.id,
         x: node.x + (node.id === V9_SLIDE_TEST_TEXT_ID ? 10 : 11),
         y: node.y + (node.id === V9_SLIDE_TEST_TEXT_ID ? 20 : 21),
@@ -699,8 +950,9 @@ describe('test-only V9 Slide vertical slice', () => {
     expect(opened.project.schemaVersion).toBe(9)
     expect(opened.assetFiles).toEqual({})
     expect(opened.componentFiles).toEqual({})
-    expect(snapshot.document.nodes).toHaveLength(1)
-    expect(snapshot.document.nodes[0]).toMatchObject({
+    expect(snapshot.document.nodes).toHaveLength(2)
+    expect(snapshot.document.nodes.find((node) => node.id === V9_SLIDE_TEST_TEXT_ID))
+      .toMatchObject({
       id: V9_SLIDE_TEST_TEXT_ID,
       text: 'V9 可移动文字',
       x: 515.5,

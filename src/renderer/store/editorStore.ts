@@ -182,6 +182,7 @@ import {
   clearV9SlideNativeNodeOverride,
   clearV9SlidePresentationStateOverrides,
   completeV9SlideVerticalSliceSave,
+  captureCourseGlobalControllerTarget,
   createV9CourseEditorState,
   createV9SlideVerticalSliceState,
   deleteV9SlideComponentPackage,
@@ -214,12 +215,14 @@ import {
   selectV9CourseFlowLayer,
   selectV9CourseLocation,
   selectV9CourseSpatialLayers,
+  selectCourseGlobalController,
   selectV9SlideVerticalSlice,
   setInitialV9SlidePresentationState,
   setThumbnailV9SlidePresentationState,
   setV9SlideEditingScope,
   setV9SlideSceneBackgroundAsset,
   setV9SlideSceneBackgroundColor,
+  transformCourseGlobalController,
   transformV9SlideVerticalSlice,
   undoV9SlideVerticalSlice,
   updateV9SlideComponentProps,
@@ -230,6 +233,10 @@ import {
   updateV9SlideRuntime,
   updateV9SlideRuntimeAsset,
   updateV9SlideRuntimeContent,
+  updateCourseGlobalController,
+  type CourseGlobalControllerPatch,
+  type CourseGlobalControllerTarget,
+  type CourseGlobalControllerTransform,
   type V9CourseSelection,
   type V9SlideLayerPatch,
   type V9SlideEditingScope,
@@ -518,6 +525,16 @@ export interface EditorState {
     options?: { markDirty?: boolean },
   ): void
   clearCourseProjectSession(): void
+  captureCourseGlobalControllerTarget(): CourseGlobalControllerTarget | null
+  selectCourseGlobalController(target: CourseGlobalControllerTarget): boolean
+  transformCourseGlobalController(
+    target: CourseGlobalControllerTarget,
+    transform: CourseGlobalControllerTransform,
+  ): boolean
+  updateCourseGlobalController(
+    target: CourseGlobalControllerTarget,
+    patch: CourseGlobalControllerPatch,
+  ): boolean
   selectCourseLayers(input: V9SlideSelectionInput): boolean
   transformCourseLayers(input: V9SlideTransformInput): boolean
   nudgeCourseLayers(dx: number, dy: number): void
@@ -2302,6 +2319,65 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     clearCourseProjectSession() {
       set({ courseSession: null })
+    },
+
+    captureCourseGlobalControllerTarget() {
+      const session = get().courseSession
+      return session === null ? null : captureCourseGlobalControllerTarget(session)
+    },
+
+    selectCourseGlobalController(target) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = selectCourseGlobalController(state.courseSession, target)
+        accepted = courseSession !== state.courseSession || (
+          target.sessionId === state.courseSession.sessionId &&
+          target.locationId === state.courseSession.selection.locationId &&
+          target.projectRevision === state.courseSession.history.present.revision &&
+          target.source === 'global' &&
+          courseSession.selection.globalController?.source === 'global' &&
+          courseSession.selection.globalController.layerItemId === target.layerItemId
+        )
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession }
+      })
+      return accepted
+    },
+
+    transformCourseGlobalController(target, transform) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = transformCourseGlobalController(
+          state.courseSession,
+          target,
+          transform,
+        )
+        accepted = courseSession !== state.courseSession
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '全课控制器已更新' }
+      })
+      return accepted
+    },
+
+    updateCourseGlobalController(target, patch) {
+      let accepted = false
+      set((state) => {
+        if (state.courseSession === null) return state
+        const courseSession = updateCourseGlobalController(
+          state.courseSession,
+          target,
+          patch,
+        )
+        accepted = courseSession !== state.courseSession
+        return courseSession === state.courseSession
+          ? state
+          : { ...state, courseSession, statusMessage: '全课控制器已更新' }
+      })
+      return accepted
     },
 
     selectCourseLayers(input) {

@@ -6,12 +6,12 @@
     "planExecutionCommit": "31f936aa063abf59f4a18d1d0900df3d48eef057",
     "collector": "vitest list --json --includeTaskLocation",
     "protectedSuiteCount": 12,
-    "staticDefinitionCount": 151,
+    "staticDefinitionCount": 157,
     "parameterizedDefinitionCount": 7,
-    "expandedCaseCount": 172,
+    "expandedCaseCount": 178,
     "expectedVitestResult": {
       "filesPassed": 12,
-      "testsPassed": 172
+      "testsPassed": 178
     }
   },
   "policy": {
@@ -689,15 +689,15 @@
       "path": "tests/unit/globalLayerUi.test.tsx",
       "contract": "fixed global entry, scene switching, global components, and properties",
       "disposition": "keep",
-      "sha256": "4f73126014234c4e68a2c83c7b8bb850fbc6891afd4df9d44192ebe618714f46",
-      "staticDefinitionCount": 4,
-      "expandedCaseCount": 4,
+      "sha256": "43c2b70b47a38334e1a3f5a926e7cf273872af04e68de4ef445c8f165ba13e91",
+      "staticDefinitionCount": 9,
+      "expandedCaseCount": 9,
       "definitions": [
         {
-          "definitionId": "tests/unit/globalLayerUi.test.tsx:76:3",
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:86:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 76,
+          "sourceLine": 86,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -705,10 +705,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/globalLayerUi.test.tsx:91:3",
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:101:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 91,
+          "sourceLine": 101,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -716,10 +716,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/globalLayerUi.test.tsx:123:3",
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:133:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 123,
+          "sourceLine": 133,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -727,14 +727,69 @@
           ]
         },
         {
-          "definitionId": "tests/unit/globalLayerUi.test.tsx:222:3",
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:232:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 222,
+          "sourceLine": 232,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
             "Project V8 global-layer editor UI > offers a state-free scene directory and keeps fixed scene targets as an advanced action"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:289:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 289,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "V9 current-page layer list > keeps source explicit and locates the one global controller by its stable ID"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:384:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 384,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "V9 current-page layer list > marks a shared row with a source-explicit local inspection selection"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:430:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 430,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "V9 hidden shared navigation archive safety > leaves global and current-content shared layer semantics byte-stable"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:605:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 605,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "V9 ComponentsTab locator and scope > uses the V9 current-page scope and selects a concrete scene use instead of a preceding global use"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/globalLayerUi.test.tsx:656:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 656,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "V9 ComponentsTab locator and scope > disables the V9 locator when a package is used only in shared layers"
           ]
         }
       ]
@@ -819,15 +874,15 @@
       "path": "tests/unit/stageViewportTransform.test.ts",
       "contract": "1280x720 design space, 50%-200% zoom, fit, pan, and coordinate transforms",
       "disposition": "keep",
-      "sha256": "2de169e95a16c9f1cbdfbcd8b5fdde1a44eb3f164718ae25cbdca502cfb69aaa",
-      "staticDefinitionCount": 14,
-      "expandedCaseCount": 23,
+      "sha256": "0d420de1bace9310b8633868413c6490ca938d5569c7945e30d0220f9d73b59d",
+      "staticDefinitionCount": 15,
+      "expandedCaseCount": 24,
       "definitions": [
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:36:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:37:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 36,
+          "sourceLine": 37,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -835,10 +890,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:43:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:44:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 43,
+          "sourceLine": 44,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -846,10 +901,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:59:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:60:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 59,
+          "sourceLine": 60,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -857,10 +912,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:73:40",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:74:40",
           "kind": "each",
           "disposition": "keep",
-          "sourceLine": 73,
+          "sourceLine": 74,
           "sourceColumn": 40,
           "expandedCaseCount": 6,
           "collectedCaseNames": [
@@ -873,10 +928,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:93:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:94:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 93,
+          "sourceLine": 94,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -884,10 +939,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:102:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:103:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 102,
+          "sourceLine": 103,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -895,10 +950,21 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:120:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:121:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 120,
+          "sourceLine": 121,
+          "sourceColumn": 3,
+          "expandedCaseCount": 1,
+          "collectedCaseNames": [
+            "stage viewport transform > centers a located controller point with transient pan only"
+          ]
+        },
+        {
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:138:3",
+          "kind": "test",
+          "disposition": "keep",
+          "sourceLine": 138,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -906,10 +972,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:145:5",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:163:5",
           "kind": "each",
           "disposition": "keep",
-          "sourceLine": 145,
+          "sourceLine": 163,
           "sourceColumn": 5,
           "expandedCaseCount": 4,
           "collectedCaseNames": [
@@ -920,10 +986,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:172:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:190:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 172,
+          "sourceLine": 190,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -931,10 +997,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:186:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:204:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 186,
+          "sourceLine": 204,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -942,10 +1008,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:199:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:217:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 199,
+          "sourceLine": 217,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -953,10 +1019,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:212:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:230:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 212,
+          "sourceLine": 230,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [
@@ -964,10 +1030,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:230:5",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:248:5",
           "kind": "each",
           "disposition": "keep",
-          "sourceLine": 230,
+          "sourceLine": 248,
           "sourceColumn": 5,
           "expandedCaseCount": 2,
           "collectedCaseNames": [
@@ -976,10 +1042,10 @@
           ]
         },
         {
-          "definitionId": "tests/unit/stageViewportTransform.test.ts:234:3",
+          "definitionId": "tests/unit/stageViewportTransform.test.ts:252:3",
           "kind": "test",
           "disposition": "keep",
-          "sourceLine": 234,
+          "sourceLine": 252,
           "sourceColumn": 3,
           "expandedCaseCount": 1,
           "collectedCaseNames": [

@@ -118,6 +118,57 @@ button:disabled {
   grid-template-columns: 224px minmax(0, 1fr) clamp(460px, 38vw, 560px);
 }
 
+/* Shell collapse: the collapsed side leaves the grid entirely, and the
+   professional developer width rule only applies while the right panel is
+   expanded. The panels stay mounted; hidden/inert live on the shell wrappers. */
+.app-main--left-collapsed {
+  grid-template-columns: 0px minmax(0, 1fr) 312px;
+}
+
+.app-main--right-collapsed {
+  grid-template-columns: 224px minmax(0, 1fr) 0px;
+}
+
+.app-main--left-collapsed.app-main--right-collapsed {
+  grid-template-columns: 0px minmax(0, 1fr) 0px;
+}
+
+.app-main--developer.app-main--right-collapsed {
+  grid-template-columns: 224px minmax(0, 1fr) 0px;
+}
+
+.app-main--developer.app-main--left-collapsed {
+  grid-template-columns: 0px minmax(0, 1fr) clamp(460px, 38vw, 560px);
+}
+
+.app-main--developer.app-main--left-collapsed.app-main--right-collapsed {
+  grid-template-columns: 0px minmax(0, 1fr) 0px;
+}
+
+/* The shell is the grid item stretched to the full row height. Flexing the
+   shell lets the panel inside it fill the same height, which preserves the
+   original full-height panel geometry (224x640 left / full-height right)
+   while keeping the collapse state (hidden + inert, zero-width track). */
+.scene-panel-shell,
+.right-sidebar-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.scene-panel-shell > .scene-panel,
+.right-sidebar-shell > .right-sidebar {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.toolbar__shell-toggle {
+  margin-left: 2px;
+}
+
 .editor-center {
   display: grid;
   min-width: 0;

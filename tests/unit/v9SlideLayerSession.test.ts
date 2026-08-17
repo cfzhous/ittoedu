@@ -14,6 +14,8 @@ import {
   addV9SlideShapeLayer,
   addV9SlideTextLayer,
   activateV9SlidePresentationState,
+  buildV9SlideWorkspaceSnapshot,
+  captureCourseGlobalControllerTarget,
   clearV9SlideNativeNodeOverride,
   deleteV9SlideLayer,
   duplicateV9SlideLayer,
@@ -21,8 +23,11 @@ import {
   nudgeV9SlideSelection,
   openV9SlideVerticalSliceState,
   reorderV9SlideLayers,
+  selectCourseGlobalController,
   selectV9SlideVerticalSlice,
+  transformCourseGlobalController,
   transformV9SlideVerticalSlice,
+  undoV9SlideVerticalSlice,
   updateV9SlideLayer,
   updateV9SlideNativeNode,
 } from '@/renderer/course/v9SlideVerticalSlice'
@@ -66,6 +71,50 @@ function sceneFor(state: ReturnType<typeof createLayerSession>) {
 }
 
 describe('V9 Slide native layer session commands', () => {
+  it('moves the scene-canvas global-controller proxy through one global revision only', () => {
+    const initial = createLayerSession()
+    const snapshot = buildV9SlideWorkspaceSnapshot(initial)
+    const controller = snapshot.document.nodes.find((node) => node.type === 'teacher-controller')
+    if (!controller) throw new Error('expected scene-canvas controller proxy')
+    const target = captureCourseGlobalControllerTarget(initial)
+    if (!target) throw new Error('expected global controller target')
+    const sceneItemsBefore = structuredClone(sceneFor(initial).layerItems)
+
+    expect(snapshot.authoringTargets.get(controller.id)).toEqual({
+      source: 'global',
+      layerItemId: target.layerItemId,
+    })
+    const selected = selectCourseGlobalController(initial, target)
+    const moved = transformCourseGlobalController(selected, target, {
+      x: controller.x + 36,
+      y: controller.y + 18,
+      width: controller.width,
+      height: controller.height,
+      rotation: controller.rotation,
+    }, NOW)
+
+    expect(selected.editingScope).toBe(initial.editingScope)
+    expect(selected.selection.globalController).toEqual({
+      source: 'global',
+      layerItemId: target.layerItemId,
+    })
+    expect(moved.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(moved.history.past).toEqual([initial.history.present])
+    expect(sceneFor(moved).layerItems).toEqual(sceneItemsBefore)
+    expect(moved.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item.frame).toMatchObject({
+      x: controller.x + 36,
+      y: controller.y + 18,
+    })
+    expect(undoV9SlideVerticalSlice(moved).history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item.frame).toMatchObject({
+      x: controller.x,
+      y: controller.y,
+    })
+  })
+
   it('keeps an exact named-state transform as the same state with zero history', () => {
     const named = addV9SlidePresentationState(createLayerSession(), '反馈态', NOW)
     const selected = selectV9SlideVerticalSlice(named, {

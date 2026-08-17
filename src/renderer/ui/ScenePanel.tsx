@@ -27,6 +27,7 @@ import {
 } from './SceneThumbnail'
 import { hasUnrepresentedRuntime } from './sceneThumbnailComposition'
 import type { FlowEditorView } from '../course/flowEditorView'
+import type { CourseEditorShellPolicy } from '../course/courseEditorLayout'
 import { FlowOutlinePanel } from './FlowOutlinePanel'
 import {
   SpatialCameraPanel,
@@ -61,6 +62,12 @@ export interface ScenePanelSpatialDocumentControl extends SpatialCameraPanelProp
 export interface ScenePanelDocumentControl {
   /** Explains why the current course location has no scene-authoring surface. */
   unavailableReason?: string
+  /**
+   * V9 keeps shared data in the project, but normal teacher navigation stays
+   * on the current page instead of opening a separate shared-layer page.
+   * Legacy/V8 callers intentionally leave this unset.
+   */
+  hideSharedLayerEntries?: boolean
   editingScope: 'scene' | 'surface' | 'global'
   globalElementCount: number
   globalHasRuntime: boolean
@@ -112,6 +119,10 @@ interface CourseLocationNavProps {
   onActivateLocation?: (locationId: string) => void
   onAddFlowSurface?: () => void
   onAddSpatialSurface?: () => void
+  /** Teacher-facing section title; defaults to the legacy 课程内容 label. */
+  title?: string
+  /** Screen-reader name for the navigation region. */
+  ariaLabel?: string
 }
 
 const courseLocationNavListStyle: CSSProperties = {
@@ -166,15 +177,17 @@ function CourseLocationNav({
   onActivateLocation,
   onAddFlowSurface,
   onAddSpatialSurface,
+  title = '课程内容',
+  ariaLabel = '课程内容',
 }: CourseLocationNavProps) {
   return (
     <section
       className="course-location-nav"
       data-testid="course-location-nav"
-      aria-label="课程内容"
+      aria-label={ariaLabel}
     >
       <div className="panel-header">
-        <h2 className="panel-title">课程内容</h2>
+        <h2 className="panel-title">{title}</h2>
         {(onAddFlowSurface || onAddSpatialSurface) && (
           <div style={{ display: 'flex', gap: 6 }}>
             {onAddFlowSurface && (
@@ -378,18 +391,15 @@ function SortableScene({
   )
 }
 
-function ScenePanelContent({
+/**
+ * The slide primary navigation body. The shell owns the aside and the optional
+ * course-location navigation so switching locations across surface kinds reuses
+ * one navigation DOM node (see ScenePanel).
+ */
+function ScenePanelContentBody({
   documentControl,
-  courseLocations,
-  onActivateLocation,
-  onAddFlowSurface,
-  onAddSpatialSurface,
 }: {
   documentControl: ScenePanelDocumentControl
-  courseLocations?: readonly ScenePanelCourseLocation[]
-  onActivateLocation?: (locationId: string) => void
-  onAddFlowSurface?: () => void
-  onAddSpatialSurface?: () => void
 }) {
   const [pendingDelete, setPendingDelete] = useState<ScenePanelSceneRow | null>(null)
   const sensors = useSensors(
@@ -409,15 +419,7 @@ function ScenePanelContent({
   }
 
   return (
-    <aside className="panel scene-panel" aria-label="场景列表">
-      {courseLocations && (
-        <CourseLocationNav
-          courseLocations={courseLocations}
-          onActivateLocation={onActivateLocation}
-          onAddFlowSurface={onAddFlowSurface}
-          onAddSpatialSurface={onAddSpatialSurface}
-        />
-      )}
+    <>
       <div className="panel-header">
         <h2 className="panel-title">场景</h2>
         <button
@@ -430,50 +432,52 @@ function ScenePanelContent({
           新建场景
         </button>
       </div>
-      <div className="global-layer-entry-wrap">
-        <button
-          type="button"
-          className={`global-layer-entry${documentControl.editingScope === 'global' ? ' global-layer-entry--active' : ''}`}
-          aria-pressed={documentControl.editingScope === 'global'}
-          data-testid="global-layer-entry"
-          disabled={documentControl.globalEditingDisabled}
-          title={documentControl.globalEditingUnavailableReason}
-          onClick={documentControl.onActivateGlobal}
-        >
-          <span className="global-layer-entry__icon"><Globe2 size={19} /></span>
-          <span className="global-layer-entry__content">
-            <strong>全局层</strong>
-            <small>
-              {documentControl.globalElementCount} 个元素
-              {documentControl.globalHasRuntime ? ' · 自定义动态内容' : ''}
-              {documentControl.globalEditingDisabled ? ' · 暂不可编辑' : ''}
-            </small>
-          </span>
-          <Layers3 size={16} />
-        </button>
-        {documentControl.surfaceLayer && (
+      {!documentControl.hideSharedLayerEntries && (
+        <div className="global-layer-entry-wrap">
           <button
             type="button"
-            className={`global-layer-entry global-layer-entry--surface${documentControl.editingScope === 'surface' ? ' global-layer-entry--active' : ''}`}
-            aria-pressed={documentControl.editingScope === 'surface'}
-            data-testid="surface-layer-entry"
-            disabled={documentControl.surfaceLayer.editingDisabled}
-            title={documentControl.surfaceLayer.editingUnavailableReason}
-            onClick={documentControl.surfaceLayer.onActivate}
+            className={`global-layer-entry${documentControl.editingScope === 'global' ? ' global-layer-entry--active' : ''}`}
+            aria-pressed={documentControl.editingScope === 'global'}
+            data-testid="global-layer-entry"
+            disabled={documentControl.globalEditingDisabled}
+            title={documentControl.globalEditingUnavailableReason}
+            onClick={documentControl.onActivateGlobal}
           >
-            <span className="global-layer-entry__icon"><Layers3 size={19} /></span>
+            <span className="global-layer-entry__icon"><Globe2 size={19} /></span>
             <span className="global-layer-entry__content">
-              <strong>当前内容共用</strong>
+              <strong>全局层</strong>
               <small>
-                {documentControl.surfaceLayer.elementCount} 个元素 · 场景间共享
-                {documentControl.surfaceLayer.hasDynamicContent ? ' · 含动态内容' : ''}
-                {documentControl.surfaceLayer.editingDisabled ? ' · 暂不可编辑' : ''}
+                {documentControl.globalElementCount} 个元素
+                {documentControl.globalHasRuntime ? ' · 自定义动态内容' : ''}
+                {documentControl.globalEditingDisabled ? ' · 暂不可编辑' : ''}
               </small>
             </span>
             <Layers3 size={16} />
           </button>
-        )}
-      </div>
+          {documentControl.surfaceLayer && (
+            <button
+              type="button"
+              className={`global-layer-entry global-layer-entry--surface${documentControl.editingScope === 'surface' ? ' global-layer-entry--active' : ''}`}
+              aria-pressed={documentControl.editingScope === 'surface'}
+              data-testid="surface-layer-entry"
+              disabled={documentControl.surfaceLayer.editingDisabled}
+              title={documentControl.surfaceLayer.editingUnavailableReason}
+              onClick={documentControl.surfaceLayer.onActivate}
+            >
+              <span className="global-layer-entry__icon"><Layers3 size={19} /></span>
+              <span className="global-layer-entry__content">
+                <strong>当前内容共用</strong>
+                <small>
+                  {documentControl.surfaceLayer.elementCount} 个元素 · 场景间共享
+                  {documentControl.surfaceLayer.hasDynamicContent ? ' · 含动态内容' : ''}
+                  {documentControl.surfaceLayer.editingDisabled ? ' · 暂不可编辑' : ''}
+                </small>
+              </span>
+              <Layers3 size={16} />
+            </button>
+          )}
+        </div>
+      )}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -515,7 +519,7 @@ function ScenePanelContent({
           setPendingDelete(null)
         }}
       />
-    </aside>
+    </>
   )
 }
 
@@ -567,19 +571,85 @@ export function LegacyScenePanelAdapter() {
     scenes,
   ])
 
-  return <ScenePanelContent documentControl={{
-    editingScope,
-    globalElementCount: globalLayer.length,
-    globalHasRuntime: Boolean(globalRuntime),
-    scenes: sceneRows,
-    onAddScene: addScene,
-    onActivateScene: setActiveScene,
-    onActivateGlobal: () => setEditingScope('global'),
-    onRenameScene: (sceneId, name) => updateScene(sceneId, { name }),
-    onDeleteScene: deleteScene,
-    onDuplicateScene: duplicateScene,
-    onReorderScenes: (sceneIds) => reorderScenes([...sceneIds]),
-  }} />
+  return (
+    <aside className="panel scene-panel" aria-label="场景列表">
+      <ScenePanelContentBody documentControl={{
+        editingScope,
+        globalElementCount: globalLayer.length,
+        globalHasRuntime: Boolean(globalRuntime),
+        scenes: sceneRows,
+        onAddScene: addScene,
+        onActivateScene: setActiveScene,
+        onActivateGlobal: () => setEditingScope('global'),
+        onRenameScene: (sceneId, name) => updateScene(sceneId, { name }),
+        onDeleteScene: deleteScene,
+        onDuplicateScene: duplicateScene,
+        onReorderScenes: (sceneIds) => reorderScenes([...sceneIds]),
+      }} />
+    </aside>
+  )
+}
+
+/**
+ * Primary-navigation kinds for pure courses. A pure course only lists its own
+ * kind in the location navigation; mixed courses list every location.
+ */
+const PRIMARY_NAVIGATION_KIND: Readonly<
+  Record<
+    Exclude<CourseEditorShellPolicy['primaryNavigation'], 'course-locations'>,
+    ScenePanelCourseLocationKind
+  >
+> = {
+  'slide-thumbnails': 'slide-scene',
+  'flow-outline': 'flow-block',
+  'spatial-camera-list': 'spatial-camera',
+}
+
+/**
+ * The shell policy decides which left navigation a V9 course needs. Mixed
+ * courses always show the full 课程流程 list; pure courses with a single
+ * surface rely on their own primary navigation and show no location list;
+ * pure courses with several same-type surfaces flatten their own kind into a
+ * primary-navigation list so every location stays reachable.
+ */
+function buildCourseLocationNav(
+  courseLocations: readonly ScenePanelCourseLocation[] | undefined,
+  shellPolicy: CourseEditorShellPolicy | undefined,
+  onActivateLocation: ((locationId: string) => void) | undefined,
+  onAddFlowSurface: (() => void) | undefined,
+  onAddSpatialSurface: (() => void) | undefined,
+) {
+  if (!courseLocations) return null
+  if (!shellPolicy || shellPolicy.primaryNavigation === 'course-locations') {
+    return (
+      <CourseLocationNav
+        courseLocations={courseLocations}
+        onActivateLocation={onActivateLocation}
+        onAddFlowSurface={onAddFlowSurface}
+        onAddSpatialSurface={onAddSpatialSurface}
+        title={shellPolicy?.leftPanelLabel ?? '课程内容'}
+        ariaLabel={shellPolicy?.leftPanelLabel ?? '课程内容'}
+      />
+    )
+  }
+  const kind = PRIMARY_NAVIGATION_KIND[shellPolicy.primaryNavigation]
+  const sameKindLocations = courseLocations.filter(
+    (location) => location.kind === kind,
+  )
+  const surfaceCount = new Set(
+    sameKindLocations.map((location) => location.surfaceId),
+  ).size
+  if (surfaceCount <= 1) return null
+  return (
+    <CourseLocationNav
+      courseLocations={sameKindLocations}
+      onActivateLocation={onActivateLocation}
+      onAddFlowSurface={kind === 'flow-block' ? onAddFlowSurface : undefined}
+      onAddSpatialSurface={kind === 'spatial-camera' ? onAddSpatialSurface : undefined}
+      title={shellPolicy.leftPanelLabel}
+      ariaLabel={shellPolicy.leftPanelLabel}
+    />
+  )
 }
 
 export function ScenePanel({
@@ -590,6 +660,7 @@ export function ScenePanel({
   onActivateLocation,
   onAddFlowSurface,
   onAddSpatialSurface,
+  shellPolicy,
 }: {
   documentControl?: ScenePanelDocumentControl
   flowDocumentControl?: ScenePanelFlowDocumentControl
@@ -598,22 +669,26 @@ export function ScenePanel({
   onActivateLocation?: (locationId: string) => void
   onAddFlowSurface?: () => void
   onAddSpatialSurface?: () => void
+  /** LAYOUT lane policy; keeps the V9 left panel aligned with the course kind. */
+  shellPolicy?: CourseEditorShellPolicy
 } = {}) {
-  const courseLocationNav = courseLocations ? (
-    <CourseLocationNav
-      courseLocations={courseLocations}
-      onActivateLocation={onActivateLocation}
-      onAddFlowSurface={onAddFlowSurface}
-      onAddSpatialSurface={onAddSpatialSurface}
-    />
-  ) : null
+  // The aside is rendered by this shell so the course-location navigation stays
+  // the same DOM node while the active location moves across surface kinds.
+  const courseLocationNav = buildCourseLocationNav(
+    courseLocations,
+    shellPolicy,
+    onActivateLocation,
+    onAddFlowSurface,
+    onAddSpatialSurface,
+  )
+  const asideLabel = shellPolicy?.leftPanelLabel ?? '场景列表'
 
   if (flowDocumentControl) {
     return (
-      <aside className="panel scene-panel" aria-label="Flow 讲义导航">
+      <aside className="panel scene-panel" aria-label={shellPolicy?.leftPanelLabel ?? '讲义大纲'}>
         {courseLocationNav}
         <div className="panel-header">
-          <h2 className="panel-title">Flow 讲义</h2>
+          <h2 className="panel-title">讲义大纲</h2>
           {flowDocumentControl.onAddSurface && (
             <button
               type="button"
@@ -622,7 +697,7 @@ export function ScenePanel({
               data-testid="add-flow-surface"
             >
               <Plus size={14} />
-              添加 Flow 讲义
+              添加讲义
             </button>
           )}
         </div>
@@ -648,10 +723,10 @@ export function ScenePanel({
       ...cameraPanelProps
     } = spatialDocumentControl
     return (
-      <aside className="panel scene-panel" aria-label="Spatial 空间导航">
+      <aside className="panel scene-panel" aria-label={shellPolicy?.leftPanelLabel ?? '空间画布'}>
         {courseLocationNav}
         <div className="panel-header">
-          <h2 className="panel-title">Spatial 空间</h2>
+          <h2 className="panel-title">空间画布</h2>
           {onAddSurface && (
             <button
               type="button"
@@ -660,7 +735,7 @@ export function ScenePanel({
               data-testid="add-spatial-surface"
             >
               <Plus size={14} />
-              添加 Spatial 空间
+              添加空间
             </button>
           )}
         </div>
@@ -678,7 +753,7 @@ export function ScenePanel({
   }
   if (documentControl?.unavailableReason) {
     return (
-      <aside className="panel scene-panel" aria-label="场景列表">
+      <aside className="panel scene-panel" aria-label={asideLabel}>
         {courseLocationNav}
         <div className="panel-header">
           <h2 className="panel-title">场景</h2>
@@ -696,18 +771,15 @@ export function ScenePanel({
   }
   if (documentControl) {
     return (
-      <ScenePanelContent
-        documentControl={documentControl}
-        courseLocations={courseLocations}
-        onActivateLocation={onActivateLocation}
-        onAddFlowSurface={onAddFlowSurface}
-        onAddSpatialSurface={onAddSpatialSurface}
-      />
+      <aside className="panel scene-panel" aria-label={asideLabel}>
+        {courseLocationNav}
+        <ScenePanelContentBody documentControl={documentControl} />
+      </aside>
     )
   }
   if (courseLocations) {
     return (
-      <aside className="panel scene-panel" aria-label="课程内容">
+      <aside className="panel scene-panel" aria-label={asideLabel}>
         {courseLocationNav}
       </aside>
     )

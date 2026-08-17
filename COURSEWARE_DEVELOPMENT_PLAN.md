@@ -1,406 +1,478 @@
-# Courseware 产品开发总纲
+# Course Project V9 编辑器长期开放方案：V8 表面无降级与 V9 完整化
 
-> PLAN_VERSION: 7.0
-> DATE: 2026-08-15
-> ROLE: 本仓库唯一长期开发计划
-> EXECUTION_MODE: 并行 Agent 集群（唯一协调者 + 多执行者 + 单一集成主线）
-> CURRENT_STAGE: M5/M6 / Flow 与 Spatial 并行
-> CURRENT_PRODUCT_CHECKPOINT: 7f04a8a（M4 Gate）
-> CURRENT_PLAN_CHECKPOINT: 8b4513c
-> BASE_COMMIT: 3e41ec058627d38c4b9f5439b454cc72331e1485
-> V9_DONOR_COMMIT: f77ba9e477f9cb496e3219eb58babdb4f4becf7d
-> PRODUCT_PROTOCOL: Course Project V9 / Published Course V2 / Runtime API 2/3 / Component API 4
-> STATUS: implementation-active
+> 计划版本：10.0
+> 更新日期：2026-08-17
+> 适用协议：Course Project V9、Published Course V2、Runtime API 2/3、Component API 4
+> 状态：唯一长期产品与开发总纲
+> 执行入口：[`docs/tasks/v9-editor/00_INDEX.md`](docs/tasks/v9-editor/00_INDEX.md)
 
-本文件维护长期目标、不可违背的产品合同、并行任务模式、当前任务板、集成 Gate 与验证预算。详细实施说明放在从属阶段计划中；从属计划不得修改本文件的产品合同与集成协议。
+本方案汇总此前多轮代码评估、真实体验复核、Git 供体分析和 UI 定稿。它取代以删除、隐藏或禁用既有能力为手段的“轻量界面收敛”路线。这里的“轻量”只表示低学习成本、默认界面克制和渐进披露，不表示减少 V8 已经可用的编辑能力。
 
-事实优先级如下：用户明确要求与 `AGENTS.md` → 当前源码、Schema 和可复现证据 → 本总纲 → 当前阶段计划 → 项目认知索引。认知索引用于导航，不是第二真相源。
+本文件负责长期方向、产品决策、阶段 Gate 和完成定义；执行级任务包只负责某一纵切的文件所有权、最小验证和交付格式，不得另立相互竞争的产品方案。
 
-## 1. 最终目标
+## 1. 目标结果
 
-在真实存在的原 App、UI、Workspace、Phaser 画布与 CSS 中原地换入 V9 数据和运行内核，使教师继续使用熟悉的产品，同时获得：
+最终交付必须同时成立：
 
-1. Course Project V9 是唯一可写、可保存、可发布的工程真相源。
-2. Published Course V2、Runtime API 2/3 兼容和 Component API 4 成为真实运行合同。
-3. Slide、Flow、Spatial 与 Mixed 完成编辑、保存重开、隔离 Player 和发布导出闭环。
-4. 原 App 是唯一正式入口；Project V8 只用于显式导入迁移和必要兼容测试。
-5. 普通教师界面不暴露协议术语、内部 ID 或未接入的占位入口。
-6. 文档、Builder skill、Agent Kit 能力卡与最终可达产品一致。
-7. 自动化最多证明 `engineering candidate`；具体课例经真实视觉和互动复核才可称 `art candidate`，`accepted` 必须来自教师明确验收。
+1. **工程真相是 V9**：新建、编辑、保存、重开、试运行、Player、导出均以 Course Project V9 为唯一工程真相；V8 只保留显式导入迁移与兼容测试。
+2. **表面能力不低于 V8**：把成熟的 V8 壳层、工作流、快捷键、属性、图层、媒体和高级编辑入口完整接到 V9 命令与数据上，不保留双工程状态，也不以“暂不可用”代替迁移。
+3. **完整提供 V9 新能力**：Slide、Flow、Spatial 三类 location 可直接新建、编辑和发布；Mixed 由实际 locations/surfaces 自动形成。
+4. **修复已知回归并建立防线**：控制器、文字就地编辑、图层、声音、剪贴板、Delete、右键、纯课程入口等必须有端到端回归验证。
+5. **真实体验达标**：自动化只能证明 `engineering candidate`；视觉、交互和教师工作流必须经过真实运行复核，教师明确验收后才可称 `accepted`。
 
-## 2. 不可违背的产品合同
+这不是把 V9 降级回 V8，也不是重新启用 V8 工程作为生产后端；准确表述是：
 
-### 2.1 原壳原地升级
+> **以 V9 为唯一引擎和文档模型，以 V8 已验证的产品表面作为最低交互基线，再补齐 V9 的 Flow、Spatial、Mixed 与统一图层能力。**
 
-必须继续使用正式调用链中的原文件：
+### 1.1 已确认结论总表
 
-- `src/renderer/App.tsx`
-- `src/renderer/ProductApp.tsx`，且它只能进入同一个原 App
-- `src/renderer/ui/TopToolbar.tsx`
-- `src/renderer/ui/ScenePanel.tsx`
-- `src/renderer/ui/SceneThumbnail.tsx`
-- `src/renderer/ui/Workspace.tsx`
-- `src/renderer/ui/SceneStateStrip.tsx`
-- `src/renderer/ui/RightSidebar.tsx`
-- `src/renderer/ui/ElementsTab.tsx`
-- `src/renderer/ui/NodesTab.tsx`
-- `src/renderer/ui/PropertiesTab.tsx`
-- `src/renderer/ui/ComponentsTab.tsx`
-- `src/renderer/ui/AutomationTab.tsx`
-- `src/renderer/ui/DeveloperTab.tsx`
-- `src/renderer/ui/PresenterSettingsEditor.tsx`
-- `src/renderer/authoring/stageViewportTransform.ts`
-- `src/renderer/phaser/**`
-- `src/renderer/styles/globals.css`
-
-永久禁止：
-
-- 新建第二套 App、Shell、Store、Slide Workspace 或产品入口。
-- 让 `CourseStudioApp`、`CourseSurfaceCanvas`、`V9EditorShell` 或 donor 前端重新进入正式 import graph。
-- 复制 donor 的整套 UI、Store、Canvas、Playback Session 或 CSS。
-- 为测试增加只在测试中成立的视觉层、DOM 覆盖层或第二 Player。
-- 从只读 View 反建 V9 工程，或同步写 V8/V9 两份工程。
-- 用 `src/renderer/converged/**`、替代性 `src/renderer/studio/**`、新 `*EditorApp`、新 `*EditorShell` 包装重写。
-
-Flow 和 Spatial 可以在原中央编辑区使用适合自身语义的内容工作区，但不能成为新产品壳，也不能反向破坏 Slide 的成熟画布交互。
-
-### 2.2 单一数据与运行真相
-
-- Course Project V9 是唯一写入源。
-- Editor View、Workspace 输入和 Player payload 都是 V9 的只读投影。
-- Phaser proxy 只负责命中、选择和几何变换；隔离 Player 是视觉真相。
-- 一次用户操作只产生一次 command、一次 history 和一次 revision。
-- 保存、Undo/Redo、选择和 dirty 以真实工程对象与稳定 ID 为准；临时 `hitId` 不能代替 `authoringAddress`。
-- Native、Runtime、Component、全局项和教师控制器进入同一图层顺序。
-- Runtime/Component 的可编辑文字必须、普通可替换图片应当公开稳定作者目标。
-- Project V8 只能显式迁移到 V9，不能成为新建或继续编辑的默认真相。
-
-### 2.3 作者检查、试运行与整课预览分离
-
-- `AuthoringInspectHost` 常驻编辑画布，只负责作者渲染、命中和稳定地址，不承担真实课程会话。
-- `TrialRunSession` 从当前 V9 snapshot 构建 Published Course V2，从当前 location/state 启动；停止即销毁，不改 Project、history、revision、selection 或 viewport。
-- `FullPreviewWindow` 复用现有 standalone HTML → `openPreview` → previewWindow 链。
-- 禁止把编辑 Host 原地切换成 playback、复用上次运行实例、让 Player 普通事件直接改编辑工程，或从 Player DOM/Canvas 反序列化工程。
-
-### 2.4 教师可见交互合同
-
-| 区域 | 必须保留的行为 |
+| 主题 | 长期结论 |
 |---|---|
-| 顶部 | 新建、打开、保存、撤销、重做、当前位置试运行、整课预览、导出；不随意改变顺序和密度 |
-| 左侧 | 固定一级“全局层”；幻灯片缩略图；场景排序、重命名、复制、删除；有内容时显示“当前内容共用” |
-| 中央 | 1280×720 Slide 逻辑画布；缩放、平移、点选、框选、Shift 多选、移动、八向缩放、旋转、方向键微调、双击编辑、吸附 |
-| 状态条 | 基础画面与命名状态始终在画布下方；新增、复制、重命名、设初始、设缩略图、删除 |
-| 右侧 | 简洁/专业模式；元素、图层、属性；专业模式中的互动与开发 |
-| 开发 | Runtime 源码/内容/素材、Component manifest/runtime/props、Object/Rules JSON、校验、错误和预览 |
-| 教师控制器 | 全局层中的真实作者对象；可编辑、可恢复；编辑态按钮不执行，试运行中正确导航、收展和移动 |
-| 底部状态 | 状态、选择、缩放、dirty 与错误可见；普通错误不暴露内部标识 |
+| V8 与 V9 | V9 是唯一生产工程真相；V8 是表面能力底线、显式导入来源和兼容证据，不是第二套编辑器。 |
+| “轻量” | 只减少默认信息密度，不删除或长期禁用 V8 已有能力；低频功能采用渐进披露。 |
+| UI 先行 | 根目录五张 `V9_EDITOR_UI_*` 图片和 [`V9_EDITOR_UI_DESIGN_SPEC.md`](V9_EDITOR_UI_DESIGN_SPEC.md) 是四态实现基准；若图片中教师控制台与文字合同冲突，以文字合同为准。 |
+| 页面形态 | 纯 Slide、纯 Flow、纯 Spatial 与 Mixed 从被 locations 引用的 surfaces 推导；不保存 `projectMode`。 |
+| 主动与自适应 | 教师可直接新建三类空白工程或三类页面；添加、删除、选择 location 后编辑器自动适配，不依赖外部导入。 |
+| 全局层 | **保留且可见。** 四态左栏固定提供“共享内容 → 全局层（全课）”作者入口；它与页面形态正交，不是课程顺序中的页面，也不参与四态推导。 |
+| Flow 层级 | 流式页面是父节点，只有可导航标题/章节作为子节点；普通文本和媒体块不与页面同级。运行态目录使用贴边三角按钮展开/收起。 |
+| 教师控制台 | 使用统一动作集：上一场景、下一场景、场景目录、重播、声音、全屏、收起；作者框、属性、试运行和 Player 共用同一配置和坐标合同。 |
+| 基础编辑 | 右键、Delete/Backspace、剪贴板、就地文字、紧凑图层、排序、锁定、隐藏、声音和媒体管理均为完成门槛。 |
+| 远期扩张 | Focusky 级镜头化演示和大规模 AI 结构编辑暂不作为本轮门槛，只保留长期开放方向，不提前扩建可见 AI 或重型手工面板。 |
 
-冻结区域必须在 1280×720、1366×768、1920×1080 三档窗口及简洁/专业模式中留在可视区。侧栏只能在自身滚动，不能撑高 App 壳并挤出场景状态条、缩放控件或底部状态栏。
+## 2. 不可妥协的产品与工程约束
 
-教师看到“幻灯片”“全局层”“当前内容共用”“基础画面/命名状态”，不看到 V8、V9、Surface、Native、Runtime、Component（专业开发区例外）、API、Manifest、Package ID、Layer Item ID、authoringAddress、targetId、revision、JSON Pointer、AI Patch。
+- 不新增持久化 `projectMode`、`courseMode` 或“四模式”字段。纯 Slide、纯 Flow、纯 Spatial 与 Mixed 从 `locations` / `surfaces` 推导。
+- 全局层、surface 共享层、scene/location 层、状态 override、Runtime、Component 与教师控制器继续进入统一图层系统。
+- 全局层编辑范围与 Slide/Flow/Spatial 页面类型是两个正交概念。为了 Mixed 而取消全局作者入口没有数据或交互上的必然性。
+- `authoringAddress` 是跨保存稳定的作者目标；临时 DOM、Canvas 或 Runtime `hitId` 只能用于一次命中，不得成为保存后的身份。
+- 不双写 V8/V9 两套 store，不让旧工程模型继续成为隐藏生产真相。
+- 不以禁用控件、隐藏入口、删除面板或改写测试期望来完成迁移。一个功能只有在“V8 表面 → V9 命令 → history → 保存重开 → Player/导出”纵切闭合后才能合入默认产品路径。
+- 不因本轮问题启动 V10 Schema 大迁移；确需 Schema 变化时，必须先证明 V9 无法表达目标并单独评审。
+- 当前没有可见 AI 编辑工作流，不把 reserved 接口宣传为现有功能。本计划只处理编辑器本体与可验证的外部接口边界。
 
-### 2.5 迁移与兼容边界
+## 3. Git 取证与恢复基线决策
 
-- 迁移采用影子构建、逐簇切换和一次正式切换，不做大爆炸重写，也不双写。
-- V9 command 先于旧 UI 接线；兼容 View 只读，不能进入 history、archive、export。
-- 原 `useEditorStore` 导入路径可以保留以降低迁移风险，但同一个 Store 内只能有一个当前工程真相。
-- donor 只能摘取纯模型或单项算法，不能成为前端母体。
-- `projectTypes.ts`、`projectSchema.ts` 中被 V9 Native 内容实际复用的中性类型不能因文件名带 V8 而误删。
-- 默认不增加依赖，不改 package/lockfile、Schema 或 IPC；确实无法在既有能力上完成时，先取得用户授权。
+### 3.1 可复用里程碑
 
-## 3. 当前恢复点
-
-### 3.1 已集成检查点
-
-| 检查点 | SHA | 已成立事实 |
+| 提交 | 已有价值 | 在本计划中的用途 |
 |---|---|---|
-| G00–G05 | `8c7a530` … `dc190ed` | 原工程、视觉、行为与反重写基线；原 App 唯一入口 |
-| K00 | `eb00ed2` | 直接 V9 新工程 factory |
-| V01–V04 | `cf01dda` … `62cd1a4` | Slide 只读投影、稳定选择/移动、Workspace 窄注入、单 backend |
-| M1 | `ecad7a1` | V9 text 的 Player、拖动、Undo/Redo、保存、完全重开和继续拖动 |
-| M2-A–M2-D | `77a7a79` … `e04d017` | V9 生命周期和 Store 所有权；原壳高度、状态栏、场景与状态 UI |
-| M2-E–M2-H | `b010947` … `cc8c6c4` | 场景 Native、Properties、默认 V9、导出、全局控制器和工程检查 |
-| M2 | `cc8c6c4` | 默认 V9 单写生命周期及原壳主要区域 Gate |
-| M3-A | `b6d1787` | surface Native 作者闭环、共享显示、统一顺序、陈旧目标拒绝和保存重开 |
-| M3 | `6361641` | 完整 Slide 作者闭环：media/text/背景作者链、原子 IME 事务、互动/开发 UI 接 V9、动态作者目标入统一图层、一次手势一次 history、M3 Gate 全证据通过 |
-| M4 | `7f04a8a` | Player/Runtime/Component 与课程逻辑：Published Slide 会话生命周期、教师控制器运行合同、Runtime API 2/3、Component API 4、课程状态与恢复单一 owner、M4 Gate 全证据通过 |
+| `3e41ec0` | 首次围绕 Project V9 重建，同时保留成熟 V8 `App` | V8 表面、旧能力实现和早期 V9 代码供体；**不作为恢复基线** |
+| `378c195` | V8 视觉基线 | 壳层几何与视觉对照 |
+| `14890bb` | 受保护的 V8 行为图，12 个 suite、172 个展开用例 | 功能不降级的最低合同 |
+| `6361641` | V9 Slide M3 Gate：完整 Slide 作者闭环、属性到画布、单手势单历史 | Slide 纵切参考与二级回退证据 |
+| `7f04a8a` | M4：原 App 壳、V9 默认工程、Player/控制器/恢复闭合 | **条件回退基线** |
+| `e2e34aa` | Flow/Spatial、原 App 壳、store、Player 及收口修复已集成，且早于本轮轻量化脏改动 | **首选恢复基线** |
+| 当前工作区 | 在 `e2e34aa` 后同时改动约 60 个 tracked 文件、测试合同和视觉基线 | 仅作问题取证与局部代码供体；不在原地硬修、不重置 |
+
+### 3.2 为什么不整体回到“刚写出 V9”的 `3e41ec0`
+
+`3e41ec0` 的默认入口是独立 `CourseStudioApp`，成熟 V8 `App` 只通过 `legacy-v8` 路由存在。直接以它为基线会再次形成“两套编辑器表面”，正是本计划要消除的偏离。它适合提供 V8 表面和具体能力实现，不适合成为新的产品主干。
+
+### 3.3 三条路线比较
+
+| 路线 | 优点 | 主要风险 | 结论 |
+|---|---|---|---|
+| 在当前脏工作区继续前修 | 保留所有最新试验 | UI、实现、测试合同与截图基线一起变化，错误假设已进入测试；定位成本和漏回归风险最高 | 不采用为主路线 |
+| 回到 `3e41ec0` 从头再做 | V8 表面代码完整、早期 V9 较简单 | 默认是独立 V9 Studio；会丢失大量已闭合的 Slide、Player、Flow、Spatial 工作 | 不采用为基线 |
+| 从 `e2e34aa` 建干净恢复分支，必要时回退至 `7f04a8a` | 保留原 App 壳与完整多表面工程；避开当前轻量化污染；Git 供体清晰 | `e2e34aa` 仍有早期迁移缺口，如复制、专属属性、Delete 限制和无右键 | **推荐** |
+
+### 3.4 安全执行方式
+
+1. 保留当前 `codex/v9-editor-v8-base` 工作区和所有未提交内容，不执行 hard reset、checkout 覆盖或批量删除。
+2. 从 `e2e34aa` 创建独立恢复 branch/worktree，例如 `codex/v9-parity-reconstruction`。
+3. 在恢复 worktree 中运行 M4/M5/M6 原有测试、启动真实 Electron/浏览器应用，并按第 10 节做基线资格检查。
+4. 默认继续使用 `e2e34aa`。只有在它违反“V9 单一工程真相”、核心保存/重开链断裂，或多个相互独立子系统均需推倒重写时，才转到 `7f04a8a`。
+5. 若使用 `7f04a8a`，后续 Flow/Spatial 提交只作为纵切供体选择性重放，不盲目整串 cherry-pick，不带回过期计划和被放宽的测试。
+
+## 4. 页面创建、纯课程与自动适配
+
+“自动适配”是编辑器根据工程中真实页面内容和当前 location 自动呈现合适工作区，不是只识别外部导入，也不是让用户先选择一个永久工程模式。
 
-产品 accepted cursor 仍是 M1。反重写 diff 基线固定为 `BASE_COMMIT`，不能随阶段移动。
+四态 UI、页面分组、主动入口、转换副本和自适应事务的实现规范见 [`V9_EDITOR_UI_DESIGN_SPEC.md`](V9_EDITOR_UI_DESIGN_SPEC.md)，视觉基准为根目录 `V9_EDITOR_UI_*_REFERENCE.png` 与 `V9_EDITOR_UI_SWITCHING_LOGIC.png`。
+
+四态左栏都先显示固定的“共享内容 → 全局层（全课）”入口，再显示各自页面树。选择该入口只改变 authoring scope，当前 active location 继续提供预览上下文；它不创建 location、不写 history、不改变课程顺序或四态推导结果。
 
-### 3.2 当前已成立事实
+### 4.1 必须提供的显式入口
 
-- 原 `editorStore` 单一持有 V9 document/history/archive/session；文件生命周期、标题、dirty、关闭和恢复不再以隐藏 V8 工程为真相。
-- 原 ScenePanel、SceneStateStrip、底部状态栏、Elements、Nodes、Properties 与 Workspace 的已接能力共用同一 V9 session。
-- 场景/状态 CRUD、text/formula/shape、场景/全局/surface Native、选择、多选变换和属性编辑保持一操作一历史。
-- 默认入口创建 V9；普通 Open/Recent 只接受 V9；旧工程经显式迁移并强制另存。
-- 原顶栏已接通工程检查、整课预览、HTML、网页包和基础 PPTX；PDF、DOCX 仍在后续发布阶段闭合。
-- 编辑态只显示工程内教师控制器；全局控制器可选择、缩放下移动、Undo/Redo、保存重开。
-- Published V2 已移除废弃的画布外 `.course-nav` 底栏。
-- App 壳在 1280×720、1366×768、1920×1080 三档视口贴合窗口；新增元素后无壳层跳动、页面滚动或底部黑区。
+- 新建工程菜单提供：
+  - 空白演示课件：创建一个 Slide location/surface；
+  - 空白流式课件：创建一个 Flow location/surface；
+  - 空白无限画布：创建一个 Spatial location/surface。
+- 左侧课程结构中始终提供“新增内容”菜单：
+  - 新增演示页面；
+  - 新增流式页面；
+  - 新增无限画布。
+- 页面/location 必须支持重命名、复制、删除、排序和切换；不可删除工程最后一个 location。
+- 纯类型工程添加另一类型 location 后自动成为 Mixed；删除其他类型后自动回到纯类型界面。
+- 选中不同 location 时，中央工作区、元素面板、图层面板、属性面板和试运行入口自动切换到该 surface 的能力，不要求用户手工切“模式”。
+
+### 4.2 推导规则
 
-### 3.4 M3 Gate 已通过（2026-08-15，`6361641`）
-
-- image/video 插入、素材引用、稳定选择、通用属性、场景背景颜色/素材与保存重开成立（T-IMG）。
-- text 画布编辑/富文本/IME 事务一次编辑一次 history，session 绑定 authoring 引用、任何文档变更即失效防串写（T-TEXT）。
-- formula/shape/media 属性与 Workspace 视觉同步；resize/rotate/多选/方向键一次手势一次 history，scene/surface/global 与命名状态一致（T-GEST）。
-- Runtime/Component 作者目标进入统一图层：稳定 authoringAddress、编辑态与 Phaser proxy 共用同一 V9 只读事实、不投影成假 Native（T-RTGT）。
-- Interaction/Automation/Developer/Components 四 Tab 接 V9 command；可达按钮真实执行或明确禁用，不静默写 V8（T-IUI）。
-- Published Slide 会话生命周期统一：真实 await 异步 action、失败停链并报教师安全错误、scene/presentation exit/enter 事件、video 媒体事件、WAAPI motion（T-PSES）。
-- Runtime API 2/3 编辑宿主链（create 失败清理、API 2 dom 重挂、API 3 capture/checkpoint 屏障）与 Component API 4 全链（多版本显式拒绝、props/hot update 不重建无关实例、fallback/thumbnail/实跑职责分离）成立（T-RT/T-COMP）。
-- L3 证据：M3 定向测试、typecheck、受影响 build、代表性 Electron（几何三档 + 试运行 3 条）、`npm test`、preservation 门禁全部通过。
+- locations 中只有 `slide-scene`：纯 Slide。
+- locations 中只有 `flow-block`：纯 Flow。
+- locations 中只有 `spatial-camera`：纯 Spatial。
+- 同时存在两种或三种：Mixed。
+- 当前工作区由 active location 的 kind 决定；工程级导航由全部 locations 的组合决定。
+- “转换页面类型”不得静默丢数据。若后续提供转换，应实现为有预览的内容迁移/复制命令，而不是修改一个 mode 字段。
 
-### 3.3 已关闭 P1：新增元素后壳层上弹并露出底部黑区
+## 5. V8 表面能力最低清单
 
-根因（2026-08-15 经几何诊断确认）：`ProductApp.tsx` 在 `#root` 与 `.app-shell` 之间引入匿名包装 `div`，断开 html → body → #root → 壳的 100% 高度链；`.app-shell` 退化为内容高度（`min-height: 720px` 兜底），视口更高时底部露出窗口背景色，新增元素改变右栏内容高度导致壳纵向跳动。页面无滚动，根节点高度正常。
-
-修复：ProductApp 直接渲染原 App，不加任何包装元素；`v9SlideVerticalSlice` Electron 路径新增 `expectAppShellFillsViewport` 几何断言，断言添加元素前后壳顶对齐视口顶、壳与底部状态栏贴合视口底、`scrollY` 为 0。
-
-已验证：1280×720、1366×768、1920×1080 三档视口添加 text/rectangle/formula 前后壳与底部状态栏贴合窗口底部、几何不变、页面无滚动；工程、history、selection、dirty 与保存语义不受影响。当前无登记的 P1。
-
-### 3.5 M4 Gate 已通过（2026-08-15，`7f04a8a`）
-
-- Published Slide 会话生命周期统一：session 创建/切换/销毁、稳定 layer item 事件、scene/presentation enter/exit、计时/媒体/motion 完成事件、异步 action 真实 await、失败停链并报教师安全错误（T-PSES）。
-- 教师控制器运行合同：收展/进度/目录/静音/全屏与状态标签、session-only 拖动与 Alt+方向键、点击拖拽互斥、收起命中收缩、`controls:none` 隐藏、destroy/restart 恢复默认、教师动作单一 owner 管线（T-CTRL）。
-- Runtime API 2/3：加载/通信/资源访问/错误隔离/destroy、作者目标、hit field、状态热更新、capture/checkpoint 屏障、API 2/3 各真实路径测试（T-RT）。
-- Component API 4：package/版本/manifest/runtime/props/preset/资源加载、多版本显式拒绝、props/hot update 不重建无关实例、fallback/thumbnail/实跑职责分离（T-COMP）。
-- 课程状态与恢复：CourseLocation/state/guard/controller 同一课程状态、replay 单语义单元单次进入、restart 整课重置、会话状态不写 archive、checkpoint 不产生 history/dirty、Trial/Preview/HTML 隔离销毁无泄漏（T-CSTATE）。
-- L3 证据：M4 定向测试、typecheck、build:player、代表性 Electron 3 条、`npm test`、preservation 门禁全部通过。
+下面的能力是迁移底线，不因默认界面简洁而取消。低频能力可以渐进披露，但必须可发现、可操作、可保存、可撤销。
 
-### 3.6 M5/M6 审计与既有问题处置（2026-08-15）
+| 领域 | 必须保留或恢复的能力 |
+|---|---|
+| 工程生命周期 | 新建、打开、最近工程、保存、另存、脏状态、防误关、恢复、V8 显式导入、V9 导出 |
+| 壳层与导航 | 原 App 顶栏、左侧课程结构、中央工作区、右侧元素/图层/属性、底部状态/场景或状态区、面板折叠与尺寸稳定 |
+| 场景/location/state | 新增、复制、重命名、着色、排序、删除；命名状态新增/复制/重命名/删除；基础状态与 override 语义 |
+| 画布视口 | 1280×720 设计坐标、50%–200% 缩放、适配、平移、缩放中心稳定、坐标转换一致 |
+| 选择与变换 | 单选、多选、框选、跨入口同步选择、拖动、八方向缩放、旋转、方向键微调、Shift 加速、锁定约束、单手势单 history |
+| 剪贴板与删除 | 全选、复制、剪切、粘贴、重复、Delete/Backspace、批量原子删除/状态隐藏、Undo/Redo |
+| 文字与公式 | 画布双击就地编辑、属性编辑、IME、富文本局部格式、竖排/自适应宽度、缩放下编辑、公式双击编辑 |
+| 图形与媒体 | 图形、图片、视频的添加/替换/裁剪或适配/播放设置；拖放和批量导入 |
+| 声音 | 声音导入、试听、重命名、删除、声音库、全局音量/静音/声道/ducking、互动动作引用校验 |
+| 图层 | 统一显示所有有效层；名称、来源、选择、拖拽排序、上/下移、置顶/置底、显示/隐藏、锁定/解锁、复制、删除/状态隐藏 |
+| 属性与格式 | 位置尺寸旋转、文本、填充描边、透明度、层级、可见/锁定、媒体专属属性、组件属性、背景和状态 override |
+| 互动与自动化 | 触发器、动作、规则排序/复制/删除、场景/状态/媒体/声音目标、动画完成依赖清理 |
+| 组件与开发 | Runtime/Component 作者目标、组件 props/variant/preset/nested content、设计 token、开发工作区和 history |
+| 教师控制器 | 添加/恢复、选择、拖缩、属性、主题、折叠、运行时展开/折叠、重播/重置、声音和全屏等既有功能 |
+| 试运行与交付 | 当前 location 试运行、整课 Player、重播/重置、场景目录、Flow/Spatial 运行时、HTML/包/打印或 PDF 导出 |
 
-M5/M6 任务板全部 integrated 后，协调者按真实证据复核（四路代码审查 + Electron 实机截图/交互 + 全量测试 + E2E 对分）：
+`14890bb` 的 12 组 V8 合同继续作为最低证据，但必须让合同直接验证默认 V9 路径；不得只在 `legacy-v8` 测试入口通过后就宣称 V9 无回退。
 
-- **M5/M6 Gate 未判定**：发现 P1×2（Spatial 路径/关系全链不可见、镜头会话相机未接线）与 P2×9（Flow 结构编辑零入口、统一图层不进生产画布、Spatial Inspector 击键历史、控制器三件套不全、混合工程无表面导航、Flow/Spatial 无试运行动线等），口径与证据见 M5/M6 阶段计划 §5；收口任务板已登记（§4.5）。
-- **preservation visual 冻结 golden 已重捕获**：旧基线冻结于 P1 修复前（期望壳固定 720px），与已退休行为永久冲突。P1 已被产品协议明确关闭且有 replacement test（`expectAppShellFillsViewport`），按 §7 条款重捕获同壳基线，掩码区域人工核对无夹带视觉变化。
-- **`v9GlobalControllerAndHealth` 控制器几何失败已校准修复**：对分证明失败引入于 M3 集成期（0c12bb0 通过、7cd5939 起失败），拖动管线逐字节未变；90% 缩放 × 小数 fitScale 的鼠标量化误差（DPR 2 → 0.5 CSS px 步进）踩过 ±1px 容差，且像素断言对 T-CTRL DOM 渲染器的边框/内缩样式过度敏感。修复：几何容差校准为 ≤2px（注明量化依据），绘制断言改为 frame 内网格扫描取最小亮度（忠实于"绘制落在已提交 frame 内"）。spec 复跑通过。
-- **`course-studio.spec.ts` 已退休**：它等待的 donor 壳 testid 自 dc190ed 起不在正式 import graph，该测试自此必然失败；其覆盖价值已被原壳上的 v9SlideVerticalSlice/v9TrialRun/v9DefaultBoundary/v9SpatialAuthoring 等价覆盖。donor 源文件本体移除仍属 M8。
-- **Schema 加法变更（spatial world.paths/relations）**：带 `.default([])` 与引用完整性校验，旧工程零迁移打开有测试背书；属 §2.5 需授权项，已获用户确认（deepseek M5/M6 工作范围内）。
+## 6. 已知 P0 问题与明确设计决策
 
-## 4. 并行任务模式
+### 6.1 右键：历史中从未实现，必须作为 V9 完整能力新增
 
-开发不再按阶段串行推进，而是由唯一协调者把阶段完成定义拆成任务单元，多执行者并行交付，按依赖序集成进单一主线。阶段 Gate 保留为唯一验收标准，但不再是执行链。
+Git 全历史没有 `onContextMenu` / `contextmenu` 编辑实现，因此任何回退都不会自动恢复右键。实现时只增加一个窄的编辑动作路由，让顶栏、图层按钮、右键菜单和键盘调用同一批 V9 命令；不建立泛化插件或大型命令框架。
 
-### 4.1 角色
+右键目标与最低动作：
 
-- **协调者（唯一）**：维护 §4.5 任务板，派发任务，声明和调整文件所有权，持有唯一主线集成权，裁决冲突，运行集成 Gate。只有协调者可以改本文件；执行者不得改任务板，不得直接向主线落代码。
-- **执行者（多个）**：一个执行者同一时刻只持一个任务单元，只在该任务 owns 范围内工作，完成后向协调者交付分支 diff、L2 证据和范围声明。执行者之间不互相等待、不互相 rebase。
-- 教师验收不变：`accepted` 仍只来自教师明确验收。
+| 目标 | 动作 |
+|---|---|
+| Slide/Spatial 元素 | 剪切、复制、粘贴、重复、删除/状态隐藏、置顶/置底、上移/下移、显示/隐藏、锁定/解锁、编辑文字/公式、替换媒体 |
+| 多选 | 剪切、复制、重复、批量删除/隐藏、层级移动、锁定/可见性；不支持的组合给出具体原因 |
+| 空白画布 | 粘贴、全选、新增内容、适配视图、重置视图 |
+| 图层行 | 与画布元素相同的核心动作，另含重命名和来源说明 |
+| location/场景/state | 重命名、复制、删除、前移/后移、新增状态或相邻内容 |
+| Flow block | 在前/后插入、复制、删除、上/下移、缩进/取消缩进、编辑属性 |
+| Spatial frame/path/relation | 聚焦、复制、删除、重命名及相应关系维护 |
 
-### 4.2 任务单元
+交互规则：
 
-每个任务单元必须在 §4.5 登记：ID、目标、供给的 Gate、依赖、owns 路径集、验证级别、状态（`pending` / `dispatched` / `integrated`）。任务口径直接从从属阶段计划的对应小节切出，不自创范围；执行中发现必要的新工作时只登记建议，由协调者入库后再派发。任务单元是最小可独立验证纵切，不是任务卡流程，不设 Owner 头衔、审批状态机或平行路线图。
+- 右键未选目标时先选中目标；右键已在多选集合内时保持多选。
+- 菜单针对打开瞬间的稳定 selection 快照执行，不能因 hover 或重新渲染改目标。
+- `Escape` 关闭并恢复焦点；`Shift+F10` 和 Menu 键打开同一菜单。
+- 禁用项必须说明原因；不能显示会静默失败的动作。
+- 所有变更走同一 history/revision，Undo/Redo 与保存重开可复现。
 
-### 4.3 文件所有权与共享区
+### 6.2 Delete：不是数据层不能删，而是入口路由退化
 
-- 同一文件同一时刻只允许一个活跃任务深改；派发前协调者按 owns 集合做交集检查。
-- 共享热点文件（`Workspace.tsx`、`editorStore`、`PropertiesTab.tsx`、`globals.css`、`PublishedCourseApp.ts`、`SlideSurfaceHost.ts` 等正式调用链文件）只允许窄接口增量；两个任务同时需要同一共享文件时，协调者串行派发，或由协调者亲自完成共享部分后再放行。
-- 测试文件随任务 owns 走；`tests/contracts/**`、冻结视觉基线与 `scripts/verify-editor-preservation.ts` 属反重写禁区，任何任务不得改写。
+从 `6361641`、`7f04a8a`、`e2e34aa` 到当前代码，V9 全局 keydown 一直存在以下限制：只处理 active Slide、禁止 global、只允许恰好一个 selection；Flow/Spatial 和多选会被挡住。旧 V8 的多选删除并没有迁移完整。
 
-### 4.4 隔离与集成
+必须实现单一 `deleteCurrentSelection` 语义：
 
-- 每个任务一个 worktree：`output/worktrees/<task-id>`，分支 `task/<task-id>`，从登记时的主线 SHA 切出。
-- 执行者交付 = 分支 diff + 定向 L2 证据 + 范围声明；协调者先审范围，再验证证据。
-- 协调者按依赖序集成：互不触及的批次可同时评审，但串行落主线；每落一批跑受影响定向测试。
-- 冲突由协调者回源裁决：以已集成主线为准，被推翻的一方基于新主线重派，不在主线之外长期分叉。
+- 输入框、textarea、contenteditable、文字/公式编辑态中，Delete/Backspace 只编辑文本，不删元素。
+- 画布、图层、右键关闭后、缩放/平移后均能稳定接收删除命令。
+- Slide 基础场景删除真实 owned item；命名状态对继承项执行“当前状态隐藏”；本状态新建项执行删除。
+- global/surface 共享项按真实 owner 删除并提示影响范围；默认教师控制器删除后必须有显式“恢复教师控制器”入口。
+- 多选一次性原子删除或隐藏，只产生一个 history step。
+- Flow 删除 block 时维护父子、顺序和引用；Spatial 删除 world item/frame/path/relation 时维护相机、路径和关系引用。
+- 命令失败必须给出可理解原因，不能吞掉返回值后无反馈。
+- Delete 和 Backspace 在 Windows/macOS 键盘语义一致，并有 Electron 级 E2E。
 
-### 4.5 当前任务板
+### 6.3 全局层作者入口：保留，取消决定不成立
 
-可立即并行派发（依赖已满足，owns 两两无交集；标 ★ 者属后续阶段供给，与 M3 在途任务无文件交集，前置并行）：
+全局层取消不是 Mixed 的必要条件。Mixed 解决“有哪些 location/surface”，全局层解决“哪些内容跨 location 共享”。当前扁平有效图层又缺少 ownership-aware 排序、锁定、隐藏、复制和删除，直接隐藏全局入口导致功能不可达。
 
-| ID | 目标（口径见从属计划） | 供给 | 依赖 | owns | 状态 |
-|---|---|---|---|---|---|
-| T-IMG | image/video 插入、素材引用、稳定选择、通用属性、保存重开；场景背景颜色与背景素材（M3-B3.1/2） | M3 | 无 | 媒体作者链与对应测试 | integrated |
-| T-TEXT | text 正文/富文本/IME 事务，一次编辑一次 history（M3-B3.3） | M3 | 无 | 文本编辑链与对应测试 | integrated |
-| T-RTGT | Runtime/Component 作者目标进入统一图层（M3-B4） | M3 | 无 | authoring host、hit/address 映射、Nodes/Properties 窄边界 | integrated |
-| T-IUI | 原 Interaction/Automation/Developer/Components 逐项接 V9（M3-B5） | M3 | 无 | 右栏四个 Tab 与对应 commands | integrated |
-| T-GEST | formula/shape/media 属性视觉同步；resize/rotate/多选/方向键跨 scope/state 一次手势一次 history（M3-B3.4/5） | M3 | T-IMG、T-TEXT | 手势/属性同步链与对应测试 | integrated |
-| T-PSES ★ | Published Slide 会话生命周期统一（M4-A） | M4 | 无（M3-B1/B2 已集成） | `src/player/**` Slide 会话链 | integrated |
-| T-RT ★ | Runtime API 2/3 全链（M4-C） | M4 | 无 | Runtime host 链与对应测试 | integrated |
-| T-COMP ★ | Component API 4 全链（M4-D） | M4 | 无 | Component host 链与对应测试 | integrated |
+因此：
 
-依赖队列（条件满足后由协调者派发）：
+- 四态左栏固定显示“共享内容 → 全局层（全课）”，接到 V9 `globalLayerItems`；它与页面树分区，不能伪造成 location 或 scene。
+- surface 共享项继续接到 `surfaceLayerItems`，通过当前内容的共享入口或统一有效图层中的明确来源进入；低频入口可以渐进披露，但不能不可达。
+- 当前页面的统一有效图层继续存在，用于跨来源查看和直接操作；selection、属性目标、history 和 owner 必须一致。
+- 统一有效图层是合成视图，不是删除显式全局作者入口的理由。未来若要调整入口层级，必须先通过完整功能等价与教师可发现性验证，并单独确认。
 
-| ID | 目标 | 供给 | 依赖 | 状态 |
-|---|---|---|---|---|
-| T-CTRL | 教师控制器运行合同（M4-B） | M4 | T-PSES | integrated |
-| T-CSTATE | 课程状态与恢复（M4-E） | M4 | T-PSES、T-CTRL | integrated |
+### 6.4 教师控制器
 
-M5/M6 任务板（协调者已按 §4.5 规范拆出并登记）：
+- 选择框、控制器渲染和八方向 resize 必须共享同一个规范坐标、zoom/pan 变换与 commit 边界。
+- 控制点拖动方向必须与视觉边缘移动方向一致，pointermove 期间实时跟手，pointerup 只提交一次 history。
+- 删除无产品意义的“定位控制器”动作；选择图层应直接选择并在必要时最小滚动到可见区域。
+- 属性面板中的折叠状态、画布编辑预览、当前 location 试运行和真实 Player 使用同一 V9 控制器配置；不能依赖只在试运行重建时更新的缓存。
+- 控制器在 global owner 中编辑，但在每个适用 surface 上以同一稳定 `authoringAddress` 命中。
 
-| ID | 目标（口径见从属计划） | 供给 | 依赖 | owns | 状态 |
-|---|---|---|---|---|---|
-| T-FLOW-VIEW | M5-A 原壳 Flow 只读投影：稳定块遍历/轮廓/位置标签与表、公式、媒体、共享图层物化；FlowWorkspace/FlowOutlinePanel 组件 | M5 | 无 | `src/renderer/course/flowEditorView.ts`、`src/renderer/ui/FlowWorkspace.tsx`、`src/renderer/ui/FlowOutlinePanel.tsx` 与对应测试 | integrated |
-| T-FLOW-CMD | M5-B Flow 作者命令与历史切片：增删/复制/移动/重排/嵌套移动一次手势一次 history，陈旧目标拒绝、ID 再生成、选择恢复 | M5 | 无（与 T-FLOW-VIEW 并行，接口由协调者固定） | `src/renderer/course/flowEditorCommands.ts`、`src/renderer/course/flowEditorSlice.ts` 与对应测试 | integrated |
-| T-FLOW-PROPS | M5-B Flow 插入面板与属性文档控件：全部块类型插入、段落/列表/表格/媒体/公式/代码/提示块/章节/组件属性编辑 | M5 | T-FLOW-CMD | `src/renderer/ui/FlowElementsTab.tsx`、`src/renderer/ui/FlowPropertiesTab.tsx` 与对应测试 | integrated |
-| T-SPAT-VIEW | M6-A Spatial 作者只读模型与世界坐标命令：统一全局/表面/世界图层、camera home/frames、semanticZoom、世界坐标选择/变换、一次手势一次 history、会话相机不入历史 | M6 | 无 | `src/renderer/course/spatialEditorView.ts`、`src/renderer/course/spatialEditorCommands.ts` 与对应测试 | integrated |
-| T-SPAT-WORKSPACE | M6-B/M6-C Spatial 工作区：会话 pan/zoom-at-cursor、minimap、culling、世界内容接受 camera transform、屏幕空间控件不随世界缩放、节点增选移缩放旋转手势 | M6 | T-SPAT-VIEW | `src/renderer/ui/SpatialWorkspace.tsx`、`src/renderer/ui/spatialWorkspaceAuthoring.ts`、`src/renderer/ui/SpatialLayerInspector.tsx` 与对应测试 | integrated |
-| T-SPAT-CAMERA | M6-B 镜头帧与语义缩放作者链：镜头创建/重命名/排序/切换/删除持久化；semanticZoom 规则编辑；会话相机与持久镜头分离 | M6 | T-SPAT-VIEW | `src/renderer/course/spatialCameraCommands.ts`、`src/renderer/ui/SpatialCameraPanel.tsx` 与对应测试 | integrated |
-| T-PLAYER-FLOW | M5-C FlowSurfaceHost 异步更新与销毁竞态修复；保持统一图层/教师控制器/捕获顺序 | M5 | 无 | `src/player/surfaces/flow/FlowSurfaceHost.ts` 与 `tests/unit/flowUnifiedLayers.test.tsx` | integrated |
-| T-PLAYER-SPATIAL | M6-C/M6-D SpatialSurfaceHost 运行合同：全局/表面教师控制器与 session 控件留在屏幕空间、控制器单 owner/静音/全屏/progress、动态捕获不再退化为静态占位 | M6 | 无 | `src/player/surfaces/spatial/SpatialSurfaceHost.ts`、`src/player/surfaces/spatial/spatialModel.ts` 与对应测试 | integrated |
-| T-FLOW-TARGETS | M5-B Flow 互动、状态与 Runtime/Component 作者目标：Flow 位置 globalInteractions 试运行执行/检查态惰性、稳定 block/图层目标 | M5 | T-FLOW-CMD、T-FLOW-VIEW、T-PLAYER-FLOW | `src/player/surfaces/flow/FlowSurfaceHost.ts` 中目标报告边界与对应测试 | integrated |
-| T-SPAT-RELATIONS | M6-A/M6-B Spatial 路径与关系：共享 Schema/Types 最小增量、路径/关系命令与编辑器、稳定 ID 与悬空引用拒绝 | M6 | T-SPAT-VIEW | `src/renderer/course/spatialPathCommands.ts`、`src/renderer/ui/SpatialPathEditor.tsx`、`src/shared/courseProjectTypes.ts`、`src/shared/courseProjectSchema.ts` 中路径/关系最小边界与对应测试 | integrated |
-| T-PUB-APP | M6-D PublishedCourseApp 接入 Spatial 单一 owner 教师动作/playbackControls/initialMuted 与镜头恢复 | M6 | T-PLAYER-SPATIAL | `src/player/PublishedCourseApp.ts` 中 Spatial 窄接线与对应测试 | integrated |
-| T-M5M6-STORE | 共享热点串行集成第一步：editorStore 增加 Flow/Spatial 会话选择、块/图层/镜头/语义缩放/路径命令、Flow/Spatial surface 创建；保持 Slide 一操作一 history 回归 | M5/M6 | 上述 Flow/Spatial 模块任务 | `src/renderer/store/editorStore.ts`、`src/renderer/course/v9SlideVerticalSlice.ts` 窄边界与对应测试 | integrated |
-| T-M5M6-SHELL | 共享热点串行集成第二步：App/Workspace/ScenePanel/RightSidebar/TopToolbar 接入 Flow 与 Spatial 编辑路由与正式 PDF/DOCX 菜单；不动 Store 真相 | M5/M6 | T-M5M6-STORE | `src/renderer/App.tsx`、`src/renderer/ui/Workspace.tsx`、`src/renderer/ui/ScenePanel.tsx`、`src/renderer/ui/RightSidebar.tsx`、`src/renderer/ui/TopToolbar.tsx` 与对应测试 | integrated |
+### 6.5 画布文字与公式编辑
 
-M3/M4 任务板已清空。M5/M6 任务板由协调者按 §4.5 规范拆出后在本节登记；M5 与 M6 默认并行（表面 owns 不重叠，共享边界窄接口串行），各表面内部保持纵切顺序。上述 M5/M6 任务已全部 integrated：Flow/Spatial 作者命令、原壳工作区、镜头/语义缩放、路径/关系、Player 运行合同与正式 PDF/DOCX 菜单均已入主线；L2 定向证据 136 测试与全量 Vitest 196 文件 / 1280 测试、`tsc --noEmit`、`build:player`、`build:renderer`、agent-kit 测试均通过。**但 2026-08-15 协调者审计（四路代码审查 + Electron 真实复核）发现 P1×2 与 P2×9（口径见 M5/M6 阶段计划 §5 缺口登记），M5/M6 Gate 未判定。**
+- 双击编辑事务以稳定的 `authoringAddress`、location/state/scope 和 revision 为键，不以临时投影对象引用是否相同判断有效性。
+- composition、实时草稿、blur/Enter/Ctrl+Enter、取消、外部 selection 变化有明确事务边界。
+- 画布编辑和属性栏编辑写入同一个 V9 内容字段；重新投影不能丢弃已提交内容。
+- 富文本、竖排、自适应宽度、缩放下编辑和公式编辑恢复 V8 合同。
+- 必测：双击输入 → 点击空白 → 保存 → 关闭重开 → Player 显示一致。
 
-M5/M6 收口任务板（2026-08-15 审计登记；修复完成后方可判定 M5/M6 Gate）：
+### 6.6 图层面板
 
-| ID | 目标（口径见 M5/M6 阶段计划 §5） | 供给 | 依赖 | owns | 状态 |
-|---|---|---|---|---|---|
-| T-FIX-SPAT-PATHS | Spatial 路径/关系全链：编辑画布渲染折线/箭头、Published payload 保留 paths/relations（复用 spatial schema）、Player SpatialSurfaceHost 渲染、打印/PDF 包含、差异报告明示；补渲染与发布断言（缺口 §5-P1-1） | M6 | 无 | spatial 渲染链 + published 类型/schema/builder 窄边界与对应测试 | integrated |
-| T-FIX-SPAT-CAM | Spatial 镜头会话相机接线：SpatialWorkspace 回传 session pose、App 喂真实位姿给"从当前画面添加/设为首页镜头"、镜头切换移动画布视口；补 App 壳层接线断言（缺口 §5-P1-2） | M6 | 无 | SpatialWorkspace/SpatialCameraPanel/App 窄接线与对应测试 | integrated |
-| T-FIX-FLOW-ENTRY | Flow 结构命令 UI 入口（删除/复制/重排/层级移动按钮 + Delete/Ctrl+D 键盘）+ onStructuralCommand 接线 + 媒体/互动组件插入禁用或教师安全拒绝（缺口 §5-P2-3/4/5） | M5 | 无 | Flow 大纲/画布/ElementsTab/PropertiesTab 与对应测试 | integrated |
-| T-FIX-FLOW-LAYER | Flow 统一图层进入生产画布与图层面板（消费 view 已物化的 global/surface 图层；不经 donor FlowCourseCanvas）（缺口 §5-P2-6） | M5 | T-FIX-FLOW-ENTRY | FlowWorkspace/RightSidebar 窄边界与对应测试 | integrated |
-| T-FIX-SPAT-INSPECT | SpatialLayerInspector blur/Enter 提交（一次编辑一次 history）+ 支持负坐标输入（缺口 §5-P2-7） | M6 | 无 | SpatialLayerInspector 与对应测试 | integrated |
-| T-FIX-SPAT-CTRL | Spatial 控制器三件套：audio:change 订阅刷新静音标签、progress 真实源、replay 后 DOM 与 canonical session 一致（去 seed 钉死）（缺口 §5-P2-8） | M6 | 无 | SpatialSurfaceHost 控制器段与对应测试 | integrated |
-| T-FIX-SURFACE-NAV | 混合工程表面导航入口 + 场景目录按 location 列举三类 kind（缺口 §5-P2-9/10） | M5/M6 | 无 | ScenePanel 跨表面列表 + picker 按 location 与对应测试 | integrated |
-| T-FIX-TRIAL-FS | Flow/Spatial 路由"当前位置试运行"动线（缺口 §5-P2-11） | M5/M6 | 无 | Workspace 早返回分支与 trialRunOverlay 窄边界与对应测试 | integrated |
+- 恢复紧凑单行布局，名称不再被挤成竖排；来源、名称和操作按钮有确定宽度与溢出规则。
+- 统一有效图层不是只读检查器。每个来源必须支持它语义上允许的重命名、排序、显示、锁定、复制和删除/状态隐藏。
+- 跨 owner 不做假排序；拖拽跨来源时要么执行明确的“移动到 scope”，要么禁止并解释。owner 内排序必须正常工作。
+- 画布选择、图层选择、属性目标三者始终一致；共享项不能只进入临时 inspected 状态而不成为真实 selection。
 
-P1/P2 收口任务已全部 integrated，并完成共享热点 App/Store/Workspace 接线与 `publishedCourse.ts` paths/relations 水合修复。收口证据：全量 Vitest 205 文件 / 1325 测试、`npm run typecheck`、`build:player`、`build:renderer` 通过；代表 Electron E2E `v9DefaultBoundary` 3/3 与 `v9SpatialAuthoring` 1/1 通过。
+### 6.7 声音、媒体与剪贴板
 
-P3 一致性项（术语、DOCX 范围、schemaVersion bump、helper 去重、旋转选择 chrome、capture 队列、includeInStaticExports、Flow 宿主 interactions、世界图层删除级联）仍登记为 M5/M6 Gate 前的收尾批次，由协调者视余量继续派发；修复完成前 M5/M6 Gate 仍不判定。
+- 恢复元素面板声音导入、MediaTab 声音库、试听、重命名、删除和全局声音设置。
+- 恢复图片/视频专属属性、替换和画布拖放；Flow/Spatial 的媒体块/世界元素使用同一 asset 真相。
+- 在默认 V9 路径恢复 Ctrl/Cmd+C、X、V、D；跨页面粘贴生成新稳定 ID 并清理或重写引用。
+- 不保留“复制暂不可用”“声音暂不能从此面板管理”作为产品完成状态。
 
-M7-B 集成后五类导出按格式并行派发。M8-A/B/C 在 M7 Gate 后并行，M8-D 最后单独运行。
+## 7. V9 新增能力的完成定义
 
-### 4.6 集成 Gate
+### 7.1 Flow
 
-§5 的里程碑完成定义是唯一验收标准。Gate 在供给它的全部任务到达 `integrated` 后由协调者运行一次 L3；Gate 判定仍按 M3 → M4 → M5/M6 → M7 → M8 次序，前置并行只提前产出任务，不提前判定 Gate。
+- 可从新建工程和“新增内容”直接创建，不依赖导入样例。
+- block 新增、选择、多选、删除、复制、排序、层级/缩进、属性、媒体、互动目标和统一图层完整。
+- 键盘、右键、左侧 outline、中央工作区和属性面板走同一命令。
+- 编辑器左侧只把页面和可导航标题做成父子树，普通文本/媒体块不升级为课程级节点；运行态目录可由贴视口边缘的三角按钮唤起或完全收起。
+- 保存重开、Undo/Redo、当前 location 试运行、整课 Player、发布和打印/PDF 行为一致。
 
-## 5. 里程碑完成定义
+### 7.2 Spatial 无限画布
 
-### M3 — 完整 Slide 作者闭环（Gate 通过，2026-08-15，`6361641`）
+- 可从新建工程和“新增内容”直接创建；中央为真正可平移、缩放和放置世界元素的无限画布。
+- 文字、图形、公式、图片、Component/Runtime 等 world item 可选择、拖缩、排序、锁定、隐藏、复制、删除。
+- camera frame、active frame、路径、关系、semantic zoom、教师控制器和会话 hydration 完整。
+- 选择框与世界/屏幕坐标一致；缩放时 UI chrome 尺寸稳定。
+- 保存重开、Undo/Redo、试运行和 Published Player 完整。
 
-供给任务：T-IMG、T-TEXT、T-GEST、T-RTGT、T-IUI（M3-B0/B1/B2 已集成）。
+### 7.3 Mixed
 
-- 原壳上弹/底部黑区 P1 已修复。
-- text、formula、shape、image、video、背景和教师控制器可在原 Workspace 作者链中工作。
-- global/surface/scene 统一 scope、order、visibility、lock 和稳定选择。
-- Scene、状态、变换、属性、字体、IME、互动和媒体保持一操作一历史。
-- Runtime/Component 的可作者目标进入统一图层，不用构建脚本绕行。
-- `scene.interactions` 的 Native 点击、条件和 action 在隔离 Player 与最小 Published Slide 中真实执行。
-- “当前位置试运行”使用独立 Published snapshot，会话停止即销毁。
+- 一个课程结构中可任意混排 Slide、Flow、Spatial location。
+- 切换 location 自动切工作区和右侧能力；不遗留上一个 surface 的 selection、属性或快捷键路由。
+- 全局层与控制器按适用范围投射，surface 共享层只影响对应 surface。
+- 课程目录、上一页/下一页、重播/重置、进度、声音和导出按统一 location 顺序工作。
 
-### M4 — Player、Runtime、Component 与课程逻辑（Gate 通过，2026-08-15，`7f04a8a`）
+## 8. 实施阶段与 Gate
 
-供给任务：T-PSES、T-CTRL、T-RT、T-COMP、T-CSTATE。
+每个功能按同一纵切模板完成：**表面入口 → V9 命令 → selection/history → 保存重开 → Player/导出（适用时）→ 自动化与真实体验复核**。不得先替换表面再把能力留成禁用状态。
 
-- Runtime API 2/3 与 Component API 4 的加载、通信、作者目标、checkpoint、hot update 和释放成立。
-- location/state/guard/controller 在独立试运行中成立，不污染编辑工程。
-- Slide 教师控制器完成导航、收展、session-only 移动、目录、重播、静音和全屏；Flow/Spatial 后续复用同一运行合同。
-- 互动事件、媒体、动作链、课程重启和恢复具有单一运行 owner。
+### M0 — 恢复基线资格检查
 
-### M5 — Flow
+产出：
 
-- Flow 语义结构、层级、表格、公式、媒体、统一图层、稳定选择、属性、状态和互动成立。
-- Player、保存重开以及 HTML/PDF/DOCX 的 Flow 路径成立。
+- 从 `e2e34aa` 建独立恢复 worktree；当前工作区保持原样。
+- 以 Git diff、入口链和每个候选点各一组代表性定向测试完成资格检查；此阶段不跑全量 build/typecheck/unit/E2E。
+- 记录候选点的已有历史证据，并对原 App 壳、V9 单一真相、Slide 保存重开、Flow/Spatial 可达性和 Player 接线做最小人工抽查。
+- 形成缺口矩阵：V8 已有且 V9 缺失、V9 已有但表面不可达、V9 新功能未闭合、当前脏改动新增回归。
 
-### M6 — Spatial
+Gate：明确选择 `e2e34aa` 或有证据地转用 `7f04a8a`；不得凭提交名或测试绿灯直接决定。
 
-- Spatial pan/zoom、选择、变换、关系、镜头、路径、小地图、状态和互动成立。
-- world 内容接受 camera transform；全局教师控制器使用 viewport/session 坐标，不随世界平移缩放。
-- Player、保存重开和导出成立。
+### M1 — 回归防火墙与原 App 壳
 
-### M7 — Mixed 与发布导出
+产出：
 
-- Mixed 跨表面 location/state/guard/controller 成立。
-- Published Course V2 是真实整课 Player；HTML/网页包不注入废弃外层导航。
-- HTML、网页包、PDF、PPTX、DOCX 各有一个真实样例。
+- 恢复 `14890bb` 行为合同与 `378c195` 视觉基线的权威性。
+- 将 V8 合同逐项移植为默认 V9 路径测试；V8 importer 测试单独保留。
+- 删除或改写那些把“功能不可用、入口隐藏、只读图层”当成功标准的错误测试。
+- 固定原 App 壳层、面板折叠、滚动、响应式断点和三种基准视口。
 
-### M8 — 最终收敛
+Gate：默认 V9 入口能运行原 App 壳；任何基线更新都有明确产品变更说明，而不是为了让 diff 变绿。
 
-- ProductApp 只有原 App 一个入口；默认编辑、保存和发布只有 Course Project V9。
-- V8 只保留显式导入和必要兼容测试；失败前端、不可达占位和旧顶层协议断开。
-- 普通教师 UI 去除内部协议词和无效入口。
-- docs、USER_GUIDE、Builder skill、Agent Kit 能力卡与可达产品一致。
-- 给出真实 outcome 等级；教师未明确验收前不得写 `accepted`。
+### M2 — 统一选择与编辑动作
 
-## 6. 验证预算
+产出：
 
-验证是风险控制，不是工作量证明。同一 SHA 的等价绿色证据直接复用；代码、环境和失败条件未变化时不得重复运行。
+- 稳定 selection/authoring target 路由，覆盖 canvas、layer、properties、Flow outline、Spatial inspector。
+- Delete/Backspace、多选删除/隐藏、复制/剪切/粘贴/重复、Undo/Redo 完整。
+- 右键菜单与 Shift+F10/Menu 键完整，和工具栏/图层按钮共用窄动作路由。
+- 焦点、文字编辑态、iframe/runtime 命中和错误反馈完整。
 
-并行条款：
+Gate：同一动作从键盘、右键、图层和画布入口得到同一结果、同一 history、同一持久化结果。
 
-- 执行者只对自己任务跑 L2，不得自行跑全量测试、preservation 或三尺寸 visual。
-- Electron/E2E 类验证使用本机单一会话资源，由协调者在集成时统一串行运行；执行者以 vitest、typecheck、受影响 build 为主。
-- 协调者每集成一批只跑受影响定向测试；L3 每 Gate 一次，不随任务批次重复。
+### M3 — Slide 表面完整对齐 V8
 
-### L0 — 文档或索引变更
+产出：
 
-只运行：
+- 场景/state CRUD、画布选择、多选、框选、拖缩旋转、方向键、zoom/pan 完整。
+- 文字/公式双击编辑、富文本、IME、竖排、自适应宽度完整。
+- 图形、图片、视频、组件/Runtime 的添加、替换和专属属性完整。
+- 图层紧凑布局、owner 内排序、显示/锁定/复制/删除完整。
+- 所有属性到画布实时同步，一个手势一个 history。
 
-1. Markdown 链接和真实路径检查。
-2. JSON 解析。
-3. `git diff --check` 与范围审查。
+Gate：V8 Slide 核心工作流在默认 V9 工程中无功能降级；保存重开和真实 Player 一致。
 
-不运行 typecheck、build、Vitest、Electron 或视觉 Gate。
+### M4 — Global / Surface / 控制器 / 声音
 
-### L1 — 开发循环
+产出：
 
-- 一个连贯修改默认只跑 1 个最相关命令；只有首个命令不能覆盖改动时才增加第 2 个。
-- 只有导出类型、Schema、IPC 或跨包接口变化时才跑相关 typecheck。
-- 只构建受影响 bundle。
-- UI 调试只用一个主视口和一条真实指针路径。
-- E2E 失败后先读首份 trace/截图，只定向复跑一次；不得转为全套测试碰运气。
+- 恢复 global 和 surface 共享作者入口，并与当前页面统一有效图层双向同步。
+- 修复控制器选择框、拖动、resize、折叠、声音、全屏、重播/重置和 Player 投射。
+- 恢复声音导入与 MediaTab 管理、全局声音设置和互动引用。
+- 跨 owner 操作、状态 override、默认控制器恢复和影响范围提示完整。
 
-### L2 — 可提交纵切
+Gate：global/surface/scene/state 四种 ownership 语义分别通过编辑、撤销、保存重开、跨 location 和 Player 验证。
 
-只要求：
+### M5 — Flow 完整化
 
-1. 该纵切的定向单测。
-2. 受影响类型边界或 bundle 的检查（确实涉及才运行）。
-3. 用户可见路径最多一条代表性 Electron E2E（由协调者在集成窗口运行）。
-4. `git diff --check`、临时诊断清理和范围审查。
+产出：
 
-默认不运行 `npm test`、全量 Electron、三尺寸视觉或 preservation visual。
+- 直接创建入口、outline、工作区、block/层级/属性/媒体/互动/统一图层完整。
+- Delete、右键、快捷键、拖放排序、多选和无障碍焦点完整。
+- Player、试运行、导出和保存重开完整。
 
-### L3 — 阶段 Gate
+Gate：从空白 Flow 工程开始，教师可不借助导入或代码完成一份可发布流式课件。
 
-每个阶段、每个最终 SHA 只运行一次：
+### M6 — Spatial 完整化
 
-1. 当前阶段定向测试。
-2. `npm run typecheck` 和受影响 build。
-3. 一条代表性 Electron 路径。
-4. `npm test`。
-5. 仅在触及 App/ui/Workspace/Phaser/CSS、ProductApp 或正式 import graph 时运行 preservation；仅在布局相关时运行三尺寸 visual。
-6. `git diff --check` 与仓库卫生检查。
+产出：
 
-### L4 — M8 最终验证
+- 直接创建入口、无限画布、世界元素、相机帧、路径、关系、semantic zoom 和 inspector 完整。
+- 坐标、zoom/pan、选择框、拖缩、图层、Delete、右键和控制器完整。
+- Player、试运行、导出和保存重开完整。
 
-只在 M8 运行一次最终集合：全量测试、typecheck、相关 Renderer/Player/Electron build、反重写 Gate、最终 Electron、必要的三尺寸视觉、archive/Published/Runtime/Component 与五类导出。
+Gate：从空白 Spatial 工程开始，教师可完成并发布一个多相机帧无限画布课件。
 
-不得为了“更放心”追加第二轮全量、另一浏览器工具、平行审计或重复截图。若 M7 后相关代码未变，M8 复用 M7 的发布证据。
+### M7 — Pure/Mixed 自动适配与课程结构
 
-## 7. 反重写与停止条件
+产出：
 
-`scripts/verify-editor-preservation.ts`、`tests/contracts/v8-behavior-map.json` 和冻结视觉基线不得被删除、弱化或用测试入口旁路。behavior map 只有在旧行为被产品协议明确退休且已有 replacement test 时才能更新；golden 不能为了接受新壳而修改。
+- 三种空白工程入口和三种新增 location 入口。
+- 课程结构跨 surface 的新增、复制、重命名、排序、删除与导航。
+- 纯类型和 Mixed 自动推导；切 location 时工作区、selection、属性和快捷键正确切换。
+- 全局控制器、课程目录、上一页/下一页和进度跨 surface 一致。
 
-并行执行不豁免任何产品合同与反重写门禁。两个任务对同一事实给出冲突证据时，以已集成主线为准，另一方由协调者基于新主线重派。
+Gate：纯 Slide、纯 Flow、纯 Spatial、Slide+Flow、Slide+Spatial、Flow+Spatial、三者 Mixed 七种组合全部通过保存重开、试运行与 Player。
 
-开发只在以下情况停下并请求用户决定：
+### M8 — 交付链与兼容
 
-1. 需要新增依赖、付费能力或仓库外操作。
-2. 必须执行不可恢复的破坏性操作。
-3. 权限阻止继续。
-4. 产品合同内部不可调和，且已有最小证据证明不存在安全路径。
+产出：
 
-普通测试失败、复杂 bug、任务冲突、相邻文件需求或阶段 NO-GO 不是停止条件；应回到首次证据并选择最短安全路径。
+- V9 新建/打开/保存/另存/恢复/最近工程完整。
+- V8 显式导入迁移有清晰报告，不让 V8 成为新工程默认格式。
+- Published Course V2、HTML/课程包、打印/PDF、资源寻址、Runtime API 2/3、Component API 4 完整。
+- 项目健康检查只报告真实问题，不以隐藏功能规避错误。
 
-## 8. 接手入口
+Gate：编辑器、保存文件、Published Player 和各导出物对相同课程结构给出一致结果。
 
-协调者依次阅读：
+### M9 — 发布候选与教师验收
 
-1. [`AGENTS.md`](AGENTS.md)
-2. 本总纲的产品合同、当前恢复点、任务板与集成协议
-3. 当前 [M3 阶段计划](docs/plans/M3_SLIDE_AUTHORING_PLAN.md)
-4. [`PROJECT_COGNITION_INDEX.md`](PROJECT_COGNITION_INDEX.md)
-5. `git status --short` 与 `output/worktrees/` 中各任务分支状态
+产出：
 
-执行者只读：
+- 全量 build/typecheck/unit/component/Electron E2E。
+- 三视口视觉对比、长图层列表、复杂 Mixed、低性能设备和键盘工作流复核。
+- 真实课程样例覆盖 Slide、Flow、Spatial、Mixed 和 global/controller/audio。
+- 已知限制列表只允许真正超出 V9 目标范围的问题，不得包含 V8 已有功能缺失。
 
-1. 本总纲 §2 产品合同与 §4.3 所有权规则
-2. 自己的任务行（§4.5）与从属阶段计划对应小节
-3. owns 范围内的当前源码
+Gate：工程状态达到 `engineering candidate`，视觉/互动复核达到 `art candidate`；教师明确验收后标记 `accepted`。
 
-不要先读全仓库、全量测试或 donor 前端；先从认知索引的“改什么看哪里”进入实际代码。
+## 9. Git 供体使用清单
+
+若首选 `e2e34aa` 通过 M0，直接在其上修复，不重新实现已经闭合的 Flow/Spatial。若必须回到 `7f04a8a`，按功能纵切参考以下提交：
+
+- Flow：`fc02e04`、`b3be117`、`e75c394`、`c46b996`、`3b073c4`。
+- Spatial：`8fc6e36`、`9c1b81d`、`9d92f00`、`6ee0bc6`、`6ddefed`、`2f77876`。
+- Store 与原壳接线：`82dbd39`、`01a8141`。
+- 收口修复：`91221e4`、`2e015e3`、`b9a6061`、`c9c3a94`、`6c9fac5`、`2903bba`、`ad3d8db`、`11ef31e`、`8344987`。
+
+使用规则：
+
+- 先读 diff 和测试，再选择性应用；集成提交不是天然正确答案。
+- 不从供体带回“暂不可用”产品决策、过期计划、放宽后的基线或双 editor route。
+- 一次提交只闭合一个可验证纵切；大规模机械格式变更与功能变更分开。
+- 每个里程碑留下可二分的稳定提交和结果证据。
+
+## 10. 验证矩阵
+
+### 10.1 分层验证政策
+
+- 中间任务只运行任务文档列出的最小定向验证：通常为 1–4 个相关 Vitest 文件、纯函数/组件断言、`git diff --check` 和必要的单场景人工抽查。
+- 中间任务不得运行 `npm test`、`npm run build`、`npm run verify`、`npm run verify:full`、全量 typecheck、全量 Electron E2E 或三视口 preservation visual；不得自行重捕视觉基线。
+- 跨 lane 的 App/store/shell 接线由中央集成任务串行完成，仍只运行组合定向测试，不提前跑全量。
+- 只有最终全量 Gate 允许统一运行全量 typecheck、unit/component、build、全部 V9 Electron E2E、V8 preservation visual、课程样例和导出验证。失败项按文件所有权回派，修复者仍只跑对应最小测试，再由最终 Gate 复跑。
+- 单包通过只称该纵切 `engineering candidate`；全量绿灯只证明项目级 `engineering candidate`，真实视觉/互动复核后才可称 `art candidate`。
+
+### 10.2 最终自动化覆盖
+
+- Schema/type：V9 工程、Published V2、Runtime/Component 协议。
+- Store/command：每种 owner、surface、state、history、引用清理和错误路径。
+- React/component：表面入口、图层、属性、右键、焦点和面板折叠。
+- Electron E2E：真实键盘、pointer、拖放、resize、右键、保存对话、重开和窗口尺寸。
+- Player/export：真实 PublishedCourseApp、Flow/Spatial host、控制器、音频和导出物。
+- Contract：V8 172 个展开用例的 V9 等价合同，不得只打在 legacy route。
+
+### 10.3 最终必跑交互场景
+
+1. Slide 多选 → 右键复制 → 粘贴 → Delete → Undo/Redo → 保存重开。
+2. 画布双击文字 → IME 输入 → 点击空白 → 保存重开 → Player 对比。
+3. 图层拖拽排序、上/下移、锁定、隐藏、重命名、长名称和长列表。
+4. global/surface/scene/state 四种来源的选择、属性、删除/隐藏和跨页影响。
+5. 控制器八方向 resize、zoom/pan 后选择框、属性折叠与真实 Player 折叠。
+6. 声音导入、试听、改名、互动引用、被引用删除保护、发布播放。
+7. 从空白分别创建纯 Flow 和纯 Spatial，不使用导入完成编辑与发布。
+8. Mixed 中连续切换三类 location，确认 selection、快捷键和属性不串页。
+9. Spatial 相机帧、路径、关系删除后的引用与 Player。
+10. Flow block 层级、排序、Delete、右键和打印/PDF。
+
+### 10.4 最终视觉视口
+
+- 1280×720
+- 1366×768
+- 1920×1080
+
+每个视口至少检查：壳层几何、右侧三标签、长图层列表、控制器选择框、Flow 长文、Spatial zoom chrome 和所有浮层菜单不越界。
+
+## 11. 完成定义
+
+以下条件全部满足，才可称“V9 编辑器完整迁移到 V8 表面并完成 V9 新功能”：
+
+- 默认新工程和生产编辑路径只有 V9 真相，没有可见的 V8/legacy editor 切换。
+- V8 显式导入仍可用，但不参与新工程日常编辑。
+- 第 5 节所有 V8 表面能力在默认 V9 路径可达；没有用 `暂不能`、disabled 或隐藏入口代替。
+- Slide、Flow、Spatial 可从空白直接创建；Pure/Mixed 自动推导并可完整编辑。
+- 右键、Delete、剪贴板、图层、文字、控制器、声音和属性均通过自动化与手工场景。
+- global/surface/scene/state ownership、稳定 `authoringAddress`、保存重开、Undo/Redo、Player 与导出一致。
+- 受保护行为合同和视觉基线没有被为了适配回归而静默放宽。
+- 工程证据、视觉证据、互动证据分别记录；教师明确给出最终验收。
+
+## 12. 明确不做
+
+- 不把 V8 工程模型重新设为默认生产格式。
+- 不维护两个可见编辑器或两套长期并行 store。
+- 不新增持久化四模式字段。
+- 不以“AI-native”或“轻量”为理由删掉手工高频能力；AI 可以补充工作流，不能成为基础编辑缺失的借口。
+- 不在没有完整替代路径时取消全局层、图层控制、声音、属性或高级作者入口。
+- 不重捕截图、改行为地图或删除测试来掩盖回归。
+- 不把通过自动化直接写成 `accepted`。
+
+## 13. 远期开放方向
+
+以下方向保留，但不阻塞当前 V9 编辑器完成，也不允许以“未来会有 AI”替代基础手工能力：
+
+### 13.1 Focusky 级镜头化演示
+
+- 可优先通过全视口 Component API 4 或 Runtime API 3 组件实现镜头路径、语义缩放、场景转场、时间线、音画同步和复杂互动，不要求把每个效果都变成原生节点。
+- 当前 Runtime/Component 已能承载局部复杂机制，但 viewport ownership、课程导航同步、批量结构编辑和稳定 AI authoring contract 尚不足以宣称 Focusky 级等价。
+- 只有在本方案的 V9 表面无降级、Spatial 基础编辑和 Player 交付链达到 `accepted` 后，才单独立项；届时先做一个高风险纵切样例，再决定扩充协议或编辑器入口。
+
+### 13.2 AI 结构编辑能力
+
+- 当前 `courseAiHandoff` / `courseAiPatch` 继续是 internal/reserved 的未挂载纯接口，不新增聊天、模型、Provider、网络、Clipboard 或可见 Patch 入口。
+- 长期可扩展批量/结构级命令、相机路径编排、Runtime/Component props 与时间线编辑，但必须复用人工命令的锁定、history、revision、引用检查和保存合同。
+- 轻量人工编辑器不扩建成重型 Focusky/PPT/白板面板；复杂批量机制优先由未来 AI 调用窄命令完成。
+
+### 13.3 Schema 与共享层演进
+
+- 当前继续使用 Course Project V9；不因隐藏、移动 UI 或简化心智模型启动 V10 迁移。
+- `globalLayerItems` 和 `surfaceLayerItems` 继续是 V9 引擎、作者和发布能力；全局层保持可见作者入口。
+- 任何未来 Schema 清理都必须证明 V9 无法表达目标、提供无损迁移与旧版拒绝策略，并另行获得确认。
+
+## 14. 执行任务包
+
+当前可派发任务位于 [`docs/tasks/v9-editor/00_INDEX.md`](docs/tasks/v9-editor/00_INDEX.md)。任务包遵守以下关系：
+
+- 本文件是唯一产品与长期方向；任务文档不得修改产品决策。
+- 任务按文件所有权分 lane，先并行实现窄纵切，后由中央集成任务处理 `App.tsx`、store、Workspace、ScenePanel、RightSidebar 和全局 CSS 等热点。
+- 中间任务只跑最小定向验证；最终任务 [`13_FINAL_FULL_GATE.md`](docs/tasks/v9-editor/13_FINAL_FULL_GATE.md) 是唯一全量测试入口。
+- 旧 `docs/plans/AI_NATIVE_*`、M3–M8 计划和评估报告只作历史取证或代码供体说明，不再用于任务领取或状态判断。
+
+## 15. 接手与记录规则
+
+- 新 Agent 先读本文件，再从 `PROJECT_COGNITION_INDEX.md` 定位源码、Schema、Player 和能力卡。
+- 执行者再读任务索引、共享合同和自己领取的单一任务文档；不得顺手承接相邻 lane。
+- 长期决策只更新本文件；执行状态更新任务索引和相应任务交付记录，不再创建互相冲突的总计划。
+- 每次交付必须写明：基线提交、改动纵切、实际修改文件、最小测试命令与结果、集成请求、视觉/互动证据和剩余风险。
+- 当前脏工作区在恢复分支完成并验收前一直保留为取证材料；任何清理都需单独确认。

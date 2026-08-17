@@ -33,7 +33,6 @@ const NOW = '2026-08-15T11:00:00.000Z'
 const SHARED_TEXT_ID = 'surface-scope-shared-text'
 const SHARED_TEXT_ORDER = 23
 const INITIAL_NAME = '场景间共用提示'
-const UPDATED_NAME = '所有场景共用提示'
 
 interface EditorHandle {
   app: ElectronApplication
@@ -207,61 +206,22 @@ async function expectPlayerRendersSharedText(page: Page): Promise<void> {
   })
 }
 
-async function dragSharedText(
-  page: Page,
-  frame: SharedTextSnapshot,
-  delta: { x: number; y: number },
-): Promise<void> {
-  const stage = page.getByTestId('canvas-stage')
-  const box = await stage.boundingBox()
-  if (!box) throw new Error('Canvas stage has no bounds')
-  const scaleX = box.width / 1280
-  const scaleY = box.height / 720
-  const start = {
-    x: box.x + (frame.x + frame.width / 2) * scaleX,
-    y: box.y + (frame.y + frame.height / 2) * scaleY,
-  }
-  const end = {
-    x: start.x + delta.x * scaleX,
-    y: start.y + delta.y * scaleY,
-  }
-  await page.mouse.move(start.x, start.y)
-  await expect.poll(() => stage.locator('canvas').evaluate((canvas) => (
-    getComputedStyle(canvas).cursor
-  ))).toBe('move')
-  // Alt is the product's explicit free-move modifier. It keeps this coordinate
-  // regression independent from alignment-guide snapping while still using
-  // the real Phaser pointer path at the requested zoom.
-  await page.keyboard.down('Alt')
-  try {
-    await page.mouse.down({ button: 'left' })
-    await page.mouse.move(end.x, end.y, { steps: 4 })
-    await page.mouse.up({ button: 'left' })
-  } finally {
-    await page.keyboard.up('Alt')
-  }
-}
-
-async function enterSurfaceScope(page: Page): Promise<void> {
-  const entry = page.getByTestId('surface-layer-entry')
-  await expect(entry).toBeEnabled()
-  await entry.click()
-  await expect(entry).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.locator('.canvas-label')).toContainText('当前内容共用')
-  await expect(page.locator('.status-bar')).toContainText('1 个共用元素')
-  await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
-}
-
-async function setZoom(page: Page, expected: '120%' | '90%'): Promise<void> {
-  const zoom = page.getByLabel('画布缩放比例')
-  await expect(zoom).toHaveText('100%')
-  if (expected === '120%') {
-    await page.getByRole('button', { name: '放大画布' }).click()
-    await page.getByRole('button', { name: '放大画布' }).click()
-  } else {
-    await page.getByRole('button', { name: '缩小画布' }).click()
-  }
-  await expect(zoom).toHaveText(expected)
+async function inspectSurfaceSharedText(page: Page): Promise<void> {
+  await page.getByRole('tab', { name: '图层' }).click()
+  const sharedRow = page.getByTestId(
+    `effective-layer-item-surface-${SHARED_TEXT_ID}`,
+  )
+  await expect(sharedRow).toHaveAttribute('data-layer-view-only', 'true')
+  await expect(sharedRow).toHaveAttribute('data-layer-effective-visible', 'true')
+  await expect(sharedRow).toContainText(INITIAL_NAME)
+  await expect(sharedRow).toContainText('当前内容共用')
+  await expect(sharedRow.getByRole('status')).toContainText(
+    '会在当前内容的多个页面中出现；当前仅可查看影响范围',
+  )
+  await sharedRow.locator('.node-item__effective-select').click()
+  await expect(page.locator('.status-bar')).toContainText(
+    '该共用内容当前仅可查看影响范围',
+  )
 }
 
 async function saveAs(editor: EditorHandle, path: string): Promise<void> {
@@ -355,7 +315,7 @@ test.afterAll(async () => {
   }
 })
 
-test('authors one shared surface text across scenes and a complete reopen', async () => {
+test('shows one shared surface text across scenes and a complete reopen', async () => {
   test.slow()
   const sourceBytes = readFileSync(sourceProjectPath)
   const initial = readSharedText(sourceProjectPath)
@@ -376,52 +336,12 @@ test('authors one shared surface text across scenes and a complete reopen', asyn
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
     await expectNoProtocolLeak(editor.page)
-    await enterSurfaceScope(editor.page)
+    // P2-05 intentionally removes separate shared-layer author pages. A
+    // non-controller surface item remains visible for impact inspection only.
+    await expect(editor.page.getByTestId('global-layer-entry')).toHaveCount(0)
+    await expect(editor.page.getByTestId('surface-layer-entry')).toHaveCount(0)
+    await inspectSurfaceSharedText(editor.page)
     await expectPlayerRendersSharedText(editor.page)
-
-    const undo = editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' })
-    const redo = editor.page.getByRole('button', {
-      name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
-    })
-    await expect(undo).toBeDisabled()
-    await expect(redo).toBeDisabled()
-    await setZoom(editor.page, '120%')
-
-    // Reuse the pixel-grid-aligned deltas from the controller zoom regression.
-    // This keeps the archive assertion at ±1 logical px without masking
-    // CSS-to-pointer rounding behind a wider tolerance.
-    const firstDelta = { x: 54, y: -26 }
-    await dragSharedText(editor.page, initial, firstDelta)
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await expect(editor.page.locator('.status-bar')).toContainText(`已选：${INITIAL_NAME}`)
-    await expect(undo).toBeEnabled()
-    await expect(redo).toBeDisabled()
-
-    await undo.click()
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(false)
-    await expect(undo).toBeDisabled()
-    await expect(redo).toBeEnabled()
-    await expectPlayerRendersSharedText(editor.page)
-
-    await redo.click()
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await expect(undo).toBeEnabled()
-    await expect(redo).toBeDisabled()
-    await expectPlayerRendersSharedText(editor.page)
-
-    await editor.page.getByRole('tab', { name: '属性' }).click()
-    const properties = editor.page.getByTestId('properties-tab')
-    await expect(properties).toContainText('修改会应用到当前内容内的所有场景')
-    const name = properties.getByLabel('名称', { exact: true })
-    await name.fill(UPDATED_NAME)
-    await name.press('Enter')
-    await expect(name).toHaveValue(UPDATED_NAME)
 
     await editor.page.getByRole('group', {
       name: '场景 2：共享验证场景',
@@ -430,19 +350,13 @@ test('authors one shared surface text across scenes and a complete reopen', asyn
     }).click()
     await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 2 / 2')
     await expectPlayerRendersSharedText(editor.page)
-    await enterSurfaceScope(editor.page)
-    await editor.page.getByRole('tab', { name: '图层' }).click()
-    await expect(editor.page.getByText(UPDATED_NAME, { exact: true })).toBeVisible()
+    await inspectSurfaceSharedText(editor.page)
 
     await saveAs(editor, savedProjectPath)
     firstSaved = await waitForSharedText(savedProjectPath)
-    expect(firstSaved.revision).toBeGreaterThan(initial.revision)
+    expect(firstSaved.revision).toBe(initial.revision)
     expectStableSharedText(firstSaved, {
       ...initial,
-      revision: firstSaved.revision,
-      name: UPDATED_NAME,
-      x: initial.x + firstDelta.x,
-      y: initial.y + firstDelta.y,
     })
     expect(readFileSync(sourceProjectPath)).toEqual(sourceBytes)
     expectCleanRenderer(editor)
@@ -457,34 +371,23 @@ test('authors one shared surface text across scenes and a complete reopen', asyn
     await expectNoProtocolLeak(editor.page)
     const reopened = readSharedText(savedProjectPath)
     expectStableSharedText(reopened, firstSaved)
-    await enterSurfaceScope(editor.page)
+    expect(reopened.revision).toBe(initial.revision)
+    await expect(editor.page.getByTestId('global-layer-entry')).toHaveCount(0)
+    await expect(editor.page.getByTestId('surface-layer-entry')).toHaveCount(0)
+    await inspectSurfaceSharedText(editor.page)
     await expectPlayerRendersSharedText(editor.page)
-    await editor.page.getByRole('tab', { name: '图层' }).click()
-    await editor.page.getByText(UPDATED_NAME, { exact: true }).click()
-    await editor.page.getByRole('tab', { name: '属性' }).click()
-    await expect(editor.page.getByTestId('properties-tab').getByLabel('名称', {
-      exact: true,
-    })).toHaveValue(UPDATED_NAME)
 
-    await setZoom(editor.page, '90%')
-    const secondDelta = { x: -31, y: -14 }
-    await dragSharedText(editor.page, reopened, secondDelta)
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await editor.page.keyboard.press('Control+s')
+    await editor.page.getByRole('group', {
+      name: '场景 2：共享验证场景',
+    }).getByRole('button', {
+      name: /打开场景“共享验证场景”/,
+    }).click()
+    await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 2 / 2')
+    await inspectSurfaceSharedText(editor.page)
+    await expectPlayerRendersSharedText(editor.page)
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
-    const movedAgain = await waitForSharedText(savedProjectPath)
-    expect(movedAgain.revision).toBe(reopened.revision + 1)
-    expectStableSharedText(movedAgain, {
-      ...reopened,
-      revision: reopened.revision + 1,
-      x: reopened.x + secondDelta.x,
-      y: reopened.y + secondDelta.y,
-    })
-    await expectPlayerRendersSharedText(editor.page)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)

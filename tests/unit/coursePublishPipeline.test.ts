@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { strFromU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
@@ -12,7 +14,9 @@ import type {
   SpatialSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
+import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import type { AssetMeta, ProjectDocument } from '@/shared/projectTypes'
+import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import {
   createCourseProject,
 } from '@/renderer/course/courseStudioModel'
@@ -21,8 +25,15 @@ import {
   createTextNode,
 } from '@/renderer/project/createProject'
 import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
+import { bytesToDataUrl } from '@/renderer/export/base64'
+import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
+import {
   buildPublishedCourseV2Payload,
   collectPublishedCourseAssetIds,
+  type CoursePublishSources,
 } from '@/renderer/export/course/buildPublishedCourse'
 import {
   buildPublishedCourseStandaloneHtml,
@@ -769,51 +780,55 @@ describe('Published Course V2 product pipeline', () => {
     root.remove()
   })
 
-  it('opens the scene directory from the teacher controller and jumps guarded', async () => {
+  it('opens the Mixed course directory by location and preserves navigation guards', async () => {
     const sources = fixture()
-    const slide = sources.project.surfaces[0]!
-    if (slide.type !== 'slide') throw new Error('expected Slide')
-    const sceneTwo = structuredClone(slide.scenes[0]!)
-    sceneTwo.id = 'slide-scene-2'
-    sceneTwo.name = 'Slide 2'
-    sceneTwo.interactions = []
-    slide.scenes.push(sceneTwo)
-    sources.project.surfaces = [slide]
-    sources.project.locations = [
-      {
-        id: 'location-slide',
-        label: 'Slide 1',
-        kind: 'slide-scene',
-        surfaceId: slide.id,
-        sceneId: slide.scenes[0]!.id,
-      },
-      {
-        id: 'location-slide-2',
-        label: 'Slide 2',
-        kind: 'slide-scene',
-        surfaceId: slide.id,
-        sceneId: sceneTwo.id,
-      },
-    ]
-    sources.project.startLocationId = 'location-slide'
-    delete sources.project.mixedPrintPlan
+    sources.project.courseState = [{ key: 'directoryLocked', valueType: 'boolean', defaultValue: false }]
+    sources.project.navigationGuards = [{
+      id: 'directory-blocks-spatial',
+      effect: 'block',
+      toLocationIds: ['location-spatial'],
+      match: 'all',
+      conditions: [{ type: 'compare', key: 'directoryLocked', operator: 'eq', value: true }],
+      message: '请先完成前面的内容',
+    }]
     sources.project.globalLayerItems.push(teacherControllerLayer())
     sources.project.playback.controls = 'canvas'
     const published = buildPublishedCourseV2Payload(sources)
     const root = document.createElement('div')
     document.body.appendChild(root)
     const app = await startPublishedCourse(published, root)
-    const slideSurfaceId = sources.project.surfaces[0]!.id
 
     root.querySelector<HTMLButtonElement>(
-      `[data-surface-id="${slideSurfaceId}"] [data-controller-button-id="picker"]`,
+      '[data-surface-id] [data-controller-button-id="picker"]',
     )!.click()
     await vi.waitFor(() => {
-      expect(root.querySelector('[data-scene-id="slide-scene-2"]')).not.toBeNull()
+      expect([...root.querySelectorAll<HTMLButtonElement>('[data-location-id]')]
+        .map((button) => button.dataset.locationId))
+        .toEqual(['location-slide', 'location-flow', 'location-spatial'])
     })
-    ;(root.querySelector<HTMLButtonElement>('[data-scene-id="slide-scene-2"]')!).click()
-    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-slide-2'))
+    expect([...root.querySelectorAll<HTMLButtonElement>('[data-location-id]')]
+      .map((button) => button.dataset.kind))
+      .toEqual(['slide-scene', 'flow-block', 'spatial-camera'])
+    expect(root.querySelector('[data-location-id="location-flow"]')).toHaveTextContent('Flow')
+    expect(root.querySelector('[data-location-id="location-spatial"]')).toHaveTextContent('Spatial')
+
+    root.querySelector<HTMLButtonElement>('[data-location-id="location-flow"]')!.click()
+    await vi.waitFor(() => expect(app.currentLocationId).toBe('location-flow'))
     expect(root.querySelector('.lesson-scene-picker-layer')).not.toBeVisible()
+
+    root.querySelector<HTMLButtonElement>(
+      '[data-surface-id="flow-surface"] [data-controller-button-id="picker"]',
+    )!.click()
+    await vi.waitFor(() => {
+      expect(root.querySelector('[data-location-id="location-spatial"]')).not.toBeNull()
+    })
+    root.querySelector<HTMLButtonElement>('[data-location-id="location-spatial"]')!.click()
+    await vi.waitFor(() => expect(root.querySelector('[data-course-player-notice]'))
+      .toHaveTextContent('请先完成前面的内容'))
+    expect(app.currentLocationId).toBe('location-flow')
+
+    expect(await app.navigate('location-spatial', 'author-force')).toBe(true)
+    expect(app.currentLocationId).toBe('location-spatial')
 
     await app.destroy()
     root.remove()
@@ -1156,5 +1171,222 @@ describe('Published Course V2 product pipeline', () => {
     rootA.remove()
     rootB.remove()
     history.replaceState(null, '', '#')
+  })
+})
+
+const ECOSYSTEM_MIXED_ARCHIVE_PATH = resolve(
+  process.cwd(),
+  'examples/course-project-v9/ecosystem-mixed/project.h5lesson',
+)
+
+/**
+ * E1 代表 Mixed fixture：读取共享的 ecosystem-mixed 工程（Slide + Flow +
+ * 非 1× Spatial + global teacher-controller），走与编辑器打开一致的归档路径。
+ */
+function ecosystemMixedSources(): CoursePublishSources & {
+  componentFiles: Record<string, Record<string, Uint8Array>>
+} {
+  const archive = openCourseProjectArchive(readFileSync(ECOSYSTEM_MIXED_ARCHIVE_PATH))
+  const components: Record<string, ComponentPackageData> = {}
+  for (const [key, files] of Object.entries(archive.componentFiles)) {
+    components[key] = parseComponentPackageFiles(files)
+  }
+  return {
+    project: archive.project,
+    assetFiles: archive.assetFiles,
+    components,
+    componentFiles: archive.componentFiles,
+  }
+}
+
+function projectTruthSnapshot(project: CourseProjectDocument) {
+  return {
+    locations: project.locations,
+    startLocationId: project.startLocationId,
+    sceneIds: project.surfaces.flatMap((surface) => (
+      surface.type === 'slide' ? surface.scenes.map((scene) => scene.id) : []
+    )),
+    flowBlocks: project.surfaces.find((surface) => surface.type === 'flow')?.blocks,
+    spatialCamera: project.surfaces.find((surface) => surface.type === 'spatial-2d')?.camera,
+    globalLayerItems: project.globalLayerItems,
+  }
+}
+
+interface ScopedLayerEntry {
+  item: LayerItem
+  scope: string
+}
+
+function allLayerScopes(project: CourseProjectDocument): ScopedLayerEntry[] {
+  return [
+    ...project.globalLayerItems.map((entry) => ({ item: entry.item, scope: 'global' })),
+    ...project.surfaces.flatMap((surface) => [
+      ...surface.surfaceLayerItems.map((entry) => ({ item: entry.item, scope: `surface:${surface.id}` })),
+      ...(surface.type === 'slide'
+        ? surface.scenes.flatMap((scene) => scene.layerItems.map((item) => ({ item, scope: `scene:${surface.id}:${scene.id}` })))
+        : []),
+      ...(surface.type === 'spatial-2d'
+        ? surface.world.layerItems.map((item) => ({ item, scope: `world:${surface.id}` }))
+        : []),
+    ]),
+  ]
+}
+
+function teacherControllerOccurrences(entries: readonly ScopedLayerEntry[]): ScopedLayerEntry[] {
+  return entries.filter(({ item }) => (
+    item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+  ))
+}
+
+interface PublishedScopedLayerEntry {
+  item: PublishedLayerItemLike
+  scope: string
+}
+
+interface PublishedLayerItemLike {
+  kind: string
+  content?: { nativeType?: string }
+}
+
+function allPublishedLayerScopes(published: PublishedCourseV2Payload): PublishedScopedLayerEntry[] {
+  return [
+    ...published.globalLayerItems.map((entry) => ({ item: entry.item, scope: 'global' })),
+    ...published.surfaces.flatMap((surface) => [
+      ...surface.surfaceLayerItems.map((entry) => ({ item: entry.item, scope: `surface:${surface.id}` })),
+      ...(surface.type === 'slide'
+        ? surface.scenes.flatMap((scene) => scene.layerItems.map((item) => ({ item, scope: `scene:${surface.id}:${scene.id}` })))
+        : []),
+      ...(surface.type === 'spatial-2d'
+        ? surface.world.layerItems.map((item) => ({ item, scope: `world:${surface.id}` }))
+        : []),
+    ]),
+  ]
+}
+
+function publishedTeacherControllerOccurrences(
+  entries: readonly PublishedScopedLayerEntry[],
+): PublishedScopedLayerEntry[] {
+  return entries.filter(({ item }) => (
+    item.kind === 'native' && item.content?.nativeType === 'teacher-controller'
+  ))
+}
+
+describe('E1 — ecosystem-mixed 代表工程：保存重开、控制器单一所有权与发布载荷', () => {
+  it('保存重开前后的 location 顺序、stable IDs、Flow 文本、Spatial camera、global controller 一致', () => {
+    const sources = ecosystemMixedSources()
+    const before = projectTruthSnapshot(sources.project)
+    const reopened = openCourseProjectArchive(createCourseProjectArchive(
+      {
+        project: sources.project,
+        assetFiles: sources.assetFiles,
+        componentFiles: sources.componentFiles,
+      },
+      { mtime: '2026-08-14T00:00:00.000Z' },
+    ))
+    expect(projectTruthSnapshot(reopened.project)).toEqual(before)
+    expect(reopened.project.revision).toBe(0)
+  })
+
+  it('归档/发布输入中控制器只在 global 保存一份，scene/surface/world 无副本', () => {
+    const sources = ecosystemMixedSources()
+    const occurrences = teacherControllerOccurrences(allLayerScopes(sources.project))
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0]!.scope).toBe('global')
+    expect(occurrences[0]!.item.layerItemId).toBe('teacher-controller')
+
+    const published = buildPublishedCourseV2Payload(sources)
+    const publishedOccurrences = publishedTeacherControllerOccurrences(allPublishedLayerScopes(published))
+    expect(publishedOccurrences).toHaveLength(1)
+    expect(publishedOccurrences[0]!.scope).toBe('global')
+  })
+
+  it('发布 payload 的三类 location 与工程一致，资产/组件闭包精确', () => {
+    const sources = ecosystemMixedSources()
+    const published = buildPublishedCourseV2Payload(sources)
+    expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+    expect(published.locations).toEqual(sources.project.locations)
+    expect(published.startLocationId).toBe(sources.project.startLocationId)
+    expect(published.surfaces.map((surface) => surface.type)).toEqual(
+      sources.project.surfaces.map((surface) => surface.type),
+    )
+    expect([...new Set(published.locations.map((location) => location.kind))].sort()).toEqual([
+      'flow-block',
+      'slide-scene',
+      'spatial-camera',
+    ])
+    expect(Object.keys(published.assets).sort()).toEqual([
+      'ecosystem-evidence-fallback',
+      'pond-observation',
+    ])
+    expect(Object.keys(published.components)).toEqual(['ittoedu.evidence-sort@1.0.0'])
+    expect(published.globalLayerItems).toHaveLength(1)
+    expect(published.globalLayerItems[0]!.item.kind).toBe('native')
+  })
+
+  it('single HTML 与 web package 携带三类 location 且离线资源闭包', () => {
+    const sources = ecosystemMixedSources()
+    const html = buildPublishedCourseStandaloneHtml(sources, 'window.CoursePlayerBundle=true;')
+    expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
+    for (const locationId of [
+      'ecosystem:prediction',
+      'ecosystem:reading',
+      'ecosystem:path-sort',
+      'ecosystem:overview',
+      'ecosystem:larvae',
+      'ecosystem:indirect',
+      'ecosystem:revision',
+    ]) {
+      expect(html).toContain(locationId)
+    }
+    expect(html).toContain('"teacher-controller"')
+    expect(html).toContain('data:image/svg+xml;base64,')
+    expect(html).not.toMatch(/https?:\/\//)
+
+    const files = buildPublishedCourseWebPackageFiles(sources, 'window.CoursePlayerBundle=true;')
+    const courseData = strFromU8(files['course-data.js']!)
+    for (const locationId of ['ecosystem:prediction', 'ecosystem:reading', 'ecosystem:overview']) {
+      expect(courseData).toContain(locationId)
+    }
+    expect(courseData).toContain('./assets/')
+    expect(courseData).toContain('"teacher-controller"')
+    expect(courseData).not.toContain('data:image/svg+xml;base64,')
+    const assetPaths = Object.keys(files).filter((path) => path.startsWith('assets/'))
+    expect(assetPaths).toHaveLength(2)
+    expect(files['index.html']).toBeDefined()
+    expect(files['player/player.iife.js']).toBeDefined()
+    const archiveFiles = unzipSync(zipSync(files))
+    expect(Object.keys(archiveFiles).sort()).toEqual(Object.keys(files).sort())
+  })
+
+  it('归档与导出过程不修改 project/revision/dirty', async () => {
+    const sources = ecosystemMixedSources()
+    const projectBefore = JSON.stringify(sources.project)
+    const revisionBefore = sources.project.revision
+    const session = { revision: sources.project.revision, dirty: false }
+
+    createCourseProjectArchive(
+      {
+        project: sources.project,
+        assetFiles: sources.assetFiles,
+        componentFiles: sources.componentFiles,
+      },
+      { mtime: '2026-08-14T00:00:00.000Z' },
+    )
+    buildPublishedCourseV2Payload(sources)
+    buildPublishedCourseStandaloneHtml(sources, 'window.CoursePlayerBundle=true;')
+    buildPublishedCourseWebPackageFiles(sources, 'window.CoursePlayerBundle=true;')
+    await buildCoursePrintArtifacts(sources.project, {
+      resolveAsset: (assetId) => {
+        const meta = sources.project.assets[assetId]
+        const bytes = sources.assetFiles[assetId]
+        return meta && bytes ? bytesToDataUrl(bytes, meta.mimeType) : undefined
+      },
+      captureSlide: async () => '<section data-captured-slide="true"></section>',
+    })
+    await buildCoursePptx(sources.project, sources.assetFiles)
+
+    expect(JSON.stringify(sources.project)).toBe(projectBefore)
+    expect(sources.project.revision).toBe(revisionBefore)
+    expect(session.dirty).toBe(false)
   })
 })

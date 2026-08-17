@@ -7,6 +7,8 @@ import {
   FilePlus2,
   FolderOpen,
   FileText,
+  PanelLeft,
+  PanelRight,
   Presentation,
   Pencil,
   Redo2,
@@ -53,6 +55,33 @@ export interface TopToolbarDocumentControl {
   onUndo(): void
   onRedo(): void
   onSetEditorMode(mode: EditorMode): void
+}
+
+/**
+ * Session-only shell collapse control. The expanded booleans live as React
+ * state in App and never enter the Store, Course Project or IPC.
+ */
+export interface ShellLayoutControl {
+  readonly leftExpanded: boolean
+  readonly rightExpanded: boolean
+  onToggleLeft(): void
+  onToggleRight(): void
+}
+
+interface TopToolbarBaseProps {
+  busy: boolean
+  onNew(): void
+  onOpen(): void
+  onImportLegacy(): void
+  recentProjects: RecentProjectEntry[]
+  onOpenRecent(path: string): void
+  onSave(saveAs?: boolean): void
+  healthSummary: ProjectHealthSummary
+  onOpenHealth(): void
+  onPreview(): void
+  onExport(format: ExportFormat): void
+  /** Optional session-only shell collapse control; absent keeps the old toolbar. */
+  shellLayoutControl?: ShellLayoutControl
 }
 
 type TopToolbarProps = TopToolbarBaseProps & (
@@ -111,6 +140,7 @@ function TopToolbarView({
   onOpenHealth,
   onPreview,
   onExport,
+  shellLayoutControl,
 }: TopToolbarViewProps) {
   const {
     title: projectTitle,
@@ -329,6 +359,31 @@ function TopToolbarView({
         </details>
       )}
 
+      {shellLayoutControl && (
+        <div className="toolbar__group toolbar__shell-toggle" role="group" aria-label="面板显示">
+          <button
+            type="button"
+            className="tool-button"
+            aria-label={shellLayoutControl.leftExpanded ? '收起左侧面板' : '展开左侧面板'}
+            aria-expanded={shellLayoutControl.leftExpanded}
+            title={shellLayoutControl.leftExpanded ? '收起左侧面板' : '展开左侧面板'}
+            onClick={shellLayoutControl.onToggleLeft}
+          >
+            <PanelLeft size={18} />
+          </button>
+          <button
+            type="button"
+            className="tool-button"
+            aria-label={shellLayoutControl.rightExpanded ? '收起右侧面板' : '展开右侧面板'}
+            aria-expanded={shellLayoutControl.rightExpanded}
+            title={shellLayoutControl.rightExpanded ? '收起右侧面板' : '展开右侧面板'}
+            onClick={shellLayoutControl.onToggleRight}
+          >
+            <PanelRight size={18} />
+          </button>
+        </div>
+      )}
+
       <div className="toolbar__spacer" />
 
       <div className="toolbar__project">
@@ -481,7 +536,7 @@ function TopToolbarView({
             }}
           >
             <FileText size={18} />
-            <span><strong>DOCX 讲义</strong><small>Flow 内容导出为可编辑 Word 文档</small></span>
+            <span><strong>DOCX 讲义</strong><small>讲义内容导出为可编辑 Word 文档</small></span>
           </button>
         </div>
       </details>
@@ -518,7 +573,7 @@ function LegacyTopToolbar(props: TopToolbarBaseProps) {
         canPreview: true,
         canExport: true,
         unavailableExports: {
-          docx: '请先切换到 Flow 讲义位置',
+          docx: '请先切换到讲义位置',
         },
         onRename: renameProject,
         onUndo: undo,

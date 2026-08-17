@@ -5,7 +5,6 @@ import {
   Maximize2,
   Minus,
   MousePointer2,
-  Copy,
   Play,
   Plus,
   RotateCcw,
@@ -71,8 +70,10 @@ import {
   resolveWorkspaceSlideAuthoringInput,
   workspaceAuthoringActionAllowed,
   workspaceCanvasLabel,
+  workspaceSelectionHasMixedGlobalTeacherController,
   workspaceSelectionAllowed,
   workspaceTextEditTargetNode,
+  workspaceTransformHasMixedGlobalTeacherController,
   workspaceTransformAllowed,
   workspaceSlidePreviewAssetFiles,
   workspaceSlideCarrierScope,
@@ -80,6 +81,7 @@ import {
   workspaceSlidePreviewSceneId,
   workspaceSlidePreviewStateId,
   workspacePreviewNodeWithTransform,
+  type WorkspaceControllerLocateRequest,
   type WorkspaceSlideAuthoringInput,
   type WorkspaceSlideEditingScope,
 } from './workspaceSlideAuthoring'
@@ -113,6 +115,7 @@ import {
 import {
   clientToWorld,
   createStageViewportTransform,
+  stageViewportPanToCenterWorldPoint,
   rotatedRectIntersectsStage,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
@@ -136,17 +139,26 @@ import {
   type RuntimeTargetEditSession,
 } from '../authoring/runtimeTargetEditSession'
 import type { ImportedImageAsset } from '../project/assetManager'
-import {
-  copyableAiSelectionReference,
-  type AuthoringCanvasTarget,
-} from '../authoring/aiSelectionReference'
 import type { V9SlideLayerTarget } from '../course/v9SlideVerticalSlice'
-import type { FlowEditorLayerView, FlowEditorView } from '../course/flowEditorView'
+import type {
+  FlowEditorLayerTarget,
+  FlowEditorLayerView,
+  FlowEditorView,
+} from '../course/flowEditorView'
 import type { SpatialCameraPose, SpatialSurfaceDocument } from '../../shared/courseProjectTypes'
-import { FlowWorkspace, type FlowBlockMoveDirection } from './FlowWorkspace'
+import {
+  FlowWorkspace,
+  type FlowBlockMoveDirection,
+  type FlowInlineTextPatch,
+  type FlowWorkspaceLayerTransform,
+} from './FlowWorkspace'
+import type { FlowStructuralCommand } from './FlowPropertiesTab'
 import {
   SpatialWorkspace,
   type SpatialWorkspaceItemTransform,
+  type SpatialWorkspaceScreenController,
+  type SpatialWorkspaceScreenControllerTarget,
+  type SpatialWorkspaceScreenControllerTransform,
 } from './SpatialWorkspace'
 
 export interface WorkspaceFlowAuthoringInput {
@@ -157,8 +169,17 @@ export interface WorkspaceFlowAuthoringInput {
   readonly onDuplicateBlock?: (blockId: string) => void
   readonly onMoveBlock?: (blockId: string, direction: FlowBlockMoveDirection) => void
   readonly layers?: readonly FlowEditorLayerView[]
-  readonly selectedLayerItemId?: string | null
-  readonly onSelectLayer?: (layerItemId: string) => void
+  readonly selectedLayerTarget?: FlowEditorLayerTarget | null
+  /** One-shot UI request to reveal the selected global controller card. */
+  readonly controllerLocateRequest?: WorkspaceControllerLocateRequest | null
+  readonly onSelectLayer?: (target: FlowEditorLayerTarget) => void
+  readonly onTransformLayer?: (transform: FlowWorkspaceLayerTransform) => void
+  /** FLOW C1/C2: in-place heading/paragraph/quote text patch, mapped by App to one Store command. */
+  readonly onPatchBlock?: (blockId: string, patch: FlowInlineTextPatch) => void
+  /** FLOW C2: narrow structural command (list item text), reuses the FlowPropertiesTab protocol. */
+  readonly onStructuralCommand?: (command: FlowStructuralCommand) => void
+  /** Teacher-safe reason that makes in-place text editing unavailable (busy/readOnly only). */
+  readonly editingUnavailableReason?: string
 }
 
 export interface WorkspaceSpatialAuthoringInput {
@@ -170,6 +191,17 @@ export interface WorkspaceSpatialAuthoringInput {
   readonly interactionDisabled?: boolean
   readonly onSelect: (ids: readonly string[]) => void
   readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
+  /** The visible course-global controller is a screen layer, not a world item. */
+  readonly screenController?: SpatialWorkspaceScreenController | null
+  readonly selectedScreenControllerTarget?: SpatialWorkspaceScreenControllerTarget | null
+  /** One-shot UI request to focus the fixed screen controller. */
+  readonly controllerLocateRequest?: WorkspaceControllerLocateRequest | null
+  readonly onSelectScreenController?: (
+    target: SpatialWorkspaceScreenControllerTarget,
+  ) => void
+  readonly onScreenControllerTransformEnd?: (
+    transform: SpatialWorkspaceScreenControllerTransform,
+  ) => void
 }
 
 export interface WorkspaceProps {
@@ -547,8 +579,14 @@ export function Workspace(props: WorkspaceProps) {
             onDuplicateBlock={props.flowAuthoring.onDuplicateBlock}
             onMoveBlock={props.flowAuthoring.onMoveBlock}
             layers={props.flowAuthoring.layers}
-            selectedLayerItemId={props.flowAuthoring.selectedLayerItemId}
+            selectedLayerTarget={props.flowAuthoring.selectedLayerTarget}
+            controllerLocateRequest={props.flowAuthoring.controllerLocateRequest}
             onSelectLayer={props.flowAuthoring.onSelectLayer}
+            onTransformLayer={props.flowAuthoring.onTransformLayer}
+            onPatchBlock={props.flowAuthoring.onPatchBlock}
+            onStructuralCommand={props.flowAuthoring.onStructuralCommand}
+            editingUnavailableReason={props.flowAuthoring.editingUnavailableReason}
+            readOnly={props.interactionDisabled}
           />
         </div>
       </main>
@@ -572,6 +610,11 @@ export function Workspace(props: WorkspaceProps) {
             interactionDisabled={props.spatialAuthoring.interactionDisabled}
             onSelect={props.spatialAuthoring.onSelect}
             onTransformEnd={props.spatialAuthoring.onTransformEnd}
+            screenController={props.spatialAuthoring.screenController}
+            selectedScreenControllerTarget={props.spatialAuthoring.selectedScreenControllerTarget}
+            controllerLocateRequest={props.spatialAuthoring.controllerLocateRequest}
+            onSelectScreenController={props.spatialAuthoring.onSelectScreenController}
+            onScreenControllerTransformEnd={props.spatialAuthoring.onScreenControllerTransformEnd}
           />
         </div>
       </main>
@@ -598,6 +641,7 @@ function WorkspaceEditor({
   interactionDisabledRef.current = interactionDisabled
   const lastParentFocusRef = useRef<HTMLElement | null>(null)
   const authoringFocusRecoveryTimerRef = useRef<number | null>(null)
+  const lastControllerLocateRequestRef = useRef<number | null>(null)
   const retiredPreviewResourcesRef = useRef(new Set<{
     document: RuntimePreviewBlobResources | null
     payload: RuntimePreviewPayloadResources | null
@@ -674,8 +718,6 @@ function WorkspaceEditor({
     useState<string | null>(null)
   const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
     useState<string | null>(null)
-  const [lastAuthoringSelection, setLastAuthoringSelection] =
-    useState<AuthoringCanvasTarget | null>(null)
   const projectRevisionRef = useRef(0)
   const layoutRevisionRef = useRef(0)
   const projectIdentityRef = useRef<string | null>(null)
@@ -777,14 +819,6 @@ function WorkspaceEditor({
   useEffect(() => {
     closeTrialRun()
   }, [closeTrialRun, project.id, slideAuthoring?.sessionId])
-
-  useEffect(() => setLastAuthoringSelection(null), [
-    editingScope,
-    interactionDisabled,
-    project.id,
-    scene.id,
-    slideAuthoring?.sessionId,
-  ])
 
   const stageTransform = useMemo(() => createStageViewportTransform({
     viewport: {
@@ -1894,6 +1928,43 @@ function WorkspaceEditor({
   const authoringSelectedNodeIds = activeSlideAuthoring.selectedNodeIds
   const authoringEditingScope = activeSlideAuthoring.editingScope
 
+  // Locating is a view-only operation. Recenter the existing canvas proxy for
+  // the same stable global layer ID; do not enter the hidden global scope or
+  // synthesize a replacement node.
+  useLayoutEffect(() => {
+    const request = activeSlideAuthoring.controllerLocateRequest
+    if (!request || lastControllerLocateRequestRef.current === request.requestId) {
+      return
+    }
+    const target = activeSlideAuthoring.authoringTargets?.get(request.layerItemId)
+    const node = document.nodes.find((candidate) => candidate.id === request.layerItemId)
+    if (target?.source !== 'global' || node?.type !== 'teacher-controller') return
+
+    lastControllerLocateRequestRef.current = request.requestId
+    setView((current) => {
+      return {
+        ...current,
+        ...stageViewportPanToCenterWorldPoint(
+          {
+            x: 0,
+            y: 0,
+            width: stageViewportSize.width,
+            height: stageViewportSize.height,
+          },
+          { x: node.x + node.width / 2, y: node.y + node.height / 2 },
+          current.zoom,
+        ),
+      }
+    })
+    stageViewportRef.current?.focus({ preventScroll: true })
+  }, [
+    activeSlideAuthoring.authoringTargets,
+    activeSlideAuthoring.controllerLocateRequest,
+    document.nodes,
+    stageViewportSize.height,
+    stageViewportSize.width,
+  ])
+
   const courseProjectId = useEditorStore(
     (state) => state.courseSession?.history.present.id,
   )
@@ -2729,34 +2800,6 @@ function WorkspaceEditor({
     visibleComponentTargets,
   ])
 
-  const copyAiReferenceFor = useCallback(async (
-    selection: AuthoringCanvasTarget,
-  ) => {
-    if (interactionDisabledRef.current) return
-    if (!workspaceAuthoringActionAllowed(
-      slideAuthoringInputRef.current,
-      'ai-reference',
-    )) {
-      reportUnsupportedInjectedAction('AI 修改引用暂不可用')
-      return
-    }
-    const store = useEditorStore.getState()
-    const reference = copyableAiSelectionReference({
-      project: store.project,
-      projectRevision: projectRevisionRef.current,
-      layoutRevision: layoutRevisionRef.current,
-      surfaceId: 'slide:main',
-      activeSceneId: store.activeSceneId,
-      selection,
-    })
-    try {
-      await navigator.clipboard.writeText(reference)
-      store.setStatus('已复制稳定 AI 修改引用；可直接粘贴给 Codex')
-    } catch {
-      store.setStatus('复制 AI 修改引用失败，请检查系统剪贴板权限')
-    }
-  }, [reportUnsupportedInjectedAction])
-
   useLayoutEffect(() => {
     const host = gameHostRef.current
     if (!host) return
@@ -2817,7 +2860,15 @@ function WorkspaceEditor({
       const injected = slideAuthoringInputRef.current
       if (!event || !workspaceTransformAllowed(injected, event)) {
         restoreInjectedNodes(nodeIds)
-        if (injected) reportUnsupportedInjectedAction(unsupportedMessage)
+        if (injected) {
+          if (event && workspaceTransformHasMixedGlobalTeacherController(injected, event)) {
+            useEditorStore.getState().setStatus(
+              '全课控制器不能与当前场景元素一起移动或缩放；请先取消其中一个选择',
+            )
+          } else {
+            reportUnsupportedInjectedAction(unsupportedMessage)
+          }
+        }
         return
       }
       if (!active.onTransformEnd(event)) restoreInjectedNodes(nodeIds)
@@ -2832,7 +2883,13 @@ function WorkspaceEditor({
         const injected = slideAuthoringInputRef.current
         if (!workspaceSelectionAllowed(injected, event)) {
           restoreInjectedNodes(event.nodeIds)
-          reportUnsupportedInjectedAction('多选暂不可用')
+          if (workspaceSelectionHasMixedGlobalTeacherController(injected, event)) {
+            useEditorStore.getState().setStatus(
+              '全课控制器不能与当前场景元素同时选择；请先取消其中一个选择',
+            )
+          } else {
+            reportUnsupportedInjectedAction('多选暂不可用')
+          }
           return
         }
         if (!activeSlideAuthoringRef.current.onSelectionChange(event)) {
@@ -3287,7 +3344,6 @@ function WorkspaceEditor({
         event.preventDefault()
         event.stopPropagation()
         if (hit.kind === 'component') {
-          setLastAuthoringSelection({ carrier: 'component', target: hit.target })
           if (hit.target.kind === 'component-text') {
             beginComponentTextEdit(hit.target)
           } else {
@@ -3295,10 +3351,8 @@ function WorkspaceEditor({
             void replaceComponentAsset(hit.target)
           }
         } else if (hit.target.kind === 'text') {
-          setLastAuthoringSelection({ carrier: 'runtime', target: hit.target })
           beginRuntimeTextEdit(hit.target)
         } else {
-          setLastAuthoringSelection({ carrier: 'runtime', target: hit.target })
           void replaceRuntimeAsset(hit.target)
         }
       }}
@@ -3351,29 +3405,18 @@ function WorkspaceEditor({
           <span title="Ctrl+滚轮缩放；按住空格或鼠标中键拖动画布">
             <Hand size={13} />
           </span>
-          {!slideAuthoring && (
-            <button
-              type="button"
-              aria-label="复制当前画布目标的 AI 修改引用"
-              title={lastAuthoringSelection
-                ? '复制稳定作者地址、当前 revision 和当前值'
-                : '请先点选一个 Runtime 或 Component 文字/图片'}
-              disabled={interactionDisabled || !lastAuthoringSelection}
-              onClick={() => {
-                if (lastAuthoringSelection) {
-                  void copyAiReferenceFor(lastAuthoringSelection)
-                }
-              }}
-            >
-              <Copy size={13} />AI 引用
-            </button>
-          )}
         </div>
       )}
       <div className={`canvas-label${authoringEditingScope === 'global' ? ' canvas-label--global' : ''}`}>
         1280 × 720 · {workspaceCanvasLabel(activeSlideAuthoring)}
       </div>
-      <div ref={stageViewportRef} className="canvas-viewport">
+      <div
+        ref={stageViewportRef}
+        className="canvas-viewport"
+        data-testid="canvas-viewport"
+        tabIndex={-1}
+        aria-label="画布视图"
+      >
         <div
           className="canvas-stage-stack"
           data-panning={panning || undefined}
@@ -3468,7 +3511,6 @@ function WorkspaceEditor({
                   onFocus={() => setHoveredAuthoringTargetId(target.targetId)}
                   onBlur={() => setHoveredAuthoringTargetId(null)}
                   onClick={() => {
-                    setLastAuthoringSelection({ carrier: 'runtime', target })
                     if (target.kind === 'text') {
                       beginRuntimeTextEdit(target)
                     } else {
@@ -3520,7 +3562,6 @@ function WorkspaceEditor({
                   onFocus={() => setHoveredAuthoringTargetId(target.targetId)}
                   onBlur={() => setHoveredAuthoringTargetId(null)}
                   onClick={() => {
-                    setLastAuthoringSelection({ carrier: 'component', target })
                     if (target.kind === 'component-text') {
                       beginComponentTextEdit(target)
                     } else {

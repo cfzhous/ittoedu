@@ -83,7 +83,7 @@ export function DesignTokensEditor({ value, onChange }: DesignTokensEditorProps)
     <section className="property-section design-tokens-editor">
       <h3 className="property-title">字体与色板 Token</h3>
       <p className="property-hint">
-        只保存稳定 ID、名称和值，供人类和 AI 统一取色与字体；不承载叙述性美术方向，也不会自动改写已有节点。
+        只保存稳定 ID、名称和值，便于统一取色与字体；不承载叙述性美术方向，也不会自动改写已有节点。
       </p>
       <div className="property-subsection-header">
         <strong>字体</strong>

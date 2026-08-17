@@ -10,6 +10,7 @@ import {
   clientToWorld,
   createStageViewportTransform,
   rotatedRectIntersectsStage,
+  stageViewportPanToCenterWorldPoint,
   worldDeltaToClient,
   worldRectToClient,
   worldToClient,
@@ -115,6 +116,23 @@ describe('stage viewport transform', () => {
     expect(panned.stageRect.height).toBe(base.stageRect.height)
     expect(panned.stageRect.x - base.stageRect.x).toBe(137.25)
     expect(panned.stageRect.y - base.stageRect.y).toBe(-64.5)
+  })
+
+  it('centers a located controller point with transient pan only', () => {
+    const viewport = { x: 40, y: 28, width: 960, height: 640 }
+    const controllerCenter = { x: 1040, y: 86 }
+    const pan = stageViewportPanToCenterWorldPoint(
+      viewport,
+      controllerCenter,
+      1.5,
+    )
+    const located = createStageViewportTransform({ viewport, zoom: 1.5, pan })
+
+    expect(located.zoom).toBe(1.5)
+    expectPointClose(worldToClient(located, controllerCenter), {
+      x: viewport.x + viewport.width / 2,
+      y: viewport.y + viewport.height / 2,
+    })
   })
 
   it('maps world points to expected client positions and back', () => {

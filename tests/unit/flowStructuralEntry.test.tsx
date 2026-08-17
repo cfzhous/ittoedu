@@ -259,6 +259,84 @@ describe('FlowPropertiesTab structural unavailable reason', () => {
   })
 })
 
+describe('FlowPropertiesTab inlineTextEditing hint (C2)', () => {
+  it('replaces heading body text input with the inline hint but keeps heading level usable', () => {
+    const onPatch = vi.fn()
+    render(
+      <FlowPropertiesTab block={headingBlock()} inlineTextEditing onPatch={onPatch} />,
+    )
+
+    expect(screen.getByTestId('flow-inline-text-editing-hint')).toHaveTextContent('请在正文中就地编辑')
+    expect(screen.queryByLabelText('标题文本')).toBeNull()
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+
+    const level = screen.getByRole('combobox', { name: '标题级别' })
+    expect(level).toBeInTheDocument()
+    fireEvent.change(level, { target: { value: '2' } })
+    expect(onPatch).toHaveBeenCalledWith('block-h1', { level: 2 })
+  })
+
+  it('replaces quote body text with the hint but keeps the citation input usable', () => {
+    const onPatch = vi.fn()
+    render(
+      <FlowPropertiesTab
+        block={{ id: 'block-quote', type: 'quote', text: '引用文字', citation: '出处' }}
+        inlineTextEditing
+        onPatch={onPatch}
+      />,
+    )
+
+    expect(screen.getAllByTestId('flow-inline-text-editing-hint')).toHaveLength(1)
+    expect(screen.queryByLabelText('引用内容')).toBeNull()
+
+    const citation = screen.getByLabelText('出处')
+    expect(citation).toBeInTheDocument()
+    fireEvent.change(citation, { target: { value: '新出处' } })
+    fireEvent.blur(citation)
+    expect(onPatch).toHaveBeenCalledWith('block-quote', { citation: '新出处' })
+  })
+
+  it('replaces every list item text input but keeps ordered toggle and item actions', () => {
+    const onPatch = vi.fn()
+    const onStructuralCommand = vi.fn()
+    render(
+      <FlowPropertiesTab
+        block={{
+          id: 'block-list',
+          type: 'list',
+          ordered: true,
+          items: [
+            { id: 'item-a', text: '第一项' },
+            { id: 'item-b', text: '第二项' },
+          ],
+        }}
+        inlineTextEditing
+        onPatch={onPatch}
+        onStructuralCommand={onStructuralCommand}
+      />,
+    )
+
+    expect(screen.getAllByTestId('flow-inline-text-editing-hint')).toHaveLength(2)
+    expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+
+    const ordered = screen.getByLabelText('有序列表')
+    expect(ordered).toBeInTheDocument()
+    fireEvent.click(ordered)
+    expect(onPatch).toHaveBeenCalledWith('block-list', { ordered: false })
+
+    expect(screen.getByTestId('flow-list-add-item')).toBeEnabled()
+    expect(screen.getByTestId('flow-list-item-1-delete')).toBeEnabled()
+    expect(screen.getByTestId('flow-list-item-2-move-up')).toBeEnabled()
+
+    fireEvent.click(screen.getByTestId('flow-list-item-1-delete'))
+    expect(onStructuralCommand).toHaveBeenCalledWith({
+      blockId: 'block-list',
+      kind: 'list.deleteItem',
+      itemId: 'item-a',
+    })
+  })
+})
+
 describe('FlowElementsTab media and component insert gating', () => {
   it('disables media and component insertion with the supplied teacher-safe reasons', () => {
     const onInsert = vi.fn()

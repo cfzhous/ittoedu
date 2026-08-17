@@ -23,9 +23,11 @@ import type { AssetKind, AssetMeta } from '../shared/projectTypes'
 import type {
   CourseProjectDocument,
   FlowBlock,
+  NativeLayerItem,
   SpatialCameraPose,
 } from '../shared/courseProjectTypes'
 import { getEffectiveCourseLayerOrder } from '../shared/courseProjectModel'
+import { materializeNativeLayerItem } from '../shared/courseProjectSchema'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { bytesToDataUrl } from './export/base64'
 import { buildExportPayload } from './export/buildExportPayload'
@@ -58,6 +60,7 @@ import {
   isV9SlideVerticalSliceDirty,
   registeredV9SlideAssetFiles,
   v9SlideLayerContextKey,
+  type CourseGlobalControllerPatch,
   type V9SlideVerticalSliceState,
 } from './course/v9SlideVerticalSlice'
 import {
@@ -65,8 +68,15 @@ import {
   type CourseProjectHealthCheckResult,
 } from './course/courseProjectHealthCheck'
 import { buildSlideEditorView } from './course/slideEditorView'
-import { buildFlowEditorView } from './course/flowEditorView'
+import {
+  buildFlowEditorView,
+  type FlowEditorLayerTarget,
+} from './course/flowEditorView'
 import { buildSpatialEditorView } from './course/spatialEditorView'
+import {
+  deriveCourseEditorShellPolicy,
+  type CourseEditorShellPolicy,
+} from './course/courseEditorLayout'
 import type { FlowEditorBlockInput } from './course/flowEditorCommands'
 import {
   v9InteractionSceneDocument,
@@ -136,7 +146,10 @@ import type {
   WorkspaceFlowAuthoringInput,
   WorkspaceSpatialAuthoringInput,
 } from './ui/Workspace'
-import type { WorkspaceSlideAuthoringInput } from './ui/workspaceSlideAuthoring'
+import type {
+  WorkspaceControllerLocateRequest,
+  WorkspaceSlideAuthoringInput,
+} from './ui/workspaceSlideAuthoring'
 import type { SpatialCameraPanelProps } from './ui/SpatialCameraPanel'
 import type { SpatialLayerInspectorProps } from './ui/SpatialLayerInspector'
 import type { SpatialPathEditorProps } from './ui/SpatialPathEditor'
@@ -176,6 +189,12 @@ function readableError(error: unknown, fallback: string): string {
 interface BatchImportIssue {
   name: string
   message: string
+}
+
+/** A transient workspace request; it never becomes Course Project state. */
+interface V9ControllerLocateRequest extends WorkspaceControllerLocateRequest {
+  readonly sessionId: string
+  readonly locationId: string
 }
 
 interface PreparedAssetBatch {
@@ -327,7 +346,13 @@ function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
 export default function App() {
   const v9SlideVerticalSlice = useEditorStore((state) => state.courseSession)
   const [busy, setBusy] = useState(false)
+  // Session-only shell collapse state: never enters the Store, Course Project
+  // or IPC, and never affects revision/history/dirty/selection/camera.
+  const [leftSidebarExpanded, setLeftSidebarExpanded] = useState(true)
+  const [rightSidebarExpanded, setRightSidebarExpanded] = useState(true)
   const [spatialSessionCamera, setSpatialSessionCamera] = useState<SpatialCameraPose | null>(null)
+  const [controllerLocateRequest, setControllerLocateRequest] =
+    useState<V9ControllerLocateRequest | null>(null)
   const [componentPackageRequest, setComponentPackageRequest] = useState<
     | {
       mode: 'replace'
@@ -434,6 +459,18 @@ export default function App() {
         }
   const v9CourseProject = v9SlideVerticalSlice?.history.present ?? null
   const v9SelectionLocationId = v9SlideVerticalSlice?.selection.locationId ?? null
+  // Shell policy is derived once per render/memo and never written back to the
+  // project. A course whose locations/surfaces cannot be resolved is handed to
+  // the Schema/health path; the shell only refuses to crash on it.
+  const v9ShellPolicy = useMemo<CourseEditorShellPolicy | null>(() => {
+    if (v9CourseProject === null) return null
+    try {
+      return deriveCourseEditorShellPolicy(v9CourseProject)
+    } catch (error) {
+      console.error('课件壳层策略推导失败', error)
+      return null
+    }
+  }, [v9CourseProject])
   const v9ActiveLocation = useMemo(() => {
     if (v9CourseProject === null || v9SelectionLocationId === null) return null
     return v9CourseProject.locations.find(
@@ -485,7 +522,7 @@ export default function App() {
   // "add from current view" and "set home" with the real workspace pose.
   useEffect(() => {
     setSpatialSessionCamera(null)
-  }, [v9SpatialEditorView?.surfaceId, v9SpatialEditorView?.activeCameraFrameId])
+  }, [v9SpatialEditorView?.surfaceId])
   const activeCourseEditorRoute = v9SlideVerticalSlice === null
     ? 'legacy'
     : v9ActiveSlideContext !== null
@@ -764,6 +801,7 @@ export default function App() {
       thumbnail: scene.thumbnail,
     }))
     return {
+      hideSharedLayerEntries: true,
       editingScope: v9SlideVerticalSlice.editingScope,
       globalElementCount: v9ScenePanelBase?.globalElementCount ??
         v9SlideVerticalSlice.history.present.globalLayerItems.length,
@@ -949,6 +987,19 @@ export default function App() {
     }
   }, [])
 
+  const requestControllerLocate = useCallback((layerItemId: string): void => {
+    const session = useEditorStore.getState().courseSession
+    if (session === null) return
+    setControllerLocateRequest((previous) => ({
+      sessionId: session.sessionId,
+      locationId: session.selection.locationId,
+      layerItemId,
+      // A new sequence is required even when the same controller is located
+      // repeatedly, because this request only moves the active UI viewport.
+      requestId: (previous?.requestId ?? 0) + 1,
+    }))
+  }, [])
+
   const reportBatchOutcome = useCallback((input: {
     label: string
     completedCount: number
@@ -1102,17 +1153,6 @@ export default function App() {
       stateId: v9SlideVerticalSlice.selection.stateId,
     })
     const editingScope = v9SlideVerticalSlice.editingScope
-    const scopedLayers = view.layers.filter((layer) => layer.source === editingScope)
-    // Native and component layers both enter the unified layer; runtime layers
-    // and scene teacher controllers remain outside the Nodes/Properties lists.
-    const unsupportedScopedLayerCount = scopedLayers.filter((layer) => (
-      layer.item.kind === 'runtime' ||
-      (
-        layer.item.kind === 'native' &&
-        editingScope !== 'global' &&
-        layer.item.content.nativeType === 'teacher-controller'
-      )
-    )).length
     const editingScene = editingScope === 'scene'
     const editingSurface = editingScope === 'surface'
     const editingNativeLayerList = editingScene || editingSurface
@@ -1121,6 +1161,47 @@ export default function App() {
       (node) => selectedIds.has(node.id),
     )
     const selectedNode = selectedNodes.length === 1 ? selectedNodes[0]! : null
+    const selectedAuthoringTarget = selectedNode === null
+      ? undefined
+      : v9WorkspaceSnapshot.authoringTargets.get(selectedNode.id)
+    const selectedGlobalController = selectedNode?.type === 'teacher-controller' &&
+      selectedAuthoringTarget?.source === 'global'
+    // The inspector keeps every source-explicit row for the current course
+    // location. Visibility only affects the canvas proxy, never whether a
+    // teacher can inspect a shared item's state and impact here.
+    const effectiveLayers = view.layers
+      .map((layer) => {
+        const controller = layer.source === 'global' &&
+          layer.item.kind === 'native' &&
+          layer.item.content.nativeType === 'teacher-controller'
+        const kind = layer.item.kind === 'native'
+          ? layer.item.content.nativeType
+          : layer.item.kind
+        const selected = controller
+          ? v9SlideVerticalSlice.selection.globalController?.source === 'global' &&
+            v9SlideVerticalSlice.selection.globalController.layerItemId === layer.selectionId
+          : layer.source === editingScope && selectedIds.has(layer.selectionId)
+        return {
+          source: layer.source,
+          layerItemId: layer.selectionId,
+          label: layer.item.label,
+          kind,
+          order: layer.item.order,
+          visible: layer.item.visible,
+          locked: layer.item.locked,
+          effectiveVisible: layer.effectiveVisible,
+          selected,
+          ...(controller ? { controller: true } : {}),
+          ...(layer.source === 'scene' || controller
+            ? {}
+            : {
+                viewOnly: true,
+                impactLabel: layer.source === 'global'
+                  ? '会在整门课中出现；当前仅可查看影响范围'
+                  : '会在当前内容的多个页面中出现；当前仅可查看影响范围',
+              }),
+        }
+      })
     const activeState = v9SlideVerticalSlice.selection.stateId === null
       ? null
       : v9ActiveSlideContext?.scene.presentation?.states.find(
@@ -1133,15 +1214,17 @@ export default function App() {
       editingScope,
     } as const
     const layerContextKey = v9SlideLayerContextKey(layerContext)
-    // Global layers enter the same controlled property editor as scene/surface
-    // natives. Runtime layers are never projected into the authoring document,
-    // and teacher controllers keep their own type-level capability gate.
+    // Global controllers keep the current scene's visual scope but carry their
+    // real ownership explicitly. Runtime layers are never projected into the
+    // authoring document.
     const propertyTarget = selectedNode && (
       editingNativeLayerList || editingScope === 'global'
-    )
+    ) && selectedAuthoringTarget
       ? {
           ...layerContext,
-          layerItemId: selectedNode.id,
+          layerItemId: selectedAuthoringTarget.layerItemId,
+          source: selectedAuthoringTarget.source,
+          projectRevision: v9SlideVerticalSlice.history.present.revision,
         }
       : null
     const interactionScenes = v9SlideScenes(v9SlideVerticalSlice.history.present)
@@ -1198,29 +1281,63 @@ export default function App() {
             },
           }
         : {}),
-      ...(editingNativeLayerList
-        ? {
-            layers: {
+      layers: {
               editingScope: v9SlideVerticalSlice.editingScope,
               contextKey: layerContextKey,
-              scopeLabel: editingSurface
-                ? '当前内容共用'
-                : v9ActiveSlideContext?.scene.name ?? view.sceneName,
-              nodes: v9WorkspaceSnapshot.document.nodes,
-              selectedNodeIds: v9WorkspaceSnapshot.selectedNodeIds,
+              scopeLabel: '当前页面图层',
+              nodes: [],
+              selectedNodeIds: [],
+              effectiveLayers,
               deletionMode: editingScene && v9SlideVerticalSlice.selection.stateId !== null
                 ? 'hide-in-state'
                 : 'delete',
-              omittedItemsReason: unsupportedScopedLayerCount > 0
-                ? editingSurface
-                  ? `当前内容共用层还有 ${unsupportedScopedLayerCount} 个动态内容或复用内容暂不能编辑；已显示的元素仍可编辑。`
-                  : `当前幻灯片还有 ${unsupportedScopedLayerCount} 个动态元素或控制器暂不在列表中；已显示的元素仍可编辑。`
-                : undefined,
-              reorderUnavailableReason: unsupportedScopedLayerCount > 0
-                ? editingSurface
-                  ? '当前列表未包含共用层中的全部元素，暂不能调整整体层级。'
-                  : '当前列表未包含幻灯片中的全部元素，暂不能调整整体层级。'
-                : undefined,
+              reorderUnavailableReason: '当前页面图层按实际叠放顺序显示。',
+              onSelectEffectiveLayer: (layer) => {
+                if (layer.controller) {
+                  const target = useEditorStore.getState().captureCourseGlobalControllerTarget()
+                  if (target === null || target.layerItemId !== layer.layerItemId) {
+                    useEditorStore.getState().setStatus('全课控制器已变化，请重新选择')
+                    return
+                  }
+                  useEditorStore.getState().selectCourseGlobalController(target)
+                  return
+                }
+                if (layer.source !== 'scene') {
+                  useEditorStore.getState().setStatus(
+                    layer.source === 'global'
+                      ? '该全课内容当前仅可查看影响范围'
+                      : '该共用内容当前仅可查看影响范围',
+                  )
+                  return
+                }
+                run(() => {
+                  const accepted = useEditorStore.getState().selectCourseLayers({
+                    nodeIds: [layer.layerItemId],
+                    additive: false,
+                  })
+                  if (!accepted) throw new Error('当前元素无法选择')
+                }, '无法选择元素')
+              },
+              onLocateController: (layer) => run(() => {
+                if (!layer.controller || layer.source !== 'global') {
+                  throw new Error('当前图层不是全课控制器')
+                }
+                if (!layer.effectiveVisible) {
+                  useEditorStore.getState().setStatus('全课控制器当前不可见，无法定位到画布')
+                  return
+                }
+                const store = useEditorStore.getState()
+                const target = store.captureCourseGlobalControllerTarget()
+                if (target === null || target.layerItemId !== layer.layerItemId) {
+                  throw new Error('全课控制器已变化，请重新选择')
+                }
+                if (!store.selectCourseGlobalController(target)) {
+                  throw new Error('无法选择全课控制器，请重新选择')
+                }
+                store.setActiveTab('properties')
+                requestControllerLocate(layer.layerItemId)
+                store.setStatus('已定位全课控制器')
+              }, '无法定位全课控制器'),
               onSelectNode: (nodeId, additive) => run(() => {
                 const accepted = useEditorStore.getState().selectCourseLayers({
                   nodeIds: nodeId === null ? [] : [nodeId],
@@ -1271,21 +1388,23 @@ export default function App() {
                 if (!accepted) throw new Error('当前图层上下文已变化')
               }, '无法调整图层顺序'),
             },
-          }
-        : {}),
       properties: {
         editingScope: v9SlideVerticalSlice.editingScope,
         editorMode,
         selectedNodes,
         target: propertyTarget,
-        scopeLabel: editingScope === 'global'
+        scopeLabel: selectedGlobalController
+          ? '全课控制器'
+          : editingScope === 'global'
           ? '全局层'
           : editingSurface
             ? '当前内容共用'
           : activeState
             ? `状态：${activeState.name}`
             : '基础场景',
-        scopeDescription: editingScope === 'global'
+        scopeDescription: selectedGlobalController
+          ? '本次修改将应用到整门课。'
+          : editingScope === 'global'
           ? '修改会应用到课件内的所有幻灯片。'
           : editingSurface
             ? '修改会应用到当前内容内的所有场景。'
@@ -1294,6 +1413,7 @@ export default function App() {
             : '修改基础元素会影响继承它的命名状态。',
         overrideActive: Boolean(
           editingScene &&
+          !selectedGlobalController &&
           activeState &&
           propertyTarget &&
           activeState.layerItemOverrides[propertyTarget.layerItemId],
@@ -1305,6 +1425,7 @@ export default function App() {
           '图片和视频的专属设置暂不可用；上方通用属性仍可修改。',
         controllerUnavailableReason:
           '教师控制器的专属设置暂不可用；上方通用属性仍可修改。',
+        controllerScenes: interactionScenes,
         ...(editingScene
           ? {
               background: {
@@ -1346,15 +1467,33 @@ export default function App() {
               },
             }
           : {}),
-        onUpdateNode: (target, patch) => updateProperty(
-          () => useEditorStore.getState().updateCourseNativeNode(target, patch),
-          '无法更新元素属性',
-        ),
+        onUpdateNode: (target, patch) => updateProperty(() => {
+          const store = useEditorStore.getState()
+          if (target.source === 'global') {
+            const globalTarget = store.captureCourseGlobalControllerTarget()
+            if (
+              globalTarget === null ||
+              target.projectRevision !== globalTarget.projectRevision ||
+              target.sessionId !== globalTarget.sessionId ||
+              target.locationId !== globalTarget.locationId ||
+              target.layerItemId !== globalTarget.layerItemId
+            ) {
+              return false
+            }
+            return store.updateCourseGlobalController(
+              globalTarget,
+              patch as CourseGlobalControllerPatch,
+            )
+          }
+          return store.updateCourseNativeNode(target, patch)
+        }, '无法更新元素属性'),
         onClearOverride: (target) => updateProperty(
-          () => useEditorStore.getState().clearCourseNativeNodeOverride(target),
+          () => target.source === 'global'
+            ? false
+            : useEditorStore.getState().clearCourseNativeNodeOverride(target),
           '无法恢复基础属性',
         ),
-        interaction: (editingScene || editingScope === 'global') ? {
+        interaction: !selectedGlobalController && (editingScene || editingScope === 'global') ? {
           scene: interactionSceneDocument,
           sourceScope: editingScope === 'global' ? 'global' : 'scene',
           sourceNodes: v9WorkspaceSnapshot.document.nodes,
@@ -1391,6 +1530,7 @@ export default function App() {
   }, [
     editorMode,
     pickCourseBackgroundImage,
+    requestControllerLocate,
     selectAndAddCourseMedia,
     v9ActiveSlideContext?.scene.name,
     v9CourseLocationUnavailableReason,
@@ -1400,6 +1540,11 @@ export default function App() {
   const v9SlideAuthoring = useMemo<WorkspaceSlideAuthoringInput | undefined>(() => {
     if (v9SlideVerticalSlice === null || v9WorkspaceSnapshot === null) return undefined
     const snapshot = v9WorkspaceSnapshot
+    const activeControllerLocateRequest = controllerLocateRequest?.sessionId ===
+      v9SlideVerticalSlice.sessionId &&
+      controllerLocateRequest.locationId === v9SlideVerticalSlice.selection.locationId
+      ? controllerLocateRequest
+      : undefined
     const stateName = v9SlideVerticalSlice.editingScope === 'global'
       ? '全局层'
       : v9SlideVerticalSlice.editingScope === 'surface'
@@ -1423,14 +1568,57 @@ export default function App() {
       sceneName: v9ActiveSlideContext?.scene.name ?? snapshot.document.name,
       stateName,
       editingScope: v9SlideVerticalSlice.editingScope,
+      controllerLocateRequest: activeControllerLocateRequest,
       unsupportedActionReason: '当前版本暂不支持此操作；现有内容不会改变',
       onSelectionChange: (event) => {
         if (lifecycleOperationInFlightRef.current) return false
-        return useEditorStore.getState().selectCourseLayers(event)
+        const globalControllerIds = event.nodeIds.filter((nodeId) => {
+          const target = snapshot.authoringTargets.get(nodeId)
+          const node = snapshot.document.nodes.find((candidate) => candidate.id === nodeId)
+          return target?.source === 'global' && node?.type === 'teacher-controller'
+        })
+        if (globalControllerIds.length === 0) {
+          return useEditorStore.getState().selectCourseLayers(event)
+        }
+        if (globalControllerIds.length !== event.nodeIds.length || globalControllerIds.length !== 1) {
+          setStatus('全课控制器不能与当前场景元素同时选择；请先取消其中一个选择')
+          return false
+        }
+        const store = useEditorStore.getState()
+        const target = store.captureCourseGlobalControllerTarget()
+        if (target === null || target.layerItemId !== globalControllerIds[0]) return false
+        return store.selectCourseGlobalController(target)
       },
       onTransformEnd: (event) => {
         if (lifecycleOperationInFlightRef.current) return false
-        return useEditorStore.getState().transformCourseLayers(event)
+        const globalControllerTransforms = event.nodes.filter((transform) => {
+          const target = snapshot.authoringTargets.get(transform.nodeId)
+          const node = snapshot.document.nodes.find(
+            (candidate) => candidate.id === transform.nodeId,
+          )
+          return target?.source === 'global' && node?.type === 'teacher-controller'
+        })
+        if (globalControllerTransforms.length === 0) {
+          return useEditorStore.getState().transformCourseLayers(event)
+        }
+        if (
+          globalControllerTransforms.length !== event.nodes.length ||
+          globalControllerTransforms.length !== 1
+        ) {
+          setStatus('全课控制器不能与当前场景元素一起移动或缩放；请先取消其中一个选择')
+          return false
+        }
+        const transform = globalControllerTransforms[0]!
+        const store = useEditorStore.getState()
+        const target = store.captureCourseGlobalControllerTarget()
+        if (target === null || target.layerItemId !== transform.nodeId) return false
+        return store.transformCourseGlobalController(target, {
+          x: transform.x,
+          y: transform.y,
+          width: transform.width,
+          height: transform.height,
+          rotation: transform.rotation,
+        })
       },
       onTextEditCommit: (event) => {
         if (lifecycleOperationInFlightRef.current) return false
@@ -1445,22 +1633,28 @@ export default function App() {
         }, event.text, [...event.runs])
       },
     }
-  }, [v9ActiveSlideContext?.scene, v9SlideVerticalSlice, v9WorkspaceSnapshot])
+  }, [
+    controllerLocateRequest,
+    setStatus,
+    v9ActiveSlideContext?.scene,
+    v9SlideVerticalSlice,
+    v9WorkspaceSnapshot,
+  ])
 
   const v9FlowStructuralCommands = useMemo(() => {
     if (v9FlowEditorView === null) return undefined
     return {
       onDeleteBlock: (blockId: string) => runCourseCommand(() => {
         useEditorStore.getState().deleteCourseFlowBlock(blockId)
-      }, '无法删除 Flow 内容块'),
+      }, '无法删除内容块'),
       onDuplicateBlock: (blockId: string) => runCourseCommand(() => {
         useEditorStore.getState().duplicateCourseFlowBlock(blockId)
-      }, '无法复制 Flow 内容块'),
+      }, '无法复制内容块'),
       onMoveBlock: (blockId: string, direction: 'up' | 'down' | 'left' | 'right') => runCourseCommand(() => {
         const current = v9FlowEditorView.blocks.find(
           (entry) => entry.blockId === blockId,
         )
-        if (!current) throw new Error('所选 Flow 内容块已失效，请重新选择')
+        if (!current) throw new Error('所选内容块已失效，请重新选择')
         if (direction === 'up' || direction === 'down') {
           const toIndex = direction === 'up'
             ? Math.max(0, current.index - 1)
@@ -1493,9 +1687,83 @@ export default function App() {
           parentId: previous.blockId,
           index: previous.block.blocks.length,
         })
-      }, '无法移动 Flow 内容块'),
+      }, '无法移动内容块'),
     }
   }, [runCourseCommand, v9FlowEditorView])
+
+  const v9FlowSelectedLayerTarget = useMemo<FlowEditorLayerTarget | null>(() => {
+    if (v9SlideVerticalSlice === null || v9FlowEditorView === null) return null
+    const globalController = v9SlideVerticalSlice.selection.globalController
+    if (globalController?.source === 'global') {
+      const layer = v9FlowEditorView.globalLayerItems.find((candidate) => (
+        candidate.source === 'global' &&
+        candidate.selectionId === globalController.layerItemId &&
+        candidate.item.kind === 'native' &&
+        candidate.item.content.nativeType === 'teacher-controller'
+      ))
+      if (layer) {
+        return { source: 'global', layerItemId: layer.selectionId }
+      }
+    }
+    const layerItemId = v9SlideVerticalSlice.selection.flowLayerItemId
+    if (!layerItemId) return null
+    const layer = v9FlowEditorView.surfaceLayerItems.find((candidate) => (
+      candidate.source === 'surface' && candidate.selectionId === layerItemId
+    ))
+    return layer ? { source: 'surface', layerItemId: layer.selectionId } : null
+  }, [v9FlowEditorView, v9SlideVerticalSlice])
+
+  const v9FlowSelectedGlobalController = useMemo(() => {
+    if (v9FlowEditorView === null || v9FlowSelectedLayerTarget?.source !== 'global') {
+      return null
+    }
+    const layer = v9FlowEditorView.globalLayerItems.find((candidate) => (
+      candidate.source === 'global' &&
+      candidate.selectionId === v9FlowSelectedLayerTarget.layerItemId &&
+      candidate.item.kind === 'native' &&
+      candidate.item.content.nativeType === 'teacher-controller'
+    ))
+    if (!layer || layer.item.kind !== 'native') return null
+    const node = materializeNativeLayerItem(
+      structuredClone(layer.item) as NativeLayerItem,
+    )
+    return node.type === 'teacher-controller' ? node : null
+  }, [v9FlowEditorView, v9FlowSelectedLayerTarget])
+
+  const selectV9FlowAuthoringLayer = useCallback((target: FlowEditorLayerTarget) => {
+    if (lifecycleOperationInFlightRef.current || v9FlowEditorView === null) return
+    const layers = target.source === 'global'
+      ? v9FlowEditorView.globalLayerItems
+      : v9FlowEditorView.surfaceLayerItems
+    const layer = layers.find((candidate) => (
+      candidate.source === target.source && candidate.selectionId === target.layerItemId
+    ))
+    if (!layer) {
+      setStatus('所选讲义图层已变化，请重新选择')
+      return
+    }
+    if (target.source === 'global') {
+      if (
+        layer.item.kind !== 'native' ||
+        layer.item.content.nativeType !== 'teacher-controller'
+      ) {
+        setStatus('该全课内容当前仅可查看影响范围')
+        return
+      }
+      runCourseCommand(() => {
+        const store = useEditorStore.getState()
+        const globalTarget = store.captureCourseGlobalControllerTarget()
+        if (globalTarget === null || globalTarget.layerItemId !== target.layerItemId) {
+          throw new Error('全课控制器已变化，请重新选择')
+        }
+        if (!store.selectCourseGlobalController(globalTarget)) {
+          throw new Error('无法选择全课控制器，请重新选择')
+        }
+      }, '无法选择全课控制器')
+      return
+    }
+    setStatus('该共用内容当前仅可查看影响范围')
+  }, [runCourseCommand, setStatus, v9FlowEditorView])
 
   const v9FlowDocumentControl = useMemo<RightSidebarFlowDocumentControl | undefined>(() => {
     if (v9SlideVerticalSlice === null || v9FlowEditorView === null) return undefined
@@ -1507,13 +1775,70 @@ export default function App() {
     const selectedSectionId = selectedBlock?.type === 'section'
       ? selectedBlock.id
       : undefined
+    const controllerProperties = v9FlowSelectedGlobalController === null
+      ? undefined
+      : {
+          editingScope: 'scene' as const,
+          editorMode,
+          selectedNodes: [v9FlowSelectedGlobalController],
+          target: {
+            sessionId: v9SlideVerticalSlice.sessionId,
+            locationId: v9SlideVerticalSlice.selection.locationId,
+            stateId: null,
+            editingScope: 'scene' as const,
+            source: 'global' as const,
+            projectRevision: project.revision,
+            layerItemId: v9FlowSelectedGlobalController.id,
+          },
+          scopeLabel: '全课控制器',
+          scopeDescription: '本次修改将应用到整门课。',
+          overrideActive: false,
+          textContentUnavailableReason: '文字内容暂不能在此编辑；当前可调整整段样式。',
+          richTextUnavailableReason: '局部文字格式暂不能在此编辑。',
+          mediaUnavailableReason:
+            '图片和视频的专属设置暂不可用；上方通用属性仍可修改。',
+          controllerUnavailableReason:
+            '教师控制器的专属设置暂不可用；上方通用属性仍可修改。',
+          controllerScenes: v9SlideScenes(project),
+          onUpdateNode: (target: {
+            readonly sessionId: string
+            readonly locationId: string
+            readonly projectRevision?: number
+            readonly source?: 'scene' | 'surface' | 'global'
+            readonly layerItemId: string
+          }, patch: CourseGlobalControllerPatch): boolean => {
+            if (lifecycleOperationInFlightRef.current) return false
+            const store = useEditorStore.getState()
+            const globalTarget = store.captureCourseGlobalControllerTarget()
+            if (
+              target.source !== 'global' ||
+              globalTarget === null ||
+              target.sessionId !== globalTarget.sessionId ||
+              target.locationId !== globalTarget.locationId ||
+              target.projectRevision !== globalTarget.projectRevision ||
+              target.layerItemId !== globalTarget.layerItemId
+            ) {
+              setStatus('全课控制器已变化，请重新选择')
+              return false
+            }
+            try {
+              const accepted = store.updateCourseGlobalController(globalTarget, patch)
+              if (!accepted) setStatus('全课控制器已变化，请重新选择')
+              return accepted
+            } catch (error) {
+              setError(readableError(error, '无法更新全课控制器'))
+              return false
+            }
+          },
+          onClearOverride: () => false,
+        }
     return {
       elements: {
         onInsert: (request) => runCourseCommand(() => {
           useEditorStore.getState().insertCourseFlowBlock(
             request as FlowEditorBlockInput,
           )
-        }, '无法插入 Flow 内容块'),
+        }, '无法插入内容块'),
         onInsertNested: (sectionId, request) => runCourseCommand(() => {
           const section = v9FlowEditorView.blocks.find(
             (block) => block.blockId === sectionId,
@@ -1528,7 +1853,7 @@ export default function App() {
               index: section.blocks.length,
             },
           )
-        }, '无法插入 Flow 内容块'),
+        }, '无法插入内容块'),
         nestedSectionId: selectedSectionId,
         assets: Object.values(project.assets).map((asset) => ({
           id: asset.id,
@@ -1559,25 +1884,99 @@ export default function App() {
             version: embedded.version,
           }),
         ),
+        // FLOW C2: while the Flow workspace can edit text in place (not busy),
+        // the right sidebar shows a hint instead of duplicating body-text inputs.
+        inlineTextEditing: !busy,
         onPatch: (blockId, patch) => runCourseCommand(() => {
           useEditorStore.getState().updateCourseFlowBlock(blockId, patch)
-        }, '无法更新 Flow 内容块'),
+        }, '无法更新内容块'),
         onStructuralCommand: (command) => runCourseCommand(() => {
           useEditorStore.getState().applyCourseFlowStructuralCommand(command)
-        }, '无法更新 Flow 内容块结构'),
+        }, '无法更新内容块结构'),
       },
+      ...(controllerProperties ? { controllerProperties } : {}),
       layers: {
         layers: [
           ...v9FlowEditorView.globalLayerItems,
           ...v9FlowEditorView.surfaceLayerItems,
         ],
-        selectedLayerItemId: v9SlideVerticalSlice.selection.flowLayerItemId,
-        onSelectLayer: (layerItemId) => runCourseCommand(() => {
-          useEditorStore.getState().selectCourseFlowLayer(layerItemId)
-        }, '无法选择 Flow 图层'),
+        selectedLayerTarget: v9FlowSelectedLayerTarget,
+        onSelectLayer: selectV9FlowAuthoringLayer,
+        onLocateController: (target) => {
+          if (target.source !== 'global') return
+          const controller = v9FlowEditorView.globalLayerItems.find((layer) => (
+            layer.source === 'global' &&
+            layer.selectionId === target.layerItemId &&
+            layer.item.kind === 'native' &&
+            layer.item.content.nativeType === 'teacher-controller'
+          ))
+          if (!controller) {
+            setStatus('全课控制器已变化，请重新选择')
+            return
+          }
+          if (!controller.effectiveVisible) {
+            setStatus('全课控制器当前不可见，无法定位到画布')
+            return
+          }
+          selectV9FlowAuthoringLayer(target)
+          const selected = useEditorStore.getState().courseSession
+            ?.selection.globalController
+          if (
+            selected?.source === 'global' &&
+            selected.layerItemId === target.layerItemId
+          ) {
+            useEditorStore.getState().setActiveTab('properties')
+            requestControllerLocate(target.layerItemId)
+            useEditorStore.getState().setStatus('已定位全课控制器')
+          }
+        },
       },
     }
-  }, [runCourseCommand, v9FlowEditorView, v9SlideVerticalSlice])
+  }, [
+    busy,
+    editorMode,
+    requestControllerLocate,
+    runCourseCommand,
+    selectV9FlowAuthoringLayer,
+    setError,
+    setStatus,
+    v9FlowEditorView,
+    v9FlowSelectedGlobalController,
+    v9FlowSelectedLayerTarget,
+    v9SlideVerticalSlice,
+  ])
+
+  /**
+   * Spatial keeps its world layer model separate. The one course-global
+   * teacher controller is projected as a screen layer only when it is
+   * effective-visible at this Spatial location.
+   */
+  const v9SpatialGlobalControllerLayer = useMemo(() => {
+    if (v9SpatialEditorView === null) return null
+    return v9SpatialEditorView.layers.find((candidate) => (
+      candidate.source === 'global' &&
+      candidate.item.kind === 'native' &&
+      candidate.item.content.nativeType === 'teacher-controller'
+    )) ?? null
+  }, [v9SpatialEditorView])
+
+  const v9SpatialSelectedGlobalController = useMemo(() => {
+    if (
+      v9SlideVerticalSlice === null ||
+      v9SpatialGlobalControllerLayer === null
+    ) return null
+    const selected = v9SlideVerticalSlice.selection.globalController
+    if (
+      selected?.source !== 'global' ||
+      selected.layerItemId !== v9SpatialGlobalControllerLayer.selectionId
+    ) return null
+    const item = v9SpatialGlobalControllerLayer.item
+    if (item.kind !== 'native') return null
+    const node = materializeNativeLayerItem(
+      structuredClone(item) as NativeLayerItem,
+    )
+    return node.type === 'teacher-controller' ? node : null
+  }, [v9SlideVerticalSlice, v9SpatialGlobalControllerLayer])
 
   const v9SpatialCameraPanelProps = useMemo<SpatialCameraPanelProps | null>(() => {
     if (v9SlideVerticalSlice === null || v9SpatialEditorView === null) return null
@@ -1659,7 +2058,7 @@ export default function App() {
     const selectedId = v9SlideVerticalSlice.selection.spatialLayerItemIds?.[0]
     const selectedLayer = selectedId
       ? v9SpatialEditorView.layers.find(
-          (layer) => layer.selectionId === selectedId,
+          (layer) => layer.source === 'world' && layer.selectionId === selectedId,
         ) ?? null
       : null
     const item = selectedLayer?.item ?? null
@@ -1679,10 +2078,12 @@ export default function App() {
           }
         : null,
       onPatch: (patch) => runCourseCommand(() => {
-        if (!selectedId) throw new Error('请先选择一个空间图层')
+        if (!selectedLayer || selectedLayer.source !== 'world') {
+          throw new Error('请先选择一个空间图层')
+        }
         useEditorStore.getState().updateCourseSpatialLayer({
           ...patch,
-          layerItemId: selectedId,
+          layerItemId: selectedLayer.selectionId,
         })
       }, '无法更新空间图层'),
     }
@@ -1740,10 +2141,87 @@ export default function App() {
 
   const v9SpatialDocumentControl = useMemo<RightSidebarSpatialDocumentControl | undefined>(() => {
     if (
+      v9SlideVerticalSlice === null ||
+      v9SpatialEditorView === null ||
       v9SpatialCameraPanelProps === null ||
       v9SpatialLayerInspectorProps === null ||
       v9SpatialPathEditorProps === null
     ) return undefined
+    const project = v9SlideVerticalSlice.history.present
+    const selectedGlobalController = v9SlideVerticalSlice.selection.globalController
+    const selectedWorldLayerId = v9SlideVerticalSlice.selection.spatialLayerItemIds?.[0]
+    const selectedSpatialLayerTarget = selectedGlobalController?.source === 'global' &&
+      v9SpatialEditorView.layers.some((layer) => (
+        layer.source === 'global' &&
+        layer.scopedVisible &&
+        layer.selectionId === selectedGlobalController.layerItemId
+      ))
+      ? {
+          source: 'global' as const,
+          layerItemId: selectedGlobalController.layerItemId,
+        }
+      : selectedWorldLayerId && v9SpatialEditorView.layers.some((layer) => (
+          layer.source === 'world' && layer.selectionId === selectedWorldLayerId
+        ))
+        ? { source: 'world' as const, layerItemId: selectedWorldLayerId }
+        : null
+    const controllerProperties = v9SpatialSelectedGlobalController === null
+      ? undefined
+      : {
+          editingScope: 'scene' as const,
+          editorMode,
+          selectedNodes: [v9SpatialSelectedGlobalController],
+          target: {
+            sessionId: v9SlideVerticalSlice.sessionId,
+            locationId: v9SlideVerticalSlice.selection.locationId,
+            stateId: null,
+            editingScope: 'scene' as const,
+            source: 'global' as const,
+            projectRevision: project.revision,
+            layerItemId: v9SpatialSelectedGlobalController.id,
+          },
+          scopeLabel: '全课控制器',
+          scopeDescription: '本次修改将应用到整门课。',
+          overrideActive: false,
+          textContentUnavailableReason: '文字内容暂不能在此编辑；当前可调整整段样式。',
+          richTextUnavailableReason: '局部文字格式暂不能在此编辑。',
+          mediaUnavailableReason:
+            '图片和视频的专属设置暂不可用；上方通用属性仍可修改。',
+          controllerUnavailableReason:
+            '教师控制器的专属设置暂不可用；上方通用属性仍可修改。',
+          controllerScenes: v9SlideScenes(project),
+          onUpdateNode: (target: {
+            readonly sessionId: string
+            readonly locationId: string
+            readonly projectRevision?: number
+            readonly source?: 'scene' | 'surface' | 'global'
+            readonly layerItemId: string
+          }, patch: CourseGlobalControllerPatch): boolean => {
+            if (lifecycleOperationInFlightRef.current) return false
+            const store = useEditorStore.getState()
+            const globalTarget = store.captureCourseGlobalControllerTarget()
+            if (
+              target.source !== 'global' ||
+              globalTarget === null ||
+              target.sessionId !== globalTarget.sessionId ||
+              target.locationId !== globalTarget.locationId ||
+              target.projectRevision !== globalTarget.projectRevision ||
+              target.layerItemId !== globalTarget.layerItemId
+            ) {
+              setStatus('全课控制器已变化，请重新选择')
+              return false
+            }
+            try {
+              const accepted = store.updateCourseGlobalController(globalTarget, patch)
+              if (!accepted) setStatus('全课控制器已变化，请重新选择')
+              return accepted
+            } catch (error) {
+              setError(readableError(error, '无法更新全课控制器'))
+              return false
+            }
+          },
+          onClearOverride: () => false,
+        }
     return {
       elements: {
         onAddText: () => runCourseCommand(() => {
@@ -1757,16 +2235,95 @@ export default function App() {
         }, '无法添加空间公式'),
       },
       layers: v9SpatialLayerInspectorProps,
+      layerList: {
+        layers: v9SpatialEditorView.layers,
+        selectedLayerTarget: selectedSpatialLayerTarget,
+        onSelectLayer: (target) => {
+          const layer = v9SpatialEditorView.layers.find((candidate) => (
+            candidate.source === target.source &&
+            candidate.selectionId === target.layerItemId
+          ))
+          if (!layer) {
+            setStatus('所选图层已变化，请重新选择')
+            return
+          }
+          const controller = layer.source === 'global' &&
+            layer.item.kind === 'native' &&
+            layer.item.content.nativeType === 'teacher-controller'
+          if (controller) {
+            runCourseCommand(() => {
+              const store = useEditorStore.getState()
+              const globalTarget = store.captureCourseGlobalControllerTarget()
+              if (globalTarget === null || globalTarget.layerItemId !== target.layerItemId) {
+                throw new Error('全课控制器已变化，请重新选择')
+              }
+              if (!store.selectCourseGlobalController(globalTarget)) {
+                throw new Error('无法选择全课控制器，请重新选择')
+              }
+            }, '无法选择全课控制器')
+            return
+          }
+          if (target.source !== 'world') {
+            setStatus(
+              target.source === 'global'
+                ? '该全课内容当前仅可查看影响范围'
+                : '该共用内容当前仅可查看影响范围',
+            )
+            return
+          }
+          runCourseCommand(() => {
+            useEditorStore.getState().selectCourseSpatialLayers([target.layerItemId])
+          }, '无法选择空间图层')
+        },
+        onLocateController: (target) => {
+          if (target.source !== 'global') return
+          const layer = v9SpatialEditorView.layers.find((candidate) => (
+            candidate.source === 'global' &&
+            candidate.selectionId === target.layerItemId &&
+            candidate.item.kind === 'native' &&
+            candidate.item.content.nativeType === 'teacher-controller'
+          ))
+          if (!layer) {
+            setStatus('全课控制器已变化，请重新选择')
+            return
+          }
+          if (!layer.effectiveVisible) {
+            setStatus('全课控制器当前不可见，无法定位到画布')
+            return
+          }
+          runCourseCommand(() => {
+            const store = useEditorStore.getState()
+            const globalTarget = store.captureCourseGlobalControllerTarget()
+            if (globalTarget === null || globalTarget.layerItemId !== target.layerItemId) {
+              throw new Error('全课控制器已变化，请重新选择')
+            }
+            if (!store.selectCourseGlobalController(globalTarget)) {
+              throw new Error('无法选择全课控制器，请重新选择')
+            }
+            store.setActiveTab('properties')
+            requestControllerLocate(target.layerItemId)
+            store.setStatus('已定位全课控制器')
+          }, '无法定位全课控制器')
+        },
+      },
       properties: {
         camera: v9SpatialCameraPanelProps,
         paths: v9SpatialPathEditorProps,
       },
+      ...(controllerProperties ? { controllerProperties } : {}),
     }
   }, [
+    editorMode,
+    requestControllerLocate,
     runCourseCommand,
+    setError,
+    setStatus,
     v9SpatialCameraPanelProps,
     v9SpatialLayerInspectorProps,
     v9SpatialPathEditorProps,
+    v9SpatialSelectedGlobalController,
+    v9SlideVerticalSlice,
+    v9SpatialEditorView,
   ])
 
   const v9ScenePanelFlowDocumentControl = useMemo<ScenePanelFlowDocumentControl | undefined>(() => {
@@ -1777,11 +2334,11 @@ export default function App() {
       selectedBlockId: v9FlowEditorView.activeBlockId,
       onSelectBlock: (blockId) => runCourseCommand(() => {
         useEditorStore.getState().selectCourseFlowBlock(blockId)
-      }, '无法切换 Flow 内容块'),
+      }, '无法切换内容块'),
       ...v9FlowStructuralCommands,
       onAddSurface: () => runCourseCommand(() => {
         useEditorStore.getState().addCourseSurface('flow')
-      }, '无法新建 Flow 讲义'),
+      }, '无法新建讲义'),
     }
   }, [runCourseCommand, v9FlowEditorView, v9FlowStructuralCommands])
 
@@ -1791,7 +2348,7 @@ export default function App() {
       ...v9SpatialCameraPanelProps,
       onAddSurface: () => runCourseCommand(() => {
         useEditorStore.getState().addCourseSurface('spatial-2d')
-      }, '无法新建 Spatial 空间'),
+      }, '无法新建空间画布'),
     }
   }, [runCourseCommand, v9SpatialCameraPanelProps])
 
@@ -1822,24 +2379,78 @@ export default function App() {
   }, [v9SlideVerticalSlice])
 
   const v9FlowAuthoring = useMemo<WorkspaceFlowAuthoringInput | undefined>(() => {
-    if (v9FlowEditorView === null) return undefined
+    if (v9FlowEditorView === null || v9SlideVerticalSlice === null) return undefined
+    const activeControllerLocateRequest = controllerLocateRequest?.sessionId ===
+      v9SlideVerticalSlice.sessionId &&
+      controllerLocateRequest.locationId === v9FlowEditorView.locationId
+      ? controllerLocateRequest
+      : undefined
     return {
       view: v9FlowEditorView,
       selectedBlockId: v9FlowEditorView.activeBlockId,
       onSelectBlock: (blockId) => runCourseCommand(() => {
         useEditorStore.getState().selectCourseFlowBlock(blockId)
-      }, '无法切换 Flow 内容块'),
+      }, '无法切换内容块'),
       ...v9FlowStructuralCommands,
+      onPatchBlock: (blockId, patch) => runCourseCommand(() => {
+        useEditorStore.getState().updateCourseFlowBlock(blockId, patch)
+      }, '无法更新内容块'),
+      onStructuralCommand: (command) => runCourseCommand(() => {
+        useEditorStore.getState().applyCourseFlowStructuralCommand(command)
+      }, '无法更新内容块结构'),
+      // Lifecycle busy only makes in-place editing unavailable; never persisted.
+      editingUnavailableReason: busy ? '正在处理…，请稍候再编辑正文' : undefined,
       layers: [
         ...v9FlowEditorView.globalLayerItems,
         ...v9FlowEditorView.surfaceLayerItems,
       ],
-      selectedLayerItemId: v9SlideVerticalSlice?.selection.flowLayerItemId,
-      onSelectLayer: (layerItemId) => runCourseCommand(() => {
-        useEditorStore.getState().selectCourseFlowLayer(layerItemId)
-      }, '无法选择 Flow 图层'),
+      selectedLayerTarget: v9FlowSelectedLayerTarget,
+      controllerLocateRequest: activeControllerLocateRequest,
+      onSelectLayer: selectV9FlowAuthoringLayer,
+      onTransformLayer: (transform) => {
+        if (lifecycleOperationInFlightRef.current) return
+        const layer = transform.source === 'global'
+          ? v9FlowEditorView.globalLayerItems.find((candidate) => (
+            candidate.source === 'global' &&
+            candidate.selectionId === transform.layerItemId &&
+            candidate.item.kind === 'native' &&
+            candidate.item.content.nativeType === 'teacher-controller'
+          ))
+          : undefined
+        if (!layer) {
+          setStatus('全课控制器已变化，请重新选择')
+          return
+        }
+        runCourseCommand(() => {
+          const store = useEditorStore.getState()
+          const target = store.captureCourseGlobalControllerTarget()
+          if (target === null || target.layerItemId !== transform.layerItemId) {
+            throw new Error('全课控制器已变化，请重新选择')
+          }
+          const accepted = store.transformCourseGlobalController(target, {
+            x: transform.x,
+            y: transform.y,
+            width: transform.width,
+            height: transform.height,
+            rotation: transform.rotation,
+          })
+          if (!accepted) {
+            store.setStatus('全课控制器已变化，请重新选择')
+          }
+        }, '无法移动全课控制器')
+      },
     }
-  }, [runCourseCommand, v9FlowEditorView, v9FlowStructuralCommands, v9SlideVerticalSlice])
+  }, [
+    busy,
+    controllerLocateRequest,
+    runCourseCommand,
+    selectV9FlowAuthoringLayer,
+    setStatus,
+    v9FlowEditorView,
+    v9FlowSelectedLayerTarget,
+    v9FlowStructuralCommands,
+    v9SlideVerticalSlice,
+  ])
 
   const v9SpatialAuthoring = useMemo<WorkspaceSpatialAuthoringInput | undefined>(() => {
     if (v9SlideVerticalSlice === null || v9SpatialEditorView === null) return undefined
@@ -1848,6 +2459,39 @@ export default function App() {
       (candidate) => candidate.id === v9SpatialEditorView.surfaceId,
     )
     if (!surface || surface.type !== 'spatial-2d') return undefined
+    const globalControllerLayer = v9SpatialGlobalControllerLayer
+    const globalControllerItem = globalControllerLayer?.item
+    const screenController = globalControllerLayer?.effectiveVisible &&
+      globalControllerItem?.kind === 'native' &&
+      globalControllerItem.content.nativeType === 'teacher-controller'
+      ? {
+          source: 'global' as const,
+          layerItemId: globalControllerLayer.selectionId,
+          label: globalControllerItem.label,
+          title: globalControllerItem.content.data.title,
+          compact: globalControllerItem.content.data.compact,
+          locked: globalControllerItem.locked,
+          opacity: globalControllerItem.opacity,
+          frame: {
+            x: globalControllerItem.frame.x,
+            y: globalControllerItem.frame.y,
+            width: globalControllerItem.frame.width,
+            height: globalControllerItem.frame.height,
+            rotation: globalControllerItem.rotation,
+          },
+        }
+      : null
+    const selectedGlobalController = v9SlideVerticalSlice.selection.globalController
+    const selectedScreenControllerTarget = screenController !== null &&
+      selectedGlobalController?.source === 'global' &&
+      selectedGlobalController.layerItemId === screenController.layerItemId
+      ? { source: 'global' as const, layerItemId: screenController.layerItemId }
+      : null
+    const activeControllerLocateRequest = controllerLocateRequest?.sessionId ===
+      v9SlideVerticalSlice.sessionId &&
+      controllerLocateRequest.locationId === v9SlideVerticalSlice.selection.locationId
+      ? controllerLocateRequest
+      : undefined
     return {
       spatial: surface,
       viewportSize: { width: 1280, height: 720 },
@@ -1863,8 +2507,68 @@ export default function App() {
           nodes: transforms,
         })
       }, '无法变换空间图层'),
+      screenController,
+      selectedScreenControllerTarget,
+      controllerLocateRequest: activeControllerLocateRequest,
+      onSelectScreenController: (target) => {
+        if (lifecycleOperationInFlightRef.current) return
+        if (
+          screenController === null ||
+          target.source !== 'global' ||
+          target.layerItemId !== screenController.layerItemId
+        ) {
+          setStatus('全课控制器已变化，请重新选择')
+          return
+        }
+        runCourseCommand(() => {
+          const store = useEditorStore.getState()
+          const globalTarget = store.captureCourseGlobalControllerTarget()
+          if (globalTarget === null || globalTarget.layerItemId !== target.layerItemId) {
+            throw new Error('全课控制器已变化，请重新选择')
+          }
+          if (!store.selectCourseGlobalController(globalTarget)) {
+            throw new Error('无法选择全课控制器，请重新选择')
+          }
+        }, '无法选择全课控制器')
+      },
+      onScreenControllerTransformEnd: (transform) => {
+        if (lifecycleOperationInFlightRef.current) return
+        if (
+          screenController === null ||
+          transform.source !== 'global' ||
+          transform.layerItemId !== screenController.layerItemId
+        ) {
+          setStatus('全课控制器已变化，请重新选择')
+          return
+        }
+        runCourseCommand(() => {
+          const store = useEditorStore.getState()
+          const globalTarget = store.captureCourseGlobalControllerTarget()
+          if (globalTarget === null || globalTarget.layerItemId !== transform.layerItemId) {
+            throw new Error('全课控制器已变化，请重新选择')
+          }
+          const accepted = store.transformCourseGlobalController(globalTarget, {
+            x: transform.x,
+            y: transform.y,
+            width: transform.width,
+            height: transform.height,
+            rotation: transform.rotation,
+          })
+          if (!accepted) {
+            store.setStatus('全课控制器已变化，请重新选择')
+          }
+        }, '无法移动全课控制器')
+      },
     }
-  }, [busy, runCourseCommand, v9SlideVerticalSlice, v9SpatialEditorView])
+  }, [
+    busy,
+    controllerLocateRequest,
+    runCourseCommand,
+    setStatus,
+    v9SlideVerticalSlice,
+    v9SpatialEditorView,
+    v9SpatialGlobalControllerLayer,
+  ])
 
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
@@ -2302,7 +3006,7 @@ export default function App() {
   const handleReplaceComponent = useCallback((packageId: string) => {
     void run(async () => {
       if (useEditorStore.getState().courseSession !== null) {
-        setStatus('组件替换将在组件宿主（M4-COMP）集成后提供；当前 V9 工程请勿替换组件包。')
+        setStatus('组件替换将在后续版本提供；当前工程请勿替换组件包。')
         return
       }
       const file = await desktopApi().selectComponentPackage()
@@ -2444,7 +3148,7 @@ export default function App() {
     entry: AvailableComponentCatalogPackage,
   ) => {
     if (useEditorStore.getState().courseSession !== null) {
-      setStatus('组件更新将在组件宿主（M4-COMP）集成后提供；当前 V9 工程不会迁移实例版本。')
+      setStatus('组件更新将在后续版本提供；当前工程不会迁移组件实例版本。')
       return
     }
     setCatalogPackageRequest({ entries: [entry], mode: 'update' })
@@ -2623,7 +3327,7 @@ export default function App() {
       const state = useEditorStore.getState()
       const courseSession = state.courseSession
       if (courseSession === null) {
-        throw new Error('DOCX 讲义仅适用于 Flow 讲义位置')
+        throw new Error('DOCX 讲义仅适用于讲义位置')
       }
       const project = courseSession.history.present
       const location = project.locations.find(
@@ -2640,7 +3344,7 @@ export default function App() {
         !surface ||
         surface.type !== 'flow'
       ) {
-        throw new Error('请先切换到 Flow 讲义位置')
+        throw new Error('请先切换到讲义位置')
       }
       const effectiveLayerItems = getEffectiveCourseLayerOrder({
         project,
@@ -2672,7 +3376,7 @@ export default function App() {
           : ''
         state.setStatus(`DOCX 讲义已导出到 ${result.path}${noteSummary}`)
       }
-    }, 'DOCX 导出失败。请切换到 Flow 讲义位置后重试。')
+    }, 'DOCX 导出失败。请切换到讲义位置后重试。')
   }, [run])
 
   const handleExport = useCallback((format: ExportFormat) => {
@@ -2687,7 +3391,7 @@ export default function App() {
       return
     }
     if (format === 'docx') {
-      state.setError('DOCX 讲义仅适用于 Flow 讲义位置')
+      state.setError('DOCX 讲义仅适用于讲义位置')
       return
     }
     setExportPreflightReport(collectExportPreflight(
@@ -2928,12 +3632,28 @@ export default function App() {
             return
           }
           const snapshot = buildV9SlideWorkspaceSnapshot(state.courseSession)
-          state.selectCourseLayers({
-            nodeIds: snapshot.document.nodes
-              .filter((node) => node.visible)
-              .map((node) => node.id),
-            additive: false,
+          const visibleNodeIds = snapshot.document.nodes
+            .filter((node) => node.visible)
+            .map((node) => node.id)
+          const globalControllerIds = visibleNodeIds.filter((nodeId) => {
+            const target = snapshot.authoringTargets.get(nodeId)
+            const node = snapshot.document.nodes.find((candidate) => candidate.id === nodeId)
+            return target?.source === 'global' && node?.type === 'teacher-controller'
           })
+          if (globalControllerIds.length > 0 && globalControllerIds.length !== visibleNodeIds.length) {
+            state.setStatus('全课控制器不能与当前场景元素同时选择；请先取消其中一个选择')
+            return
+          }
+          if (globalControllerIds.length === 1) {
+            const target = state.captureCourseGlobalControllerTarget()
+            if (target === null || target.layerItemId !== globalControllerIds[0]) {
+              state.setStatus('全课控制器已变化，请重新选择')
+              return
+            }
+            state.selectCourseGlobalController(target)
+            return
+          }
+          state.selectCourseLayers({ nodeIds: visibleNodeIds, additive: false })
           return
         }
         state.selectNodes(selectEditingNodes(state).map((node) => node.id))
@@ -3073,12 +3793,18 @@ export default function App() {
           unavailableExports: v9BackendActive
             ? activeCourseEditorRoute === 'flow'
               ? undefined
-              : { docx: '请先切换到 Flow 讲义位置' }
+              : { docx: '请先切换到讲义位置' }
             : undefined,
           onRename: renameActiveDocument,
           onUndo: undoActiveDocument,
           onRedo: redoActiveDocument,
           onSetEditorMode: (mode) => useEditorStore.getState().setEditorMode(mode),
+        }}
+        shellLayoutControl={{
+          leftExpanded: leftSidebarExpanded,
+          rightExpanded: rightSidebarExpanded,
+          onToggleLeft: () => setLeftSidebarExpanded((expanded) => !expanded),
+          onToggleRight: () => setRightSidebarExpanded((expanded) => !expanded),
         }}
         onNew={handleNew}
         onOpen={handleOpen}
@@ -3093,6 +3819,10 @@ export default function App() {
       />
       <div
         className={`app-main${
+          !leftSidebarExpanded ? ' app-main--left-collapsed' : ''
+        }${
+          !rightSidebarExpanded ? ' app-main--right-collapsed' : ''
+        }${
           editorMode === 'professional' && activeTab === 'developer'
             ? ' app-main--developer'
             : ''
@@ -3100,25 +3830,40 @@ export default function App() {
         aria-busy={busy}
         inert={busy ? true : undefined}
       >
-        <ScenePanel
-          documentControl={
-            v9ScenePanelFlowDocumentControl || v9ScenePanelSpatialDocumentControl
-              ? undefined
-              : v9ScenePanelDocumentControl
-          }
-          flowDocumentControl={v9ScenePanelFlowDocumentControl}
-          spatialDocumentControl={v9ScenePanelSpatialDocumentControl}
-          courseLocations={v9ScenePanelCourseLocations}
-          onActivateLocation={(locationId) => runCourseCommand(() => {
-            useEditorStore.getState().selectCourseLocation(locationId)
-          }, '无法切换课程内容')}
-          onAddFlowSurface={() => runCourseCommand(() => {
-            useEditorStore.getState().addCourseSurface('flow')
-          }, '无法新建 Flow 讲义')}
-          onAddSpatialSurface={() => runCourseCommand(() => {
-            useEditorStore.getState().addCourseSurface('spatial-2d')
-          }, '无法新建 Spatial 空间')}
-        />
+        <div
+          className="scene-panel-shell"
+          hidden={!leftSidebarExpanded}
+          inert={leftSidebarExpanded ? undefined : true}
+        >
+          <ScenePanel
+            shellPolicy={v9ShellPolicy ?? undefined}
+            documentControl={
+              v9ScenePanelFlowDocumentControl || v9ScenePanelSpatialDocumentControl
+                ? undefined
+                : v9ScenePanelDocumentControl
+            }
+            flowDocumentControl={v9ScenePanelFlowDocumentControl}
+            spatialDocumentControl={v9ScenePanelSpatialDocumentControl}
+            courseLocations={v9ScenePanelCourseLocations}
+            onActivateLocation={(locationId) => runCourseCommand(() => {
+              useEditorStore.getState().selectCourseLocation(locationId)
+            }, '无法切换课程内容')}
+            onAddFlowSurface={v9ShellPolicy === null ||
+              v9ShellPolicy.layout === 'mixed' ||
+              v9ShellPolicy.layout === 'flow'
+              ? () => runCourseCommand(() => {
+                  useEditorStore.getState().addCourseSurface('flow')
+                }, '无法新建讲义')
+              : undefined}
+            onAddSpatialSurface={v9ShellPolicy === null ||
+              v9ShellPolicy.layout === 'mixed' ||
+              v9ShellPolicy.layout === 'spatial'
+              ? () => runCourseCommand(() => {
+                  useEditorStore.getState().addCourseSurface('spatial-2d')
+                }, '无法新建空间画布')
+              : undefined}
+          />
+        </div>
         <div className="editor-center">
           <Workspace
             slideAuthoring={v9SlideAuthoring}
@@ -3141,29 +3886,35 @@ export default function App() {
           />
           <SceneStateStrip documentControl={v9SceneStateStripDocumentControl} />
         </div>
-        <RightSidebar
-          documentControl={
-            v9FlowDocumentControl || v9SpatialDocumentControl
-              ? undefined
-              : v9RightSidebarDocumentControl
-          }
-          flowDocumentControl={v9FlowDocumentControl}
-          spatialDocumentControl={v9SpatialDocumentControl}
-          onAddImage={(x, y) =>
-            void selectAndImportImage('add', { x, y })
-          }
-          onReplaceImage={() => void selectAndImportImage('replace')}
-          onAddVideo={(x, y) => void selectAndImportVideo('add', { x, y })}
-          onImportImage={() => void selectAndImportImage('library')}
-          onImportAudio={() => void selectAndImportAudio()}
-          onImportVideo={() => void selectAndImportVideo('library')}
-          onImportExternalComponents={handleImportComponent}
-          onReplaceComponent={handleReplaceComponent}
-          componentCatalog={componentCatalog}
-          onRefreshComponentCatalog={handleRefreshComponentCatalog}
-          onAddCatalogComponents={requestCatalogPackageBatch}
-          onUpdateCatalogComponent={requestCatalogPackageUpdate}
-        />
+        <div
+          className="right-sidebar-shell"
+          hidden={!rightSidebarExpanded}
+          inert={rightSidebarExpanded ? undefined : true}
+        >
+          <RightSidebar
+            documentControl={
+              v9FlowDocumentControl || v9SpatialDocumentControl
+                ? undefined
+                : v9RightSidebarDocumentControl
+            }
+            flowDocumentControl={v9FlowDocumentControl}
+            spatialDocumentControl={v9SpatialDocumentControl}
+            onAddImage={(x, y) =>
+              void selectAndImportImage('add', { x, y })
+            }
+            onReplaceImage={() => void selectAndImportImage('replace')}
+            onAddVideo={(x, y) => void selectAndImportVideo('add', { x, y })}
+            onImportImage={() => void selectAndImportImage('library')}
+            onImportAudio={() => void selectAndImportAudio()}
+            onImportVideo={() => void selectAndImportVideo('library')}
+            onImportExternalComponents={handleImportComponent}
+            onReplaceComponent={handleReplaceComponent}
+            componentCatalog={componentCatalog}
+            onRefreshComponentCatalog={handleRefreshComponentCatalog}
+            onAddCatalogComponents={requestCatalogPackageBatch}
+            onUpdateCatalogComponent={requestCatalogPackageUpdate}
+          />
+        </div>
       </div>
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />

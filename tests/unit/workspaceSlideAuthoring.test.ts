@@ -5,7 +5,9 @@ import {
   resolveWorkspaceSlideAuthoringInput,
   workspaceAuthoringActionAllowed,
   workspaceCanvasLabel,
+  workspaceSelectionHasMixedGlobalTeacherController,
   workspaceTransformAllowed,
+  workspaceTransformHasMixedGlobalTeacherController,
   workspaceSelectionAllowed,
   workspaceTextEditTargetNode,
   workspaceSlidePreviewAssetFiles,
@@ -247,6 +249,59 @@ describe('Workspace Slide authoring input boundary', () => {
     })).toBe(true)
     expect(workspaceTransformAllowed(locked, {
       nodes: [transform('v9-text', 40, 50)],
+    })).toBe(false)
+  })
+
+  it('keeps a global controller separate from scene selection and transform groups', () => {
+    const sceneText = createTextNode({
+      id: 'scene-text-proxy',
+      text: '场景文字',
+      x: 20,
+      y: 30,
+    })
+    const controller = createTeacherControllerNode({
+      id: 'controller-proxy',
+      x: 320,
+      y: 20,
+    })
+    const base = input('mixed-provenance', [sceneText, controller])
+    const injected: WorkspaceSlideAuthoringInput = {
+      ...base.value,
+      selectedNodeIds: [],
+      authoringTargets: new Map([
+        ['scene-text-proxy', { source: 'scene', layerItemId: 'scene-text-stable' }],
+        // The proxy id intentionally differs from its persistent layer id: the
+        // explicit source map, rather than an id convention, owns this route.
+        ['controller-proxy', { source: 'global', layerItemId: 'global-controller-stable' }],
+      ]),
+    }
+    const globalOnlySelection = { nodeIds: ['controller-proxy'], additive: false }
+    const mixedSelection = {
+      nodeIds: ['scene-text-proxy', 'controller-proxy'],
+      additive: false,
+    }
+    const globalOnlyTransform = { nodes: [transform('controller-proxy', 340, 42)] }
+    const mixedTransform = {
+      nodes: [
+        transform('scene-text-proxy', 40, 52),
+        transform('controller-proxy', 340, 42),
+      ],
+    }
+
+    expect(workspaceSelectionAllowed(injected, globalOnlySelection)).toBe(true)
+    expect(workspaceTransformAllowed(injected, globalOnlyTransform)).toBe(true)
+    expect(workspaceSelectionHasMixedGlobalTeacherController(injected, mixedSelection)).toBe(true)
+    expect(workspaceTransformHasMixedGlobalTeacherController(injected, mixedTransform)).toBe(true)
+    expect(workspaceSelectionAllowed(injected, mixedSelection)).toBe(false)
+    expect(workspaceTransformAllowed(injected, mixedTransform)).toBe(false)
+
+    const sceneAlreadySelected: WorkspaceSlideAuthoringInput = {
+      ...injected,
+      selectedNodeIds: ['scene-text-proxy'],
+    }
+    expect(workspaceSelectionAllowed(sceneAlreadySelected, {
+      nodeIds: ['controller-proxy'],
+      additive: true,
     })).toBe(false)
   })
 

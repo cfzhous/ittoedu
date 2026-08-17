@@ -1,16 +1,16 @@
 {
-  "capturedAt": "2026-08-16T04:32:24.267Z",
-  "sourceCommit": "5799007345cb41917a82c2ccecc03a276b8c7aed",
-  "executionParent": "5799007345cb41917a82c2ccecc03a276b8c7aed",
-  "recaptureReason": "Retire frozen P1 shell-height defect geometry (appShell pinned at 720px exposing window background below taller viewports). The same original shell now fills the viewport; replacement assertions live in tests/e2e/v9SlideVerticalSlice.spec.ts (expectAppShellFillsViewport).",
+  "capturedAt": "2026-08-16T16:01:13.301374Z",
+  "sourceCommit": "85dd3cd60a5f04beccf235c1ebab21d4badae286",
+  "executionParent": "85dd3cd60a5f04beccf235c1ebab21d4badae286",
+  "recaptureReason": "P3 lightweight shell convergence (intentional left/right sidebar navigation, terminology and collapse-button changes; canvas stage masked and unchanged). SHELL visual regression fixed (panel heights restored to full grid row). 1280/1366/1920 recaptured from stable current build; note 1366/1920 initial recapture rounds produced transient outlier screenshots and were re-recaptured from the deterministic running state.",
   "captures": [
     {
       "viewport": {
         "width": 1280,
         "height": 720
       },
-      "bytes": 94439,
-      "sha256": "66d8bf49b76103cf3afcba4381633ec42c34356479bed4b8b5ea191803f73702",
+      "bytes": 94743,
+      "sha256": "0eca72fdaaca67665558352e06e320dbc8096038b3484be76ace915dc0200f64",
       "resizeTrace": [
         {
           "width": 1427,
@@ -141,8 +141,8 @@
         "width": 1366,
         "height": 768
       },
-      "bytes": 102576,
-      "sha256": "ba8cb7c7a2dddc8f99c7066db09c4f9a39d460a29ed977c70d786fe63bd0f1b4",
+      "bytes": 100689,
+      "sha256": "f611834b0c76c099e26f99039c3afb663351cbf0774f4d9c86c0e802553e65e2",
       "resizeTrace": [
         {
           "width": 1280,
@@ -269,8 +269,8 @@
         "width": 1920,
         "height": 1080
       },
-      "bytes": 129828,
-      "sha256": "c9b911add199fe76956e3fc3af0ab642fc70efed5004d491623695b552c10054",
+      "bytes": 127844,
+      "sha256": "b860585f070c9809ca17a596dc6a6a4b2158f929cb439b84eac0506fe5f64e32",
       "resizeTrace": [
         {
           "width": 1366,

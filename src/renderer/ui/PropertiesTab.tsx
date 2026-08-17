@@ -1335,7 +1335,7 @@ const TEACHER_CONTROLLER_ACTION_OPTIONS: Array<{
 
 function defaultTeacherControllerAction(
   type: TeacherControllerAction['type'],
-  scenes: readonly SceneDocument[],
+  scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>,
 ): TeacherControllerAction {
   return type === 'scene.go'
     ? { type, sceneId: scenes[0]?.id ?? '' }
@@ -1344,7 +1344,7 @@ function defaultTeacherControllerAction(
 
 function TeacherControllerProperties({ node, scenes, update }: {
   node: TeacherControllerNode
-  scenes: readonly SceneDocument[]
+  scenes: ReadonlyArray<Pick<SceneDocument, 'id' | 'name' | 'presentation'>>
   update(patch: DeepPartial<SceneNode>): void
 }) {
   const replaceButton = (
@@ -1933,6 +1933,11 @@ export interface PropertiesTabDocumentControl {
   readonly richTextUnavailableReason: string
   readonly mediaUnavailableReason: string
   readonly controllerUnavailableReason: string
+  /** Scene choices used only by the controller's `scene.go` action editor. */
+  readonly controllerScenes?: ReadonlyArray<Pick<
+    SceneDocument,
+    'id' | 'name' | 'presentation'
+  >>
   /** Present only when the owner can edit the scene background from this tab. */
   readonly background?: PropertiesTabBackgroundControl
   /** Optional V9-backed click-rule editor shown below the common properties. */
@@ -1965,6 +1970,10 @@ export interface PropertiesTabDocumentTarget {
   readonly sessionId: string
   readonly locationId: string
   readonly stateId: string | null
+  /** Owning layer source; a global controller may be rendered in a scene scope. */
+  readonly source?: 'scene' | 'surface' | 'global'
+  /** Optional optimistic-concurrency snapshot supplied by a V9 owner. */
+  readonly projectRevision?: number
   readonly editingScope: 'scene' | 'surface' | 'global'
   readonly layerItemId: string
 }
@@ -2111,6 +2120,7 @@ function ControlledPropertiesTab({
     richTextUnavailableReason,
     mediaUnavailableReason,
     controllerUnavailableReason,
+    controllerScenes = [],
     interaction,
     onUpdateNode,
     onClearOverride,
@@ -2142,9 +2152,11 @@ function ControlledPropertiesTab({
     )
   }
   const node = selectedNodes[0]!
+  const isGlobalController = node.type === 'teacher-controller' &&
+    target?.source === 'global'
   if (
     !target ||
-    target.editingScope !== editingScope ||
+    (target.source !== 'global' && target.editingScope !== editingScope) ||
     target.layerItemId !== node.id
   ) {
     return (
@@ -2170,6 +2182,8 @@ function ControlledPropertiesTab({
     target.sessionId,
     target.locationId,
     target.stateId,
+    target.source,
+    target.projectRevision,
     target.editingScope,
     target.layerItemId,
     rejectedUpdateKey,
@@ -2183,7 +2197,15 @@ function ControlledPropertiesTab({
       />
     )
     : node.type === 'teacher-controller'
-      ? (
+      ? isGlobalController
+        ? (
+          <TeacherControllerProperties
+            node={node}
+            scenes={controllerScenes}
+            update={update}
+          />
+        )
+        : (
         <ControlledPropertiesGate
           title="教师控制器属性"
           reason={controllerUnavailableReason}
@@ -2207,13 +2229,13 @@ function ControlledPropertiesTab({
         <div>
           <strong>{scopeLabel ?? '场景元素'}</strong>
           <span>{scopeDescription ?? '可修改所选元素的布局与外观。'}</span>
-          {editingScope === 'scene' && target.stateId !== null && (
+          {editingScope === 'scene' && !isGlobalController && target.stateId !== null && (
             <span>{overrideActive
               ? '此元素已有当前状态设置。'
               : '此元素当前沿用基础设置。'}</span>
           )}
         </div>
-        {editingScope === 'scene' && target.stateId !== null && overrideActive && (
+        {editingScope === 'scene' && !isGlobalController && target.stateId !== null && overrideActive && (
           <button
             type="button"
             className="state-editing-notice__clear"
@@ -2253,7 +2275,7 @@ function ControlledPropertiesTab({
         )}
         {unsupported}
       </div>
-      {interaction && editingScope === 'scene' && (
+      {interaction && editingScope === 'scene' && !isGlobalController && (
         <InteractionEditor
           scene={interaction.scene}
           selectedNode={node}

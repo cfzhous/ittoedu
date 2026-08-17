@@ -429,7 +429,13 @@ describe('V9 Slide layer regressions', () => {
 
     let state = open(project)
     const initialSnapshot = buildV9SlideWorkspaceSnapshot(state)
-    expect(initialSnapshot.document.nodes.map((node) => node.type)).toEqual(['image', 'video'])
+    expect(
+      initialSnapshot.document.nodes
+        .map((node) => node.type)
+        .filter((type) => type !== 'teacher-controller'),
+    ).toEqual(['image', 'video'])
+    // The effective global teacher-controller is exposed as a scene-canvas proxy.
+    expect(initialSnapshot.document.nodes.some((node) => node.type === 'teacher-controller')).toBe(true)
 
     state = selectV9SlideVerticalSlice(state, {
       nodeIds: ['native-image', 'native-video'],
@@ -509,8 +515,15 @@ describe('V9 Slide layer regressions', () => {
     const state = open(project)
     const snapshot = buildV9SlideWorkspaceSnapshot(state)
 
-    expect(snapshot.document.nodes.map((node) => node.id)).toEqual(['visible-text'])
-    expect(snapshot.document.nodes.some((node) => node.type === 'teacher-controller')).toBe(false)
+    expect(snapshot.document.nodes.some((node) => node.id === 'visible-text')).toBe(true)
+    // A scene-authored controller stays out of the document canvas; only the
+    // effective global controller appears there as a proxy.
+    expect(snapshot.document.nodes.some((node) => node.id === 'scene-teacher-controller')).toBe(false)
+    expect(
+      snapshot.document.nodes.filter(
+        (node) => node.type === 'teacher-controller' && node.id !== 'scene-teacher-controller',
+      ),
+    ).toHaveLength(1)
     expect(snapshot.previewDocument.nodes.find(
       (node) => node.id === 'scene-teacher-controller',
     )).toMatchObject({ type: 'teacher-controller', name: '场景教师控制器' })

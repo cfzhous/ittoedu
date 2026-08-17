@@ -28,10 +28,33 @@ import {
   zoomCameraAt,
   type SpatialWorkspaceFrame,
 } from './spatialWorkspaceAuthoring'
+import type { WorkspaceControllerLocateRequest } from './workspaceSlideAuthoring'
 
 export interface SpatialWorkspaceItemTransform extends SpatialWorkspaceFrame {
   readonly layerItemId: string
 }
+
+/**
+ * The course-global teacher controller is authored in Spatial as a screen
+ * layer. It intentionally has a separate, source-explicit contract from
+ * `SpatialWorkspaceItemTransform`, which is reserved for world items.
+ */
+export interface SpatialWorkspaceScreenControllerTarget {
+  readonly source: 'global'
+  readonly layerItemId: string
+}
+
+export interface SpatialWorkspaceScreenController extends SpatialWorkspaceScreenControllerTarget {
+  readonly label: string
+  readonly title: string
+  readonly compact: boolean
+  readonly locked: boolean
+  readonly opacity: number
+  readonly frame: SpatialWorkspaceFrame
+}
+
+export interface SpatialWorkspaceScreenControllerTransform
+  extends SpatialWorkspaceScreenControllerTarget, SpatialWorkspaceFrame {}
 
 export interface SpatialWorkspaceProps {
   readonly spatial: SpatialSurfaceDocument
@@ -42,6 +65,17 @@ export interface SpatialWorkspaceProps {
   readonly onCameraChange?: (pose: SpatialCameraPose) => void
   readonly onSelect: (ids: readonly string[]) => void
   readonly onTransformEnd: (transforms: readonly SpatialWorkspaceItemTransform[]) => void
+  /** Effective-visible global teacher controller, rendered outside the world. */
+  readonly screenController?: SpatialWorkspaceScreenController | null
+  readonly selectedScreenControllerTarget?: SpatialWorkspaceScreenControllerTarget | null
+  /** One-shot UI focus request for the existing fixed screen controller. */
+  readonly controllerLocateRequest?: WorkspaceControllerLocateRequest | null
+  readonly onSelectScreenController?: (
+    target: SpatialWorkspaceScreenControllerTarget,
+  ) => void
+  readonly onScreenControllerTransformEnd?: (
+    transform: SpatialWorkspaceScreenControllerTransform,
+  ) => void
 }
 
 type SpatialGestureKind = 'pan' | 'move' | 'resize' | 'rotate'
@@ -55,6 +89,8 @@ const HANDLE_SIZE = 9
 
 interface SpatialGesture {
   readonly kind: SpatialGestureKind
+  /** World transforms use the camera; screen controller transforms do not. */
+  readonly coordinateSpace: 'world' | 'screen'
   readonly pointerId: number
   readonly startClientX: number
   readonly startClientY: number
@@ -62,6 +98,7 @@ interface SpatialGesture {
   readonly startCamera: SpatialCamera
   readonly itemIds: readonly string[]
   readonly startDrafts: Readonly<Record<string, SpatialWorkspaceFrame>>
+  readonly screenController?: SpatialWorkspaceScreenController
   readonly resizeHandle?: ResizeHandle
   moved: boolean
 }
@@ -153,6 +190,33 @@ function rotateFrame(
   const currentAngle = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x)
   const rotation = start.rotation + (currentAngle - startAngle) * 180 / Math.PI
   return { ...start, rotation: Math.min(36_000, Math.max(-36_000, rotation)) }
+}
+
+function rotateScreenFrame(
+  start: SpatialWorkspaceFrame,
+  startPoint: { x: number; y: number },
+  currentPoint: { x: number; y: number },
+): SpatialWorkspaceFrame {
+  const center = {
+    x: start.x + start.width / 2,
+    y: start.y + start.height / 2,
+  }
+  const startAngle = Math.atan2(startPoint.y - center.y, startPoint.x - center.x)
+  const currentAngle = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x)
+  const rotation = start.rotation + (currentAngle - startAngle) * 180 / Math.PI
+  return { ...start, rotation: Math.min(36_000, Math.max(-36_000, rotation)) }
+}
+
+function screenControllerFrameChanged(
+  controller: SpatialWorkspaceScreenController,
+  frame: SpatialWorkspaceFrame,
+): boolean {
+  const start = controller.frame
+  return start.x !== frame.x ||
+    start.y !== frame.y ||
+    start.width !== frame.width ||
+    start.height !== frame.height ||
+    start.rotation !== frame.rotation
 }
 
 function nativeKindLabel(item: Extract<LayerItem, { kind: 'native' }>): string {
@@ -294,8 +358,15 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     onCameraChange,
     onSelect,
     onTransformEnd,
+    screenController,
+    selectedScreenControllerTarget,
+    controllerLocateRequest,
+    onSelectScreenController,
+    onScreenControllerTransformEnd,
   } = props
   const rootRef = useRef<HTMLDivElement>(null)
+  const screenControllerRef = useRef<HTMLDivElement>(null)
+  const lastControllerLocateRequestRef = useRef<number | null>(null)
   const [camera, setCamera] = useState<SpatialCamera>(() => {
     const activeFrame = activeCameraFrameId
       ? spatial.camera.frames.find((frame) => frame.id === activeCameraFrameId)
@@ -344,6 +415,26 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
   }, [])
 
   const selectedIds = selectedLayerItemIds ?? []
+  const screenControllerSelected = screenController !== undefined &&
+    screenController !== null &&
+    selectedScreenControllerTarget?.source === 'global' &&
+    selectedScreenControllerTarget.layerItemId === screenController.layerItemId
+
+  // Spatial's global controller lives in a fixed screen layer outside the
+  // camera-transformed world. Focusing that existing element is therefore the
+  // correct locate behavior; the camera must not be rewritten for it.
+  useEffect(() => {
+    if (
+      !controllerLocateRequest ||
+      !screenController ||
+      controllerLocateRequest.layerItemId !== screenController.layerItemId ||
+      lastControllerLocateRequestRef.current === controllerLocateRequest.requestId
+    ) return
+    const controller = screenControllerRef.current
+    if (!controller) return
+    lastControllerLocateRequestRef.current = controllerLocateRequest.requestId
+    controller.focus({ preventScroll: true })
+  }, [controllerLocateRequest, screenController])
   const itemById = useMemo(
     () => new Map(spatial.world.layerItems.map((item) => [item.layerItemId, item])),
     [spatial.world.layerItems],
@@ -469,6 +560,21 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
       commitDrafts({})
       return
     }
+    if (gesture.coordinateSpace === 'screen') {
+      const controller = gesture.screenController
+      const frame = controller
+        ? draftsRef.current[controller.layerItemId]
+        : undefined
+      commitDrafts({})
+      if (controller && frame && screenControllerFrameChanged(controller, frame)) {
+        onScreenControllerTransformEnd?.({
+          source: 'global',
+          layerItemId: controller.layerItemId,
+          ...frame,
+        })
+      }
+      return
+    }
     const transforms: SpatialWorkspaceItemTransform[] = []
     for (const layerItemId of gesture.itemIds) {
       const frame = draftsRef.current[layerItemId]
@@ -479,7 +585,13 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     }
     commitDrafts({})
     if (transforms.length > 0) onTransformEnd(transforms)
-  }, [commitCamera, commitDrafts, itemById, onTransformEnd])
+  }, [
+    commitCamera,
+    commitDrafts,
+    itemById,
+    onScreenControllerTransformEnd,
+    onTransformEnd,
+  ])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent): void => {
     const gesture = gestureRef.current
@@ -494,7 +606,9 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
       return
     }
     if (gesture.kind === 'move') {
-      const zoom = gesture.startCamera.zoom
+      const zoom = gesture.coordinateSpace === 'world'
+        ? gesture.startCamera.zoom
+        : 1
       const next: Record<string, SpatialWorkspaceFrame> = {}
       for (const layerItemId of gesture.itemIds) {
         const start = gesture.startDrafts[layerItemId]
@@ -514,9 +628,17 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
       const start = gesture.startDrafts[layerItemId]
       if (!start) continue
       if (gesture.kind === 'resize') {
-        next[layerItemId] = resizeFrame(start, gesture.resizeHandle!, screenPointToWorld(gesture.startCamera, point))
+        next[layerItemId] = resizeFrame(
+          start,
+          gesture.resizeHandle!,
+          gesture.coordinateSpace === 'world'
+            ? screenPointToWorld(gesture.startCamera, point)
+            : point,
+        )
       } else {
-        next[layerItemId] = rotateFrame(start, gesture.startCamera, gesture.startPoint, point)
+        next[layerItemId] = gesture.coordinateSpace === 'world'
+          ? rotateFrame(start, gesture.startCamera, gesture.startPoint, point)
+          : rotateScreenFrame(start, gesture.startPoint, point)
       }
     }
     commitDrafts(next)
@@ -536,6 +658,7 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     if (Object.keys(startDrafts).length === 0) return
     gestureRef.current = {
       kind: 'move',
+      coordinateSpace: 'world',
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -548,6 +671,33 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     commitDrafts(startDrafts)
     rootRef.current?.setPointerCapture?.(event.pointerId)
   }, [camera, clientToViewportPoint, commitDrafts, itemById])
+
+  const beginScreenControllerGesture = useCallback((
+    event: ReactPointerEvent,
+    controller: SpatialWorkspaceScreenController,
+    kind: Exclude<SpatialGestureKind, 'pan'>,
+    resizeHandle?: ResizeHandle,
+  ): void => {
+    if (controller.locked || interactionDisabled) return
+    const start = draftsRef.current[controller.layerItemId] ?? controller.frame
+    const startDrafts = { [controller.layerItemId]: start }
+    gestureRef.current = {
+      kind,
+      coordinateSpace: 'screen',
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPoint: clientToViewportPoint(event.clientX, event.clientY),
+      startCamera: camera,
+      itemIds: [controller.layerItemId],
+      startDrafts,
+      screenController: controller,
+      ...(resizeHandle ? { resizeHandle } : {}),
+      moved: false,
+    }
+    commitDrafts(startDrafts)
+    rootRef.current?.setPointerCapture?.(event.pointerId)
+  }, [camera, clientToViewportPoint, commitDrafts, interactionDisabled])
 
   const handleItemPointerDown = useCallback((
     event: ReactPointerEvent<SVGGElement>,
@@ -572,6 +722,27 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     beginItemGesture(event, nextSelection)
   }, [beginItemGesture, interactionDisabled, onSelect, selectedIds])
 
+  const handleScreenControllerPointerDown = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+    controller: SpatialWorkspaceScreenController,
+  ): void => {
+    if (event.button !== 0 || interactionDisabled) return
+    event.preventDefault()
+    event.stopPropagation()
+    onSelectScreenController?.({
+      source: 'global',
+      layerItemId: controller.layerItemId,
+    })
+    if (onScreenControllerTransformEnd) {
+      beginScreenControllerGesture(event, controller, 'move')
+    }
+  }, [
+    beginScreenControllerGesture,
+    interactionDisabled,
+    onScreenControllerTransformEnd,
+    onSelectScreenController,
+  ])
+
   const handleResizePointerDown = useCallback((
     event: ReactPointerEvent<HTMLButtonElement>,
     item: LayerItem,
@@ -584,6 +755,7 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     const startDrafts = { [item.layerItemId]: start }
     gestureRef.current = {
       kind: 'resize',
+      coordinateSpace: 'world',
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -609,6 +781,7 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     const startDrafts = { [item.layerItemId]: start }
     gestureRef.current = {
       kind: 'rotate',
+      coordinateSpace: 'world',
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -622,14 +795,37 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
     rootRef.current?.setPointerCapture?.(event.pointerId)
   }, [camera, clientToViewportPoint, commitDrafts, interactionDisabled])
 
+  const handleScreenControllerResizePointerDown = useCallback((
+    event: ReactPointerEvent<HTMLButtonElement>,
+    controller: SpatialWorkspaceScreenController,
+    handle: ResizeHandle,
+  ): void => {
+    if (event.button !== 0 || interactionDisabled || controller.locked) return
+    event.preventDefault()
+    event.stopPropagation()
+    beginScreenControllerGesture(event, controller, 'resize', handle)
+  }, [beginScreenControllerGesture, interactionDisabled])
+
+  const handleScreenControllerRotatePointerDown = useCallback((
+    event: ReactPointerEvent<HTMLButtonElement>,
+    controller: SpatialWorkspaceScreenController,
+  ): void => {
+    if (event.button !== 0 || interactionDisabled || controller.locked) return
+    event.preventDefault()
+    event.stopPropagation()
+    beginScreenControllerGesture(event, controller, 'rotate')
+  }, [beginScreenControllerGesture, interactionDisabled])
+
   const handleRootPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0 || interactionDisabled) return
     const target = event.target as Element
     if (target.closest('[data-spatial-item]')) return
+    if (target.closest('[data-spatial-screen-controller]')) return
     if (target.closest('[data-spatial-handle]')) return
     if (target.closest('.spatial-workspace__controls, .spatial-workspace__minimap')) return
     gestureRef.current = {
       kind: 'pan',
+      coordinateSpace: 'world',
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -811,6 +1007,147 @@ export function SpatialWorkspace(props: SpatialWorkspaceProps): React.JSX.Elemen
           })}
         </g>
       </svg>
+
+      {screenController && (() => {
+        const frame = drafts[screenController.layerItemId] ?? screenController.frame
+        return (
+          <div
+            ref={screenControllerRef}
+            className="spatial-workspace__screen-controller"
+            data-spatial-screen-controller
+            data-layer-item-id={screenController.layerItemId}
+            data-layer-source={screenController.source}
+            data-layer-locked={screenController.locked}
+            data-testid="spatial-screen-controller"
+            aria-label={`全课控制器：${screenController.title || screenController.label}`}
+            aria-disabled={screenController.locked}
+            tabIndex={-1}
+            onPointerDown={(event) => handleScreenControllerPointerDown(event, screenController)}
+            style={{
+              position: 'absolute',
+              left: frame.x,
+              top: frame.y,
+              width: frame.width,
+              height: frame.height,
+              boxSizing: 'border-box',
+              display: 'flex',
+              alignItems: 'center',
+              gap: screenController.compact ? 6 : 10,
+              padding: screenController.compact ? '4px 7px' : '8px 12px',
+              border: screenControllerSelected
+                ? '2px solid #2563eb'
+                : '1px solid #64748b',
+              borderRadius: 8,
+              background: '#172033',
+              color: '#f8fafc',
+              opacity: screenController.opacity,
+              transform: frame.rotation === 0 ? undefined : `rotate(${frame.rotation}deg)`,
+              transformOrigin: 'center',
+              cursor: screenController.locked ? 'default' : 'move',
+              zIndex: 2,
+              overflow: 'hidden',
+            }}
+          >
+            <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {screenController.title || screenController.label || '全课控制器'}
+            </strong>
+            <span
+              aria-hidden="true"
+              style={{ fontSize: 11, opacity: 0.78, whiteSpace: 'nowrap' }}
+            >
+              {screenController.locked ? '已锁定' : '全课'}
+            </span>
+          </div>
+        )
+      })()}
+
+      {screenController && screenControllerSelected && (() => {
+        const frame = drafts[screenController.layerItemId] ?? screenController.frame
+        return (
+          <div
+            className="spatial-workspace__screen-selection"
+            data-testid="spatial-screen-selection"
+            data-layer-item-id={screenController.layerItemId}
+            style={{
+              position: 'absolute',
+              left: frame.x,
+              top: frame.y,
+              width: frame.width,
+              height: frame.height,
+              border: '1px solid #2563eb',
+              pointerEvents: 'none',
+              zIndex: 3,
+            }}
+          >
+            <span
+              style={{
+                position: 'absolute',
+                left: 4,
+                top: -18,
+                padding: '1px 6px',
+                borderRadius: 3,
+                background: '#2563eb',
+                color: '#ffffff',
+                fontSize: 10,
+                lineHeight: 1.4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              全课控制器
+            </span>
+            {!screenController.locked && RESIZE_HANDLES.map((handle) => (
+              <button
+                key={handle}
+                type="button"
+                data-spatial-handle={`screen-resize-${handle}`}
+                aria-label={`调整全课控制器大小 ${handle}`}
+                onPointerDown={(event) => handleScreenControllerResizePointerDown(
+                  event,
+                  screenController,
+                  handle,
+                )}
+                style={{
+                  position: 'absolute',
+                  ...handleStyle(handle, HANDLE_SIZE),
+                  width: HANDLE_SIZE,
+                  height: HANDLE_SIZE,
+                  padding: 0,
+                  border: '1px solid #2563eb',
+                  borderRadius: 2,
+                  background: '#ffffff',
+                  pointerEvents: 'auto',
+                  touchAction: 'none',
+                }}
+              />
+            ))}
+            {!screenController.locked && (
+              <button
+                type="button"
+                data-spatial-handle="screen-rotate"
+                aria-label="旋转全课控制器"
+                onPointerDown={(event) => handleScreenControllerRotatePointerDown(
+                  event,
+                  screenController,
+                )}
+                style={{
+                  position: 'absolute',
+                  left: frame.width / 2 - 6,
+                  top: -28,
+                  width: 12,
+                  height: 12,
+                  padding: 0,
+                  border: '1px solid #2563eb',
+                  borderRadius: '50%',
+                  background: '#ffffff',
+                  pointerEvents: 'auto',
+                  touchAction: 'none',
+                  cursor: 'grab',
+                }}
+              />
+            )}
+          </div>
+        )
+      })()}
 
       {renderItems.map((item) => {
         if (!selectedIds.includes(item.layerItemId)) return null

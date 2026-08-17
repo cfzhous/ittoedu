@@ -108,6 +108,72 @@ describe('V9 ownership in the original editor Store', () => {
     expectLegacyTruthUnchanged(legacyBefore)
   })
 
+  it('routes the explicit global-controller target through only V9 history', () => {
+    const legacyBefore = captureLegacyTruth()
+    const store = useEditorStore.getState()
+    store.activateV9SlideFixture()
+    const initial = useEditorStore.getState().courseSession!
+    const target = store.captureCourseGlobalControllerTarget()
+    if (!target) throw new Error('expected controller target')
+    const controller = initial.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item
+    if (!controller) throw new Error('expected controller')
+
+    expect(store.selectCourseGlobalController(target)).toBe(true)
+    const selected = useEditorStore.getState().courseSession!
+    expect(selected.history).toBe(initial.history)
+    expect(selected.editingScope).toBe(initial.editingScope)
+    expect(selected.selection.locationId).toBe(initial.selection.locationId)
+    expect(selected.selection.globalController).toEqual({
+      source: 'global',
+      layerItemId: target.layerItemId,
+    })
+
+    expect(store.transformCourseGlobalController(target, {
+      x: controller.frame.x + 44,
+      y: controller.frame.y - 12,
+      width: controller.frame.width,
+      height: controller.frame.height,
+      rotation: controller.rotation,
+    })).toBe(true)
+    const moved = useEditorStore.getState().courseSession!
+    expect(moved.history.present.revision).toBe(initial.history.present.revision + 1)
+    expect(moved.history.past).toEqual([initial.history.present])
+    expect(moved.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item.frame).toMatchObject({
+      x: controller.frame.x + 44,
+      y: controller.frame.y - 12,
+    })
+    expect(store.transformCourseGlobalController(target, {
+      x: controller.frame.x + 80,
+      y: controller.frame.y,
+      width: controller.frame.width,
+      height: controller.frame.height,
+      rotation: controller.rotation,
+    })).toBe(false)
+
+    store.undoCourseProject()
+    expect(useEditorStore.getState().courseSession!.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item.frame).toEqual(controller.frame)
+    store.redoCourseProject()
+    const redone = useEditorStore.getState().courseSession!
+    const refreshedTarget = store.captureCourseGlobalControllerTarget()
+    if (!refreshedTarget) throw new Error('expected refreshed target')
+    expect(store.selectCourseGlobalController(refreshedTarget)).toBe(true)
+    const updateTarget = store.captureCourseGlobalControllerTarget()
+    if (!updateTarget) throw new Error('expected selected controller target')
+    expect(store.updateCourseGlobalController(updateTarget, { title: '全课标题' })).toBe(true)
+    expect(useEditorStore.getState().courseSession!.history.present.revision)
+      .toBe(redone.history.present.revision + 1)
+    expect(useEditorStore.getState().courseSession!.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item).toMatchObject({ content: { data: { title: '全课标题' } } })
+    expectLegacyTruthUnchanged(legacyBefore)
+  })
+
   it('rejects stale selection and no-op transforms so the canvas can restore canonical state', () => {
     const store = useEditorStore.getState()
     store.activateV9SlideFixture()

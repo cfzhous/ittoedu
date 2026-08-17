@@ -4,7 +4,7 @@
 
 长期开发范围和完成定义只看 [根目录唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)。新 Agent 可从 [项目认知索引](PROJECT_COGNITION_INDEX.md) 进入真实代码；当前可用能力仍以源码、Schema 与 [Agent Kit 能力卡](agent-kit/capabilities/index.json) 为准。
 
-当前仓库状态是 `engineering candidate`：自动化能够证明协议、构建和交付闭环，但不能代替课堂品质判断。`art candidate` 只适用于已经过真实画面与关键交互复核的具体课例；`accepted` 必须由教师明确确认，当前不作此声明。
+当前仓库状态是 `engineering candidate`（集成候选）：并行收敛（LAYOUT/SHELL/FLOW/AI-BOUNDARY/RELEASE）与窄集成（I1）已通过定向验证，保存重开、发布与导出有 E1 机器断言（38/38）；最终全量 Gate（Z1）与真实视觉/互动复核（Z2）仍待执行。`art candidate` 只适用于已经过真实画面与关键交互复核的具体课例；`accepted` 必须由教师明确确认，当前不作此声明。
 
 ## 快速开始
 
@@ -36,22 +36,32 @@ npm run install:courseware-skills
 - `flow`：标题、段落、列表、引用、媒体、表格、公式、代码、提示块、章节和组件组成的语义长文。
 - `spatial-2d`：二维世界、相机、镜头书签与语义缩放；不是通用 3D 编辑器。
 - `mixed`：通过统一 location、目录、深链接、进度和课程状态连接多种 surface。
+- 教师控制器：始终只有 `project.globalLayerItems` 中一个全局副本，可从任意 Slide/Flow/Spatial 当前页点选修改并全课生效，不复制到 scene/surface/world。
 - `PublishedCourseV2Payload`：面向 Player 的单向发布数据，不可作为编辑项目重新导入。
 
 V9 不公开 `underlay` / `overlay`。全局、surface、scene/world 中的所有可视项以稳定 `layerItemId` 和显式 `order` 合成；选择、播放、保存与导出必须遵循同一顺序。Flow 的语义块仍是文档流，surface/global 视觉项在文档上方的统一覆盖层内排序，不与段落逐项交错。显式 V8 迁移保留单平面 Runtime；无法无损表达的旧双平面 Hybrid 会被拒绝，而不是静默改变层级。
 
-## 编辑与 AI 精确修改
+## AI-native 与无降级表面边界
+
+- 编辑器保持低学习成本和克制的默认界面，但 V8 已经可用的编辑能力是 V9 迁移底线；低频能力可以渐进披露，不能以“轻量”为理由删除或禁用。
+- 普通教师保留点选、拖缩、就地改字、增删排序、少量高频属性、撤销/保存/试运行/导出；跨页批量、复杂互动和动态机制优先由 AI 完成。
+- 纯 Slide、纯 Flow、纯 Spatial 与 Mixed 的界面从现有 `locations` / `surfaces` 自动推导，不新增工程形态字段；新建工程和课程结构必须直接提供三类 surface 的创建入口，不能只靠外部导入形成。
+- V9 的 global/surface 共享层继续供编辑器、引擎和发布使用；在统一有效图层达到完整 ownership-aware 操作等价前，保留 V8 表面的全局与 surface 共享作者入口，不启动 V10 迁移。
+- 详细取舍、当前缺口和执行顺序以 [根目录唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md) 为准。
+
+## 编辑与外部 AI 协作边界
 
 Native 承担稳定文字、公式、图片、视频、形状和常用控制；一次性复杂动态机制用 Runtime；只有确有跨课例复用价值时才用 Component。
 
-Runtime/Component 中当前可见文字必须可命中，普通可替换图片应可命中。画布命中产生会话 `hitId`，跨保存定位使用稳定 `authoringAddress`。复制给 AI 的选择引用同时包含当前 `projectRevision`；过期 revision 会被拒绝，避免覆盖教师后续修改。
+Runtime/Component 中当前可见文字必须可命中，普通可替换图片应可命中。画布命中产生会话 `hitId`，跨保存定位使用稳定 `authoringAddress`。为未来外部协作预留的纯接口按稳定 `authoringAddress` + 当前 `projectRevision` 构造字段上下文；过期 revision 会被拒绝，避免覆盖教师后续修改。
 
 编辑器托管的 Player 可以在同一实例中从试运行切回检查/编辑，保留当前交互画面。该画面是会话检查点，不会自动变成项目默认答案；只有教师显式保存的命名状态才进入工程。
 
-点选可编辑目标后，可在编辑器中使用“复制 AI 稳定引用”和“应用 AI Patch”。终端也可读取当前选择；关闭工程后，磁盘 Patch 命令会原子更新 `.h5lesson` 和默认 HTML。工程仍在编辑器中打开时，磁盘命令会拒绝覆盖，必须走编辑器事务以保留 Undo/Redo。
+**当前版本编辑器内没有可见 AI**：没有复制引用、Clipboard、Patch 文件选择或应用、聊天、模型、Provider 或网络调用；只保留未挂载的纯接口 `courseAiHandoff` / `courseAiPatch`（internal/reserved），不在任何产品界面可达。磁盘 Patch 命令仍可在工程已关闭时原子更新 `.h5lesson` 和默认 HTML；工程仍处于打开状态时命令会拒绝覆盖。命令通过选择桥判断编辑器是否打开，而当前编辑器没有生产写入方，实际使用以人工确认工程已关闭为准。
+
+工程已关闭时运行（revision 保护的原子 Patch）：
 
 ```powershell
-npm run current:course-selection
 npm run patch:course-project -- --project <project.h5lesson> --patch <patch.json>
 ```
 
@@ -85,10 +95,10 @@ node agent-kit/bin/courseware-agent-kit.mjs capabilities --index agent-kit/capab
 | `npm run typecheck` | 检查产品、Electron 与 E2E 类型 |
 | `npm test` | 当前单元/集成测试与 Agent Kit 测试 |
 | `npm run test:compat` | 必要的 V8 / PublishedLesson V1 / Runtime API 2 / Component API 4 兼容测试 |
-| `npm run test:e2e` | 构建三课例并运行 Course Studio V9 与真实 Mixed 课程 Electron E2E；不属于默认快速验证 |
+| `npm run test:e2e` | 构建课例并运行 V9 默认边界、控制器/健康、Trial Run 与真实 Mixed 课程 Electron E2E；不属于默认快速验证 |
 | `npm run check:ai-capabilities` | 只读检查短 V9 能力卡、来源和版本 |
 | `npm run generate:ai-capabilities` | 规范化能力卡 JSON 后再检查 |
-| `npm run current:course-selection` | 读取当前 Course Studio 点选的稳定 AI 引用 |
+| `npm run current:course-selection` | 读取选择桥中记录的稳定引用（保留命令；当前编辑器没有生产写入方，写入方为已不可达的 Course Studio donor） |
 | `npm run patch:course-project -- --project <file> --patch <json>` | 对已关闭的 V9 工程执行 revision 保护的原子 Patch，并重发默认 HTML |
 | `npm run build:course-cases` | 用 Agent Kit 构建并验证三个差异课例 |
 | `npm run verify:course-cases` | 在已有 Player bundle 上只读验证三课例定义与交付闭环 |
@@ -106,6 +116,6 @@ node agent-kit/bin/courseware-agent-kit.mjs capabilities --index agent-kit/capab
 - [Component API 4 作者边界](docs/COMPONENT_AUTHORING.md)
 - [文档导航](docs/README.md)
 
-旧计划、评估稿和里程碑验证记录只由 Git 历史保存，不再作为当前操作入口。
+评估稿和旧里程碑记录是决策输入，不是当前操作入口；已整合结论只看根目录唯一计划。
 
 `.github/workflows/clean-windows.yml` 会在 GitHub 的全新 `windows-latest` checkout 上执行 `npm ci`、默认验证与 clean-Windows 门禁；本地隔离通过不冒充另一台机器的人工作业。

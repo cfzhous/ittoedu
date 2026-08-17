@@ -74,7 +74,7 @@
       ]
     },
     {
-      "authoringBoundary": "Block IDs remain stable across reorder, save, export and AI patching.",
+      "authoringBoundary": "Block IDs remain stable across reorder, save and export; in-place text editing commits one history entry per submission.",
       "id": "surface:flow",
       "inputs": [
         "FlowBlock[]"
@@ -223,7 +223,7 @@
       ]
     },
     {
-      "authoringBoundary": "A session hitId is diagnostic only; the persisted address and current revision identify the edit.",
+      "authoringBoundary": "Reserved interface: no editor UI applies patches in the current version; the persisted address and current revision identify a machine-applied edit.",
       "id": "authoring:stable-patch",
       "inputs": [
         "projectRevision",
@@ -232,14 +232,15 @@
       ],
       "label": "Stable authoring address patch",
       "limitations": [
-        "A stale revision is rejected and must be reread."
+        "A stale revision is rejected and must be reread.",
+        "No editor UI applies patches; only unmounted preflight interfaces and the closed-project disk CLI."
       ],
       "outputs": [
         "revision-protected local edit"
       ],
       "purpose": "Patch one selected text, asset or property without regenerating the course or overwriting later edits.",
       "source": "../../src/shared/authoringAddress.ts",
-      "status": "stable",
+      "status": "reserved",
       "tags": [
         "authoringAddress",
         "patch",
@@ -285,7 +286,8 @@
       ],
       "label": "Surface-aware static exports",
       "limitations": [
-        "PPTX is a static Slide compatibility output; Flow and Spatial semantics are not converted into editable slide layouts."
+        "PPTX is a static Slide compatibility output; Flow and Spatial semantics are not converted into editable slide layouts.",
+        "The main editor PDF export path does not pass Slide capture hooks yet (Z1 check); Slide pages may be missing from a real PDF until that is verified or fixed."
       ],
       "outputs": [
         "DOCX",

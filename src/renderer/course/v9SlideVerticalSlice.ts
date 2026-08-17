@@ -20,6 +20,7 @@ import type {
   SceneNode,
   ShapeType,
   AssetMeta,
+  TeacherControllerNode,
 } from '../../shared/projectTypes'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
 import {
@@ -186,6 +187,14 @@ export interface V9CourseSelection extends SlideEditorSelection {
   readonly flowBlockId?: string | null
   readonly flowLayerItemId?: string | null
   readonly spatialLayerItemIds?: readonly string[]
+  /**
+   * Session-only source marker for the one project-level teacher controller.
+   * It is deliberately not part of Course Project V9 persistence.
+   */
+  readonly globalController?: {
+    readonly source: 'global'
+    readonly layerItemId: string
+  }
 }
 
 export interface V9SlideSelectionInput {
@@ -212,6 +221,30 @@ export interface V9SlideLayerTarget {
 }
 
 export type V9SlideNativeNodeTarget = V9SlideLayerTarget
+
+/** Explicit optimistic-concurrency target for the one global controller. */
+export interface CourseGlobalControllerTarget {
+  readonly sessionId: string
+  readonly locationId: string
+  readonly projectRevision: number
+  readonly source: 'global'
+  readonly layerItemId: string
+}
+
+export interface CourseGlobalControllerTransform {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+  readonly rotation: number
+}
+
+export type CourseGlobalControllerPatch = DeepPartial<
+  Omit<TeacherControllerNode, 'id' | 'type' | 'locked'>
+> & {
+  /** Layer-item lock is intentionally outside the materialized node payload. */
+  readonly locked?: boolean
+}
 
 export interface V9SlideLayerOrderTarget {
   readonly sessionId: string
@@ -243,6 +276,12 @@ export interface V9SlideWorkspaceSnapshot {
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly selectedNodeIds: readonly string[]
   /**
+   * Source-of-truth provenance for every transient node in `document`.
+   * It is session-only: the canvas never infers ownership from an id and
+   * never writes this projection into a Course Project.
+   */
+  readonly authoringTargets: ReadonlyMap<string, V9SlideWorkspaceAuthoringTarget>
+  /**
    * The single API-2 runtime layer projected into the isolated Player carrier
    * as the legacy scene runtime. Every author target reported for the active
    * scene resolves to this layer's stable layerItemId.
@@ -256,6 +295,12 @@ export interface V9SlideWorkspaceSnapshot {
     readonly node: ExternalComponentNode
     readonly layer: 'underlay' | 'overlay'
   }>
+}
+
+/** Explicit authoring provenance for a transient workspace node proxy. */
+export interface V9SlideWorkspaceAuthoringTarget {
+  readonly source: V9SlideEditingScope
+  readonly layerItemId: string
 }
 
 /** Production is the default; one exact query keeps the isolated regression fixture. */
@@ -554,6 +599,233 @@ export function selectV9CourseLocation(
     state.componentFiles,
     state.componentPackages,
   )
+}
+
+function currentGlobalTeacherController(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+  requireSelected = false,
+): NativeLayerItem | null {
+  if (
+    target.sessionId !== state.sessionId ||
+    target.locationId !== state.selection.locationId ||
+    target.projectRevision !== state.history.present.revision ||
+    target.source !== 'global' ||
+    (requireSelected && !hasSelectedGlobalController(state, target)) ||
+    !state.history.present.locations.some((location) => location.id === target.locationId)
+  ) {
+    return null
+  }
+  const item = state.history.present.globalLayerItems.find(
+    (entry) => entry.item.layerItemId === target.layerItemId,
+  )?.item
+  return item?.kind === 'native' && item.content.nativeType === 'teacher-controller'
+    ? item
+    : null
+}
+
+/** Captures the only supported cross-surface global-controller author target. */
+export function captureCourseGlobalControllerTarget(
+  state: V9SlideVerticalSliceState,
+): CourseGlobalControllerTarget | null {
+  const item = state.history.present.globalLayerItems.find(
+    (entry) => entry.item.kind === 'native' &&
+      entry.item.content.nativeType === 'teacher-controller',
+  )?.item
+  if (!item || item.kind !== 'native') return null
+  return Object.freeze({
+    sessionId: state.sessionId,
+    locationId: state.selection.locationId,
+    projectRevision: state.history.present.revision,
+    source: 'global' as const,
+    layerItemId: item.layerItemId,
+  })
+}
+
+function globalControllerSelection(
+  state: V9SlideVerticalSliceState,
+  layerItemId: string,
+): V9CourseSelection {
+  return Object.freeze({
+    ...state.selection,
+    selectionIds: Object.freeze([layerItemId]),
+    ...(state.selection.surfaceKind === 'flow'
+      ? { flowLayerItemId: layerItemId }
+      : {}),
+    ...(state.selection.surfaceKind === 'spatial-2d'
+      ? { spatialLayerItemIds: Object.freeze([]) }
+      : {}),
+    globalController: Object.freeze({ source: 'global' as const, layerItemId }),
+  })
+}
+
+function hasSelectedGlobalController(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+): boolean {
+  return state.selection.globalController?.source === 'global' &&
+    state.selection.globalController.layerItemId === target.layerItemId &&
+    sameSelection(state.selection.selectionIds, [target.layerItemId])
+}
+
+/**
+ * Selects the global controller without changing the current location or
+ * editing scope. The marker is session-only and carries an explicit source.
+ */
+export function selectCourseGlobalController(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+): V9SlideVerticalSliceState {
+  if (!currentGlobalTeacherController(state, target)) return state
+  if (hasSelectedGlobalController(state, target)) {
+    return state
+  }
+  return freezeState(
+    state.sessionId,
+    state.history,
+    globalControllerSelection(state, target.layerItemId),
+    state.editingScope,
+    state.savedSnapshot,
+    state.projectPath,
+    state.assetFiles,
+    state.componentFiles,
+    state.componentPackages,
+  )
+}
+
+function parsedGlobalControllerNode(
+  current: NativeLayerItem,
+  patch: Record<string, unknown>,
+): TeacherControllerNode | null {
+  if (
+    Object.prototype.hasOwnProperty.call(patch, 'id') ||
+    Object.prototype.hasOwnProperty.call(patch, 'type')
+  ) {
+    return null
+  }
+  const base = materializeNativeLayerItem(
+    structuredClone(current) as NativeLayerItem,
+  )
+  if (base.type !== 'teacher-controller') return null
+  const candidate = mergeCourseNativeData(
+    base as unknown as Record<string, unknown>,
+    patch,
+  )
+  const parsed = sceneNodeSchema.safeParse(candidate)
+  return parsed.success &&
+    parsed.data.type === 'teacher-controller' &&
+    courseValuesEqual(candidate, parsed.data)
+    ? parsed.data
+    : null
+}
+
+function commitGlobalControllerNode(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+  node: TeacherControllerNode,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const item = draft.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item
+    if (
+      !item ||
+      item.kind !== 'native' ||
+      item.content.nativeType !== 'teacher-controller'
+    ) {
+      throw new Error('全课控制器已失效，请重新选择')
+    }
+    replaceNativeItemFromNode(item, node)
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+/** Writes one validated frame change into the single global controller item. */
+export function transformCourseGlobalController(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+  transform: CourseGlobalControllerTransform,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const current = currentGlobalTeacherController(state, target, true)
+  if (!current || current.locked) return state
+  if (
+    !Number.isFinite(transform.x) ||
+    !Number.isFinite(transform.y) ||
+    !Number.isFinite(transform.width) || transform.width <= 0 ||
+    !Number.isFinite(transform.height) || transform.height <= 0 ||
+    !Number.isFinite(transform.rotation) ||
+    transform.rotation < -36_000 || transform.rotation > 36_000
+  ) {
+    return state
+  }
+  const node = parsedGlobalControllerNode(current, transform as unknown as Record<string, unknown>)
+  if (!node || courseValuesEqual(
+    materializeNativeLayerItem(structuredClone(current) as NativeLayerItem),
+    node,
+  )) {
+    return state
+  }
+  return commitGlobalControllerNode(state, target, node, now)
+}
+
+function explicitGlobalControllerLockChange(
+  patch: CourseGlobalControllerPatch,
+): boolean | null {
+  const entries = Object.entries(patch as Record<string, unknown>)
+  if (entries.length !== 1 || entries[0]![0] !== 'locked') return null
+  return typeof entries[0]![1] === 'boolean' ? entries[0]![1] : null
+}
+
+function setGlobalControllerLocked(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+  locked: boolean,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const project = updateCourseProject(state.history.present, (draft) => {
+    const item = draft.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === target.layerItemId,
+    )?.item
+    if (
+      !item ||
+      item.kind !== 'native' ||
+      item.content.nativeType !== 'teacher-controller'
+    ) {
+      throw new Error('全课控制器已失效，请重新选择')
+    }
+    item.locked = locked
+  }, now)
+  return commitV9SlideDocument(state, project)
+}
+
+/**
+ * Writes validated controller content into its single project-level item.
+ * Locked controllers accept only the explicit `{ locked: false }` action.
+ */
+export function updateCourseGlobalController(
+  state: V9SlideVerticalSliceState,
+  target: CourseGlobalControllerTarget,
+  patch: CourseGlobalControllerPatch,
+  now?: string,
+): V9SlideVerticalSliceState {
+  const current = currentGlobalTeacherController(state, target, true)
+  if (!current) return state
+  const locked = explicitGlobalControllerLockChange(patch)
+  if (locked !== null) {
+    if (current.locked === locked || (current.locked && locked !== false)) return state
+    return setGlobalControllerLocked(state, target, locked, now)
+  }
+  if (current.locked) return state
+  const node = parsedGlobalControllerNode(current, patch as Record<string, unknown>)
+  if (!node || courseValuesEqual(
+    materializeNativeLayerItem(structuredClone(current) as NativeLayerItem),
+    node,
+  )) {
+    return state
+  }
+  return commitGlobalControllerNode(state, target, node, now)
 }
 
 export function replaceV9CourseHistory(
@@ -876,26 +1148,51 @@ export function buildV9SlideWorkspaceSnapshot(
   const componentLayers = view.layers.filter(
     (layer): layer is ReadonlyComponentLayer => layer.item.kind === 'component',
   )
+  const scopedNativeLayers = nativeLayers.filter((layer) => (
+    layer.source === state.editingScope &&
+    (
+      state.editingScope === 'global' ||
+      layer.item.content.nativeType !== 'teacher-controller'
+    )
+  ))
+  // P2 exposes only the one effective, visible global controller while the
+  // teacher remains in a Slide scene. It is a read/callback proxy, never a
+  // scene-layer copy; other global layers stay out of this partial path.
+  const sceneGlobalControllerProxies = state.editingScope === 'scene'
+    ? nativeLayers.filter((layer) => (
+        layer.source === 'global' &&
+        layer.effectiveVisible &&
+        layer.item.content.nativeType === 'teacher-controller'
+      ))
+    : []
+  const scopedComponentLayers = componentLayers.filter(
+    (layer) => layer.source === state.editingScope,
+  )
   const nodes = [
-    ...nativeLayers
-      .filter((layer) =>
-        layer.source === state.editingScope &&
-        (
-          state.editingScope === 'global' ||
-          layer.item.content.nativeType !== 'teacher-controller'
-        ),
-      )
-      .map((layer) => nativeNodeFromLayer(
-        layer,
-        state.editingScope === 'scene' ? 'effective' : 'base',
-      )),
-    ...componentLayers
-      .filter((layer) => layer.source === state.editingScope)
-      .map((layer) => componentNodeFromLayer(
-        layer,
-        state.editingScope === 'scene' ? 'effective' : 'base',
-      )),
+    ...scopedNativeLayers.map((layer) => nativeNodeFromLayer(
+      layer,
+      state.editingScope === 'scene' ? 'effective' : 'base',
+    )),
+    ...scopedComponentLayers.map((layer) => componentNodeFromLayer(
+      layer,
+      state.editingScope === 'scene' ? 'effective' : 'base',
+    )),
+    ...sceneGlobalControllerProxies.map((layer) => nativeNodeFromLayer(
+      layer,
+      'effective',
+    )),
   ]
+  const authoringTargets = new Map<string, V9SlideWorkspaceAuthoringTarget>([
+    ...scopedNativeLayers,
+    ...scopedComponentLayers,
+    ...sceneGlobalControllerProxies,
+  ].map((layer) => [
+    layer.selectionId,
+    Object.freeze({
+      source: layer.source,
+      layerItemId: layer.item.layerItemId,
+    }),
+  ]))
   // Global component layers mount in the carrier's globalLayer (so the Player
   // reports them with scope 'global'), never in the flattened carrier scene.
   // Every other component layer joins the unified scene composition.
@@ -951,6 +1248,7 @@ export function buildV9SlideWorkspaceSnapshot(
     previewDocument: sceneDocument(previewNodes, true),
     componentPackages: state.componentPackages,
     selectedNodeIds,
+    authoringTargets,
     ...(runtimeLayer && runtime ? { sceneRuntimeLayerItemId: runtimeLayer.layerItemId } : {}),
     ...(globalRuntime && globalRuntimeLayer
       ? { globalRuntime, globalRuntimeLayerItemId: globalRuntimeLayer.layerItemId }

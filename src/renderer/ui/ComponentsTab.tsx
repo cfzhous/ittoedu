@@ -102,6 +102,11 @@ interface V9ComponentUsage extends PackageUsageSummary {
   readonly references: V9ComponentReference[]
 }
 
+interface V9ComponentLocator {
+  readonly reference: V9ComponentReference | null
+  readonly unavailableReason: string | null
+}
+
 /** Component instance counts shown by the project-component tab. */
 interface PackageUsageSummary {
   readonly sceneInstanceCount: number
@@ -183,6 +188,29 @@ function collectV9ComponentUsage(
     globalInstanceCount: references.filter((reference) => reference.scope === 'global').length,
     totalInstanceCount: references.length,
     references,
+  }
+}
+
+/**
+ * The V9 component menu can only promise a locator when it can navigate to a
+ * concrete slide-scene and select that stable layer ID. Shared references stay
+ * discoverable in the current-page layer list instead of reopening a hidden
+ * authoring scope.
+ */
+function v9ComponentLocator(usage: V9ComponentUsage): V9ComponentLocator {
+  const reference = usage.references.find((candidate) => (
+    candidate.scope === 'scene' && candidate.sceneId !== undefined
+  )) ?? null
+  if (reference !== null) return { reference, unavailableReason: null }
+  if (usage.totalInstanceCount === 0) {
+    return { reference: null, unavailableReason: '该组件尚未被使用。' }
+  }
+  const onlyShared = usage.references.every((candidate) => candidate.scope !== 'scene')
+  return {
+    reference: null,
+    unavailableReason: onlyShared
+      ? '该组件只用于全课或共用内容；请在当前页面的图层列表查看影响范围。'
+      : '该组件用于非幻灯片内容；请切换到对应页面查看。',
   }
 }
 
@@ -500,7 +528,14 @@ export function ComponentsTab({
   const legacyProject = useEditorStore((state) => state.project)
   const v9Mode = courseSession !== null
   const components = v9Mode ? courseSession.componentPackages : legacyComponents
-  const editingScope = useEditorStore((state) => state.editingScope)
+  const legacyEditingScope = useEditorStore((state) => state.editingScope)
+  // V9 owns this scope in its session. Reading the legacy V8 field here can
+  // leave a newly created course showing a stale global/surface capability.
+  const editingScope = courseSession?.editingScope ?? legacyEditingScope
+  const componentInsertionScope = editingScope === 'global' ? 'global' : 'scene'
+  const componentInsertionUnavailableReason = v9Mode && editingScope === 'surface'
+    ? '当前内容共用层暂不能插入组件；请在当前页面添加组件。'
+    : undefined
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
   const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)
   const addCourseComponentLayer = useEditorStore((state) => state.addCourseComponentLayer)
@@ -541,16 +576,19 @@ export function ComponentsTab({
         state.courseSession.history.present,
         packageId,
       )
-      const reference = usage.references[0]
-      if (!reference) return
-      if (reference.scope === 'global') {
-        state.setCourseEditingScope('global')
-      } else if (reference.scope === 'scene' && reference.sceneId) {
-        state.activateCourseScene(reference.sceneId)
-      } else {
-        state.setCourseEditingScope('surface')
-      }
-      state.setStatus(`已定位“${reference.nodeName}”；动态元素选择将在统一图层接入后提供`)
+      const locator = v9ComponentLocator(usage)
+      const reference = locator.reference
+      if (reference === null || reference.sceneId === undefined) return
+      state.activateCourseScene(reference.sceneId)
+      const selected = useEditorStore.getState().selectCourseLayers({
+        nodeIds: [reference.nodeId],
+        additive: false,
+      })
+      useEditorStore.getState().setStatus(
+        selected
+          ? `已定位“${reference.nodeName}”`
+          : `已切换到“${reference.nodeName}”所在页面；请在当前页面图层列表查看。`,
+      )
       return
     }
     const usage = collectComponentPackageUsage(useEditorStore.getState().project, packageId)
@@ -618,8 +656,19 @@ export function ComponentsTab({
         <div className="project-component-list">
           {visiblePackages.map((data) => {
             const packageId = data.manifest.id
-            const usage = usageLookup(packageId)
-            const scopeSupported = componentSupportsScope(data.manifest, editingScope)
+            const v9Usage = courseSession === null
+              ? null
+              : collectV9ComponentUsage(courseSession.history.present, packageId)
+            const usage = v9Usage ?? usageLookup(packageId)
+            const locator = v9Usage === null ? null : v9ComponentLocator(v9Usage)
+            const locateDisabled = v9Usage === null
+              ? usage.totalInstanceCount === 0
+              : locator?.reference === null
+            const locateUnavailableReason = v9Usage === null
+              ? usage.totalInstanceCount === 0 ? '该组件尚未被使用。' : undefined
+              : locator?.unavailableReason ?? undefined
+            const scopeSupported = componentInsertionUnavailableReason === undefined &&
+              componentSupportsScope(data.manifest, componentInsertionScope)
             const catalogEntry = currentCatalogEntries.find((entry) => entry.packageId === packageId)
             const catalogStatus = catalogEntry
               ? componentCatalogInstallStatus(catalogEntry, data)
@@ -636,7 +685,8 @@ export function ComponentsTab({
                     disabled={!scopeSupported}
                     title={scopeSupported
                       ? `插入“${data.manifest.name}”`
-                      : `该组件不支持${editingScope === 'global' ? '全局层' : '场景层'}；仍可从右侧菜单管理。`}
+                      : componentInsertionUnavailableReason ??
+                        `该组件不支持${editingScope === 'global' ? '全局层' : '场景层'}；仍可从右侧菜单管理。`}
                     onDragStart={(event) => setComponentDragData(event, packageId, data.manifest.name)}
                     onClick={() => insertComponent(packageId)}
                   >
@@ -663,7 +713,7 @@ export function ComponentsTab({
                         closeContainingMenu(event.currentTarget)
                         onReplaceComponent?.(packageId)
                       }}><Upload size={14} />替换组件包</button>
-                      <button type="button" role="menuitem" disabled={usage.totalInstanceCount === 0} onClick={(event) => {
+                      <button type="button" role="menuitem" data-testid={`locate-component-${packageId}`} disabled={locateDisabled} title={locateUnavailableReason} onClick={(event) => {
                         closeContainingMenu(event.currentTarget)
                         locateFirstUsage(packageId)
                       }}><LocateFixed size={14} />定位使用位置</button>
@@ -693,7 +743,8 @@ export function ComponentsTab({
                 )}
                 {!scopeSupported && (
                   <div className="project-component-card__hint">
-                    当前处于{editingScope === 'global' ? '全局层' : '场景层'}，该组件只能在其他层使用。
+                    {componentInsertionUnavailableReason ??
+                      `当前处于${editingScope === 'global' ? '全局层' : '场景层'}，该组件只能在其他层使用。`}
                   </div>
                 )}
               </article>

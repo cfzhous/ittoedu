@@ -600,9 +600,9 @@ function verifyBehaviorMap(snapshot: RepositorySnapshot): void {
     'protected suite total must be 12',
   )
   invariant(
-    behaviorMap.baseline.staticDefinitionCount === definitions && definitions === 151,
+    behaviorMap.baseline.staticDefinitionCount === definitions && definitions === 157,
     'BEHAVIOR_MAP_INVALID',
-    'static definition total must be 151',
+    'static definition total must be 157',
   )
   invariant(
     behaviorMap.baseline.parameterizedDefinitionCount === parameterized && parameterized === 7,
@@ -610,13 +610,13 @@ function verifyBehaviorMap(snapshot: RepositorySnapshot): void {
     'parameterized definition total must be 7',
   )
   invariant(
-    behaviorMap.baseline.expandedCaseCount === expandedCases && expandedCases === 172,
+    behaviorMap.baseline.expandedCaseCount === expandedCases && expandedCases === 178,
     'BEHAVIOR_MAP_INVALID',
-    'expanded case total must be 172',
+    'expanded case total must be 178',
   )
   invariant(
     behaviorMap.baseline.expectedVitestResult.filesPassed === 12 &&
-      behaviorMap.baseline.expectedVitestResult.testsPassed === 172,
+      behaviorMap.baseline.expectedVitestResult.testsPassed === 178,
     'BEHAVIOR_MAP_INVALID',
     'expected Vitest result drifted',
   )

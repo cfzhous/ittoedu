@@ -26,12 +26,18 @@ const runDirectory = join(tmpdir(), `ittoedu-v9-spatial-authoring-${process.pid}
 const userDataDirectory = join(runDirectory, 'electron-profile')
 const sourceProjectPath = join(runDirectory, 'spatial-authoring-source.h5lesson')
 const savedProjectPath = join(runDirectory, 'spatial-authoring-roundtrip.h5lesson')
+const cameraSessionProjectPath = join(runDirectory, 'spatial-camera-session.h5lesson')
 const NOW = '2026-08-15T12:00:00.000Z'
 const SPATIAL_SURFACE_ID = 'spatial-authoring-surface'
 const SPATIAL_CAMERA_ID = 'spatial-authoring-overview'
+const SPATIAL_CAMERA_B_ID = 'spatial-authoring-detail'
+const SECOND_SPATIAL_SURFACE_ID = 'spatial-authoring-second-surface'
+const SECOND_SPATIAL_CAMERA_ID = 'spatial-authoring-second-overview'
 const TEXT_ID = 'spatial-authoring-text'
 const TEXT_NAME = '空间文本'
 const TEXT_INITIAL = { x: -300, y: 90, width: 400, height: 80, rotation: 0 }
+const SPATIAL_CAMERA_B = { x: 480, y: -240, zoom: 1.75 }
+const SECOND_SPATIAL_HOME = { x: -180, y: 140, zoom: 1.25 }
 
 interface EditorHandle {
   app: ElectronApplication
@@ -48,6 +54,12 @@ interface SpatialTextSnapshot {
   width: number
   height: number
   rotation: number
+}
+
+interface SpatialCameraSnapshot {
+  revision: number
+  home: { x: number; y: number; zoom: number }
+  frames: Array<{ id: string; x: number; y: number; zoom: number }>
 }
 
 async function launchEditor(): Promise<EditorHandle> {
@@ -150,6 +162,24 @@ function readSpatialText(path: string): SpatialTextSnapshot {
     width: item.frame.width,
     height: item.frame.height,
     rotation: item.rotation,
+  }
+}
+
+function readSpatialCamera(path: string, surfaceId: string): SpatialCameraSnapshot {
+  const archive = openCourseProjectArchive(readFileSync(path))
+  const surface = archive.project.surfaces.find((candidate) => candidate.id === surfaceId)
+  if (!surface || surface.type !== 'spatial-2d') {
+    throw new Error(`Saved Spatial surface is missing: ${surfaceId}`)
+  }
+  return {
+    revision: archive.project.revision,
+    home: { ...surface.camera.home },
+    frames: surface.camera.frames.map((frame) => ({
+      id: frame.id,
+      x: frame.x,
+      y: frame.y,
+      zoom: frame.zoom,
+    })),
   }
 }
 
@@ -259,7 +289,29 @@ test.beforeAll(() => {
     name: '总览',
     now: NOW,
   })
+  project = addSpatialCameraFrame(project, SPATIAL_SURFACE_ID, SPATIAL_CAMERA_B, {
+    id: SPATIAL_CAMERA_B_ID,
+    name: '细节镜头',
+    now: NOW,
+  })
+  project = addCourseSurface(project, 'spatial-2d', {
+    id: SECOND_SPATIAL_SURFACE_ID,
+    title: '第二空间画布',
+    now: NOW,
+  })
+  project = addSpatialCameraFrame(project, SECOND_SPATIAL_SURFACE_ID, SECOND_SPATIAL_HOME, {
+    id: SECOND_SPATIAL_CAMERA_ID,
+    name: '第二总览',
+    now: NOW,
+  })
   project = updateCourseProject(project, (draft) => {
+    const secondSurface = draft.surfaces.find(
+      (surface) => surface.id === SECOND_SPATIAL_SURFACE_ID,
+    )
+    if (!secondSurface || secondSurface.type !== 'spatial-2d') {
+      throw new Error('Second Spatial surface is missing')
+    }
+    secondSurface.camera.home = { ...SECOND_SPATIAL_HOME }
     draft.startLocationId = SPATIAL_CAMERA_ID
   }, NOW)
   writeFileSync(sourceProjectPath, createCourseProjectArchive({
@@ -397,6 +449,50 @@ test('authors one Spatial world text with stable chrome across camera and save',
     await expect(editor.page.getByTestId('spatial-workspace')).toBeVisible()
     await expect(editor.page.getByTestId('spatial-workspace').getByTestId('spatial-zoom-label'))
       .toHaveText('100%')
+    expectCleanRenderer(editor)
+  } finally {
+    await closeEditor(editor.app)
+  }
+})
+
+test('captures the selected Spatial frame pose and resets session state for another surface', async () => {
+  test.slow()
+  const firstBefore = readSpatialCamera(sourceProjectPath, SPATIAL_SURFACE_ID)
+  const secondBefore = readSpatialCamera(sourceProjectPath, SECOND_SPATIAL_SURFACE_ID)
+  const editor = await launchEditor()
+  try {
+    await openProject(editor, sourceProjectPath)
+    const page = editor.page
+    const workspace = page.getByTestId('spatial-workspace')
+    const cameraPanel = page.getByTestId('scene-panel-spatial-frames')
+
+    await page.getByTestId(`course-location-${SPATIAL_CAMERA_B_ID}`).click()
+    await expect(workspace).toHaveAttribute('data-camera-x', String(SPATIAL_CAMERA_B.x))
+    await expect(workspace).toHaveAttribute('data-camera-y', String(SPATIAL_CAMERA_B.y))
+    await expect(workspace).toHaveAttribute('data-camera-zoom', String(SPATIAL_CAMERA_B.zoom))
+
+    await cameraPanel.getByRole('button', { name: '从当前画面添加' }).click()
+    await cameraPanel.getByRole('button', { name: '设为首页镜头' }).click()
+
+    // A different Spatial surface must clear the previous surface's session
+    // pose. Its own authored home pose is then the safe capture fallback.
+    await page.getByTestId(`course-location-${SECOND_SPATIAL_CAMERA_ID}`).click()
+    await expect(workspace).toHaveAttribute('data-camera-x', String(SECOND_SPATIAL_HOME.x))
+    await expect(workspace).toHaveAttribute('data-camera-y', String(SECOND_SPATIAL_HOME.y))
+    await expect(workspace).toHaveAttribute('data-camera-zoom', String(SECOND_SPATIAL_HOME.zoom))
+    await cameraPanel.getByRole('button', { name: '从当前画面添加' }).click()
+
+    await saveAs(editor, cameraSessionProjectPath)
+    const firstAfter = readSpatialCamera(cameraSessionProjectPath, SPATIAL_SURFACE_ID)
+    const secondAfter = readSpatialCamera(cameraSessionProjectPath, SECOND_SPATIAL_SURFACE_ID)
+
+    expect(firstAfter.revision).toBeGreaterThan(firstBefore.revision)
+    expect(firstAfter.home).toEqual(SPATIAL_CAMERA_B)
+    expect(firstAfter.frames).toHaveLength(firstBefore.frames.length + 1)
+    expect(firstAfter.frames.at(-1)).toMatchObject(SPATIAL_CAMERA_B)
+
+    expect(secondAfter.frames).toHaveLength(secondBefore.frames.length + 1)
+    expect(secondAfter.frames.at(-1)).toMatchObject(SECOND_SPATIAL_HOME)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)

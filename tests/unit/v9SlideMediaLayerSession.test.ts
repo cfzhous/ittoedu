@@ -143,7 +143,8 @@ describe('V9 media authoring session (image/video/background)', () => {
     expect(state.history.past).toEqual([initial.history.present])
     expect(state.selection.selectionIds).toEqual(ids)
     const nodes = buildV9SlideWorkspaceSnapshot(state).document.nodes
-    expect(nodes.every((node) => node.type === 'video')).toBe(true)
+    expect(nodes.filter((node) => node.type !== 'teacher-controller').every((node) => node.type === 'video'))
+      .toBe(true)
     const first = nodes.find((node) => node.id === ids[0])!
     const second = nodes.find((node) => node.id === ids[1])!
     // Batch grid scales the 1280x720 clip while preserving its 16:9 aspect.

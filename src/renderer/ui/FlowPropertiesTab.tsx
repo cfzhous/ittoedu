@@ -81,6 +81,8 @@ export interface FlowPropertiesTabProps {
   onStructuralCommand?(command: FlowStructuralCommand): void
   /** Teacher-safe reason shown when structural commands (list items, table rows/columns) are not available. */
   structuralUnavailableReason?: string
+  /** When true, body text inputs (heading/paragraph/quote body, list items) become an in-place editing hint. */
+  inlineTextEditing?: boolean
 }
 
 type IconComponent = ComponentType<{ size?: number; 'aria-hidden'?: boolean }>
@@ -310,13 +312,27 @@ function InlineButton({
   )
 }
 
+/** C2: light teacher-facing hint shown when a body text field is edited in place. */
+function InlineTextEditingHint({ label }: { label: string }) {
+  return (
+    <div className="form-field">
+      <label>{label}</label>
+      <p className="property-hint" role="status" data-testid="flow-inline-text-editing-hint">
+        请在正文中就地编辑
+      </p>
+    </div>
+  )
+}
+
 function HeadingEditor({
   block,
   disabled,
+  inlineTextEditing,
   onPatch,
 }: {
   block: FlowHeadingBlock
   disabled: boolean
+  inlineTextEditing: boolean
   onPatch(blockId: string, patch: FlowBlockPatch): void
 }) {
   return (
@@ -335,12 +351,16 @@ function HeadingEditor({
         ]}
         onChange={(level) => onPatch(block.id, { level: Number(level) as FlowHeadingBlock['level'] })}
       />
-      <BufferedInput
-        label="标题文本"
-        value={block.text}
-        disabled={disabled}
-        onCommit={(text) => onPatch(block.id, { text })}
-      />
+      {inlineTextEditing
+        ? <InlineTextEditingHint label="标题文本" />
+        : (
+            <BufferedInput
+              label="标题文本"
+              value={block.text}
+              disabled={disabled}
+              onCommit={(text) => onPatch(block.id, { text })}
+            />
+          )}
     </BlockSection>
   )
 }
@@ -348,20 +368,26 @@ function HeadingEditor({
 function ParagraphEditor({
   block,
   disabled,
+  inlineTextEditing,
   onPatch,
 }: {
   block: FlowParagraphBlock
   disabled: boolean
+  inlineTextEditing: boolean
   onPatch(blockId: string, patch: FlowBlockPatch): void
 }) {
   return (
     <BlockSection icon={Type} title="段落" testId="flow-editor-paragraph">
-      <BufferedTextArea
-        label="段落文本"
-        value={block.text}
-        disabled={disabled}
-        onCommit={(text) => onPatch(block.id, { text })}
-      />
+      {inlineTextEditing
+        ? <InlineTextEditingHint label="段落文本" />
+        : (
+            <BufferedTextArea
+              label="段落文本"
+              value={block.text}
+              disabled={disabled}
+              onCommit={(text) => onPatch(block.id, { text })}
+            />
+          )}
     </BlockSection>
   )
 }
@@ -371,6 +397,7 @@ function ListEditor({
   disabled,
   structuralDisabled,
   structuralUnavailableReason,
+  inlineTextEditing,
   onPatch,
   onStructuralCommand,
 }: {
@@ -378,6 +405,7 @@ function ListEditor({
   disabled: boolean
   structuralDisabled: boolean
   structuralUnavailableReason?: string
+  inlineTextEditing: boolean
   onPatch(blockId: string, patch: FlowBlockPatch): void
   onStructuralCommand(command: FlowStructuralCommand): void
 }) {
@@ -403,17 +431,21 @@ function ListEditor({
         <div className="flow-list-items">
           {block.items.map((item, index) => (
             <div className="flow-list-item" key={item.id} data-testid={`flow-list-item-${index + 1}`}>
-              <BufferedInput
-                label={`列表项 ${index + 1}`}
-                value={item.text}
-                disabled={structuralDisabled}
-                onCommit={(text) => onStructuralCommand({
-                  blockId: block.id,
-                  kind: 'list.editItem',
-                  itemId: item.id,
-                  text,
-                })}
-              />
+              {inlineTextEditing
+                ? <InlineTextEditingHint label={`列表项 ${index + 1}`} />
+                : (
+                    <BufferedInput
+                      label={`列表项 ${index + 1}`}
+                      value={item.text}
+                      disabled={structuralDisabled}
+                      onCommit={(text) => onStructuralCommand({
+                        blockId: block.id,
+                        kind: 'list.editItem',
+                        itemId: item.id,
+                        text,
+                      })}
+                    />
+                  )}
               <div className="flow-list-item-actions">
                 <InlineButton
                   label={`上移列表项 ${index + 1}`}
@@ -465,20 +497,26 @@ function ListEditor({
 function QuoteEditor({
   block,
   disabled,
+  inlineTextEditing,
   onPatch,
 }: {
   block: FlowQuoteBlock
   disabled: boolean
+  inlineTextEditing: boolean
   onPatch(blockId: string, patch: FlowBlockPatch): void
 }) {
   return (
     <BlockSection icon={Quote} title="引用" testId="flow-editor-quote">
-      <BufferedTextArea
-        label="引用内容"
-        value={block.text}
-        disabled={disabled}
-        onCommit={(text) => onPatch(block.id, { text })}
-      />
+      {inlineTextEditing
+        ? <InlineTextEditingHint label="引用内容" />
+        : (
+            <BufferedTextArea
+              label="引用内容"
+              value={block.text}
+              disabled={disabled}
+              onCommit={(text) => onPatch(block.id, { text })}
+            />
+          )}
       <BufferedInput
         label="出处"
         value={block.citation ?? ''}
@@ -895,6 +933,7 @@ export function FlowPropertiesTab({
   onPatch,
   onStructuralCommand,
   structuralUnavailableReason,
+  inlineTextEditing = false,
 }: FlowPropertiesTabProps) {
   if (!block) {
     return <FlowPropertiesEmpty />
@@ -908,10 +947,20 @@ export function FlowPropertiesTab({
   return (
     <div className="properties-scroll" data-testid="flow-properties-tab">
       {block.type === 'heading' && (
-        <HeadingEditor block={block} disabled={disabled} onPatch={patch} />
+        <HeadingEditor
+          block={block}
+          disabled={disabled}
+          inlineTextEditing={inlineTextEditing}
+          onPatch={patch}
+        />
       )}
       {block.type === 'paragraph' && (
-        <ParagraphEditor block={block} disabled={disabled} onPatch={patch} />
+        <ParagraphEditor
+          block={block}
+          disabled={disabled}
+          inlineTextEditing={inlineTextEditing}
+          onPatch={patch}
+        />
       )}
       {block.type === 'list' && (
         <ListEditor
@@ -919,12 +968,18 @@ export function FlowPropertiesTab({
           disabled={disabled}
           structuralDisabled={structuralDisabled}
           structuralUnavailableReason={structuralUnavailableReason}
+          inlineTextEditing={inlineTextEditing}
           onPatch={patch}
           onStructuralCommand={structural}
         />
       )}
       {block.type === 'quote' && (
-        <QuoteEditor block={block} disabled={disabled} onPatch={patch} />
+        <QuoteEditor
+          block={block}
+          disabled={disabled}
+          inlineTextEditing={inlineTextEditing}
+          onPatch={patch}
+        />
       )}
       {block.type === 'divider' && (
         <BlockSection icon={Minus} title="分隔线" testId="flow-editor-divider">

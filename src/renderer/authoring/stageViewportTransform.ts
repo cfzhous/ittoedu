@@ -104,6 +104,29 @@ export function createStageViewportTransform(
   }
 }
 
+/**
+ * Returns the transient user-pan that puts one existing world point at the
+ * viewport center. This is useful for locate/reveal affordances and never
+ * changes the authored stage coordinates or zoom.
+ */
+export function stageViewportPanToCenterWorldPoint(
+  viewport: StageRect,
+  point: StagePoint,
+  zoom?: number,
+): StagePoint {
+  assertFinite(point.x, 'point.x')
+  assertFinite(point.y, 'point.y')
+  const base = createStageViewportTransform({
+    viewport,
+    zoom,
+    pan: { x: 0, y: 0 },
+  })
+  return {
+    x: viewport.x + viewport.width / 2 - (base.stageRect.x + point.x * base.scale),
+    y: viewport.y + viewport.height / 2 - (base.stageRect.y + point.y * base.scale),
+  }
+}
+
 export function worldToClient(
   transform: StageViewportTransform,
   point: StagePoint,

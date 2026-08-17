@@ -318,6 +318,37 @@ describe('ScenePanel document control port', () => {
     expect(legacyV8Sentinels.useStore).not.toHaveBeenCalled()
   })
 
+  it('hides separate shared-layer pages when the V9 owner supplies current-page controls', () => {
+    const onActivateGlobal = vi.fn()
+    const onActivateSurface = vi.fn()
+    render(<ScenePanel documentControl={{
+      hideSharedLayerEntries: true,
+      editingScope: 'scene',
+      globalElementCount: 2,
+      globalHasRuntime: false,
+      surfaceLayer: {
+        elementCount: 1,
+        hasDynamicContent: false,
+        onActivate: onActivateSurface,
+      },
+      scenes: [],
+      onAddScene: vi.fn(),
+      onActivateScene: vi.fn(),
+      onActivateGlobal,
+      onRenameScene: vi.fn(),
+      onDeleteScene: vi.fn(),
+      onDuplicateScene: vi.fn(),
+      onReorderScenes: vi.fn(),
+    }} />)
+
+    expect(screen.queryByTestId('global-layer-entry')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('surface-layer-entry')).not.toBeInTheDocument()
+    expect(onActivateGlobal).not.toHaveBeenCalled()
+    expect(onActivateSurface).not.toHaveBeenCalled()
+    expect(legacyV8Sentinels.useStore).not.toHaveBeenCalled()
+    expect(legacyV8Sentinels.ensurePresentation).not.toHaveBeenCalled()
+  })
+
   it('builds one ordered V9 composition with visibility and fallback semantics intact', () => {
     const componentFallback = componentItem('component-fallback', 10, 'asset-component')
     const runtimeFallback = runtimeItem('runtime-fallback', 15, 'asset-runtime')

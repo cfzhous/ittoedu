@@ -335,3 +335,497 @@ describe('FlowOutlinePanel presentational renderer', () => {
     expect(onSelectBlock).toHaveBeenCalledWith('block-section')
   })
 })
+
+describe('FlowWorkspace inline text editing (C1)', () => {
+  const inlineEditor = (container: HTMLElement) =>
+    container.querySelector('[data-flow-inline-editor]')
+  const surface = (container: HTMLElement) =>
+    container.querySelector('.flow-editor-surface')!
+
+  it('enters inline edit on double-click of a heading and commits exactly once on blur', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onPatchBlock={onPatchBlock} />,
+    )
+
+    const heading = container.querySelector('[data-flow-block-id="block-h1"]')!
+    expect(heading.tagName).toBe('H1')
+    fireEvent.doubleClick(heading)
+
+    const editor = inlineEditor(container)
+    expect(editor).not.toBeNull()
+    expect(editor?.tagName).toBe('TEXTAREA')
+    expect(editor?.getAttribute('aria-label')).toBeTruthy()
+    expect(editor?.getAttribute('data-flow-inline-field')).toBe('text')
+    // 编辑控件只替换当前块，不会把整篇 Flow 变成单一可编辑区域
+    expect(container.querySelector('[data-flow-block-id="block-paragraph"]')?.tagName).toBe('P')
+
+    fireEvent.change(editor!, { target: { value: '新标题' } })
+    fireEvent.blur(editor!)
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-h1', { type: 'heading', text: '新标题' })
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('enters inline edit with Enter after selecting a paragraph and commits exactly once via Ctrl+Enter', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-paragraph"
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+
+    const editor = inlineEditor(container)
+    expect(editor).not.toBeNull()
+    expect(editor?.getAttribute('data-flow-block-id')).toBe('block-paragraph')
+
+    fireEvent.change(editor!, { target: { value: '更新后的段落' } })
+    fireEvent.keyDown(editor!, { key: 'Enter', ctrlKey: true })
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-paragraph', {
+      type: 'paragraph',
+      text: '更新后的段落',
+    })
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('does not commit or cancel on Enter/Escape during composition and commits exactly once via Ctrl+Enter afterwards', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-h1"
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-h1"]')!)
+    const editor = inlineEditor(container)!
+    fireEvent.change(editor, { target: { value: '输入法文本' } })
+    fireEvent.compositionStart(editor)
+    fireEvent.keyDown(editor, { key: 'Enter', isComposing: true })
+    fireEvent.keyDown(editor, { key: 'Escape', isComposing: true })
+    expect(onPatchBlock).not.toHaveBeenCalled()
+    // composition 期间 Escape 未取消：编辑控件仍在
+    expect(inlineEditor(container)).not.toBeNull()
+
+    fireEvent.compositionEnd(editor)
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-h1', {
+      type: 'heading',
+      text: '输入法文本',
+    })
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('cancels on Escape without committing, and a later blur does not commit again', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onPatchBlock={onPatchBlock} />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-h1"]')!)
+    const editor = inlineEditor(container)!
+    fireEvent.change(editor, { target: { value: '临时文本' } })
+    fireEvent.keyDown(editor, { key: 'Escape' })
+
+    expect(onPatchBlock).not.toHaveBeenCalled()
+    expect(inlineEditor(container)).toBeNull()
+
+    // Escape 已退出编辑；随后发生的 blur 不得再次提交
+    fireEvent.blur(editor)
+    expect(onPatchBlock).not.toHaveBeenCalled()
+  })
+
+  it('does not commit when the draft equals the original text', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onPatchBlock={onPatchBlock} />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-paragraph"]')!)
+    const editor = inlineEditor(container)!
+    fireEvent.change(editor, { target: { value: '正文段落' } })
+    fireEvent.blur(editor)
+
+    expect(onPatchBlock).not.toHaveBeenCalled()
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('never enters inline edit and commits zero times under readOnly', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-h1"
+        readOnly
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-h1"]')!)
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+
+    expect(inlineEditor(container)).toBeNull()
+    expect(onPatchBlock).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-flow-block-id="block-h1"]')?.tagName).toBe('H1')
+  })
+
+  it('never enters inline edit while editingUnavailableReason is set', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-paragraph"
+        editingUnavailableReason="当前内容暂不可编辑"
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-paragraph"]')!)
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+
+    expect(inlineEditor(container)).toBeNull()
+    expect(onPatchBlock).not.toHaveBeenCalled()
+  })
+
+  it('emits only the current block ID and text patch without changing IDs, parents, order or other fields', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-paragraph"
+        onPatchBlock={onPatchBlock}
+      />,
+    )
+    const structure = () => JSON.stringify(
+      view.blocks.map((entry) => ({
+        blockId: entry.blockId,
+        parentId: entry.parentId,
+        index: entry.index,
+      })),
+    )
+    const before = structure()
+
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+    const editor = inlineEditor(container)!
+    fireEvent.change(editor, { target: { value: '更新后的段落' } })
+    fireEvent.blur(editor)
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-paragraph', {
+      type: 'paragraph',
+      text: '更新后的段落',
+    })
+    expect(structure()).toBe(before)
+    // 编辑只通过 callback 传出，不修改视图/工程数据
+    const editedBlock = view.blocks.find((entry) => entry.blockId === 'block-paragraph')?.block
+    if (!editedBlock || editedBlock.type !== 'paragraph') throw new Error('expected paragraph block')
+    expect(editedBlock.text).toBe('正文段落')
+  })
+
+  it('commits the current draft before switching to another block', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onPatchBlock={onPatchBlock} />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-h1"]')!)
+    const firstEditor = inlineEditor(container)!
+    fireEvent.change(firstEditor, { target: { value: '标题改动' } })
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-paragraph"]')!)
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-h1', { type: 'heading', text: '标题改动' })
+    expect(inlineEditor(container)?.getAttribute('data-flow-block-id')).toBe('block-paragraph')
+  })
+})
+
+describe('FlowWorkspace inline text editing (C2)', () => {
+  const inlineEditor = (container: HTMLElement) =>
+    container.querySelector('[data-flow-inline-editor]')
+  const surface = (container: HTMLElement) =>
+    container.querySelector('.flow-editor-surface')!
+
+  it('edits quote text in place and commits exactly once via onPatchBlock', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onPatchBlock={onPatchBlock} />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-quote"]')!)
+    const editor = inlineEditor(container)!
+    expect(editor).not.toBeNull()
+    expect(editor.getAttribute('data-flow-block-id')).toBe('block-quote')
+    expect(editor.getAttribute('aria-label')).toBeTruthy()
+
+    fireEvent.change(editor, { target: { value: '新的引用文字' } })
+    fireEvent.blur(editor)
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-quote', { type: 'quote', text: '新的引用文字' })
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('enters quote editing via Enter after selection and commits exactly once', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} selectedBlockId="block-quote" onPatchBlock={onPatchBlock} />,
+    )
+
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+    const editor = inlineEditor(container)!
+    fireEvent.change(editor, { target: { value: '引文改动' } })
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+
+    expect(onPatchBlock).toHaveBeenCalledTimes(1)
+    expect(onPatchBlock).toHaveBeenCalledWith('block-quote', { type: 'quote', text: '引文改动' })
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('edits two different list items by stable id with one structural commit each', () => {
+    const view = renderFlowFixture()
+    const onStructuralCommand = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onStructuralCommand={onStructuralCommand} />,
+    )
+    const item = (id: string) => container.querySelector(`[data-flow-list-item-id="${id}"]`)!
+
+    fireEvent.doubleClick(item('list-item-1'))
+    let editor = inlineEditor(container)!
+    expect(editor.getAttribute('data-flow-list-item-id')).toBe('list-item-1')
+    fireEvent.change(editor, { target: { value: '项目一改动' } })
+    fireEvent.blur(editor)
+
+    expect(onStructuralCommand).toHaveBeenCalledTimes(1)
+    expect(onStructuralCommand).toHaveBeenCalledWith({
+      blockId: 'block-list',
+      kind: 'list.editItem',
+      itemId: 'list-item-1',
+      text: '项目一改动',
+    })
+
+    fireEvent.doubleClick(item('list-item-2'))
+    editor = inlineEditor(container)!
+    expect(editor.getAttribute('data-flow-list-item-id')).toBe('list-item-2')
+    fireEvent.change(editor, { target: { value: '项目二改动' } })
+    fireEvent.blur(editor)
+
+    expect(onStructuralCommand).toHaveBeenCalledTimes(2)
+    expect(onStructuralCommand).toHaveBeenLastCalledWith({
+      blockId: 'block-list',
+      kind: 'list.editItem',
+      itemId: 'list-item-2',
+      text: '项目二改动',
+    })
+    expect(inlineEditor(container)).toBeNull()
+  })
+
+  it('enters the first list item via Enter after selecting the list block', () => {
+    const view = renderFlowFixture()
+    const onStructuralCommand = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-list"
+        onStructuralCommand={onStructuralCommand}
+      />,
+    )
+
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+    const editor = inlineEditor(container)!
+    expect(editor.getAttribute('data-flow-list-item-id')).toBe('list-item-1')
+    fireEvent.change(editor, { target: { value: '项目一改动' } })
+    fireEvent.blur(editor)
+
+    expect(onStructuralCommand).toHaveBeenCalledTimes(1)
+    expect(onStructuralCommand).toHaveBeenCalledWith({
+      blockId: 'block-list',
+      kind: 'list.editItem',
+      itemId: 'list-item-1',
+      text: '项目一改动',
+    })
+  })
+
+  it('keeps block id, item id, parent and order unchanged after list item edit', () => {
+    const view = renderFlowFixture()
+    const onStructuralCommand = vi.fn()
+    const { container } = render(
+      <FlowWorkspace view={view} onStructuralCommand={onStructuralCommand} />,
+    )
+    const structure = () => JSON.stringify(
+      view.blocks.map((entry) => ({
+        blockId: entry.blockId,
+        parentId: entry.parentId,
+        index: entry.index,
+      })),
+    )
+    const before = structure()
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-list-item-id="list-item-2"]')!)
+    const editor = inlineEditor(container)!
+    fireEvent.change(editor, { target: { value: '项目二改动' } })
+    fireEvent.blur(editor)
+
+    expect(onStructuralCommand).toHaveBeenCalledTimes(1)
+    expect(onStructuralCommand).toHaveBeenCalledWith({
+      blockId: 'block-list',
+      kind: 'list.editItem',
+      itemId: 'list-item-2',
+      text: '项目二改动',
+    })
+    expect(structure()).toBe(before)
+    const listBlock = view.blocks.find((entry) => entry.blockId === 'block-list')!.block
+    if (listBlock.type !== 'list') throw new Error('expected list block')
+    expect(listBlock.items.find((item) => item.id === 'list-item-2')?.text).toBe('项目二')
+  })
+
+  it('does not fire structural shortcuts while a list item is being edited', () => {
+    const view = renderFlowFixture()
+    const onDeleteBlock = vi.fn()
+    const onDuplicateBlock = vi.fn()
+    const onMoveBlock = vi.fn()
+    const onStructuralCommand = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-list"
+        onDeleteBlock={onDeleteBlock}
+        onDuplicateBlock={onDuplicateBlock}
+        onMoveBlock={onMoveBlock}
+        onStructuralCommand={onStructuralCommand}
+      />,
+    )
+    const root = surface(container)
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-list-item-id="list-item-1"]')!)
+    const editor = inlineEditor(container)!
+    expect(editor).not.toBeNull()
+
+    // 事件从编辑控件冒泡到根级
+    fireEvent.keyDown(editor, { key: 'Delete' })
+    fireEvent.keyDown(editor, { key: 'Backspace' })
+    fireEvent.keyDown(editor, { key: 'd', ctrlKey: true })
+    fireEvent.keyDown(editor, { key: 'd', metaKey: true })
+    fireEvent.keyDown(editor, { key: 'ArrowUp', altKey: true })
+    fireEvent.keyDown(editor, { key: 'ArrowDown', altKey: true })
+    // 直接命中根级
+    fireEvent.keyDown(root, { key: 'Delete' })
+    fireEvent.keyDown(root, { key: 'd', ctrlKey: true })
+    fireEvent.keyDown(root, { key: 'ArrowUp', altKey: true })
+
+    expect(onDeleteBlock).not.toHaveBeenCalled()
+    expect(onDuplicateBlock).not.toHaveBeenCalled()
+    expect(onMoveBlock).not.toHaveBeenCalled()
+    expect(onStructuralCommand).not.toHaveBeenCalled()
+    // 编辑控件仍在：快捷键没有触发提交或取消
+    expect(inlineEditor(container)).not.toBeNull()
+  })
+
+  it('does not fire structural shortcuts during composition', () => {
+    const view = renderFlowFixture()
+    const onDeleteBlock = vi.fn()
+    const onDuplicateBlock = vi.fn()
+    const onMoveBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-list"
+        onDeleteBlock={onDeleteBlock}
+        onDuplicateBlock={onDuplicateBlock}
+        onMoveBlock={onMoveBlock}
+      />,
+    )
+    const root = surface(container)
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-list-item-id="list-item-1"]')!)
+    const editor = inlineEditor(container)!
+    fireEvent.compositionStart(editor)
+    fireEvent.keyDown(editor, { key: 'Delete', isComposing: true })
+    fireEvent.keyDown(editor, { key: 'Backspace', isComposing: true })
+    fireEvent.keyDown(editor, { key: 'd', ctrlKey: true, isComposing: true })
+    fireEvent.keyDown(editor, { key: 'ArrowUp', altKey: true, isComposing: true })
+    fireEvent.keyDown(root, { key: 'Delete', isComposing: true })
+    fireEvent.keyDown(root, { key: 'd', ctrlKey: true, isComposing: true })
+
+    expect(onDeleteBlock).not.toHaveBeenCalled()
+    expect(onDuplicateBlock).not.toHaveBeenCalled()
+    expect(onMoveBlock).not.toHaveBeenCalled()
+    expect(inlineEditor(container)).not.toBeNull()
+  })
+
+  it('still fires structural shortcuts and keeps the selected toolbar when not editing', () => {
+    const view = renderFlowFixture()
+    const onDeleteBlock = vi.fn()
+    const onDuplicateBlock = vi.fn()
+    const onMoveBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-paragraph"
+        onDeleteBlock={onDeleteBlock}
+        onDuplicateBlock={onDuplicateBlock}
+        onMoveBlock={onMoveBlock}
+      />,
+    )
+    const root = surface(container)
+
+    fireEvent.keyDown(root, { key: 'Delete' })
+    expect(onDeleteBlock).toHaveBeenCalledWith('block-paragraph')
+    fireEvent.keyDown(root, { key: 'd', ctrlKey: true })
+    expect(onDuplicateBlock).toHaveBeenCalledWith('block-paragraph')
+    fireEvent.keyDown(root, { key: 'ArrowUp', altKey: true })
+    expect(onMoveBlock).toHaveBeenCalledWith('block-paragraph', 'up')
+
+    expect(container.querySelector('[data-testid="flow-workspace-block-toolbar"]')).not.toBeNull()
+    fireEvent.click(container.querySelector('[data-testid="flow-workspace-block-delete"]')!)
+    expect(onDeleteBlock).toHaveBeenCalledTimes(2)
+  })
+
+  it('commits zero text and structural callbacks under readOnly', () => {
+    const view = renderFlowFixture()
+    const onPatchBlock = vi.fn()
+    const onStructuralCommand = vi.fn()
+    const onDeleteBlock = vi.fn()
+    const { container } = render(
+      <FlowWorkspace
+        view={view}
+        selectedBlockId="block-list"
+        readOnly
+        onPatchBlock={onPatchBlock}
+        onStructuralCommand={onStructuralCommand}
+        onDeleteBlock={onDeleteBlock}
+      />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[data-flow-block-id="block-quote"]')!)
+    fireEvent.doubleClick(container.querySelector('[data-flow-list-item-id="list-item-1"]')!)
+    fireEvent.keyDown(surface(container), { key: 'Enter' })
+    fireEvent.keyDown(surface(container), { key: 'Delete' })
+
+    expect(inlineEditor(container)).toBeNull()
+    expect(onPatchBlock).not.toHaveBeenCalled()
+    expect(onStructuralCommand).not.toHaveBeenCalled()
+    expect(onDeleteBlock).not.toHaveBeenCalled()
+  })
+})

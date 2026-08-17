@@ -25,7 +25,7 @@ import { SpatialSurfaceHost } from './surfaces/spatial/SpatialSurfaceHost'
 import type { SurfaceDiagnostic, SurfaceHost } from './surfaces/SurfaceHost'
 import {
   ScenePickerOverlay,
-  type ScenePickerScene,
+  type ScenePickerLocation,
 } from './ScenePickerOverlay'
 
 export interface PublishedCourseAppOptions {
@@ -213,8 +213,18 @@ export class PublishedCourseApp {
       if (surface?.type === 'spatial-2d' && host) {
         const frame = surface.camera.frames.find((entry) => entry.id === target.cameraFrameId)
         if (!frame) throw new Error(`Unknown Spatial camera frame: ${target.cameraFrameId}`)
-        await host.setLocationId(target.id)
-        await host.setCamera(spatialCameraFromPose(frame, { width: 1120, height: 760 }))
+        // The Spatial host rebuilds its controller when the location changes.
+        // Make the single course-location truth visible to that rebuild, then
+        // restore it if a host operation fails before navigation completes.
+        const previousLocationId = this.#currentLocationId
+        this.#currentLocationId = locationId
+        try {
+          await host.setLocationId(target.id)
+          await host.setCamera(spatialCameraFromPose(frame, { width: 1120, height: 760 }))
+        } catch (error) {
+          this.#currentLocationId = previousLocationId
+          throw error
+        }
       }
     }
     this.#currentLocationId = locationId
@@ -414,10 +424,30 @@ export class PublishedCourseApp {
         executeTeacherControllerAction: (action) => this.#handleCourseTeacherAction(action),
         playbackControls: this.project.playback.controls,
         initialMuted: this.#muted,
+        audioChangeSource: this.events,
+        courseProgressSource: {
+          getLocations: () => this.#locations.map((location) => ({
+            id: location.id,
+            name: location.label,
+          })),
+          getCurrentLocationId: () => this.#currentLocationId,
+          getStateLabel: () => this.#currentSlideStateLabel(),
+        },
       })
       this.#spatialHosts.set(surface.id, spatial)
       return spatial
     })
+  }
+
+  #currentSlideStateLabel(): string | null {
+    const locationId = this.#currentLocationId
+    if (!locationId) return null
+    const location = this.#locationMap.get(locationId)
+    if (!location || location.kind !== 'slide-scene') return null
+    const host = this.#slideHosts.get(location.surfaceId)
+    if (!host || host.sceneId !== location.sceneId || !host.stateId) return null
+    const scene = host.document.scenes.find((entry) => entry.id === host.sceneId)
+    return scene?.presentation?.states.find((entry) => entry.id === host.stateId)?.name ?? null
   }
 
   async #mount(): Promise<void> {
@@ -443,11 +473,11 @@ export class PublishedCourseApp {
 
     this.#scenePicker = new ScenePickerOverlay({
       stage: this.#root,
-      scenes: this.#pickerScenes(),
-      onSelect: (sceneId, bypassNavigationGuards) => {
-        void this.goToScene(
-          sceneId,
-          undefined,
+      scenes: [],
+      locations: this.#pickerLocations(),
+      onSelect: (locationId, bypassNavigationGuards) => {
+        void this.navigate(
+          locationId,
           bypassNavigationGuards ? 'author-force' : 'teacher-controller',
         )
       },
@@ -462,20 +492,14 @@ export class PublishedCourseApp {
     }
   }
 
-  /** Slide-scene locations, deduplicated by scene id, in course order. */
-  #pickerScenes(): ScenePickerScene[] {
-    const scenes: ScenePickerScene[] = []
-    const seen = new Set<string>()
-    for (const location of this.#locations) {
-      if (location.kind !== 'slide-scene' || seen.has(location.sceneId)) continue
-      seen.add(location.sceneId)
-      const surface = this.project.surfaces.find((entry) => entry.id === location.surfaceId)
-      const scene = surface?.type === 'slide'
-        ? surface.scenes.find((entry) => entry.id === location.sceneId)
-        : undefined
-      scenes.push({ id: location.sceneId, name: scene?.name ?? location.sceneId })
-    }
-    return scenes
+  /** Every published location, in the canonical course navigation order. */
+  #pickerLocations(): ScenePickerLocation[] {
+    return this.#locations.map((location) => ({
+      id: location.id,
+      locationId: location.id,
+      name: location.label,
+      kind: location.kind,
+    }))
   }
 
   /**
@@ -535,12 +559,7 @@ export class PublishedCourseApp {
         'teacher-controller',
       )
       else if (action.type === 'scene.open-picker') {
-        const current = this.#currentLocationId
-          ? this.#locationMap.get(this.#currentLocationId)
-          : undefined
-        this.#scenePicker?.open(
-          current?.kind === 'slide-scene' ? current.sceneId : null,
-        )
+        this.#scenePicker?.open(this.#currentLocationId)
       } else if (action.type === 'audio.toggle-mute') {
         this.#muted = !this.#muted
         this.#root.querySelectorAll<HTMLMediaElement>('audio, video')

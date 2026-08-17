@@ -37,6 +37,16 @@ export interface FlowOutlineEntry {
 
 export type FlowEditorLayerScope = 'global' | 'surface'
 
+/**
+ * Explicit ownership for a Flow authoring-layer interaction. Layer item IDs
+ * are not sufficient because the current Flow projection contains both
+ * project-global and surface-owned entries.
+ */
+export interface FlowEditorLayerTarget {
+  readonly source: FlowEditorLayerScope
+  readonly layerItemId: string
+}
+
 export interface FlowEditorLayerView {
   readonly source: FlowEditorLayerScope
   readonly scopedVisible: boolean

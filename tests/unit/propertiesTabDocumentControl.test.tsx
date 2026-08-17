@@ -337,6 +337,52 @@ describe('PropertiesTab document control', () => {
     expect(storeAccess.getState).not.toHaveBeenCalled()
   })
 
+  it('edits the explicit global controller from a scene view without state overrides', () => {
+    const controller = createTeacherControllerNode({
+      id: 'global-controller-proxy',
+      title: '课程控制器',
+    })
+    const onUpdateNode = vi.fn(() => true)
+    const control = controlFor([controller], onUpdateNode)
+    render(<PropertiesTab documentControl={{
+      ...control,
+      target: {
+        ...control.target!,
+        source: 'global',
+        projectRevision: 12,
+      },
+      scopeLabel: '全课控制器',
+      scopeDescription: '本次修改将应用到整门课。',
+      overrideActive: true,
+      controllerScenes: [],
+    }} />)
+
+    expect(screen.getByText('全课控制器')).toBeInTheDocument()
+    expect(screen.getByText('本次修改将应用到整门课。')).toBeInTheDocument()
+    expect(screen.getByLabelText('控制器标题')).toHaveValue('课程控制器')
+    expect(screen.queryByTestId('controlled-properties-controller-gate')).not.toBeInTheDocument()
+    expect(screen.queryByText('此元素已有当前状态设置。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '恢复基础值' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('控制器标题'), {
+      target: { value: '全课导航' },
+    })
+    fireEvent.blur(screen.getByLabelText('控制器标题'))
+    fireEvent.click(screen.getByLabelText('紧凑布局'))
+
+    expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'global',
+      projectRevision: 12,
+      layerItemId: controller.id,
+    }), { title: '全课导航' })
+    expect(onUpdateNode).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'global',
+      layerItemId: controller.id,
+    }), { compact: true })
+    expect(storeAccess.hook).not.toHaveBeenCalled()
+    expect(storeAccess.getState).not.toHaveBeenCalled()
+  })
+
   it('gates empty and multi-selection without falling back to V8', () => {
     const text = createTextNode({ id: 'selected-text' })
     const shape = createShapeNode('ellipse', { id: 'selected-shape' })

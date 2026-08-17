@@ -19,7 +19,10 @@ import {
   worldGroupTransform,
   zoomCameraAt,
 } from '../../src/renderer/ui/spatialWorkspaceAuthoring'
-import { SpatialWorkspace } from '../../src/renderer/ui/SpatialWorkspace'
+import {
+  SpatialWorkspace,
+  type SpatialWorkspaceScreenController,
+} from '../../src/renderer/ui/SpatialWorkspace'
 
 function createSpatial(items: LayerItem[]): SpatialSurfaceDocument {
   return {
@@ -58,6 +61,34 @@ function createWorldText(
     height,
   }), order)
   return item
+}
+
+function createScreenController(): SpatialWorkspaceScreenController {
+  return {
+    source: 'global',
+    layerItemId: 'global-controller',
+    label: '教师控制器',
+    title: '课堂导航',
+    compact: false,
+    locked: false,
+    opacity: 1,
+    frame: { x: 120, y: 42, width: 300, height: 72, rotation: 0 },
+  }
+}
+
+function createSpatialWithCameraFrames(items: LayerItem[]): SpatialSurfaceDocument {
+  const spatial = createSpatial(items)
+  return {
+    ...spatial,
+    camera: {
+      home: { x: 0, y: 0, zoom: 1 },
+      frames: [
+        { id: 'half', name: '缩小', x: 10, y: 20, zoom: 0.5 },
+        { id: 'one', name: '正常', x: 80, y: 20, zoom: 1 },
+        { id: 'double', name: '放大', x: 200, y: 50, zoom: 2 },
+      ],
+    },
+  }
 }
 
 function expectPointClose(
@@ -197,5 +228,154 @@ describe('SpatialWorkspace one-gesture callbacks', () => {
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalledWith(['t1', 't2'])
     expect(onTransformEnd).not.toHaveBeenCalled()
+  })
+
+  it('keeps the global controller as a fixed screen layer across 0.5/1/2 cameras and pan', () => {
+    const spatial = createSpatialWithCameraFrames([
+      createWorldText('world-title', '世界文字', 100, 80),
+    ])
+    const screenController = createScreenController()
+    const screenRects: Array<Record<string, string>> = []
+    const worldRects: Array<Record<string, string>> = []
+
+    for (const frameId of ['half', 'one', 'double']) {
+      const { container, unmount } = render(h(SpatialWorkspace, {
+        spatial,
+        viewportSize: { width: 800, height: 500 },
+        activeCameraFrameId: frameId,
+        selectedLayerItemIds: ['world-title'],
+        screenController,
+        selectedScreenControllerTarget: {
+          source: 'global',
+          layerItemId: screenController.layerItemId,
+        },
+        onSelect: vi.fn(),
+        onTransformEnd: vi.fn(),
+      }))
+      const controller = container.querySelector('[data-testid="spatial-screen-controller"]')
+      const screenSelection = container.querySelector('[data-testid="spatial-screen-selection"]')
+      const worldSelection = container.querySelector(
+        '[data-testid="spatial-selection"][data-layer-item-id="world-title"]',
+      )
+      const world = container.querySelector('[data-spatial-world]')
+      const minimap = container.querySelector('[data-testid="spatial-minimap"]')
+
+      expect(controller).not.toBeNull()
+      expect(screenSelection).not.toBeNull()
+      expect(worldSelection).not.toBeNull()
+      expect(world).not.toBeNull()
+      expect(minimap).not.toBeNull()
+      expect(world!.querySelector('[data-layer-item-id="global-controller"]')).toBeNull()
+      expect(minimap!.querySelector('[data-layer-item-id="global-controller"]')).toBeNull()
+      expect(world!.contains(controller!)).toBe(false)
+      expect(controller).toHaveAttribute('data-layer-source', 'global')
+      expect(controller).toHaveAttribute('data-layer-item-id', 'global-controller')
+
+      screenRects.push({
+        left: (controller as HTMLElement).style.left,
+        top: (controller as HTMLElement).style.top,
+        width: (controller as HTMLElement).style.width,
+        height: (controller as HTMLElement).style.height,
+      })
+      worldRects.push({
+        left: (worldSelection as HTMLElement).style.left,
+        top: (worldSelection as HTMLElement).style.top,
+        width: (worldSelection as HTMLElement).style.width,
+        height: (worldSelection as HTMLElement).style.height,
+      })
+      unmount()
+    }
+
+    expect(screenRects).toEqual([
+      { left: '120px', top: '42px', width: '300px', height: '72px' },
+      { left: '120px', top: '42px', width: '300px', height: '72px' },
+      { left: '120px', top: '42px', width: '300px', height: '72px' },
+    ])
+    expect(new Set(worldRects.map((rect) => JSON.stringify(rect))).size).toBe(3)
+  })
+
+  it('focuses the fixed screen controller for a locate request without moving the camera', () => {
+    const spatial = createSpatialWithCameraFrames([])
+    const screenController = createScreenController()
+    const { container } = render(h(SpatialWorkspace, {
+      spatial,
+      viewportSize: { width: 800, height: 500 },
+      activeCameraFrameId: 'double',
+      screenController,
+      selectedScreenControllerTarget: {
+        source: 'global',
+        layerItemId: screenController.layerItemId,
+      },
+      controllerLocateRequest: {
+        layerItemId: screenController.layerItemId,
+        requestId: 1,
+      },
+      onSelect: vi.fn(),
+      onTransformEnd: vi.fn(),
+    }))
+
+    const root = container.querySelector('[data-testid="spatial-workspace"]')!
+    const controller = container.querySelector('[data-testid="spatial-screen-controller"]')!
+    expect(document.activeElement).toBe(controller)
+    expect(root).toHaveAttribute('data-camera-x', '200')
+    expect(root).toHaveAttribute('data-camera-y', '50')
+    expect(root).toHaveAttribute('data-camera-zoom', '2')
+  })
+
+  it('writes one global screen-controller transform on pointer up without writing a world item', () => {
+    const spatial = createSpatialWithCameraFrames([
+      createWorldText('world-title', '世界文字', 100, 80),
+    ])
+    const onSelect = vi.fn()
+    const onTransformEnd = vi.fn()
+    const onSelectScreenController = vi.fn()
+    const onScreenControllerTransformEnd = vi.fn()
+    const screenController = createScreenController()
+    const { container } = render(h(SpatialWorkspace, {
+      spatial,
+      viewportSize: { width: 800, height: 500 },
+      activeCameraFrameId: 'double',
+      screenController,
+      onSelect,
+      onTransformEnd,
+      onSelectScreenController,
+      onScreenControllerTransformEnd,
+    }))
+    const root = container.querySelector('[data-testid="spatial-workspace"]')!
+    const controller = container.querySelector('[data-testid="spatial-screen-controller"]')!
+
+    fireEvent.pointerDown(controller, {
+      pointerId: 13,
+      button: 0,
+      buttons: 1,
+      clientX: 250,
+      clientY: 90,
+    })
+    fireEvent.pointerMove(root, {
+      pointerId: 13,
+      button: 0,
+      buttons: 1,
+      clientX: 290,
+      clientY: 115,
+    })
+    fireEvent.pointerUp(root, { pointerId: 13, button: 0 })
+
+    expect(onSelectScreenController).toHaveBeenCalledTimes(1)
+    expect(onSelectScreenController).toHaveBeenCalledWith({
+      source: 'global',
+      layerItemId: 'global-controller',
+    })
+    expect(onScreenControllerTransformEnd).toHaveBeenCalledTimes(1)
+    expect(onScreenControllerTransformEnd).toHaveBeenCalledWith({
+      source: 'global',
+      layerItemId: 'global-controller',
+      x: 160,
+      y: 67,
+      width: 300,
+      height: 72,
+      rotation: 0,
+    })
+    expect(onTransformEnd).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })

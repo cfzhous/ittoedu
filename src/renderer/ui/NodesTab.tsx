@@ -49,7 +49,33 @@ const nodeIcon = {
   shape: Square,
   'teacher-controller': SlidersHorizontal,
   'external-component': Box,
+  component: Box,
+  runtime: Box,
 } as const
+
+export type NodesTabEffectiveLayerSource = 'global' | 'surface' | 'scene' | 'world'
+export type NodesTabEffectiveLayerKind = keyof typeof nodeIcon
+
+/**
+ * A current-page layer row with explicit ownership. This is intentionally a
+ * read-only projection: it never becomes a second layer model or tries to
+ * infer source ownership from a layer ID.
+ */
+export interface NodesTabEffectiveLayer {
+  readonly source: NodesTabEffectiveLayerSource
+  readonly layerItemId: string
+  readonly label: string
+  readonly kind: NodesTabEffectiveLayerKind
+  readonly order: number
+  readonly visible: boolean
+  readonly locked: boolean
+  readonly effectiveVisible: boolean
+  readonly selected: boolean
+  readonly controller?: boolean
+  /** Shared content without a narrow authoring command remains view-only. */
+  readonly viewOnly?: boolean
+  readonly impactLabel?: string
+}
 
 export interface NodesTabDocumentControl {
   readonly editingScope: 'scene' | 'surface' | 'global'
@@ -64,6 +90,13 @@ export interface NodesTabDocumentControl {
   readonly omittedItemsReason?: string
   /** Disables whole-list ordering until every effective item participates. */
   readonly reorderUnavailableReason?: string
+  /**
+   * Optional V9 current-page projection. When supplied, it replaces the
+   * scope-local legacy list with a source-explicit, non-reorderable list.
+   */
+  readonly effectiveLayers?: readonly NodesTabEffectiveLayer[]
+  onSelectEffectiveLayer?(layer: NodesTabEffectiveLayer): void
+  onLocateController?(layer: NodesTabEffectiveLayer): void
   /** The owner decides whether an additive request extends, toggles, or replaces selection. */
   onSelectNode(nodeId: string | null, additive: boolean): void
   onDeleteNode(nodeId: string): void
@@ -251,7 +284,122 @@ function SortableNode({
   )
 }
 
+function effectiveLayerSourceLabel(source: NodesTabEffectiveLayerSource): string {
+  switch (source) {
+    case 'global': return '全课内容'
+    case 'surface': return '当前内容共用'
+    case 'world': return '空间内容'
+    case 'scene': return '当前页面'
+  }
+}
+
+function EffectiveLayerList({
+  contextKey,
+  effectiveLayers: layers,
+  onSelectEffectiveLayer,
+  onLocateController,
+}: Pick<NodesTabDocumentControl,
+  'contextKey' | 'effectiveLayers' | 'onSelectEffectiveLayer' | 'onLocateController'>) {
+  const [inspectedSharedLayer, setInspectedSharedLayer] = useState<{
+    readonly source: NodesTabEffectiveLayerSource
+    readonly layerItemId: string
+  } | null>(null)
+  useEffect(() => {
+    setInspectedSharedLayer(null)
+  }, [contextKey])
+  const sortedLayers = [...(layers ?? [])].sort((left, right) =>
+    left.order - right.order || left.layerItemId.localeCompare(right.layerItemId),
+  )
+  return (
+    <div className="nodes-tree nodes-tree--effective" data-testid="nodes-tab">
+      <div className="tree-root">
+        <ChevronDown size={14} />
+        <Layers3 size={15} />
+        <span>当前页面图层</span>
+      </div>
+      {sortedLayers.length === 0 ? (
+        <div className="empty-state">当前页面没有可查看的图层</div>
+      ) : (
+        <div className="nodes-list" role="list">
+          {sortedLayers.map((layer) => {
+            const Icon = nodeIcon[layer.kind]
+            const sourceLabel = effectiveLayerSourceLabel(layer.source)
+            const stateLabel = `${layer.visible ? '显示' : '隐藏'} · ${layer.locked ? '锁定' : '未锁定'}`
+            const controllerLabel = `定位控制器“${layer.label}”`
+            const selected = inspectedSharedLayer === null
+              ? layer.selected
+              : inspectedSharedLayer.source === layer.source &&
+                inspectedSharedLayer.layerItemId === layer.layerItemId
+            return (
+              <div
+                key={`${layer.source}:${layer.layerItemId}`}
+                className={`node-item node-item--effective${selected ? ' node-item--selected' : ''}`}
+                data-testid={`effective-layer-item-${layer.source}-${layer.layerItemId}`}
+                data-layer-source={layer.source}
+                data-layer-item-id={layer.layerItemId}
+                data-layer-effective-visible={layer.effectiveVisible}
+                data-layer-view-only={layer.viewOnly ? 'true' : 'false'}
+                role="listitem"
+              >
+                <button
+                  type="button"
+                  className="node-item__effective-select"
+                  aria-pressed={selected}
+                  aria-label={`${layer.label}（${sourceLabel} · ${stateLabel}）`}
+                  onClick={() => {
+                    setInspectedSharedLayer(
+                      layer.viewOnly
+                        ? { source: layer.source, layerItemId: layer.layerItemId }
+                        : null,
+                    )
+                    onSelectEffectiveLayer?.(layer)
+                  }}
+                >
+                  <span className="node-type-icon" title={layer.kind}>
+                    <Icon size={15} />
+                  </span>
+                  <span className="node-name">{layer.label}</span>
+                  <span className="node-item__effective-source">{sourceLabel}</span>
+                  <span className="node-item__effective-state">{stateLabel}</span>
+                </button>
+                {layer.controller ? (
+                  <button
+                    type="button"
+                    className="secondary-button node-item__locate-controller"
+                    data-testid={`locate-controller-${layer.source}-${layer.layerItemId}`}
+                    aria-label={controllerLabel}
+                    title={layer.effectiveVisible
+                      ? '在当前画布中定位控制器'
+                      : '控制器当前不可见，无法定位到画布'}
+                    disabled={!layer.effectiveVisible}
+                    onClick={() => {
+                      setInspectedSharedLayer(null)
+                      onLocateController?.(layer)
+                    }}
+                  >
+                    定位控制器
+                  </button>
+                ) : layer.viewOnly ? (
+                  <span className="node-item__effective-impact" role="status">
+                    {layer.impactLabel ?? '当前仅可查看影响范围'}
+                  </span>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div className="tree-order-note">
+        当前页面按实际叠放顺序显示；共用内容保留原有数据和影响范围。
+      </div>
+    </div>
+  )
+}
+
 export function NodesTab({ documentControl }: NodesTabProps = {}) {
+  if (documentControl?.effectiveLayers) {
+    return <EffectiveLayerList {...documentControl} />
+  }
   if (documentControl) return <NodesTabView {...documentControl} />
   return <LegacyNodesTabAdapter />
 }

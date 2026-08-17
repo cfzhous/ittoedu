@@ -62,9 +62,9 @@ Coordinator 是唯一能写权威 Project、构建图和共享接口的人。小
 
 所有画布项、控制器、Runtime 和 Component 都作为显式图层项参与同一层级关系。稳定内容尽可能是 Native；动态载体公开可编辑内容、素材、关键参数和可选择区域。
 
-首次构建后保留稳定 project/surface/scene/layerItem/binding ID。教师手工编辑后不得全量重建覆盖。对“修改当前选中项”先运行 `npm run current:course-selection` 读取编辑器发布的 `projectPath + dirty + projectRevision + authoringAddress`，不要用会话 `hitId` 定位。
+首次构建后保留稳定 project/surface/scene/layerItem/binding ID。教师手工编辑后不得全量重建覆盖。当前编辑器没有可见 AI（没有复制引用、Clipboard、Patch 应用入口）；“修改当前选中项”优先由教师在编辑器中就地修改，或由 Builder 读取当前工程后输出窄 Patch。不要用会话 `hitId` 定位；跨保存定位使用稳定 `authoringAddress`。
 
-输出单个 `op=replace` 的 JSON Patch。工程正在编辑器中打开时，让教师用“应用 AI Patch”导入，使修改进入同一 Undo/Redo 事务；工程关闭时才运行 `npm run patch:course-project -- --project <project.h5lesson> --patch <patch.json>`，它会验证临时副本并原子更新 Project 与 `course.html`。revision 冲突或选择失效时重新读取，不猜测合并。Agent Kit `patch` 只用于尚未编译的语义构建状态，不替代产品工程 Patch。
+输出单个 `op=replace` 的 JSON Patch。工程仍在编辑器中打开时不要运行磁盘 Patch（它会拒绝覆盖，且当前编辑器没有“应用 AI Patch”导入入口）；请回编辑器直接修改，或先确认工程已关闭。工程关闭后运行 `npm run patch:course-project -- --project <project.h5lesson> --patch <patch.json>`，它会验证临时副本并原子更新 Project 与 `course.html`。revision 冲突或选择失效时重新读取，不猜测合并。Agent Kit `patch` 只用于尚未编译的语义构建状态，不替代产品工程 Patch。
 
 交互后返回编辑的当前画面是会话检查点，不自动写成默认答案；只有教师显式保存为命名状态时才持久化。
 

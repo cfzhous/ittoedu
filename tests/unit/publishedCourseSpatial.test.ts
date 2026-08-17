@@ -4,6 +4,7 @@ import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPub
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,
+  SlideSurfaceDocument,
   ScopedLayerItem,
   SpatialSurfaceDocument,
 } from '@/shared/courseProjectTypes'
@@ -32,7 +33,7 @@ function spatialSurfaceDocument(): SpatialSurfaceDocument {
   }
 }
 
-function teacherControllerLayer(): ScopedLayerItem {
+function teacherControllerLayer(options: { showSceneProgress?: boolean } = {}): ScopedLayerItem {
   return {
     item: {
       layerItemId: 'course-teacher-controller',
@@ -50,7 +51,7 @@ function teacherControllerLayer(): ScopedLayerItem {
         nativeType: 'teacher-controller',
         data: {
           title: '教师控制台',
-          showSceneProgress: false,
+          showSceneProgress: options.showSceneProgress ?? false,
           compact: false,
           collapsible: true,
           defaultCollapsed: false,
@@ -77,10 +78,27 @@ function teacherControllerLayer(): ScopedLayerItem {
   }
 }
 
-function spatialProject(): CourseProjectDocument {
+function spatialProject(options: {
+  includeSlideLocation?: boolean
+  showSceneProgress?: boolean
+} = {}): CourseProjectDocument {
   const project = createCourseProject({ id: 'published-spatial', title: '空间发布课件' })
   const spatial = spatialSurfaceDocument()
-  project.surfaces = [spatial]
+  const slide: SlideSurfaceDocument = {
+    id: 'slide-surface',
+    title: '导入',
+    type: 'slide',
+    canvas: { width: 1280, height: 720 },
+    surfaceLayerItems: [],
+    scenes: [{
+      id: 'slide-scene-1',
+      name: '导入',
+      backgroundColor: '#ffffff',
+      layerItems: [],
+      interactions: [],
+    }],
+  }
+  project.surfaces = options.includeSlideLocation ? [spatial, slide] : [spatial]
   project.locations = [
     {
       id: 'location-spatial-1',
@@ -96,6 +114,13 @@ function spatialProject(): CourseProjectDocument {
       surfaceId: spatial.id,
       cameraFrameId: 'frame-2',
     },
+    ...(options.includeSlideLocation ? [{
+      id: 'location-slide-1',
+      label: '导入',
+      kind: 'slide-scene' as const,
+      surfaceId: slide.id,
+      sceneId: 'slide-scene-1',
+    }] : []),
     {
       id: 'location-spatial-3',
       label: '镜头三',
@@ -105,7 +130,29 @@ function spatialProject(): CourseProjectDocument {
     },
   ]
   project.startLocationId = 'location-spatial-1'
-  project.globalLayerItems = [teacherControllerLayer()]
+  project.globalLayerItems = [teacherControllerLayer({
+    showSceneProgress: options.showSceneProgress,
+  })]
+  if (options.includeSlideLocation) {
+    project.mixedPrintPlan = {
+      pageSize: 'A4',
+      orientation: 'auto',
+      entries: [
+        {
+          id: 'print-spatial',
+          kind: 'spatial-frames',
+          surfaceId: spatial.id,
+          cameraFrameIds: spatial.camera.frames.map((frame) => frame.id),
+        },
+        {
+          id: 'print-slide',
+          kind: 'slide-scenes',
+          surfaceId: slide.id,
+          sceneIds: ['slide-scene-1'],
+        },
+      ],
+    }
+  }
   return courseProjectDocumentSchema.parse(project)
 }
 
@@ -229,6 +276,41 @@ describe('PublishedCourseApp Spatial wiring', () => {
 
     expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
       .toHaveTextContent('声音 · 关')
+
+    await app.destroy()
+    root.remove()
+    history.replaceState(null, '', '#')
+  })
+
+  it('wires the Spatial controller to live course mute and all-location progress', async () => {
+    history.replaceState(null, '', '#')
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = await startPublishedCourse(publish(spatialProject({
+      includeSlideLocation: true,
+      showSceneProgress: true,
+    })), root)
+
+    expect(root.querySelector('[data-layer-item-id="course-teacher-controller"]'))
+      .toHaveTextContent('1 / 4 · 镜头一')
+
+    root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]')!.click()
+    await vi.waitFor(() => {
+      expect(root.querySelector<HTMLButtonElement>('[data-controller-button-id="sound"]'))
+        .toHaveTextContent('声音 · 关')
+    })
+
+    expect(await app.navigate('location-spatial-2')).toBe(true)
+    expect(root.querySelector('[data-layer-item-id="course-teacher-controller"]'))
+      .toHaveTextContent('2 / 4 · 镜头二')
+
+    // Return from a non-Spatial location to the same start camera. The host
+    // keeps that camera's location id, so this proves its live progress is
+    // refreshed instead of retaining the prior session label.
+    expect(await app.navigate('location-slide-1')).toBe(true)
+    await app.restart()
+    expect(root.querySelector('[data-layer-item-id="course-teacher-controller"]'))
+      .toHaveTextContent('1 / 4 · 镜头一')
 
     await app.destroy()
     root.remove()

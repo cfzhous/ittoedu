@@ -1161,7 +1161,13 @@ export class SpatialSurfaceHost implements SurfaceHost {
 
   setLocationId(locationId: string): Promise<void> {
     return this.#run(async () => {
-      if (this.#locationId === locationId) return
+      if (this.#locationId === locationId) {
+        // The published course can update its current location immediately
+        // before this call. Refresh the controller even when visibility does
+        // not change so its live progress label never retains the old value.
+        this.#refreshControllerStatuses()
+        return
+      }
       this.#locationId = locationId
       await this.#reconcileDocument()
       this.#renderChrome()

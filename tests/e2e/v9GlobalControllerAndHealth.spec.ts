@@ -2,13 +2,12 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { ElectronApplication, Page } from 'playwright'
-import sharp from 'sharp'
-import { materializeNativeLayerItem } from '../../src/shared/courseProjectSchema'
-import { createTeacherControllerLayout } from '../../src/shared/teacherControllerLayout'
+import type { ElectronApplication, Locator, Page } from 'playwright'
 import {
-  addSlideScene,
+  addCourseSurface,
+  addSpatialCameraFrame,
   createCourseProject,
+  updateCourseProject,
 } from '../../src/renderer/course/courseStudioModel'
 import {
   createCourseProjectArchive,
@@ -18,9 +17,15 @@ import {
 const root = resolve(__dirname, '..', '..')
 const runDirectory = join(tmpdir(), `ittoedu-v9-global-health-${process.pid}`)
 const userDataDirectory = join(runDirectory, 'electron-profile')
-const sourceProjectPath = join(runDirectory, 'two-scene-source.h5lesson')
-const savedProjectPath = join(runDirectory, 'global-controller-roundtrip.h5lesson')
-const NOW = '2026-08-15T09:00:00.000Z'
+const sourceProjectPath = join(runDirectory, 'mixed-global-controller-source.h5lesson')
+const savedProjectPath = join(runDirectory, 'mixed-global-controller-roundtrip.h5lesson')
+const NOW = '2026-08-16T10:00:00.000Z'
+const FLOW_SURFACE_ID = 'global-controller-flow'
+const SPATIAL_SURFACE_ID = 'global-controller-spatial'
+const SPATIAL_DETAIL_CAMERA_ID = 'global-controller-spatial-detail'
+const FINAL_CONTROLLER_TITLE = '跨 Surface 控制器'
+const SLIDE_DELTA = { x: 46, y: 24 }
+const SPATIAL_DELTA = { x: 38, y: 22 }
 
 interface EditorHandle {
   app: ElectronApplication
@@ -29,17 +34,33 @@ interface EditorHandle {
   consoleErrors: string[]
 }
 
-interface ControllerFrame {
+interface MixedFixture {
+  slideLocationId: string
+  flowLocationId: string
+  spatialDetailLocationId: string
+}
+
+interface ControllerSnapshot {
   revision: number
   layerItemId: string
+  title: string
+  compact: boolean
+  collapsible: boolean
   x: number
   y: number
   width: number
   height: number
   rotation: number
-  nextButtonX: number
-  nextButtonY: number
 }
+
+interface ScreenBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+let fixture: MixedFixture
 
 async function launchEditor(): Promise<EditorHandle> {
   const app = await electron.launch({
@@ -108,133 +129,128 @@ async function openProject(editor: EditorHandle, path: string): Promise<void> {
   }).click()
   await expect(editor.page.locator('.app-main')).not.toHaveAttribute('inert', '')
   await expect(editor.page.getByRole('button', { name: '重命名课件' }))
-    .toContainText('全局控制器真实纵切')
+    .toContainText('全局控制器跨 Surface Gate')
   await expect(editor.page.locator('.runtime-preview-loading')).toHaveCount(0)
   await editor.page.getByTestId('canvas-stage').locator('canvas').waitFor()
 }
 
-function readControllerFrame(path: string): ControllerFrame {
+function readControllerSnapshot(path: string): ControllerSnapshot {
   const archive = openCourseProjectArchive(readFileSync(path))
-  const controller = archive.project.globalLayerItems.find(
+  expect(archive.project.schemaVersion).toBe(9)
+  const globalControllers = archive.project.globalLayerItems.filter(
     (entry) => entry.item.kind === 'native' &&
       entry.item.content.nativeType === 'teacher-controller',
-  )?.item
+  )
+  expect(globalControllers).toHaveLength(1)
+  const controller = globalControllers[0]!.item
   if (
-    !controller ||
     controller.kind !== 'native' ||
     controller.content.nativeType !== 'teacher-controller'
   ) {
     throw new Error('Saved V9 teacher controller is missing')
   }
-  const node = materializeNativeLayerItem(controller)
-  if (node.type !== 'teacher-controller') throw new Error('Invalid teacher controller')
-  const nextButton = createTeacherControllerLayout(
-    node,
-    node.width,
-    node.height,
-  ).buttons.find((button) => button.action.type === 'scene.next')
-  if (!nextButton) throw new Error('Teacher controller next button is missing')
+
+  const copiedControllerIds: string[] = []
+  const nonGlobalTeacherControllerIds: string[] = []
+  for (const surface of archive.project.surfaces) {
+    const localItems = [
+      ...surface.surfaceLayerItems.map((entry) => entry.item),
+      ...(surface.type === 'slide'
+        ? surface.scenes.flatMap((scene) => scene.layerItems)
+        : surface.type === 'spatial-2d'
+          ? surface.world.layerItems
+          : []),
+    ]
+    for (const item of localItems) {
+      if (item.layerItemId === controller.layerItemId) {
+        copiedControllerIds.push(item.layerItemId)
+      }
+      if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
+        nonGlobalTeacherControllerIds.push(item.layerItemId)
+      }
+    }
+  }
+  expect(copiedControllerIds, 'controller copies outside globalLayerItems').toEqual([])
+  expect(nonGlobalTeacherControllerIds, 'teacher controllers outside globalLayerItems').toEqual([])
+
   return {
     revision: archive.project.revision,
     layerItemId: controller.layerItemId,
+    title: controller.content.data.title,
+    compact: controller.content.data.compact,
+    collapsible: controller.content.data.collapsible,
     x: controller.frame.x,
     y: controller.frame.y,
     width: controller.frame.width,
     height: controller.frame.height,
     rotation: controller.rotation,
-    nextButtonX: node.x + nextButton.x + nextButton.width / 2,
-    nextButtonY: node.y + nextButton.y + nextButton.height / 2,
   }
 }
 
 async function waitForControllerRevision(
   path: string,
   revision: number,
-): Promise<ControllerFrame> {
+): Promise<ControllerSnapshot> {
   await expect.poll(() => {
     if (!existsSync(path)) return -1
     try {
-      return readControllerFrame(path).revision
+      return readControllerSnapshot(path).revision
     } catch {
       return -1
     }
   }).toBe(revision)
-  return readControllerFrame(path)
+  return readControllerSnapshot(path)
 }
 
-function expectControllerGeometry(
-  actual: ControllerFrame,
-  expected: ControllerFrame,
+function expectControllerSnapshot(
+  actual: ControllerSnapshot,
+  expected: ControllerSnapshot,
 ): void {
   expect(actual).toMatchObject({
     revision: expected.revision,
     layerItemId: expected.layerItemId,
+    title: expected.title,
+    compact: expected.compact,
+    collapsible: expected.collapsible,
     width: expected.width,
     height: expected.height,
     rotation: expected.rotation,
   })
-  // Pointer input quantizes to device pixels; at fractional zoom/fit scales the
-  // achievable drop position lands within ~1.1 logical px of the target. The
-  // saved coordinate reflects the real pointer position, so ±2 is the honest
-  // tolerance here — the pipeline itself is unchanged and exact.
+  // The Slide pointer pipeline can quantize a logical drop point by a pixel
+  // at fit zoom. Spatial is exact screen-space, but the same narrow bound
+  // keeps the archive assertion honest across the two authoring surfaces.
   expect(Math.abs(actual.x - expected.x)).toBeLessThanOrEqual(2)
   expect(Math.abs(actual.y - expected.y)).toBeLessThanOrEqual(2)
 }
 
-async function expectAuthoringPlayerController(
-  page: Page,
-  frame: ControllerFrame,
-): Promise<void> {
-  const player = page.frameLocator('.runtime-preview-frame')
-  await expect(player.locator('canvas')).toBeVisible()
-  await expect(player.locator('.lesson-authoring-input-shield')).toBeVisible()
-  await expect(player.getByTestId('teacher-escape-controls')).toHaveCount(0)
-  await expect.poll(async () => {
-    const frameBox = await page.locator('.runtime-preview-frame').boundingBox()
-    if (!frameBox) return Number.POSITIVE_INFINITY
-    const image = await page.screenshot({
-      clip: frameBox,
-      scale: 'css',
-    })
-    const { data, info } = await sharp(image)
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true })
-    // The DOM controller visually insets its bar inside the committed frame
-    // (border/padding), so a single sample point couples the assertion to the
-    // renderer's style. Scan a coarse grid inside the frame and require some
-    // dark pixels: the controller is painted within its committed frame.
-    const scaleX = info.width / 1280
-    const scaleY = info.height / 720
-    const left = Math.max(0, Math.round((frame.x + 8) * scaleX))
-    const right = Math.min(info.width - 1, Math.round((frame.x + frame.width - 8) * scaleX))
-    const top = Math.max(0, Math.round((frame.y + 8) * scaleY))
-    const bottom = Math.min(info.height - 1, Math.round((frame.y + frame.height - 8) * scaleY))
-    let minLuminance = Number.POSITIVE_INFINITY
-    for (let y = top; y <= bottom; y += 4) {
-      for (let x = left; x <= right; x += 8) {
-        const offset = (y * info.width + x) * info.channels
-        const lum = data[offset]! * 0.2126 + data[offset + 1]! * 0.7152 + data[offset + 2]! * 0.0722
-        if (lum < minLuminance) minLuminance = lum
-      }
-    }
-    return minLuminance
-  }, {
-    message: 'Player should paint the controller at its committed frame',
-  }).toBeLessThan(120)
+async function getScreenBox(locator: Locator): Promise<ScreenBox> {
+  const box = await locator.boundingBox()
+  if (!box) throw new Error('Expected visible screen controller bounds')
+  return box
 }
 
-async function clickLogicalPoint(
-  page: Page,
-  point: { x: number; y: number },
+function expectScreenBoxUnscaled(actual: ScreenBox, expected: ScreenBox): void {
+  // The workspace itself can move when its scrollable authoring region lays
+  // out after a camera command. Fixed screen content need not keep the same
+  // browser-page origin, but it must not inherit the world zoom scale.
+  expect(Math.abs(actual.width - expected.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(actual.height - expected.height)).toBeLessThanOrEqual(1)
+}
+
+async function expectScreenBoxAt(
+  controller: Locator,
+  expected: ScreenBox,
 ): Promise<void> {
-  const stage = page.getByTestId('canvas-stage')
-  const box = await stage.boundingBox()
-  if (!box) throw new Error('Canvas stage has no bounds')
-  await page.mouse.click(
-    box.x + point.x * box.width / 1280,
-    box.y + point.y * box.height / 720,
-  )
+  await expect.poll(async () => {
+    const actual = await controller.boundingBox()
+    if (!actual) return Number.POSITIVE_INFINITY
+    return Math.max(
+      Math.abs(actual.x - expected.x),
+      Math.abs(actual.y - expected.y),
+      Math.abs(actual.width - expected.width),
+      Math.abs(actual.height - expected.height),
+    )
+  }).toBeLessThanOrEqual(2)
 }
 
 async function openMoreMenu(page: Page): Promise<void> {
@@ -246,26 +262,19 @@ async function openMoreMenu(page: Page): Promise<void> {
   }
 }
 
-async function closeMoreMenu(page: Page): Promise<void> {
-  const more = page.getByTitle('更多工程操作')
-  if (await more.locator('xpath=ancestor::details').evaluate((details) => (
-    details.hasAttribute('open')
-  ))) {
-    await more.click()
-  }
+async function saveAs(editor: EditorHandle, path: string): Promise<void> {
+  await patchProjectDialogs(editor.app, { save: path })
+  await openMoreMenu(editor.page)
+  await editor.page.getByRole('menuitem', { name: /另存为/ }).click()
+  await expect.poll(() => existsSync(path)).toBe(true)
+  await expect.poll(() => editor.page.evaluate(() => (
+    window.__COURSEWARE_EDITOR_DIRTY__
+  ))).toBe(false)
 }
 
-async function expectUncheckedHealth(page: Page): Promise<void> {
-  await openMoreMenu(page)
-  const health = page.getByRole('menuitem', { name: '工程检查', exact: true })
-  await expect(health).toBeEnabled()
-  await expect(health).toContainText('点击检查')
-  await expect(health).not.toContainText('未发现问题')
-}
-
-async function dragController(
+async function dragSlideController(
   page: Page,
-  frame: ControllerFrame,
+  frame: ControllerSnapshot,
   delta: { x: number; y: number },
 ): Promise<void> {
   const stage = page.getByTestId('canvas-stage')
@@ -290,6 +299,61 @@ async function dragController(
   await page.mouse.up({ button: 'left' })
 }
 
+async function dragScreenController(
+  page: Page,
+  controller: Locator,
+  delta: { x: number; y: number },
+): Promise<ScreenBox> {
+  const before = await getScreenBox(controller)
+  await page.mouse.move(
+    before.x + before.width / 2,
+    before.y + before.height / 2,
+  )
+  await page.mouse.down({ button: 'left' })
+  await page.mouse.move(
+    before.x + before.width / 2 + delta.x,
+    before.y + before.height / 2 + delta.y,
+    { steps: 4 },
+  )
+  await page.mouse.up({ button: 'left' })
+  return before
+}
+
+async function selectSlideController(page: Page, layerItemId: string): Promise<void> {
+  await expect(page.getByTestId('canvas-stage')).toBeVisible()
+  await page.getByRole('tab', { name: '图层', exact: true }).click()
+  const locate = page.getByTestId(`locate-controller-global-${layerItemId}`)
+  await expect(locate).toBeEnabled()
+  await locate.click()
+  await page.getByRole('tab', { name: '属性', exact: true }).click()
+  await expect(page.getByLabel('控制器标题')).toBeVisible()
+}
+
+async function selectFlowController(page: Page, layerItemId: string): Promise<void> {
+  const card = page.getByTestId(`flow-layer-card-global-${layerItemId}`)
+  await expect(card).toBeVisible()
+  await card.click()
+  await page.getByRole('tab', { name: '属性', exact: true }).click()
+  await expect(page.getByLabel('控制器标题')).toBeVisible()
+}
+
+async function selectSpatialController(page: Page, layerItemId: string): Promise<Locator> {
+  const workspace = page.getByTestId('spatial-workspace')
+  await expect(workspace).toBeVisible()
+  const controller = workspace.getByTestId('spatial-screen-controller')
+  await expect(controller).toHaveAttribute('data-layer-item-id', layerItemId)
+  await expect(controller).toHaveAttribute('data-layer-source', 'global')
+  await controller.click()
+  await page.getByRole('tab', { name: '属性', exact: true }).click()
+  await expect(page.getByLabel('控制器标题')).toBeVisible()
+  return controller
+}
+
+async function expectHiddenSharedEntries(page: Page): Promise<void> {
+  await expect(page.getByTestId('global-layer-entry')).toHaveCount(0)
+  await expect(page.getByTestId('surface-layer-entry')).toHaveCount(0)
+}
+
 function expectCleanRenderer(editor: EditorHandle): void {
   expect(editor.pageErrors, 'renderer page errors').toEqual([])
   expect(editor.consoleErrors, 'renderer console errors').toEqual([])
@@ -299,18 +363,83 @@ test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(() => {
   mkdirSync(runDirectory, { recursive: true })
-  const initial = createCourseProject({
-    id: 'v9-global-controller-e2e',
-    title: '全局控制器真实纵切',
+  let project = createCourseProject({
+    id: 'v9-global-controller-mixed-e2e',
+    title: '全局控制器跨 Surface Gate',
     now: NOW,
   })
-  const surface = initial.surfaces.find((candidate) => candidate.type === 'slide')
-  if (!surface || surface.type !== 'slide') throw new Error('Initial Slide surface is missing')
-  const project = addSlideScene(initial, surface.id, {
-    id: 'scene-second',
-    name: '第二场景',
+  project = addCourseSurface(project, 'flow', {
+    id: FLOW_SURFACE_ID,
+    title: '讲义位置',
     now: NOW,
   })
+  project = addCourseSurface(project, 'spatial-2d', {
+    id: SPATIAL_SURFACE_ID,
+    title: '空间位置',
+    now: NOW,
+  })
+  project = addSpatialCameraFrame(project, SPATIAL_SURFACE_ID, {
+    x: 240,
+    y: -160,
+    zoom: 1.75,
+  }, {
+    id: SPATIAL_DETAIL_CAMERA_ID,
+    name: '非 1x 镜头',
+    now: NOW,
+  })
+
+  const slide = project.locations.find((location) => location.kind === 'slide-scene')
+  const flow = project.locations.find((location) => location.surfaceId === FLOW_SURFACE_ID)
+  const spatialDetail = project.locations.find(
+    (location) => location.id === SPATIAL_DETAIL_CAMERA_ID,
+  )
+  if (!slide || !flow || !spatialDetail) {
+    throw new Error('Mixed global-controller fixture locations are missing')
+  }
+  fixture = {
+    slideLocationId: slide.id,
+    flowLocationId: flow.id,
+    spatialDetailLocationId: spatialDetail.id,
+  }
+
+  project = updateCourseProject(project, (draft) => {
+    const controller = draft.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' &&
+      entry.item.content.nativeType === 'teacher-controller'
+    ))?.item
+    if (
+      !controller ||
+      controller.kind !== 'native' ||
+      controller.content.nativeType !== 'teacher-controller'
+    ) {
+      throw new Error('Mixed fixture global teacher controller is missing')
+    }
+    // Keep the real controller fully visible in the Slide fit canvas and in
+    // the fixed Spatial screen layer. This is fixture positioning only; all
+    // later mutations go through the product UI.
+    controller.frame = {
+      ...controller.frame,
+      x: 96,
+      y: 96,
+      width: 560,
+      height: 64,
+    }
+    controller.content.data.title = '全课控制器（初始）'
+    controller.content.data.collapsible = true
+    draft.startLocationId = fixture.slideLocationId
+    const draftSlide = draft.locations.find((location) => location.id === fixture.slideLocationId)
+    const draftFlow = draft.locations.find((location) => location.id === fixture.flowLocationId)
+    const draftSpatial = draft.locations.find(
+      (location) => location.id === fixture.spatialDetailLocationId,
+    )
+    if (!draftSlide || !draftFlow || !draftSpatial) {
+      throw new Error('Mixed fixture locations changed unexpectedly')
+    }
+    draftSlide.label = '幻灯片 · 控制器'
+    draftFlow.label = '讲义 · 控制器'
+    draftSpatial.label = '空间 · 非 1x 控制器'
+  }, NOW)
+
   writeFileSync(sourceProjectPath, createCourseProjectArchive({
     project,
     assetFiles: {},
@@ -335,143 +464,117 @@ test.afterAll(async () => {
   }
 })
 
-test('checks health, authors the global controller, and preserves it across a full reopen', async () => {
+test('keeps one global teacher controller through Slide, Flow, Spatial, trial, save and reopen', async () => {
   test.slow()
-  const initial = readControllerFrame(sourceProjectPath)
-  expect(initial.revision).toBe(1)
+  const initial = readControllerSnapshot(sourceProjectPath)
+  expect(initial.title).toBe('全课控制器（初始）')
+  expect(initial.collapsible).toBe(true)
+
   let editor = await launchEditor()
   try {
     await openProject(editor, sourceProjectPath)
-    await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 1 / 2')
+    await expect(editor.page.getByTestId(`course-location-${fixture.slideLocationId}`))
+      .toHaveAttribute('aria-current', 'page')
+    await expectHiddenSharedEntries(editor.page)
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
 
-    await expectUncheckedHealth(editor.page)
-    await editor.page.getByRole('menuitem', { name: '工程检查', exact: true }).click()
-    const healthDialog = editor.page.getByRole('dialog', { name: '工程检查' })
-    await expect(healthDialog).toBeVisible()
-    await expect(healthDialog.getByLabel('工程检查摘要')).toContainText('0 个错误')
-    await expect(healthDialog.getByLabel('工程检查摘要')).toContainText('0 个提醒')
-    await expect(healthDialog).toContainText('未发现工程问题')
-    await healthDialog.getByRole('button', { name: '关闭', exact: true }).click()
-    await openMoreMenu(editor.page)
-    await expect(editor.page.getByRole('menuitem', {
-      name: '工程检查：未发现问题',
-      exact: true,
-    })).toBeEnabled()
-    await closeMoreMenu(editor.page)
-
-    const globalLayer = editor.page.getByTestId('global-layer-entry')
-    await expect(globalLayer).toBeEnabled()
-    await globalLayer.click()
-    await expect(globalLayer).toHaveAttribute('aria-pressed', 'true')
-    await expect(editor.page.locator('.canvas-label')).toContainText('全局层')
-    await expect(editor.page.locator('.status-bar')).toContainText('1 个全局元素')
-    await expectAuthoringPlayerController(editor.page, initial)
-
-    const player = editor.page.frameLocator('.runtime-preview-frame')
-    const playerRoot = player.locator('html')
-    const sceneIdBeforeClick = await playerRoot.evaluate(() => (
-      window.__H5_LESSON_PLAYER__?.getCurrentSceneId() ?? null
-    ))
-    expect(sceneIdBeforeClick).not.toBeNull()
-    await playerRoot.evaluate(() => {
-      document.documentElement.dataset.controllerActionCount = '0'
-      window.addEventListener('courseware-teacher-controller-action', () => {
-        const count = Number(document.documentElement.dataset.controllerActionCount ?? '0')
-        document.documentElement.dataset.controllerActionCount = String(count + 1)
-      })
-    })
-    await clickLogicalPoint(editor.page, {
-      x: initial.nextButtonX,
-      y: initial.nextButtonY,
-    })
-    await expect.poll(() => playerRoot.evaluate(() => (
-      window.__H5_LESSON_PLAYER__?.getCurrentSceneId() ?? null
-    ))).toBe(sceneIdBeforeClick)
-    await expect(editor.page.locator('.toolbar__scene-index')).toHaveText('场景 1 / 2')
-    await expect.poll(() => player.locator('html').getAttribute(
-      'data-controller-action-count',
-    )).toBe('0')
-    await expect(editor.page.locator('.status-bar')).toContainText('已选：教师控制器')
+    // Slide: the controller is reached from the flattened current-page list,
+    // then its real canvas transform must produce exactly one saved revision.
+    await selectSlideController(editor.page, initial.layerItemId)
+    await dragSlideController(editor.page, initial, SLIDE_DELTA)
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(false)
+    ))).toBe(true)
+    await saveAs(editor, savedProjectPath)
+    const afterSlide = await waitForControllerRevision(
+      savedProjectPath,
+      initial.revision + 1,
+    )
+    expectControllerSnapshot(afterSlide, {
+      ...initial,
+      revision: initial.revision + 1,
+      x: initial.x + SLIDE_DELTA.x,
+      y: initial.y + SLIDE_DELTA.y,
+    })
+    expect(readControllerSnapshot(sourceProjectPath)).toEqual(initial)
 
+    // Flow: select the same global item ID and commit one shared property.
+    await editor.page.getByTestId(`course-location-${fixture.flowLocationId}`).click()
+    await expect(editor.page.getByTestId('workspace-flow-authoring')).toBeVisible()
+    await selectFlowController(editor.page, initial.layerItemId)
+    const title = editor.page.getByLabel('控制器标题')
+    await title.fill(FINAL_CONTROLLER_TITLE)
+    await title.press('Enter')
+    await expect(title).toHaveValue(FINAL_CONTROLLER_TITLE)
+    await expect.poll(() => editor.page.evaluate(() => (
+      window.__COURSEWARE_EDITOR_DIRTY__
+    ))).toBe(true)
+
+    // Spatial: this is a fixed screen proxy at a non-1x camera. It must not
+    // enter the world/minimap, and changing camera zoom must not resize it.
+    await editor.page.getByTestId(`course-location-${fixture.spatialDetailLocationId}`).click()
+    const workspace = editor.page.getByTestId('spatial-workspace')
+    await expect(workspace).toBeVisible()
+    await expect.poll(async () => Number(await workspace.getAttribute('data-camera-zoom')))
+      .toBeCloseTo(1.75, 2)
+    await expect(workspace.locator('[data-spatial-world] [data-spatial-screen-controller]'))
+      .toHaveCount(0)
+    await expect(workspace.getByTestId('spatial-minimap').locator(
+      `[data-layer-item-id="${initial.layerItemId}"]`,
+    )).toHaveCount(0)
+    const spatialController = await selectSpatialController(editor.page, initial.layerItemId)
+    await expect(editor.page.getByLabel('控制器标题')).toHaveValue(FINAL_CONTROLLER_TITLE)
+    const beforeCameraZoom = await getScreenBox(spatialController)
+    const zoomBefore = Number(await workspace.getAttribute('data-camera-zoom'))
+    await workspace.getByRole('button', { name: '放大视图' }).click()
+    await expect.poll(async () => Number(await workspace.getAttribute('data-camera-zoom')))
+      .toBeGreaterThan(zoomBefore)
+    expectScreenBoxUnscaled(await getScreenBox(spatialController), beforeCameraZoom)
+
+    const screenBoxBeforeMove = await dragScreenController(
+      editor.page,
+      spatialController,
+      SPATIAL_DELTA,
+    )
+    await expect(editor.page.getByTestId('spatial-screen-selection')).toBeVisible()
+    await expectScreenBoxAt(spatialController, {
+      ...screenBoxBeforeMove,
+      x: screenBoxBeforeMove.x + SPATIAL_DELTA.x,
+      y: screenBoxBeforeMove.y + SPATIAL_DELTA.y,
+    })
+
+    // The final gesture is Spatial only: undo must preserve the Flow title,
+    // redo must restore precisely the fixed-screen frame.
     const undo = editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' })
     const redo = editor.page.getByRole('button', {
       name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
     })
-    await expect(undo).toBeDisabled()
-    await expect(redo).toBeDisabled()
-    await editor.page.keyboard.press('Control+d')
-    await expect(editor.page.locator('.status-bar')).toContainText(
-      '全局元素暂不能复制；现有内容不会改变',
-    )
-    await editor.page.keyboard.press('Delete')
-    await expect(editor.page.locator('.status-bar')).toContainText(
-      '全局元素暂不能删除；现有内容不会改变',
-    )
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(false)
-    await expect(undo).toBeDisabled()
-    await expect(redo).toBeDisabled()
-    expect(readControllerFrame(sourceProjectPath)).toEqual(initial)
-    await expect(editor.page.getByLabel('画布缩放比例')).toHaveText('100%')
-    await editor.page.getByRole('button', { name: '放大画布' }).click()
-    await editor.page.getByRole('button', { name: '放大画布' }).click()
-    await expect(editor.page.getByLabel('画布缩放比例')).toHaveText('120%')
-
-    const firstDelta = { x: 54, y: -26 }
-    await dragController(editor.page, initial, firstDelta)
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await expect(editor.page.locator('.status-bar')).toContainText('已选：教师控制器')
     await expect(undo).toBeEnabled()
-    await expect(redo).toBeDisabled()
-    await expectAuthoringPlayerController(editor.page, {
-      ...initial,
-      x: initial.x + firstDelta.x,
-      y: initial.y + firstDelta.y,
-    })
-    await expectUncheckedHealth(editor.page)
-    await closeMoreMenu(editor.page)
-
     await undo.click()
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(false)
-    await expect(undo).toBeDisabled()
+    await expectScreenBoxAt(spatialController, screenBoxBeforeMove)
+    await expect(spatialController).toContainText(FINAL_CONTROLLER_TITLE)
     await expect(redo).toBeEnabled()
-    await expectAuthoringPlayerController(editor.page, initial)
-
     await redo.click()
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await expect(undo).toBeEnabled()
-    await expect(redo).toBeDisabled()
-    await expectAuthoringPlayerController(editor.page, {
-      ...initial,
-      x: initial.x + firstDelta.x,
-      y: initial.y + firstDelta.y,
+    await expectScreenBoxAt(spatialController, {
+      ...screenBoxBeforeMove,
+      x: screenBoxBeforeMove.x + SPATIAL_DELTA.x,
+      y: screenBoxBeforeMove.y + SPATIAL_DELTA.y,
     })
 
-    await patchProjectDialogs(editor.app, { save: savedProjectPath })
-    await openMoreMenu(editor.page)
-    await editor.page.getByRole('menuitem', { name: /另存为/ }).click()
-    const saved = await waitForControllerRevision(savedProjectPath, initial.revision + 1)
-    expectControllerGeometry(saved, {
+    await editor.page.keyboard.press('Control+s')
+    const finalSaved = await waitForControllerRevision(
+      savedProjectPath,
+      initial.revision + 3,
+    )
+    expectControllerSnapshot(finalSaved, {
       ...initial,
-      revision: initial.revision + 1,
-      layerItemId: initial.layerItemId,
-      x: initial.x + firstDelta.x,
-      y: initial.y + firstDelta.y,
+      revision: initial.revision + 3,
+      title: FINAL_CONTROLLER_TITLE,
+      x: initial.x + SLIDE_DELTA.x + SPATIAL_DELTA.x,
+      y: initial.y + SLIDE_DELTA.y + SPATIAL_DELTA.y,
     })
-    expect(readControllerFrame(sourceProjectPath)).toEqual(initial)
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
@@ -483,48 +586,56 @@ test('checks health, authors the global controller, and preserves it across a fu
   editor = await launchEditor()
   try {
     await openProject(editor, savedProjectPath)
-    const reopened = readControllerFrame(savedProjectPath)
-    expectControllerGeometry(reopened, {
+    const reopened = readControllerSnapshot(savedProjectPath)
+    expectControllerSnapshot(reopened, {
       ...initial,
-      revision: initial.revision + 1,
-      layerItemId: initial.layerItemId,
-      x: initial.x + 54,
-      y: initial.y - 26,
+      revision: initial.revision + 3,
+      title: FINAL_CONTROLLER_TITLE,
+      x: initial.x + SLIDE_DELTA.x + SPATIAL_DELTA.x,
+      y: initial.y + SLIDE_DELTA.y + SPATIAL_DELTA.y,
     })
-    const globalLayer = editor.page.getByTestId('global-layer-entry')
-    await globalLayer.click()
-    await expect(globalLayer).toHaveAttribute('aria-pressed', 'true')
-    await expectAuthoringPlayerController(editor.page, reopened)
-    const undo = editor.page.getByRole('button', { name: '撤销（Ctrl+Z）' })
-    await expect(undo).toBeDisabled()
+    await expectHiddenSharedEntries(editor.page)
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
 
-    await editor.page.getByRole('button', { name: '缩小画布' }).click()
-    await expect(editor.page.getByLabel('画布缩放比例')).toHaveText('90%')
-    const secondDelta = { x: -31, y: -14 }
-    await dragController(editor.page, reopened, secondDelta)
-    await expect.poll(() => editor.page.evaluate(() => (
-      window.__COURSEWARE_EDITOR_DIRTY__
-    ))).toBe(true)
-    await expect(undo).toBeEnabled()
-    await editor.page.keyboard.press('Control+s')
-    const movedAgain = await waitForControllerRevision(
-      savedProjectPath,
-      reopened.revision + 1,
-    )
-    expectControllerGeometry(movedAgain, {
-      ...reopened,
-      revision: reopened.revision + 1,
-      layerItemId: initial.layerItemId,
-      x: reopened.x + secondDelta.x,
-      y: reopened.y + secondDelta.y,
-    })
+    // The same persisted global item is visible and inspectable at all three
+    // authoring surfaces after a full Electron close/relaunch.
+    await selectSlideController(editor.page, reopened.layerItemId)
+    await expect(editor.page.getByLabel('控制器标题')).toHaveValue(FINAL_CONTROLLER_TITLE)
+
+    await editor.page.getByTestId(`course-location-${fixture.flowLocationId}`).click()
+    await expect(editor.page.getByTestId('workspace-flow-authoring')).toBeVisible()
+    await selectFlowController(editor.page, reopened.layerItemId)
+    await expect(editor.page.getByLabel('控制器标题')).toHaveValue(FINAL_CONTROLLER_TITLE)
+
+    await editor.page.getByTestId(`course-location-${fixture.spatialDetailLocationId}`).click()
+    const reopenedWorkspace = editor.page.getByTestId('spatial-workspace')
+    await expect(reopenedWorkspace).toBeVisible()
+    const reopenedSpatialController = await selectSpatialController(editor.page, reopened.layerItemId)
+    await expect(editor.page.getByLabel('控制器标题')).toHaveValue(FINAL_CONTROLLER_TITLE)
+    const reopenedScreenBox = await getScreenBox(reopenedSpatialController)
+    expect(reopenedScreenBox.width).toBeGreaterThan(0)
+    expect(reopenedScreenBox.height).toBeGreaterThan(0)
+
+    // Trial owns session-only controller state. Collapsing it must not dirty
+    // or persist a course mutation when the author returns to Spatial.
+    const beforeTrial = readControllerSnapshot(savedProjectPath)
+    await editor.page.getByTestId('workspace-spatial-trial-run').click()
+    const trial = editor.page.frameLocator('[data-testid="trial-run-frame"]')
+    const trialController = trial.locator('.spatial-surface .spatial-screen-teacher-controller')
+    await expect(trialController).toBeVisible()
+    await expect(trialController).toContainText(FINAL_CONTROLLER_TITLE)
+    await trialController.getByRole('button', { name: '收起教师控制器' })
+      .click({ force: true })
+    await expect(trialController.getByRole('button', { name: '展开教师控制器' }))
+      .toBeVisible()
+    await editor.page.getByTestId('trial-run-exit').click()
+    await expect(editor.page.getByTestId('trial-run-frame')).toHaveCount(0)
     await expect.poll(() => editor.page.evaluate(() => (
       window.__COURSEWARE_EDITOR_DIRTY__
     ))).toBe(false)
-    await expectAuthoringPlayerController(editor.page, movedAgain)
+    expect(readControllerSnapshot(savedProjectPath)).toEqual(beforeTrial)
     expectCleanRenderer(editor)
   } finally {
     await closeEditor(editor.app)

@@ -36,6 +36,23 @@ export interface WorkspaceSlidePreviewResources {
   readonly media: ProjectDocument['media']
 }
 
+/** Explicit source provenance for a V9 canvas proxy. */
+export interface WorkspaceSlideAuthoringTarget {
+  readonly source: WorkspaceSlideEditingScope
+  readonly layerItemId: string
+}
+
+/**
+ * A one-shot, in-memory request to reveal an already-selected controller in
+ * the current workspace. It is deliberately separate from the Course Project
+ * data model: locating never copies, recreates, or persists a layer.
+ */
+export interface WorkspaceControllerLocateRequest {
+  readonly layerItemId: string
+  /** Increments even when the teacher locates the same controller twice. */
+  readonly requestId: number
+}
+
 /**
  * Ephemeral read/callback seam for the existing Workspace canvas. Workspace
  * never persists or mutates the supplied document; the owning backend handles
@@ -51,6 +68,13 @@ export interface WorkspaceSlideAuthoringInput {
   readonly componentPackages: Record<string, ComponentPackageData>
   readonly previewResources: WorkspaceSlidePreviewResources
   readonly selectedNodeIds: readonly string[]
+  /** Optional V9-only focus/reveal request for a global controller proxy. */
+  readonly controllerLocateRequest?: WorkspaceControllerLocateRequest | null
+  /**
+   * V9-only ownership map for document nodes. Legacy callers omit it and
+   * retain their existing single-document behavior.
+   */
+  readonly authoringTargets?: ReadonlyMap<string, WorkspaceSlideAuthoringTarget>
   /** Labels owned by the injected document backend, never by the V8 shell. */
   readonly sceneName: string
   readonly stateName: string
@@ -182,6 +206,55 @@ export function workspaceTextEditTargetNode(
   return node?.type === 'text' && node.visible && !node.locked ? node : null
 }
 
+function isGlobalTeacherControllerTarget(
+  injected: WorkspaceSlideAuthoringInput,
+  nodeId: string,
+): boolean {
+  const target = injected.authoringTargets?.get(nodeId)
+  if (target?.source !== 'global') return false
+  return injected.document.nodes.some((node) => (
+    node.id === nodeId && node.type === 'teacher-controller'
+  ))
+}
+
+function hasMixedGlobalTeacherControllerTargets(
+  injected: WorkspaceSlideAuthoringInput | undefined,
+  nodeIds: readonly string[],
+): boolean {
+  if (!injected?.authoringTargets) return false
+  const ids = new Set(nodeIds)
+  const hasGlobalController = [...ids].some((nodeId) => (
+    isGlobalTeacherControllerTarget(injected, nodeId)
+  ))
+  return hasGlobalController && [...ids].some((nodeId) => {
+    const target = injected.authoringTargets?.get(nodeId)
+    return target !== undefined && target.source !== 'global'
+  })
+}
+
+/** Detects a forbidden mixed selection before the Workspace mutates its UI. */
+export function workspaceSelectionHasMixedGlobalTeacherController(
+  injected: WorkspaceSlideAuthoringInput | undefined,
+  event: Readonly<NodeSelectionEvent>,
+): boolean {
+  if (!injected) return false
+  const nodeIds = event.additive
+    ? [...new Set([...injected.selectedNodeIds, ...event.nodeIds])]
+    : event.nodeIds
+  return hasMixedGlobalTeacherControllerTargets(injected, nodeIds)
+}
+
+/** Detects a forbidden mixed transform before preview or persistence. */
+export function workspaceTransformHasMixedGlobalTeacherController(
+  injected: WorkspaceSlideAuthoringInput | undefined,
+  event: Readonly<NodesTransformEndEvent>,
+): boolean {
+  return hasMixedGlobalTeacherControllerTargets(
+    injected,
+    event.nodes.map((node) => node.nodeId),
+  )
+}
+
 /** V9 accepts the complete visible Native/Component selection, including locked items. */
 export function workspaceSelectionAllowed(
   injected: WorkspaceSlideAuthoringInput | undefined,
@@ -194,7 +267,7 @@ export function workspaceSelectionAllowed(
   return event.nodeIds.every((nodeId) => {
     const node = nodesById.get(nodeId)
     return Boolean(node && node.visible)
-  })
+  }) && !workspaceSelectionHasMixedGlobalTeacherController(injected, event)
 }
 
 /** Validates one complete Native/Component transform before it reaches the V9 command. */
@@ -220,7 +293,7 @@ export function workspaceTransformAllowed(
       Number.isFinite(transform.rotation) &&
       transform.rotation >= -36_000 && transform.rotation <= 36_000
     )
-  })
+  }) && !workspaceTransformHasMixedGlobalTeacherController(injected, event)
 }
 
 export function workspaceCanvasLabel(

@@ -2,7 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { ElectronApplication, Page } from 'playwright'
+import type { ElectronApplication, Locator, Page } from 'playwright'
 import sharp from 'sharp'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import {
@@ -318,6 +318,19 @@ function expectCleanRenderer(editor: LaunchedEditor): void {
   expect(editor.externalRequests, 'editor must remain offline').toEqual([])
 }
 
+function sceneLayerRow(page: Page, label: string): Locator {
+  return page.getByTestId('nodes-tab')
+    .locator('[data-testid^="effective-layer-item-scene-"]')
+    .filter({ hasText: label })
+}
+
+async function selectSceneLayer(page: Page, label: string): Promise<Locator> {
+  const row = sceneLayerRow(page, label)
+  await expect(row).toHaveCount(1)
+  await row.locator('.node-item__effective-select').click()
+  return row
+}
+
 test.describe.configure({ mode: 'serial' })
 test.beforeAll(() => {
   mkdirSync(runDirectory, { recursive: true })
@@ -555,13 +568,14 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expectAppShellFillsViewport(editor.page)
     const sceneItems = editor.page.locator('.scene-item')
     await expect(sceneItems).toHaveCount(1)
-    const globalLayer = editor.page.getByTestId('global-layer-entry')
-    await expect(globalLayer).toBeEnabled()
-    await globalLayer.click()
-    await expect(globalLayer).toHaveAttribute('aria-pressed', 'true')
-    await expect(editor.page.locator('.canvas-label')).toContainText('全局层')
+    // V9 normal authoring no longer exposes separate shared-layer pages.
+    // Scene/state authoring remains on the current page; controller-specific
+    // current-page routing is exercised by the cross-Surface Gate.
+    await expect(editor.page.getByTestId('global-layer-entry')).toHaveCount(0)
+    await expect(editor.page.getByTestId('surface-layer-entry')).toHaveCount(0)
+    // Retain the original scene reactivation step: it establishes the normal
+    // current-page canvas before the rest of this scene/state flow runs.
     await sceneItems.first().click()
-    await expect(globalLayer).toHaveAttribute('aria-pressed', 'false')
     await expect(editor.page.getByTestId('elements-tab')).toBeVisible()
 
     await editor.page.getByTestId('add-scene').click()
@@ -587,23 +601,37 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expect(editor.page.getByTestId('nodes-tab')).toBeVisible()
     await expect(editor.page.getByText('矩形', { exact: true })).toBeVisible()
     await expectAppShellFillsViewport(editor.page)
-    await editor.page.getByText('矩形', { exact: true }).dblclick()
-    const layerNameInput = editor.page.getByRole('textbox', { name: '重命名“矩形”' })
+    await selectSceneLayer(editor.page, '矩形')
+    await editor.page.getByRole('tab', { name: '属性' }).click()
+    const layerNameInput = editor.page.getByLabel('名称', { exact: true })
     await layerNameInput.fill('实验框')
     await layerNameInput.press('Enter')
-    await expect(editor.page.getByText('实验框', { exact: true })).toBeVisible()
-    await editor.page.getByRole('button', { name: '隐藏“实验框”' }).click()
-    await expect(editor.page.getByRole('button', { name: '显示“实验框”' })).toBeVisible()
-    await editor.page.getByRole('button', { name: '显示“实验框”' }).click()
-    await editor.page.getByRole('button', { name: '锁定“实验框”' }).click()
-    await expect(editor.page.getByRole('button', { name: '解锁“实验框”' })).toBeVisible()
-    await editor.page.getByRole('button', { name: '解锁“实验框”' }).click()
-    await editor.page.getByRole('button', { name: '复制“实验框”' }).click()
-    await expect(editor.page.getByText('实验框 副本', { exact: true })).toBeVisible()
-    await editor.page.getByRole('button', { name: '删除“实验框 副本”' }).click()
-    await expect(editor.page.getByText('实验框 副本', { exact: true })).toHaveCount(0)
-    await editor.page.getByText('实验框', { exact: true }).click()
-    await expect(editor.page.getByText('已选 1', { exact: true })).toBeVisible()
+    await expect(layerNameInput).toHaveValue('实验框')
+    const visibility = editor.page.getByLabel('显示图层', { exact: true })
+    // The visible track is a child of the label and intentionally receives the
+    // pointer hit. Force the native checkbox action while still exercising its
+    // real change handler.
+    await visibility.uncheck({ force: true })
+    await expect(visibility).not.toBeChecked()
+    await visibility.check({ force: true })
+    await expect(visibility).toBeChecked()
+    await editor.page.getByRole('button', { name: '锁定图层', exact: true }).click()
+    await expect(editor.page.getByRole('button', { name: '解锁图层', exact: true })).toBeVisible()
+    await editor.page.getByRole('button', { name: '解锁图层', exact: true }).click()
+    await editor.page.getByRole('tab', { name: '图层' }).click()
+    await selectSceneLayer(editor.page, '实验框')
+    await editor.page.keyboard.press('Control+d')
+    const duplicateRow = sceneLayerRow(editor.page, '实验框 副本')
+    await expect(duplicateRow).toHaveCount(1)
+    await duplicateRow.locator('.node-item__effective-select').click()
+    await editor.page.keyboard.press('Delete')
+    await expect(duplicateRow).toHaveCount(0)
+    const authoredShapeRow = await selectSceneLayer(editor.page, '实验框')
+    await expect(authoredShapeRow.locator('.node-item__effective-select'))
+      .toHaveAttribute('aria-pressed', 'true')
+    // Move focus off the row's button before arrow-key authoring; buttons own
+    // arrow keys for their own interaction semantics.
+    await editor.page.locator('.status-bar').click()
     await editor.page.keyboard.press('ArrowRight')
 
     await editor.page.getByRole('tab', { name: '属性' }).click()
@@ -663,18 +691,17 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expect(activeState).toContainText('缩略图')
     await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
     await editor.page.getByRole('tab', { name: '图层' }).click()
-    await editor.page.getByRole('button', {
-      name: '从当前状态隐藏“实验框”',
-    }).click()
-    await expect(editor.page.getByRole('button', {
-      name: '“实验框”已在当前状态隐藏',
-    })).toBeDisabled()
-    await editor.page.getByRole('button', { name: '显示“实验框”' }).click()
-    await expect(editor.page.getByRole('button', {
-      name: '从当前状态隐藏“实验框”',
-    })).toBeEnabled()
-    await editor.page.getByText('实验框', { exact: true }).click()
+    const stateShapeRow = await selectSceneLayer(editor.page, '实验框')
+    await editor.page.keyboard.press('Delete')
+    await expect(editor.page.getByText('已在当前状态隐藏，基础元素仍保留', {
+      exact: true,
+    })).toBeVisible()
+    await expect(stateShapeRow).toHaveAttribute('data-layer-effective-visible', 'false')
+    await stateShapeRow.locator('.node-item__effective-select').click()
     await editor.page.getByRole('tab', { name: '属性' }).click()
+    await expect(editor.page.getByText('此元素已有当前状态设置。'))
+      .toBeVisible()
+    await editor.page.getByRole('button', { name: '恢复基础值' }).click()
     await expect(editor.page.getByText('此元素当前沿用基础设置。'))
       .toBeVisible()
     const stateFill = editor.page.getByLabel('填充色', { exact: true })
@@ -770,7 +797,7 @@ test('authors V9 scenes and presentation states through the original panels', as
     await expect(editor.page.getByText('缩略图 · 反馈态', { exact: true })).toBeVisible()
     await editor.page.locator('.scene-state-card').filter({ hasText: '反馈态' }).click()
     await editor.page.getByRole('tab', { name: '图层' }).click()
-    await editor.page.getByText('实验框', { exact: true }).click()
+    await selectSceneLayer(editor.page, '实验框')
     await editor.page.getByRole('tab', { name: '属性' }).click()
     await expect(editor.page.getByLabel('宽', { exact: true })).toHaveValue('360')
     await expect(editor.page.getByLabel('填充色', { exact: true })).toHaveValue('#16a34a')
