@@ -220,12 +220,6 @@ async function closeCoursePreviewOverlay(page: Page) {
   await expect(overlay).toHaveCount(0)
 }
 
-async function closeCoursePreviewOverlay(page: Page) {
-  const overlay = page.getByTestId('course-preview-overlay')
-  await overlay.getByRole('button', { name: '关闭预览' }).click()
-  await expect(overlay).toHaveCount(0)
-}
-
 function readSavedCourseProjectArchive(filePath: string): {
   project: CourseProjectDocument
   assetFiles: Record<string, Uint8Array>
