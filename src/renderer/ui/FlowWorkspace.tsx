@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -27,6 +28,7 @@ import {
 } from '../course/flowEditorSlice'
 import { transformFlowOverlayFrame, type FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAdapters'
 import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
+import { selectMediaAssetFiles, useEditorStore } from '../store/editorStore'
 import {
   resizeWorldFrameFromHandle,
   STAGE_RESIZE_HANDLE_DIRECTIONS,
@@ -80,6 +82,8 @@ export interface FlowWorkspaceProps {
   readonly onSelectionChange?: (selection: FlowEditorSelection | null) => void
   readonly onTextEditChange?: (edit: FlowTextEditSession | null) => void
   readonly readOnly?: boolean
+  /** Sidecar bytes for edit-mode previews. Production falls back to the editor store. */
+  readonly assetFiles?: Record<string, Uint8Array>
 }
 
 export function FlowInlineRichTextEditor({
@@ -278,6 +282,120 @@ function overlayCardStyle(layer: FlowEditorLayerView, preview?: StageRect | null
   }
 }
 
+function createFlowAssetObjectUrls(
+  assets: CourseProjectDocument['assets'],
+  files: Record<string, Uint8Array>,
+): Record<string, string> {
+  const urls: Record<string, string> = {}
+  if (typeof URL.createObjectURL !== 'function') return urls
+  for (const [assetId, bytes] of Object.entries(files)) {
+    const meta = assets[assetId]
+    urls[assetId] = URL.createObjectURL(
+      new Blob([Uint8Array.from(bytes)], { type: meta?.mimeType ?? 'application/octet-stream' }),
+    )
+  }
+  return urls
+}
+
+function nativeOverlayMedia(item: LayerItem): {
+  readonly kind: 'image' | 'video'
+  readonly assetId: string
+  readonly posterAssetId?: string
+} | null {
+  if (item.kind !== 'native') return null
+  if (item.content.nativeType === 'image') {
+    return { kind: 'image', assetId: item.content.data.assetId }
+  }
+  if (item.content.nativeType === 'video') {
+    const posterAssetId = item.content.data.poster.assetId
+    return {
+      kind: 'video',
+      assetId: item.content.data.assetId,
+      ...(posterAssetId ? { posterAssetId } : {}),
+    }
+  }
+  return null
+}
+
+function overlayMediaFillStyle(): CSSProperties {
+  return {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    display: 'block',
+    pointerEvents: 'none',
+  }
+}
+
+function renderFlowPaperMedia(
+  block: Extract<FlowBlock, { type: 'media' }>,
+  assetUrls: Record<string, string>,
+): ReactNode {
+  const url = assetUrls[block.assetId]
+  if (block.mediaKind === 'image') {
+    return (
+      <img
+        data-flow-asset-id={block.assetId}
+        data-flow-media-kind="image"
+        {...(url ? { src: url } : {})}
+        alt={block.altText ?? ''}
+        style={{ maxWidth: '100%', display: 'block' }}
+      />
+    )
+  }
+  if (block.mediaKind === 'video') {
+    return (
+      <video
+        data-flow-asset-id={block.assetId}
+        data-flow-media-kind="video"
+        {...(url ? { src: url } : {})}
+        muted
+        playsInline
+        preload="metadata"
+        style={{ maxWidth: '100%', display: 'block' }}
+      />
+    )
+  }
+  return (
+    <div className="flow-media-placeholder" data-flow-media-kind="audio">
+      音频占位符
+    </div>
+  )
+}
+
+function renderFlowOverlayCardContent(
+  layer: FlowEditorLayerView,
+  assetUrls: Record<string, string>,
+): ReactNode {
+  const media = nativeOverlayMedia(layer.item as LayerItem)
+  if (!media) return layer.item.label || '浮层'
+  const url = assetUrls[media.assetId]
+  if (media.kind === 'image') {
+    return (
+      <img
+        data-flow-overlay-media="image"
+        data-flow-asset-id={media.assetId}
+        alt=""
+        {...(url ? { src: url } : {})}
+        style={overlayMediaFillStyle()}
+      />
+    )
+  }
+  const posterUrl = media.posterAssetId ? assetUrls[media.posterAssetId] : undefined
+  return (
+    <video
+      data-flow-overlay-media="video"
+      data-flow-asset-id={media.assetId}
+      {...(url ? { src: url } : {})}
+      {...(posterUrl ? { poster: posterUrl } : {})}
+      muted
+      playsInline
+      preload="metadata"
+      style={overlayMediaFillStyle()}
+    />
+  )
+}
+
 function overlayLocalPoint(
   overlay: HTMLElement,
   clientX: number,
@@ -363,6 +481,7 @@ export function FlowWorkspace({
   onSelectionChange,
   onTextEditChange,
   readOnly = false,
+  assetFiles,
 }: FlowWorkspaceProps) {
   const paperRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -375,6 +494,17 @@ export function FlowWorkspace({
   const overlayRef = useRef<HTMLDivElement>(null)
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
+  const storeAssetFiles = useEditorStore(selectMediaAssetFiles)
+  const sidecarFiles = assetFiles ?? storeAssetFiles
+  const assetUrls = useMemo(
+    () => createFlowAssetObjectUrls(project.assets, sidecarFiles),
+    [project.assets, sidecarFiles],
+  )
+
+  useEffect(() => () => {
+    if (typeof URL.revokeObjectURL !== 'function') return
+    for (const url of Object.values(assetUrls)) URL.revokeObjectURL(url)
+  }, [assetUrls])
 
   const setEditState = (next: FlowTextEditSession | null) => {
     editRef.current = next
@@ -923,13 +1053,7 @@ export function FlowWorkspace({
       case 'media':
         body = (
           <figure data-flow-media-layout={block.layout}>
-            {block.mediaKind === 'image'
-              ? <img data-flow-asset-id={block.assetId} alt={block.altText ?? ''} />
-              : (
-                  <div className="flow-media-placeholder" data-flow-media-kind={block.mediaKind}>
-                    {block.mediaKind === 'audio' ? '音频占位符' : '视频占位符'}
-                  </div>
-                )}
+            {renderFlowPaperMedia(block, assetUrls)}
             {block.caption ? <figcaption>{block.caption}</figcaption> : null}
           </figure>
         )
@@ -1324,7 +1448,7 @@ export function FlowWorkspace({
                     currentSceneId={locationId}
                   />
                 ) : (
-                  layer.item.label || '浮层'
+                  renderFlowOverlayCardContent(layer, assetUrls)
                 )}
                 {selected && !readOnly && !layer.item.locked ? (
                   STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
