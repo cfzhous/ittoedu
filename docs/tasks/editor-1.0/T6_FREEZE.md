@@ -7,7 +7,7 @@
 > **本包唯一允许跑 typecheck / 全量 test / e2e / build:desktop 的任务**
 
 预备切片已合入：[T6-docs](T6_DOCS.md)、[T6-scan](T6_SCAN.md)、[T1-D](T1_D_CONTRACTS_GEN.md)、[T6-CI](T6_CI.md)、[T6-nav](T6_NAV.md)。  
-T1-A / T1-C 仍暂缓。扫描仍可白名单 `migrateProjectV8ToCourseProjectV9`。`legacy-runtime-v2` / `legacy-whole-canvas` 的 src 白名单必须保持 `[]`（T1-B 已删）。不要在 T6 偷偷改判别器。
+T1-A / T1-C **不进本轮冻结**（大范围搬类型 / 改顶层字段）。扫描仍可白名单 `migrateProjectV8ToCourseProjectV9`。`legacy-runtime-v2` / `legacy-whole-canvas` 的 src 白名单必须保持 `[]`（T1-B 已删）。不要在 T6 偷偷改判别器。
 
 > 依赖：T1-B 已合入  
 > 并行：全量验证否

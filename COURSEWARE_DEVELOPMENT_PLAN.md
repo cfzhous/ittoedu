@@ -119,7 +119,7 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav 已合入。T6 全量验证可领取。T1-A 真迁移 / T1-C 仍暂缓。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
+T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav 已合入。T6 全量验证可领取。T1-A 真迁移 / T1-C 默认不进本轮冻结（若要进 1.0 必须先于 T6）。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
