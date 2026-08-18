@@ -1,6 +1,6 @@
 # T6-tc-tests 修 typecheck 测试与 validate-project
 
-> 状态：**可领取**  
+> 状态：**已合入，禁止重做**  
 > 并行：可与 [T1-A](T1_A_MOVE.md)、[T1-C](T1_C_AUDIT.md) 分树。不要改 `src/player/**` / Published 类型（T1-A）。不要改 `tests/unit/courseProjectTopLevelFields.test.ts`（T1-C）。  
 
 > 合同变化：否  
