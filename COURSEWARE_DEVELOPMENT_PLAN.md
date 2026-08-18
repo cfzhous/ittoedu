@@ -36,8 +36,8 @@
 
 | 缺口 | 车道 | 任务 |
 |---|---|---|
-| V9 Native 合同仍依赖 `projectTypes.ts` / `projectSchema.ts` | C | T1 |
-| 持久化仍含 `legacy-runtime-v2`、`legacy-whole-canvas` | C | T1 |
+| V9 Native 合同仍依赖 `projectTypes.ts` / `projectSchema.ts` | C | T1-A（暂缓） |
+| 顶层字段审计 | C | T1-C（暂缓） |
 | Spatial（及可选 Flow 页铬）缺少可持久化画布底色；缺省应白 | C+P | T1 加可选字段，P5 接线 |
 | 打开 V8 仍走「导入旧版工程」；空白工程仍 `create V8 then migrate` | C | T2 |
 | 双后端 + `v9-slide-candidate` | C | T3 |
