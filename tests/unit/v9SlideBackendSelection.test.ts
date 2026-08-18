@@ -8,10 +8,10 @@ import {
 } from '@/renderer/course/slideAuthoringBackend'
 import {
   selectActiveCourseProjectDocument,
+  selectSlideAuthoringBackend,
+  selectSlideAuthoringDocument,
   selectSlideAuthoringSnapshot,
   selectSlideBackendKind,
-  selectSlideCandidateBackend,
-  selectSlideCandidateDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import {
@@ -160,12 +160,12 @@ describe('V9 slide authoring backend single document transaction', () => {
     expect(selectSlideBackendKind(state)).toBe('slide-authoring')
     expect(getSlideBackendKind(state.slideBackend)).toBe('slide-authoring')
     expect(isSlideAuthoringBackend(state.slideBackend)).toBe(true)
-    expect(selectSlideCandidateBackend(state)).not.toBeNull()
+    expect(selectSlideAuthoringBackend(state)).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(state)).not.toBeNull()
-    expect(selectSlideCandidateDocument(state)?.schemaVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
+    expect(selectSlideAuthoringDocument(state)?.schemaVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
     expect(state.project.schemaVersion).toBe(8)
 
-    const documentBefore = selectSlideCandidateDocument(useEditorStore.getState())
+    const documentBefore = selectSlideAuthoringDocument(useEditorStore.getState())
     const revisionBefore = documentBefore?.revision ?? 0
     const scenesBefore = documentBefore?.surfaces
       .flatMap((surface) => surface.type === 'slide' ? surface.scenes : [])
@@ -178,7 +178,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     )
     expect(added.ok).toBe(true)
     expect(added.historyEntry).toBe(true)
-    const documentAfter = selectSlideCandidateDocument(useEditorStore.getState())
+    const documentAfter = selectSlideAuthoringDocument(useEditorStore.getState())
     expect(documentAfter?.schemaVersion).toBe(9)
     expect(documentAfter?.revision).toBe(revisionBefore + 1)
     expect(documentAfter?.surfaces.flatMap((surface) => (
@@ -194,10 +194,10 @@ describe('V9 slide authoring backend single document transaction', () => {
 
     const injected = useEditorStore.getState()
     expect(selectSlideBackendKind(injected)).toBe('slide-authoring')
-    expect(selectSlideCandidateBackend(injected)).toBe(backend)
+    expect(selectSlideAuthoringBackend(injected)).toBe(backend)
     expect(selectSlideAuthoringSnapshot(injected)).toEqual(backend.getSnapshot())
-    expect(selectSlideCandidateDocument(injected)?.schemaVersion).toBe(9)
-    expect(selectSlideCandidateDocument(injected)?.id).toBe('r2-seam-slide-candidate')
+    expect(selectSlideAuthoringDocument(injected)?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(injected)?.id).toBe('r2-seam-slide-candidate')
     expect(injected.project.schemaVersion).toBe(8)
 
     const added = injected.runSlideCandidateCommand((candidate) =>
@@ -212,9 +212,9 @@ describe('V9 slide authoring backend single document transaction', () => {
     const afterWrite = useEditorStore.getState()
     expect(selectSlideBackendKind(afterWrite)).toBe('slide-authoring')
     expect(selectSlideAuthoringSnapshot(afterWrite)?.revision).toBe(2)
-    expect(selectSlideCandidateDocument(afterWrite)?.schemaVersion).toBe(9)
-    expect(selectSlideCandidateDocument(afterWrite)?.revision).toBe(2)
-    const writtenSurface = selectSlideCandidateDocument(afterWrite)?.surfaces[0]
+    expect(selectSlideAuthoringDocument(afterWrite)?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(afterWrite)?.revision).toBe(2)
+    const writtenSurface = selectSlideAuthoringDocument(afterWrite)?.surfaces[0]
     expect(
       writtenSurface && writtenSurface.type === 'slide' ? writtenSurface.scenes : [],
     ).toHaveLength(2)
@@ -233,9 +233,9 @@ describe('V9 slide authoring backend single document transaction', () => {
 
     const cleared = useEditorStore.getState()
     expect(selectSlideBackendKind(cleared)).toBe('slide-authoring')
-    expect(selectSlideCandidateBackend(cleared)).not.toBeNull()
+    expect(selectSlideAuthoringBackend(cleared)).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(cleared)).not.toBeNull()
-    expect(selectSlideCandidateDocument(cleared)?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(cleared)?.schemaVersion).toBe(9)
     expect(
       executeSlideAuthoringCommand(cleared.slideBackend, (candidate) => candidate.addScene()),
     ).toMatchObject({
@@ -246,7 +246,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     cleared.createNewProject()
     const restored = useEditorStore.getState()
     expect(selectSlideBackendKind(restored)).toBe('slide-authoring')
-    expect(selectSlideCandidateDocument(restored)?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(restored)?.schemaVersion).toBe(9)
     expect(selectActiveCourseProjectDocument(restored)?.schemaVersion).toBe(9)
     expect(restored.errorMessage).toBeNull()
 
@@ -259,6 +259,6 @@ describe('V9 slide authoring backend single document transaction', () => {
     )
     expect(added.ok).toBe(true)
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionBefore + 1)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
   })
 })

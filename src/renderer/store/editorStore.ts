@@ -362,10 +362,8 @@ import {
 } from '../project/v9AssetAdapter'
 import {
   executeSlideAuthoringCommand,
-  executeSlideCandidateCommand,
   getSlideBackendKind,
   isSlideAuthoringBackend,
-  isV9SlideCandidateBackend,
   type SlideBackend,
   type SlideBackendKind,
 } from './slideBackendPort'
@@ -846,7 +844,7 @@ type V9PreviewState = Pick<
 export function projectCandidatePreviewDocument(
   state: V9PreviewState,
 ): { project: ProjectDocument; assetFiles: Record<string, Uint8Array> } | null {
-  const backend = isV9SlideCandidateBackend(state.slideBackend) ? state.slideBackend : null
+  const backend = isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
   if (!backend) return null
   const document = backend.getSession().history.present
   const ui = state.slideCandidateUi ?? buildSlideCandidateUi(backend, state.v9ContentEdit)
@@ -895,7 +893,7 @@ function buildCandidateEffectiveLayers(
   if (state.flowSession) {
     return flowEffectiveLayers(state.flowSession)
   }
-  const backend = isV9SlideCandidateBackend(state.slideBackend) ? state.slideBackend : null
+  const backend = isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
   if (!backend) return null
   const session = backend.getSession()
   return projectEffectiveLayers({
@@ -2783,7 +2781,7 @@ function resolveEditorFocus(
     if (state.selectedNodeIds.length > 0) return 'layer'
     return 'none'
   }
-  if (selectSlideCandidateBackend(state)) {
+  if (selectSlideAuthoringBackend(state)) {
     const tagName = focus instanceof HTMLElement ? focus.tagName : undefined
     const isContentEditable = focus instanceof HTMLElement ? focus.isContentEditable : false
     if (shouldIgnoreSlideLayerDeleteForFocus({
@@ -2891,7 +2889,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     } = {},
   ): SlideCommandResult => {
     const current = get()
-    if (!isV9SlideCandidateBackend(current.slideBackend)) return result
+    if (!isSlideAuthoringBackend(current.slideBackend)) return result
     if (!result.ok) {
       if (result.reason) {
         set({ errorMessage: result.reason, statusMessage: null })
@@ -3309,7 +3307,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }, extra)
       return
     }
-    const backend = selectSlideCandidateBackend(state)
+    const backend = selectSlideAuthoringBackend(state)
     if (backend) {
       const session = backend.getSession()
       const history = commitSlideAuthoringHistory(session.history, nextProject)
@@ -3377,7 +3375,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     result: LayerCommandResult,
     extra?: { statusMessage?: string | null },
   ): SlideCommandResult => {
-    const backend = selectSlideCandidateBackend(get())
+    const backend = selectSlideAuthoringBackend(get())
     if (!backend) {
       return {
         ok: false,
@@ -3389,7 +3387,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 
   const currentMediaSession = (): CourseMediaSession | null => {
-    const backend = selectSlideCandidateBackend(get())
+    const backend = selectSlideAuthoringBackend(get())
     if (!backend) return null
     return bindCourseMediaSession(
       backend.getSession(),
@@ -3472,7 +3470,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     node: SceneNode,
     extra: { statusMessage?: string | null; sidecar?: CourseAssetSidecar } = {},
   ): boolean => {
-    if (!selectSlideCandidateBackend(get()) || get().editingScope !== 'global') return false
+    if (!selectSlideAuthoringBackend(get()) || get().editingScope !== 'global') return false
     runV9DocumentMutation((draft) => {
       appendGlobalCourseNode(draft, node)
     }, {
@@ -3494,7 +3492,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       componentPackages?: Record<string, ComponentPackageData>
     },
   ): SlideCommandResult => {
-    const backend = selectSlideCandidateBackend(get())
+    const backend = selectSlideAuthoringBackend(get())
     if (!backend) {
       return {
         ok: false,
@@ -3512,7 +3510,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       focus?: Parameters<typeof shouldIgnoreSlideLayerDeleteForFocus>[0]
     } = {},
   ) => {
-    const backend = selectSlideCandidateBackend(get())
+    const backend = selectSlideAuthoringBackend(get())
     if (!backend) {
       return {
         ok: false,
@@ -3539,7 +3537,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     nextSelectionIds: readonly string[],
   ): SlideAuthoringBackend | null => {
     const state = get()
-    const backend = selectSlideCandidateBackend(state)
+    const backend = selectSlideAuthoringBackend(state)
     const edit = state.v9ContentEdit
     if (!backend) return null
     if (!edit) return backend
@@ -3551,12 +3549,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commitV9SlideContentEdit(backend.getSession(), edit),
       { clearContentEdit: true },
     )
-    return selectSlideCandidateBackend(get())
+    return selectSlideAuthoringBackend(get())
   }
 
   const persistOpenV9ContentEdit = (): SlideAuthoringBackend | null => {
     const state = get()
-    const backend = selectSlideCandidateBackend(state)
+    const backend = selectSlideAuthoringBackend(state)
     const edit = state.v9ContentEdit
     if (!backend) return null
     if (!edit) return backend
@@ -3564,7 +3562,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       commitV9SlideContentEdit(backend.getSession(), edit),
       { clearContentEdit: true },
     )
-    return selectSlideCandidateBackend(get())
+    return selectSlideAuthoringBackend(get())
   }
 
   const persistOpenSpatialContentEdit = (): SpatialAuthoringSession | null => {
@@ -3590,7 +3588,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   const canAddNodes = (count = 1): boolean => {
     const state = get()
-    const backend = selectSlideCandidateBackend(state)
+    const backend = selectSlideAuthoringBackend(state)
     const length = backend
       ? state.editingScope === 'global'
         ? backend.getSession().history.present.globalLayerItems.length
@@ -3741,7 +3739,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ),
 
     injectV9SlideCandidateBackend(backend) {
-      if (!isV9SlideCandidateBackend(backend)) return
+      if (!isSlideAuthoringBackend(backend)) return
       applyV9Backend(backend, {
         sidecar: emptyCourseAssetSidecar(),
         dirty: false,
@@ -3765,12 +3763,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     runSlideCandidateCommand(run) {
       return persistCandidateResult(
-        executeSlideCandidateCommand(get().slideBackend, run),
+        executeSlideAuthoringCommand(get().slideBackend, run),
       )
     },
 
     applySlideCandidateSession(session) {
-      if (!isV9SlideCandidateBackend(get().slideBackend)) return
+      if (!isSlideAuthoringBackend(get().slideBackend)) return
       persistCandidateResult({
         ok: true,
         nextSession: session,
@@ -3816,7 +3814,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
             get().addVideoNode(item.meta, item.bytes, input.x, input.y)
           }
         }
-        const backend = selectSlideCandidateBackend(get())
+        const backend = selectSlideAuthoringBackend(get())
         return {
           ok: Boolean(backend),
           reason: backend ? '图片已添加到全局层' : 'not-slide-authoring-backend',
@@ -3840,7 +3838,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     exportV9SlideCandidateArchive() {
       const spatial = get().spatialSession
       const flow = get().flowSession
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       const project = spatial?.history.present
         ?? flow?.history.present
         ?? backend?.getSession().history.present
@@ -4067,7 +4065,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ))
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (!backend) return
       const projection = buildCandidateEffectiveLayers(get())
       const from = projection?.unifiedRows.find((row) => row.id === fromId)
@@ -4111,7 +4109,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ))
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (!backend) return
       const row = findCandidateLayerRow(get(), nodeId)
       if (!row || row.owner !== 'global') return
@@ -4148,7 +4146,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ))
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (!backend) return
       const row = findCandidateLayerRow(get(), nodeId)
       if (!row || row.owner !== 'global') return
@@ -4293,10 +4291,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistOpenV9ContentEdit()
-        const nextBackend = selectSlideCandidateBackend(get()) ?? backend
+        const nextBackend = selectSlideAuthoringBackend(get()) ?? backend
         set({
           projectPath: path,
           dirty: false,
@@ -4366,7 +4364,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistCandidateResult(backend.setScope(
           editingScope === 'global' ? 'global' : 'scene',
@@ -4419,10 +4417,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistOpenV9ContentEdit()
-        const live = selectSlideCandidateBackend(get()) ?? backend
+        const live = selectSlideAuthoringBackend(get()) ?? backend
         const scene = currentScene(get())
         const nextStateId =
           canvasMode === 'run' && get().activePresentationStateId === null && scene
@@ -4503,7 +4501,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         set({ errorMessage: '课件名称不能为空。' })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         if (normalized === backend.getSession().history.present.title) return
         runCandidateSession(
@@ -4579,7 +4577,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const existing = get().v9ContentEdit
         if (
@@ -4589,7 +4587,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           return
         }
         if (existing) get().commitTextEdit()
-        const nextBackend = selectSlideCandidateBackend(get())
+        const nextBackend = selectSlideAuthoringBackend(get())
         if (!nextBackend) return
         const begun = beginV9SlideContentEdit({
           backend: nextBackend,
@@ -4689,7 +4687,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      if (selectSlideCandidateBackend(state) && state.v9ContentEdit) {
+      if (selectSlideAuthoringBackend(state) && state.v9ContentEdit) {
         if (state.v9ContentEdit.target.layerItemId !== nodeId) return
         if (state.v9ContentEdit.kind !== 'text') return
         const nextEdit = updateV9SlideContentTextDraft(state.v9ContentEdit, {
@@ -4698,7 +4696,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           ...(width !== undefined ? { width } : {}),
           ...(height !== undefined ? { height } : {}),
         })
-        const backend = selectSlideCandidateBackend(get())
+        const backend = selectSlideAuthoringBackend(get())
         set({
           v9ContentEdit: nextEdit,
           ...(backend ? candidateViewState(backend, nextEdit) : {}),
@@ -4743,7 +4741,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
         return
       }
-      const backend = selectSlideCandidateBackend(state)
+      const backend = selectSlideAuthoringBackend(state)
       if (backend && state.v9ContentEdit) {
         persistCandidateResult(
           commitV9SlideContentEdit(backend.getSession(), state.v9ContentEdit),
@@ -4785,7 +4783,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(state)
+      const backend = selectSlideAuthoringBackend(state)
       if (backend && state.v9ContentEdit) {
         cancelV9SlideContentEdit(backend.getSession(), state.v9ContentEdit)
         set({
@@ -5006,10 +5004,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
           set({ courseAuthoringSession: nextAuthoringSession })
           return
         }
-        const backend = selectSlideCandidateBackend(state)
+        const backend = selectSlideAuthoringBackend(state)
         if (backend) {
           persistOpenV9ContentEdit()
-          const live = selectSlideCandidateBackend(get()) ?? backend
+          const live = selectSlideAuthoringBackend(get()) ?? backend
           persistCandidateResult(live.activateScene(location.sceneId, {
             expectedRevision: live.getSnapshot().revision,
           }), { clearContentEdit: true })
@@ -5069,7 +5067,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
               if (id !== 'delete') {
                 return { ok: false, reason: `Slide 尚未接入${id}` }
               }
-              const backend = selectSlideCandidateBackend(get())
+              const backend = selectSlideAuthoringBackend(get())
               if (!backend) return { ok: false, reason: '当前不是 Slide 编辑会话' }
               if (live.itemIds.length === 0) {
                 return { ok: false, reason: '没有可删除的选择' }
@@ -5147,7 +5145,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
                 ))
                 return { ok: true, reason: '已删除' }
               }
-              const backend = selectSlideCandidateBackend(current)
+              const backend = selectSlideAuthoringBackend(current)
               if (backend && live.itemIds.length > 0) {
                 for (const nodeId of live.itemIds) {
                   const row = findCandidateLayerRow(current, nodeId)
@@ -5180,7 +5178,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateScene(sceneId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistCandidateResult(backend.duplicateScene(sceneId, {
           expectedRevision: backend.getSnapshot().revision,
@@ -5265,7 +5263,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (state.project.scenes.length <= 1) return false
       const index = state.project.scenes.findIndex((scene) => scene.id === sceneId)
       if (index < 0) return false
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         runV9DocumentMutation((draft) => {
           const removing = new Set(
@@ -5284,7 +5282,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
             }
           }
         })
-        const live = selectSlideCandidateBackend(get())
+        const live = selectSlideAuthoringBackend(get())
         if (!live) return false
         const result = persistCandidateResult(live.deleteScene(sceneId, {
           expectedRevision: live.getSnapshot().revision,
@@ -5355,7 +5353,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     reorderScenes(sceneIds) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistCandidateResult(backend.reorderScenes(sceneIds, {
           expectedRevision: backend.getSnapshot().revision,
@@ -5372,7 +5370,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateScene(sceneId, patch) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         runCandidateSession((session) => {
           const current = findCourseSlideScene(session.history.present, sceneId)
@@ -5471,7 +5469,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updateSceneRuntime(sceneId, patch) {
       const safePatch = editableRuntimePatch(patch)
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           for (const surface of draft.surfaces) {
             if (surface.type !== 'slide') continue
@@ -5496,7 +5494,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updateGlobalRuntime(patch) {
       const safePatch = editableRuntimePatch(patch)
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           const existing = draft.globalLayerItems.find((entry) => entry.item.kind === 'runtime')
           if (!existing || existing.item.kind !== 'runtime') return
@@ -5513,7 +5511,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setSceneRuntime(sceneId, runtime) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           writeSceneRuntime(draft, sceneId, runtime)
         }, { statusMessage: runtime ? '已创建场景运行时模板' : '已移除场景运行时' })
@@ -5531,7 +5529,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setGlobalRuntime(runtime) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           writeGlobalRuntime(draft, runtime)
         }, { statusMessage: runtime ? '已创建全局运行时模板' : '已移除全局运行时' })
@@ -5565,10 +5563,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }, { clearTextEdit: true })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistOpenV9ContentEdit()
-        const live = selectSlideCandidateBackend(get()) ?? backend
+        const live = selectSlideAuthoringBackend(get()) ?? backend
         persistCandidateResult(live.activateScene(activeSceneId, {
           expectedRevision: live.getSnapshot().revision,
         }))
@@ -5590,10 +5588,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setActivePresentationState(activePresentationStateId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistOpenV9ContentEdit()
-        const live = selectSlideCandidateBackend(get()) ?? backend
+        const live = selectSlideAuthoringBackend(get()) ?? backend
         persistCandidateResult(live.activateState(activePresentationStateId, {
           expectedRevision: live.getSnapshot().revision,
         }))
@@ -5622,7 +5620,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addPresentationState(name) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const scene = currentScene(get())
         if (!scene) return
@@ -5663,7 +5661,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicatePresentationState(stateId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const scene = currentScene(get())
         const source = scene && findPresentationState(scene, stateId)
@@ -5712,7 +5710,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deletePresentationState(stateId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const scene = currentScene(get())
         const presentation = scene && ensureScenePresentation(scene)
@@ -5806,7 +5804,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setInitialPresentationState(stateId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const sceneId = backend.getSnapshot().sceneId
         runCandidateSession((session) => {
@@ -5846,7 +5844,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setThumbnailPresentationState(stateId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const sceneId = backend.getSnapshot().sceneId
         runCandidateSession((session) => {
@@ -5886,7 +5884,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updatePresentationState(stateId, patch) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         if (patch.name !== undefined) {
           persistCandidateResult(backend.renameState(stateId, patch.name, {
@@ -5966,7 +5964,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     clearNodePresentationOverride(nodeId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const stateId = get().activePresentationStateId
         const scene = currentScene(get())
@@ -6002,7 +6000,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     clearPresentationStateOverrides(stateId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const scene = currentScene(get())
         if (!scene || !findPresentationState(scene, stateId)) return
@@ -6082,7 +6080,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         if (!canAddNode()) return
         const state = get()
         const node = normalizeNewNodeGeometry(
@@ -6160,7 +6158,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         if (!canAddNode()) return
         const state = get()
         const node = normalizeNewNodeGeometry(
@@ -6232,7 +6230,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         if (!canAddNode()) return
         const state = get()
         const node = normalizeNewNodeGeometry(
@@ -6990,7 +6988,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addInteractionRule(sceneId, rule) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         if (backend.getSnapshot().sceneId !== sceneId) {
           persistCandidateResult(backend.activateScene(sceneId, {
@@ -7014,7 +7012,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateInteractionRule(sceneId, ruleId, rule) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         runCandidateSession((session) => {
           const result = updateSlideSceneInteractionRule(session, ruleId, rule, {
@@ -7050,7 +7048,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteInteractionRule(sceneId, ruleId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         runCandidateSession((session) => {
           const current = findCourseSlideScene(session.history.present, sceneId)
@@ -7094,7 +7092,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateInteractionRule(sceneId, ruleId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const source = findCourseSlideScene(backend.getSession().history.present, sceneId)
           ?.interactions.find((rule) => rule.id === ruleId)
@@ -7135,7 +7133,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     moveInteractionRule(sceneId, ruleId, direction) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         runCandidateSession((session) => {
           const current = findCourseSlideScene(session.history.present, sceneId)
@@ -7173,7 +7171,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addGlobalInteractionRule(rule) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           if (draft.globalInteractions.some((item) => item.id === rule.id)) return
           draft.globalInteractions.push(structuredClone(rule))
@@ -7188,7 +7186,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateGlobalInteractionRule(ruleId, rule) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           const index = draft.globalInteractions.findIndex((item) => item.id === ruleId)
           if (index < 0) return
@@ -7211,7 +7209,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteGlobalInteractionRule(ruleId) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           draft.globalInteractions = withoutDanglingAnimationCompletionRules(
             draft.globalInteractions.filter((item) => item.id !== ruleId),
@@ -7233,7 +7231,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       )
       if (!source) return null
       const copy = duplicateInteractionRuleForAuthoring(source)
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           const index = draft.globalInteractions.findIndex(
             (rule) => rule.id === ruleId,
@@ -7257,7 +7255,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     moveGlobalInteractionRule(ruleId, direction) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           moveInteractionRuleWithinKind(
             draft.globalInteractions,
@@ -7278,7 +7276,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setSimpleEntranceAnimation(nodeId, config) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runCandidateSession(
           (session) => writeSlideSimpleEntranceAnimation(session, nodeId, config, {
             expectedRevision: session.history.present.revision,
@@ -7387,7 +7385,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updatePlayback(patch) {
       const requestedControls = patch.controls
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           draft.playback = { ...draft.playback, ...patch }
           if (requestedControls === 'none') {
@@ -7438,7 +7436,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateDesignTokens(tokens) {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runV9DocumentMutation((draft) => {
           draft.designTokens = structuredClone(tokens)
         }, { statusMessage: '项目字体与色板 Token 已更新' })
@@ -7461,7 +7459,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         if (restored) get().selectNode(restored.item.layerItemId)
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         runV9DocumentMutation((draft) => {
           const controller = findGlobalTeacherController(draft)
@@ -7579,7 +7577,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         if (appendV9GlobalNode(node, {
           statusMessage: scope === 'global'
             ? `已将“${presetLabel ?? data.manifest.name}”添加到全局层`
@@ -7697,7 +7695,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runCandidateSession(
           (session) => {
             const project = commitSlideProjectMutation(session.history.present, (draft) => {
@@ -7766,7 +7764,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
 
       const packageName = state.componentPackages[packageId]?.manifest.name ?? packageId
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         const result = runV9DocumentMutation((draft) => {
           removeCourseComponentPackage(draft, packageId)
         }, { statusMessage: `未使用组件包“${packageName}”已删除` })
@@ -7844,7 +7842,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
       }
 
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         const result = runV9DocumentMutation((draft) => {
           removeCourseComponentPackage(draft, packageId)
           draft.componentPackages[packageData.manifest.id] = componentMeta(packageData)
@@ -7979,7 +7977,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         sourcePackageId: sourceMeta?.sourcePackageId ?? packageId,
       }
 
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         const result = runV9DocumentMutation((draft) => {
           draft.componentPackages[nextId] = componentMeta(packageData, authoring)
           if (!selected || selected.type !== 'external-component') return
@@ -8065,7 +8063,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         contentSha256: componentContentSha256(authoredFiles),
       }
       validateEditableComponentPackage(nextPackage, state.project)
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         const result = runV9DocumentMutation((draft) => {
           removeCourseComponentPackage(draft, packageId)
           draft.componentPackages[packageId] = componentMeta(nextPackage, {
@@ -8140,8 +8138,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ), { expectedRevision: flow.history.present.revision }))
         return
       }
-      if (selectSlideCandidateBackend(get())) {
-        const backend = selectSlideCandidateBackend(get())
+      if (selectSlideAuthoringBackend(get())) {
+        const backend = selectSlideAuthoringBackend(get())
         if (!backend) return
         if (shouldIgnoreSlideLayerDeleteForFocus({
           textEditSession: Boolean(get().editingTextNodeId || get().v9ContentEdit?.kind === 'text'),
@@ -8238,13 +8236,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ))
         return
       }
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         if (shouldIgnoreSlideLayerDeleteForFocus({
           textEditSession: Boolean(get().editingTextNodeId || get().v9ContentEdit?.kind === 'text'),
           formulaEditSession: get().v9ContentEdit?.kind === 'formula',
         })) return
         for (const nodeId of [...get().selectedNodeIds]) {
-          const backend = selectSlideCandidateBackend(get())
+          const backend = selectSlideAuthoringBackend(get())
           if (!backend) break
           const row = findCandidateLayerRow(get(), nodeId)
           if (!row) continue
@@ -8311,7 +8309,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateNode(nodeId) {
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const row = findCandidateLayerRow(get(), nodeId)
         if (!row) return
@@ -8423,7 +8421,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateSelectedNodes() {
-      if (selectSlideCandidateBackend(get())) {
+      if (selectSlideAuthoringBackend(get())) {
         runCandidateAction('duplicate')
         return
       }
@@ -8516,7 +8514,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     copySelectedNodes() {
-      if (selectSlideCandidateBackend(get()) && get().editingScope !== 'global') {
+      if (selectSlideAuthoringBackend(get()) && get().editingScope !== 'global') {
         runCandidateAction('copy')
         return
       }
@@ -8552,11 +8550,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     pasteNodes() {
-      if (selectSlideCandidateBackend(get()) && get().editingScope !== 'global') {
+      if (selectSlideAuthoringBackend(get()) && get().editingScope !== 'global') {
         runCandidateAction('paste')
         return
       }
-      if (selectSlideCandidateBackend(get()) && get().editingScope === 'global') {
+      if (selectSlideAuthoringBackend(get()) && get().editingScope === 'global') {
         const state = get()
         if (state.clipboardGlobalItems.length === 0) return
         if (state.project.globalLayer.length + state.clipboardGlobalItems.length > MAX_SCENE_NODES) {
@@ -8852,7 +8850,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         if (patches.length === 0) return
         const snapshot = backend.getSnapshot()
@@ -8906,10 +8904,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const row = findCandidateLayerRow(get(), item.nodeId)
           if (!row) continue
           persistLayerCommand(patchEffectiveLayerItem(
-            selectSlideCandidateBackend(get())?.getSession().history.present ?? document,
+            selectSlideAuthoringBackend(get())?.getSession().history.present ?? document,
             commandTargetForRow(row),
             { locked: Boolean(item.patch.locked) },
-            { expectedRevision: selectSlideCandidateBackend(get())?.getSnapshot().revision ?? revision },
+            { expectedRevision: selectSlideAuthoringBackend(get())?.getSnapshot().revision ?? revision },
           ))
         }
         const controllerPatches = framePatches.filter((item) => (
@@ -8918,7 +8916,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const sceneFramePatches = framePatches.filter((item) => (
           !findCandidateLayerRow(get(), item.nodeId)?.isTeacherController
         ))
-        const live = selectSlideCandidateBackend(get()) ?? backend
+        const live = selectSlideAuthoringBackend(get()) ?? backend
         for (const item of controllerPatches) {
           const row = findCandidateLayerRow(get(), item.nodeId)
           if (!row || row.item.kind !== 'native') continue
@@ -8943,7 +8941,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
             ...sceneFramePatches.map((item) => item.nodeId),
             ...contentPatches.map((item) => item.nodeId),
           ])]
-          const liveForSelect = selectSlideCandidateBackend(get()) ?? backend
+          const liveForSelect = selectSlideAuthoringBackend(get()) ?? backend
           const selected = new Set(liveForSelect.getSnapshot().selection.selectionIds)
           if (neededIds.some((id) => !selected.has(id))) {
             persistCandidateResult(liveForSelect.selectLayers(neededIds, false, {
@@ -9018,10 +9016,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
           const row = findCandidateLayerRow(get(), item.nodeId)
           if (!row) continue
           persistLayerCommand(patchEffectiveLayerItem(
-            selectSlideCandidateBackend(get())?.getSession().history.present ?? document,
+            selectSlideAuthoringBackend(get())?.getSession().history.present ?? document,
             commandTargetForRow(row),
             { visible: Boolean(item.patch.visible) },
-            { expectedRevision: selectSlideCandidateBackend(get())?.getSnapshot().revision ?? revision },
+            { expectedRevision: selectSlideAuthoringBackend(get())?.getSnapshot().revision ?? revision },
           ))
         }
         return
@@ -9140,7 +9138,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         }
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         persistCandidatePlane(
           backend.getSession().history.present,
@@ -9198,7 +9196,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ))
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         if (get().editingScope === 'global') {
           const projection = buildCandidateEffectiveLayers(get())
@@ -9330,7 +9328,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         set({ activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const projection = buildCandidateEffectiveLayers(get())
         const available = new Set(projection?.unifiedRows.map((row) => row.id) ?? [])
@@ -9355,7 +9353,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           persistCandidateResult(nextBackend.setScope(desiredScope, {
             expectedRevision: nextBackend.getSnapshot().revision,
           }))
-          nextBackend = selectSlideCandidateBackend(get())
+          nextBackend = selectSlideAuthoringBackend(get())
           if (!nextBackend) return
         }
         persistCandidateResult(nextBackend.selectLayers(selectedNodeIds, false, {
@@ -9441,7 +9439,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         set({ activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const available = new Set(
           (buildCandidateEffectiveLayers(get())?.unifiedRows ?? []).map((row) => row.id),
@@ -9514,7 +9512,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const before = backend.getSession().history.present
         const result = backend.undo()
@@ -9561,7 +9559,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         })
         return
       }
-      const backend = selectSlideCandidateBackend(get())
+      const backend = selectSlideAuthoringBackend(get())
       if (backend) {
         const before = backend.getSession().history.present
         const result = backend.redo()
@@ -9606,8 +9604,6 @@ export const selectSlideAuthoringBackend = (
 ): SlideAuthoringBackend | null =>
   isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend : null
 
-export const selectSlideCandidateBackend = selectSlideAuthoringBackend
-
 export const selectSlideAuthoringSnapshot = (
   state: EditorState,
 ): SlideAuthoringSnapshot | null =>
@@ -9616,12 +9612,10 @@ export const selectSlideAuthoringSnapshot = (
 export const selectSlideAuthoringDocument = (state: EditorState) =>
   selectSlideAuthoringBackend(state)?.getSession().history.present ?? null
 
-export const selectSlideCandidateDocument = selectSlideAuthoringDocument
-
 export const selectActiveCourseProjectDocument = (state: EditorState) =>
   state.spatialSession?.history.present
   ?? state.flowSession?.history.present
-  ?? selectSlideCandidateBackend(state)?.getSession().history.present
+  ?? selectSlideAuthoringBackend(state)?.getSession().history.present
   ?? null
 
 export const selectActiveCourseLocationId = (state: EditorState): string | null => {
@@ -9641,7 +9635,7 @@ export const selectMediaAssets = (state: EditorState) =>
   selectActiveCourseProjectDocument(state)?.assets ?? state.project.assets
 
 export const selectMediaAssetFiles = (state: EditorState): Record<string, Uint8Array> => {
-  if (state.spatialSession || state.flowSession || selectSlideCandidateBackend(state)) {
+  if (state.spatialSession || state.flowSession || selectSlideAuthoringBackend(state)) {
     return state.slideCandidateSidecar?.files ?? EMPTY_CANDIDATE_ASSET_FILES
   }
   return state.assetFiles

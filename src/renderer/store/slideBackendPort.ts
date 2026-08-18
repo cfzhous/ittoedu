@@ -17,9 +17,6 @@ export function isSlideAuthoringBackend(
   return backend?.kind === 'slide-authoring'
 }
 
-export const isV9SlideCandidateBackend = isSlideAuthoringBackend
-export const isSlideCandidateBackend = isSlideAuthoringBackend
-
 export function getSlideBackendKind(
   backend: SlideBackend | null | undefined,
 ): SlideBackendKind {
@@ -40,5 +37,4 @@ export function executeSlideAuthoringCommand(
   return run(backend)
 }
 
-export const executeSlideCandidateCommand = executeSlideAuthoringCommand
 export const SLIDE_BACKEND_NOT_CANDIDATE = 'not-slide-authoring-backend'
