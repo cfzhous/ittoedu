@@ -979,6 +979,26 @@ button:disabled {
   pointer-events: none;
 }
 
+.course-try-run-host,
+.course-preview-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #111318;
+  z-index: 5;
+}
+
+.course-preview-host {
+  position: relative;
+  inset: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.course-try-run-feedback {
+  z-index: 6;
+}
+
 .runtime-preview-frame {
   position: absolute;
   inset: 0;

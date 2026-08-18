@@ -493,6 +493,44 @@ describe('rich text editing UI', () => {
     await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1))
     expect(onCommit).toHaveBeenCalledWith('中文输入', [])
   })
+
+  it('does not commit when focus lands on the canvas stage', async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      disconnect() {}
+    })
+    const workspace = document.createElement('div')
+    const canvas = document.createElement('div')
+    canvas.className = 'canvas-stage'
+    workspace.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 720,
+      width: 1280, height: 720, toJSON: () => ({}),
+    })
+    canvas.getBoundingClientRect = workspace.getBoundingClientRect
+    const onCommit = vi.fn()
+    render(
+      <TextEditOverlay
+        node={createTextNode()}
+        workspace={workspace}
+        canvas={canvas}
+        onPreview={() => undefined}
+        onCommit={onCommit}
+        onCancel={() => undefined}
+      />,
+    )
+    const editor = screen.getByTestId('text-edit-overlay')
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+
+    const stack = document.createElement('div')
+    stack.className = 'canvas-stage-stack'
+    stack.tabIndex = 0
+    document.body.append(stack)
+    stack.focus()
+    fireEvent.blur(editor, { relatedTarget: stack })
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+    expect(onCommit).not.toHaveBeenCalled()
+    stack.remove()
+  })
 })
 
 describe('font family picker', () => {

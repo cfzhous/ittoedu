@@ -145,8 +145,11 @@ export class PublishedCourseSession {
     for (const host of this.#hosts) {
       const slot = container.ownerDocument.createElement('div')
       slot.dataset.courseSurfaceSlot = host.id
-      slot.style.position = 'relative'
+      slot.style.position = 'absolute'
+      slot.style.inset = '0'
+      slot.style.width = '100%'
       slot.style.height = '100%'
+      slot.style.overflow = 'hidden'
       container.appendChild(slot)
       const mounted = await this.player.mountSurface(host.id, slot)
       if (!mounted.ok) throw mounted.failure?.error ?? new Error(`Failed to mount ${host.id}`)

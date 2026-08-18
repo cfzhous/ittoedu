@@ -1,3 +1,4 @@
+import type { SceneNode } from '../../shared/projectTypes'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { MIN_NODE_SIZE } from '../../shared/constants'
 import {
@@ -610,6 +611,28 @@ export function resolveSlideWorkspaceAuthoringKind(): SlideWorkspaceBackendKind 
 export function listSlideWorkspaceHitTargets(): V9SlideHitTarget[] {
   const backend = readCandidate()
   return backend ? layerTargets(backend) : []
+}
+
+export function mergeSlidePreviewIntoNodes(
+  nodes: readonly SceneNode[],
+  preview: readonly SlideEditorNodeTransform[] | undefined,
+): SceneNode[] {
+  if (!preview || preview.length === 0) return []
+  const byId = new Map(preview.map((item) => [item.nodeId, item]))
+  const next: SceneNode[] = []
+  for (const node of nodes) {
+    const transform = byId.get(node.id)
+    if (!transform) continue
+    next.push({
+      ...node,
+      x: transform.x,
+      y: transform.y,
+      width: transform.width,
+      height: transform.height,
+      rotation: transform.rotation,
+    })
+  }
+  return next
 }
 
 export { SLIDE_BACKEND_NOT_CANDIDATE }

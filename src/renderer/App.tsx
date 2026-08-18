@@ -1,4 +1,4 @@
-import { AlertCircle, X } from 'lucide-react'
+import { AlertCircle, LoaderCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AvailableComponentCatalogPackage,
@@ -103,7 +103,7 @@ import { ScenePanel } from './ui/ScenePanel'
 import { SceneStateStrip } from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
-import { mountPublishedCourseTryRun } from './ui/coursePlayerTryRun'
+import { attachPublishedCourseStageFit, mountPublishedCourseTryRun } from './ui/coursePlayerTryRun'
 import type { PublishedCourseSession } from '../player/surfaces/publishedDynamicHosts'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
@@ -399,6 +399,12 @@ export default function App() {
   const [coursePreviewOpen, setCoursePreviewOpen] = useState(false)
   const [coursePreviewHost, setCoursePreviewHost] = useState<HTMLDivElement | null>(null)
   const coursePreviewSessionRef = useRef<PublishedCourseSession | null>(null)
+  const coursePreviewFitRef = useRef<(() => void) | null>(null)
+  const [coursePreviewFeedback, setCoursePreviewFeedback] = useState<{
+    kind: 'loading' | 'error'
+    title: string
+    message: string
+  } | null>(null)
   const [v8ImportPending, setV8ImportPending] = useState<{
     result: CourseProjectV8ImportResult
     afterLoad?: { dirty: boolean; statusMessage: string }
@@ -1084,6 +1090,11 @@ export default function App() {
   const handlePreview = useCallback(() => {
     void run(async () => {
       if (activeCoursePublishSources()) {
+        setCoursePreviewFeedback({
+          kind: 'loading',
+          title: '正在准备整课预览',
+          message: '正在载入 CoursePlayer…',
+        })
         setCoursePreviewOpen(true)
         return
       }
@@ -1441,6 +1452,11 @@ export default function App() {
       return
     }
     let cancelled = false
+    setCoursePreviewFeedback({
+      kind: 'loading',
+      title: '正在准备整课预览',
+      message: '正在载入 CoursePlayer…',
+    })
     void mountPublishedCourseTryRun({
       container: coursePreviewHost,
       project: sources.project,
@@ -1451,19 +1467,27 @@ export default function App() {
         void session.destroy()
         return
       }
+      coursePreviewFitRef.current?.()
+      coursePreviewFitRef.current = attachPublishedCourseStageFit(coursePreviewHost)
       coursePreviewSessionRef.current = session
+      setCoursePreviewFeedback(null)
     }).catch((error) => {
       if (cancelled) return
-      setCoursePreviewOpen(false)
-      setError(readableError(error, '整课预览启动失败。'))
+      setCoursePreviewFeedback({
+        kind: 'error',
+        title: '整课预览启动失败',
+        message: readableError(error, '播放器未能完成启动。请关闭后重试。'),
+      })
     })
     return () => {
       cancelled = true
+      coursePreviewFitRef.current?.()
+      coursePreviewFitRef.current = null
       const session = coursePreviewSessionRef.current
       coursePreviewSessionRef.current = null
       if (session) void session.destroy()
     }
-  }, [coursePreviewHost, coursePreviewOpen, setError])
+  }, [coursePreviewHost, coursePreviewOpen])
 
   useEffect(() => {
     if (!window.desktopAPI) return
@@ -1897,11 +1921,33 @@ export default function App() {
                 </button>
               </div>
             </header>
-            <div
-              ref={setCoursePreviewHost}
-              data-testid="course-preview-host"
-              style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}
-            />
+            <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
+              <div
+                ref={setCoursePreviewHost}
+                className="course-preview-host"
+                data-testid="course-preview-host"
+              />
+              {coursePreviewFeedback ? (
+                <div
+                  className={`runtime-preview-loading runtime-preview-loading--${coursePreviewFeedback.kind} course-try-run-feedback`}
+                  role={coursePreviewFeedback.kind === 'error' ? 'alert' : 'status'}
+                  aria-live="polite"
+                  data-testid="course-preview-feedback"
+                >
+                  <div className="runtime-preview-loading__panel">
+                    {coursePreviewFeedback.kind === 'loading' && (
+                      <LoaderCircle
+                        className="runtime-preview-loading__spinner"
+                        size={24}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <strong>{coursePreviewFeedback.title}</strong>
+                    <span>{coursePreviewFeedback.message}</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </section>
         </div>
       ) : null}

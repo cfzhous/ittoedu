@@ -272,10 +272,11 @@ export class SlidePublishedAdapter implements SurfaceHost {
     const root = context.container.ownerDocument.createElement('section')
     root.className = 'slide-published-adapter'
     root.dataset.surfaceId = this.id
-    root.style.position = 'relative'
+    root.style.position = 'absolute'
     root.style.width = '1280px'
     root.style.height = '720px'
     root.style.overflow = 'hidden'
+    root.style.transformOrigin = '0 0'
     root.hidden = !this.#active
     context.container.appendChild(root)
     this.#root = root

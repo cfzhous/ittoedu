@@ -10,7 +10,7 @@ import {
 interface TextEditOverlayProps {
   node: TextNode
   workspace: HTMLElement
-  canvas: HTMLCanvasElement
+  canvas: HTMLElement
   onPreview(text: string, runs: TextRun[]): void
   onCommit(text: string, runs: TextRun[]): void
   onCancel(): void
@@ -310,9 +310,17 @@ export function TextEditOverlay({
         active instanceof HTMLIFrameElement &&
         active.classList.contains('runtime-preview-frame')
       ) {
-        // Chromium can focus a newly laid-out sandboxed authoring iframe when
-        // the Electron window is resized. That visual host is inert in edit
-        // mode and must never end an in-progress text transaction.
+        const editor = editorRef.current
+        if (editor?.isConnected) {
+          editor.focus({ preventScroll: true })
+          blurReadyRef.current = true
+        }
+        return
+      }
+      if (
+        active instanceof HTMLElement &&
+        active.closest('.canvas-stage, .canvas-stage-stack, .runtime-preview-frame')
+      ) {
         const editor = editorRef.current
         if (editor?.isConnected) {
           editor.focus({ preventScroll: true })

@@ -46,6 +46,7 @@ import {
 import {
   createSlideWorkspaceAuthoringController,
   listSlideWorkspaceHitTargets,
+  mergeSlidePreviewIntoNodes,
 } from './workspaceSlideAuthoring'
 import {
   buildSlidePreviewRebuildKey,
@@ -119,7 +120,7 @@ import { fitSpatialSessionToHomeCamera } from '../course/spatialCameraCommands'
 import { SpatialSurfaceHost } from '../../player/surfaces/spatial/SpatialSurfaceHost'
 import { mountSpatialLocationTryRun } from './spatialLocationTryRun'
 import { mountFlowLocationTryRun } from './flowLocationTryRun'
-import { mountPublishedCourseTryRun } from './coursePlayerTryRun'
+import { mountPublishedCourseTryRun, attachPublishedCourseStageFit } from './coursePlayerTryRun'
 import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
 import { FlowWorkspace } from './FlowWorkspace'
 import { buildFlowEditorView } from '../course/flowEditorView'
@@ -1312,6 +1313,9 @@ function SlideLocationWorkspace({
   const controllerPointerActiveRef = useRef(false)
   const courseTryRunRef = useRef<HTMLDivElement>(null)
   const courseTryRunSessionRef = useRef<PublishedCourseSession | null>(null)
+  const courseTryRunFitRef = useRef<(() => void) | null>(null)
+  const [tryRunFeedback, setTryRunFeedback] = useState<RuntimePreviewFeedback>(null)
+  const [tryRunEpoch, setTryRunEpoch] = useState(0)
   const [controllerOverlay, setControllerOverlay] =
     useState<StageSelectionOverlayGeometry | null>(null)
   const slideBackendKind = useEditorStore(selectSlideBackendKind)
@@ -1330,8 +1334,22 @@ function SlideLocationWorkspace({
   const canvasMode = useEditorStore((state) => state.canvasMode)
   const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const courseLocationId = useEditorStore(selectActiveCourseLocationId)
+  const courseLocationIdRef = useRef(courseLocationId)
+  courseLocationIdRef.current = courseLocationId
   const courseSidecarFiles = useEditorStore(selectMediaAssetFiles)
+  const componentPackages = useEditorStore(
+    (state) => state.componentPackages,
+  )
   const useCoursePlayerTryRun = Boolean(courseDocument && canvasMode === 'run')
+  const tryRunMountKey = useMemo(() => {
+    if (!courseDocument) return null
+    return JSON.stringify({
+      id: courseDocument.id,
+      revision: courseDocument.revision,
+      sidecar: Object.keys(courseSidecarFiles).sort(),
+      packages: Object.keys(componentPackages).sort(),
+    })
+  }, [componentPackages, courseDocument, courseSidecarFiles])
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
@@ -1350,9 +1368,6 @@ function SlideLocationWorkspace({
   )
   const project = useEditorStore((state) => state.project)
   const assetFiles = useEditorStore((state) => state.assetFiles)
-  const componentPackages = useEditorStore(
-    (state) => state.componentPackages,
-  )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
   const readCandidateViewport = useCallback(() => {
     const viewport = stageViewportRef.current
@@ -1740,6 +1755,38 @@ function SlideLocationWorkspace({
     )
   }, [flushAuthoringNodePatches])
 
+  const paintSlideTransformPreview = useCallback((
+    preview: Parameters<typeof mergeSlidePreviewIntoNodes>[1],
+  ) => {
+    const store = useEditorStore.getState()
+    const painted = mergeSlidePreviewIntoNodes(selectEditingNodes(store), preview)
+    const handle = gameRef.current
+    for (const node of painted) {
+      const current = selectEditingNodes(store).find((item) => item.id === node.id)
+      const normalized = {
+        ...node,
+        ...withDirectionAwareTextAutoSize(current, {
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: node.height,
+          rotation: node.rotation,
+        }),
+      } as SceneNode
+      handle?.bridge.applyNode(normalized)
+      queueAuthoringNodePatch(store.editingScope, normalized)
+    }
+  }, [queueAuthoringNodePatch])
+
+  const syncCommittedTextNode = useCallback((nodeId: string) => {
+    const node = selectEditingNodes(useEditorStore.getState()).find((item) => item.id === nodeId)
+    if (node) {
+      gameRef.current?.bridge.applyNode(node)
+      queueAuthoringNodePatch(useEditorStore.getState().editingScope, node)
+    }
+    gameRef.current?.bridge.setTextEditing(null)
+  }, [queueAuthoringNodePatch])
+
   const syncCompleteAuthoringSnapshot = useCallback(() => {
     const editorState = useEditorStore.getState()
     const currentScene = selectActiveScene(editorState)
@@ -1799,44 +1846,70 @@ function SlideLocationWorkspace({
 
   useEffect(() => {
     const container = courseTryRunRef.current
-    if (!useCoursePlayerTryRun || !courseDocument || !container) {
+    if (!useCoursePlayerTryRun || !courseDocument || !container || !tryRunMountKey) {
+      courseTryRunFitRef.current?.()
+      courseTryRunFitRef.current = null
       void courseTryRunSessionRef.current?.destroy()
       courseTryRunSessionRef.current = null
+      setTryRunFeedback(null)
       return
     }
     let cancelled = false
+    setTryRunFeedback({
+      kind: 'loading',
+      title: '正在准备当前位置试运行',
+      message: '正在载入 CoursePlayer…',
+    })
+    const state = useEditorStore.getState()
+    const document = selectActiveCourseProjectDocument(state)
+    if (!document) {
+      setTryRunFeedback(null)
+      return
+    }
     void mountPublishedCourseTryRun({
       container,
-      project: courseDocument,
-      assetFiles: courseSidecarFiles,
-      components: componentPackages,
-      locationId: courseLocationId,
-      width: container.getBoundingClientRect().width,
-      height: container.getBoundingClientRect().height,
+      project: document,
+      assetFiles: selectMediaAssetFiles(state),
+      components: state.componentPackages,
+      locationId: courseLocationIdRef.current,
     }).then((session) => {
       if (cancelled) {
         void session.destroy()
         return
       }
+      courseTryRunFitRef.current?.()
+      courseTryRunFitRef.current = attachPublishedCourseStageFit(container)
       courseTryRunSessionRef.current = session
       container.dataset.coursePlayerReady = 'true'
+      setTryRunFeedback(null)
+      setTryRunEpoch((current) => current + 1)
     }).catch((error) => {
-      if (!cancelled) console.error('CoursePlayer 试运行启动失败', error)
+      if (cancelled) return
+      console.error('CoursePlayer 试运行启动失败', error)
+      setTryRunFeedback({
+        kind: 'error',
+        title: '当前位置试运行启动失败',
+        message: error instanceof Error ? error.message : '播放器未能完成启动。请重试。',
+      })
     })
     return () => {
       cancelled = true
       container.dataset.coursePlayerReady = 'false'
+      courseTryRunFitRef.current?.()
+      courseTryRunFitRef.current = null
       const session = courseTryRunSessionRef.current
       courseTryRunSessionRef.current = null
       if (session) void session.destroy()
     }
-  }, [
-    componentPackages,
-    courseDocument,
-    courseLocationId,
-    courseSidecarFiles,
-    useCoursePlayerTryRun,
-  ])
+  }, [tryRunMountKey, useCoursePlayerTryRun])
+
+  useEffect(() => {
+    const session = courseTryRunSessionRef.current
+    if (!useCoursePlayerTryRun || !session || !courseLocationId) return
+    void session.goToLocation(courseLocationId).catch((error) => {
+      console.error('CoursePlayer 试运行跳转失败', error)
+    })
+  }, [courseLocationId, tryRunEpoch, useCoursePlayerTryRun])
 
   useEffect(() => {
     if (useCoursePlayerTryRun) {
@@ -2876,6 +2949,27 @@ function SlideLocationWorkspace({
     const previous = previousSceneRef.current
     const componentsChanged =
       previousComponentPackagesRef.current !== componentPackages
+    const editingId = useEditorStore.getState().editingTextNodeId
+
+    if (
+      previous &&
+      previous.id === document.id &&
+      !componentsChanged &&
+      editingId
+    ) {
+      const previousIds = previous.nodes.map((node) => node.id).join('|')
+      const nextIds = document.nodes.map((node) => node.id).join('|')
+      const othersDirty =
+        previousIds !== nextIds
+        || previous.backgroundColor !== document.backgroundColor
+        || previous.backgroundAssetId !== document.backgroundAssetId
+        || document.nodes.some((node) => {
+          if (node.id === editingId) return false
+          const before = previous.nodes.find((item) => item.id === node.id)
+          return !before || !nodesEqual(before, node)
+        })
+      if (!othersDirty) return
+    }
 
     if (
       !previous ||
@@ -2892,7 +2986,9 @@ function SlideLocationWorkspace({
       document.nodes.forEach((node) => {
         const before = previousById.get(node.id)
         if (!before) handle.bridge.addNode(node)
-        else if (!nodesEqual(before, node)) handle.bridge.applyNode(node)
+        else if (!nodesEqual(before, node) && node.id !== editingId) {
+          handle.bridge.applyNode(node)
+        }
       })
       const previousIds = previous.nodes.map((node) => node.id).join('|')
       const nextIds = document.nodes.map((node) => node.id).join('|')
@@ -2905,6 +3001,7 @@ function SlideLocationWorkspace({
         previous?.nodes.map((node) => [node.id, node]) ?? [],
       )
       for (const node of document.nodes) {
+        if (node.id === editingId) continue
         const before = previousById.get(node.id)
         if (!before || !nodesEqual(before, node)) {
           queueAuthoringNodePatch(editingScope, node)
@@ -2936,6 +3033,15 @@ function SlideLocationWorkspace({
     }
     previousSceneRef.current = structuredClone(document)
     previousComponentPackagesRef.current = componentPackages
+    if (editingId && previous) {
+      const oldNode = previous.nodes.find((node) => node.id === editingId)
+      if (oldNode) {
+        const index = previousSceneRef.current.nodes.findIndex((node) => node.id === editingId)
+        if (index >= 0) {
+          previousSceneRef.current.nodes[index] = structuredClone(oldNode)
+        }
+      }
+    }
   }, [
     canvasMode,
     componentPackages,
@@ -3067,6 +3173,17 @@ function SlideLocationWorkspace({
             '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls',
           )
         ) return
+        const store = useEditorStore.getState()
+        if (store.editingTextNodeId || store.v9ContentEdit) {
+          event.preventDefault()
+          event.stopPropagation()
+          const editingId = store.editingTextNodeId
+          if (editingId) {
+            store.commitTextEdit()
+            syncCommittedTextNode(editingId)
+          }
+          return
+        }
         const viewport = readCandidateViewport()
         if (!viewport) return
         const controllerResult = controllerAuthoringRef.current.pointerDown({
@@ -3094,6 +3211,8 @@ function SlideLocationWorkspace({
         }, viewport)
         if (result.kind === 'v8') return
         candidatePointerActiveRef.current = true
+        paintSlideTransformPreview(result.preview)
+        event.currentTarget.setPointerCapture(event.pointerId)
         event.preventDefault()
         event.stopPropagation()
       }}
@@ -3124,10 +3243,11 @@ function SlideLocationWorkspace({
           ) {
             const viewport = readCandidateViewport()
             if (viewport) {
-              slideAuthoringRef.current.pointerMove({
+              const moved = slideAuthoringRef.current.pointerMove({
                 x: event.clientX,
                 y: event.clientY,
               }, viewport)
+              if (moved.kind !== 'v8') paintSlideTransformPreview(moved.preview)
               event.preventDefault()
               event.stopPropagation()
               return
@@ -3175,12 +3295,16 @@ function SlideLocationWorkspace({
         ) {
           const viewport = readCandidateViewport()
           if (viewport) {
-            slideAuthoringRef.current.pointerUp({
+            const raised = slideAuthoringRef.current.pointerUp({
               x: event.clientX,
               y: event.clientY,
             }, viewport)
+            if (raised.kind !== 'v8') paintSlideTransformPreview(raised.preview)
           }
           candidatePointerActiveRef.current = false
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
           event.preventDefault()
           event.stopPropagation()
           return
@@ -3520,14 +3644,26 @@ function SlideLocationWorkspace({
           className="course-try-run-host"
           data-testid="course-try-run-host"
           hidden={!useCoursePlayerTryRun}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            overflow: 'hidden',
-            background: '#f8fafc',
-            zIndex: 5,
-          }}
         />
+        {tryRunFeedback && useCoursePlayerTryRun ? (
+          <div
+            className={`runtime-preview-loading runtime-preview-loading--${tryRunFeedback.kind} course-try-run-feedback`}
+            role={tryRunFeedback.kind === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+          >
+            <div className="runtime-preview-loading__panel">
+              {tryRunFeedback.kind === 'loading' && (
+                <LoaderCircle
+                  className="runtime-preview-loading__spinner"
+                  size={24}
+                  aria-hidden="true"
+                />
+              )}
+              <strong>{tryRunFeedback.title}</strong>
+              <span>{tryRunFeedback.message}</span>
+            </div>
+          </div>
+        ) : null}
       </div>
       {canvasMode === 'edit' && controllerOverlay ? (
         <TeacherControllerAuthoringOverlay overlay={controllerOverlay} />
@@ -3560,12 +3696,12 @@ function SlideLocationWorkspace({
           }}
         />
       )}
-      {canvasMode === 'edit' && editingNode && canvas && workspaceRef.current && (
+      {canvasMode === 'edit' && editingNode && workspaceRef.current && (gameHostRef.current || canvas) && (
         <TextEditOverlay
           key={editingNode.id}
           node={editingNode}
           workspace={workspaceRef.current}
-          canvas={canvas}
+          canvas={gameHostRef.current ?? canvas!}
           onPreview={(text, runs) => {
             const draftNode = { ...editingNode, text, runs }
             const rendered = editingNode.style.overflow === 'auto-height'
@@ -3595,28 +3731,11 @@ function SlideLocationWorkspace({
               rendered?.width ?? editingNode.width,
             )
             store.commitTextEdit()
-
-            // Synchronize the committed Store node into Phaser before making
-            // the interaction target draggable again. This closes the small
-            // window in which the adapter could still hold its old text.
-            const committedNode = selectEditingNodes(
-              useEditorStore.getState(),
-            ).find((node) => node.id === editingNode.id)
-            if (committedNode?.type === 'text') {
-              gameRef.current?.bridge.applyNode(committedNode)
-            }
-            gameRef.current?.bridge.setTextEditing(null)
+            syncCommittedTextNode(editingNode.id)
           }}
           onCancel={() => {
-            const store = useEditorStore.getState()
-            store.cancelTextEdit()
-            const restoredNode = selectEditingNodes(
-              useEditorStore.getState(),
-            ).find((node) => node.id === editingNode.id)
-            if (restoredNode?.type === 'text') {
-              gameRef.current?.bridge.applyNode(restoredNode)
-            }
-            gameRef.current?.bridge.setTextEditing(null)
+            useEditorStore.getState().cancelTextEdit()
+            syncCommittedTextNode(editingNode.id)
           }}
         />
       )}

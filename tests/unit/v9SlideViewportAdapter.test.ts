@@ -29,9 +29,11 @@ import {
 import {
   SLIDE_BACKEND_NOT_CANDIDATE,
   createSlideWorkspaceAuthoringController,
+  mergeSlidePreviewIntoNodes,
   resolveSlideWorkspaceAuthoringKind,
 } from '@/renderer/ui/workspaceSlideAuthoring'
 import {
+  selectEditingNodes,
   selectSlideCandidateBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -580,5 +582,24 @@ describe('V9 Slide viewport adapter', () => {
     expect(written.command?.reason).toBe(SLIDE_REJECT_LOCKED)
     expect(written.command?.historyEntry).toBe(false)
     expect(nativeFrame('slide-locked')).toMatchObject({ x: 120, y: 220, width: 400, height: 80 })
+  })
+
+  it('paints pointermove preview onto SceneNodes without committing the native frame', () => {
+    injectCandidate()
+    const controller = createSlideWorkspaceAuthoringController()
+    controller.pointerDown({ x: 200, y: 150 }, VIEW)
+    const moved = controller.pointerMove({ x: 260, y: 190 }, VIEW)
+    if (moved.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    expect(moved.preview?.[0]).toMatchObject({
+      nodeId: 'slide-title',
+      x: 180,
+      y: 160,
+    })
+    const nodes = selectEditingNodes(useEditorStore.getState())
+    const painted = mergeSlidePreviewIntoNodes(nodes, moved.preview)
+    expect(painted).toHaveLength(1)
+    expect(painted[0]).toMatchObject({ id: 'slide-title', x: 180, y: 160 })
+    expect(nativeFrame('slide-title')).toMatchObject({ x: 120, y: 120, width: 400, height: 80 })
+    expect(mergeSlidePreviewIntoNodes(nodes, undefined)).toEqual([])
   })
 })
