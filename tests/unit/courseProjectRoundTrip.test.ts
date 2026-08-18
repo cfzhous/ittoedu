@@ -6,6 +6,7 @@ import type {
   NativeLayerItem,
   ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
+import { resolveCourseSurfaceBackgroundColor } from '@/shared/courseProjectModel'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
 import {
@@ -237,5 +238,114 @@ describe('Course Project V9 protocol round-trip', () => {
     expect(Object.keys(published.assets)).toEqual(['badge'])
     expect(published.assets.badge?.mimeType).toBe('image/png')
     expect(published.assets.badge?.url.startsWith('data:image/png;base64,')).toBe(true)
+  })
+
+  it('archives a Spatial project without injecting omitted backgroundColor, and keeps an explicit color', () => {
+    const omittedColor: CourseProjectDocument = {
+      ...minimalV9Project(),
+      id: 'r1z-spatial-white',
+      locations: [{
+        id: 'camera-home',
+        label: '全景',
+        kind: 'spatial-camera',
+        surfaceId: 'surface-spatial',
+        cameraFrameId: 'camera-home',
+      }],
+      startLocationId: 'camera-home',
+      globalLayerItems: [],
+      surfaces: [{
+        id: 'surface-spatial',
+        title: '无限画布',
+        type: 'spatial-2d',
+        surfaceLayerItems: [],
+        world: {
+          bounds: { mode: 'infinite' },
+          layerItems: [nativeText('world-note', 1, '便签')],
+          paths: [],
+          relations: [],
+        },
+        camera: {
+          home: { x: 0, y: 0, zoom: 1 },
+          frames: [{ id: 'camera-home', name: '全景', x: 0, y: 0, zoom: 1 }],
+        },
+        semanticZoom: [],
+      }],
+    }
+
+    const parsedOmitted = courseProjectDocumentSchema.parse(omittedColor)
+    const omittedSurface = parsedOmitted.surfaces[0]
+    if (omittedSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(omittedSurface.backgroundColor).toBeUndefined()
+    expect(resolveCourseSurfaceBackgroundColor(omittedSurface.backgroundColor)).toBe('#ffffff')
+
+    const omittedArchive = createCourseProjectArchive({
+      project: parsedOmitted,
+      assetFiles: { badge: ASSET_BYTES },
+      componentFiles: {},
+    }, { mtime: NOW })
+    const reopenedOmitted = openCourseProjectArchive(omittedArchive)
+    const reparsedOmitted = courseProjectDocumentSchema.parse(reopenedOmitted.project)
+    expect(reparsedOmitted).toEqual(parsedOmitted)
+    const reopenedSurface = reparsedOmitted.surfaces[0]
+    if (reopenedSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(reopenedSurface.backgroundColor).toBeUndefined()
+
+    const withColor = structuredClone(parsedOmitted)
+    const coloredSurface = withColor.surfaces[0]
+    if (coloredSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    coloredSurface.backgroundColor = '#f1f5f9'
+    withColor.id = 'r1z-spatial-color'
+    const parsedColor = courseProjectDocumentSchema.parse(withColor)
+    const colorArchive = createCourseProjectArchive({
+      project: parsedColor,
+      assetFiles: { badge: ASSET_BYTES },
+      componentFiles: {},
+    }, { mtime: NOW })
+    const reopenedColor = openCourseProjectArchive(colorArchive)
+    expect(courseProjectDocumentSchema.parse(reopenedColor.project)).toEqual(parsedColor)
+    const kept = reopenedColor.project.surfaces[0]
+    if (kept?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(kept.backgroundColor).toBe('#f1f5f9')
+  })
+
+  it('archives a Flow project with optional paper backgroundColor', () => {
+    const project: CourseProjectDocument = {
+      ...minimalV9Project(),
+      id: 'r1z-flow-paper',
+      locations: [{
+        id: 'heading-1',
+        label: '标题',
+        kind: 'flow-block',
+        surfaceId: 'surface-flow',
+        blockId: 'heading-1',
+      }],
+      startLocationId: 'heading-1',
+      globalLayerItems: [],
+      surfaces: [{
+        id: 'surface-flow',
+        title: '讲义',
+        type: 'flow',
+        backgroundColor: '#fffbeb',
+        surfaceLayerItems: [],
+        layout: { readingWidth: 760, wideContentWidth: 1120 },
+        blocks: [
+          { id: 'heading-1', type: 'heading', level: 1, text: '标题' },
+          { id: 'paragraph-1', type: 'paragraph', text: '正文' },
+        ],
+      }],
+    }
+
+    const parsed = courseProjectDocumentSchema.parse(project)
+    const archiveBytes = createCourseProjectArchive({
+      project: parsed,
+      assetFiles: { badge: ASSET_BYTES },
+      componentFiles: {},
+    }, { mtime: NOW })
+    const reopened = openCourseProjectArchive(archiveBytes)
+    const reparsed = courseProjectDocumentSchema.parse(reopened.project)
+    expect(reparsed).toEqual(parsed)
+    const surface = reparsed.surfaces[0]
+    if (surface?.type !== 'flow') throw new Error('expected flow surface')
+    expect(surface.backgroundColor).toBe('#fffbeb')
   })
 })

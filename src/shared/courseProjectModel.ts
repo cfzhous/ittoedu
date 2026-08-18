@@ -29,6 +29,15 @@ import {
   type SlideSceneDocument,
 } from './courseProjectTypes'
 
+/** Absent Spatial/Flow `backgroundColor` is white. Slide scenes keep their own required field. */
+export const DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR = '#ffffff'
+
+export function resolveCourseSurfaceBackgroundColor(
+  backgroundColor: string | undefined,
+): string {
+  return backgroundColor ?? DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR
+}
+
 export type CourseProjectPath = ReadonlyArray<string | number>
 
 export interface CourseProjectVisitor {

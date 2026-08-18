@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   collectCourseProjectReferences,
   decodeFlowTableCell,
+  DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR,
   flowPlainTextFallback,
   flowRunsFallback,
   getEffectiveCourseLayerOrder,
   migrateProjectV8ToCourseProjectV9,
   normalizeFlowRichText,
+  resolveCourseSurfaceBackgroundColor,
   visitCourseProject,
 } from '@/shared/courseProjectModel'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
   courseProjectDocumentSchema,
   flowBlockSchema,
@@ -106,7 +110,38 @@ function minimalSlideProject(): CourseProjectDocument {
   }
 }
 
-function flowProject(blocks: FlowBlock[]): CourseProjectDocument {
+function spatialProject(backgroundColor?: string): CourseProjectDocument {
+  return {
+    ...courseShell(),
+    id: 'course-spatial',
+    locations: [{
+      id: 'camera-home',
+      label: '全景',
+      kind: 'spatial-camera',
+      surfaceId: 'surface-spatial',
+      cameraFrameId: 'camera-home',
+    }],
+    startLocationId: 'camera-home',
+    surfaces: [{
+      id: 'surface-spatial',
+      title: '无限画布',
+      type: 'spatial-2d',
+      ...(backgroundColor === undefined ? {} : { backgroundColor }),
+      surfaceLayerItems: [],
+      world: {
+        bounds: { mode: 'infinite' },
+        layerItems: [],
+      },
+      camera: {
+        home: { x: 0, y: 0, zoom: 1 },
+        frames: [{ id: 'camera-home', name: '全景', x: 0, y: 0, zoom: 1 }],
+      },
+      semanticZoom: [],
+    }],
+  }
+}
+
+function flowProject(blocks: FlowBlock[], backgroundColor?: string): CourseProjectDocument {
   const start = blocks[0]
   if (!start) throw new Error('flow fixture needs at least one block')
   return {
@@ -124,6 +159,7 @@ function flowProject(blocks: FlowBlock[]): CourseProjectDocument {
       id: 'surface-flow',
       title: '讲义',
       type: 'flow',
+      ...(backgroundColor === undefined ? {} : { backgroundColor }),
       surfaceLayerItems: [],
       layout: { readingWidth: 760, wideContentWidth: 1120 },
       blocks,
@@ -342,5 +378,84 @@ describe('Course Project V9 core contract', () => {
     expect(collectCourseProjectReferences(migrated).some((entry) => (
       entry.kind === 'surface' && entry.id === migrated.surfaces[0]!.id
     ))).toBe(true)
+  })
+
+  it('treats omitted Spatial and Flow backgroundColor as white without injecting the field', () => {
+    expect(DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR).toBe('#ffffff')
+    expect(resolveCourseSurfaceBackgroundColor(undefined)).toBe('#ffffff')
+    expect(resolveCourseSurfaceBackgroundColor('#f8fafc')).toBe('#f8fafc')
+
+    const spatial = courseProjectDocumentSchema.parse(spatialProject())
+    const spatialSurface = spatial.surfaces[0]
+    if (spatialSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(spatialSurface.backgroundColor).toBeUndefined()
+    expect(resolveCourseSurfaceBackgroundColor(spatialSurface.backgroundColor)).toBe('#ffffff')
+    expect('projectMode' in spatial).toBe(false)
+
+    const flow = courseProjectDocumentSchema.parse(flowProject([{
+      id: 'heading',
+      type: 'heading',
+      level: 1,
+      text: '标题',
+    }]))
+    const flowSurface = flow.surfaces[0]
+    if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
+    expect(flowSurface.backgroundColor).toBeUndefined()
+    expect(resolveCourseSurfaceBackgroundColor(flowSurface.backgroundColor)).toBe('#ffffff')
+  })
+
+  it('round-trips an explicit Spatial/Flow backgroundColor and rejects invalid colors', () => {
+    const spatial = courseProjectDocumentSchema.parse(spatialProject('#f8fafc'))
+    const spatialSurface = spatial.surfaces[0]
+    if (spatialSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(spatialSurface.backgroundColor).toBe('#f8fafc')
+    expect(courseProjectDocumentSchema.parse(
+      JSON.parse(JSON.stringify(spatial)) as unknown,
+    )).toEqual(spatial)
+
+    const flow = courseProjectDocumentSchema.parse(flowProject([{
+      id: 'heading',
+      type: 'heading',
+      level: 1,
+      text: '标题',
+    }], '#ecfdf5'))
+    const flowSurface = flow.surfaces[0]
+    if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
+    expect(flowSurface.backgroundColor).toBe('#ecfdf5')
+
+    expect(courseProjectDocumentSchema.safeParse(spatialProject('#fff')).success).toBe(false)
+    expect(courseProjectDocumentSchema.safeParse(flowProject([{
+      id: 'heading',
+      type: 'heading',
+      level: 1,
+      text: '标题',
+    }], '#111318ff')).success).toBe(false)
+
+    const slide = minimalSlideProject()
+    const slideSurface = slide.surfaces[0]
+    if (slideSurface?.type !== 'slide') throw new Error('expected slide surface')
+    const { backgroundColor: _omitted, ...sceneWithoutColor } = slideSurface.scenes[0]!
+    slideSurface.scenes[0] = sceneWithoutColor as typeof slideSurface.scenes[0]
+    expect(courseProjectDocumentSchema.safeParse(slide).success).toBe(false)
+  })
+
+  it('writes white Spatial and Flow backgroundColor on new blank surfaces', () => {
+    const spatial = createBlankSpatialCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const spatialSurface = spatial.surfaces[0]
+    if (spatialSurface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
+    expect(spatialSurface.backgroundColor).toBe('#ffffff')
+
+    const flow = createBlankFlowCourseProject({
+      now: NOW,
+      includeDefaultController: false,
+      controls: 'none',
+    })
+    const flowSurface = flow.surfaces[0]
+    if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
+    expect(flowSurface.backgroundColor).toBe('#ffffff')
   })
 })

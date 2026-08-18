@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
+import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '../../shared/courseProjectModel'
 import { remapTextRuns } from '../../shared/textRuns'
 import type {
   CourseLocation,
@@ -78,6 +79,7 @@ export function createBlankFlowSurface(input: {
       id: input.id,
       type: 'flow',
       title: input.title,
+      backgroundColor: DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR,
       surfaceLayerItems: [],
       layout: { ...DEFAULT_FLOW_LAYOUT },
       blocks: [heading, paragraph],
