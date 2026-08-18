@@ -3,9 +3,10 @@
 > 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.6  
 > 共享约束：[01_SHARED.md](01_SHARED.md)  
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
-> 更新日期：2026-08-19  
+> 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
 > 12.6：T6 Windows e2e 已合入 `main`。不得宣称 Editor 1.0 已发布。  
+> 12.7：教师回归缺陷走车道 Q（Q1–Q5）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -51,9 +52,19 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T1](T1_A_MOVE.md) **A** | 合同源文件在 `src/shared/contracts/**`；旧路径 re-export；Published Flow/Spatial `backgroundColor?` |
 | [T6](T6_FREEZE.md) | Windows e2e 27/27 合入 `main`；CI 有 contracts/typecheck/test。未视觉复核、未 `accepted` |
 
-**可领取（互斥见表）**
+**可领取 — 车道 Q（教师回归，并行、文件互斥）**
 
-无。车道 C / P 任务卡均已合入 `main`。不要再从 `owgrj` 或旧 `-de5c` 切片分支开工。
+| 任务 | 症状 | 分支后缀 |
+|---|---|---|
+| [Q1](Q1_CONTROLLER_INERT.md) | 点控制器跳全局层；场景图层仍列出控制器 | `cursor/q1-controller-inert-489b` |
+| [Q2](Q2_GLOBAL_NATIVE_TRANSFORM.md) | 全局文字/图片不能拖缩放 | `cursor/q2-global-native-transform-489b` |
+| [Q3](Q3_PUBLISHED_TEXT_RUNS.md) | 试运行/预览文字格式无效（Slide） | `cursor/q3-published-text-runs-489b` |
+| [Q4](Q4_FLOW_IMAGE_EDIT.md) | 流式讲义不能编辑稿纸图片 | `cursor/q4-flow-image-edit-489b` |
+| [Q5](Q5_SPATIAL_VIDEO.md) | 无限画布视频插入不稳、试运行不能播 | `cursor/q5-spatial-video-489b` |
+
+并行规则与禁止抢文件：[Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。本轮 Git 后缀是 **`-489b`**（不要用旧 `-de5c`）。
+
+车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 
 **必须等待**
 
@@ -101,7 +112,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 1. 读 [02_WORKER.md](02_WORKER.md)。
 2. 看本页「合入状态」：已合入的不要做；等待中的不要抢。
-3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。
-4. 从 `origin/main` 建 `cursor/<slug>-de5c`。
+3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md) + [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)（仅 Q 卡）。
+4. 车道 Q 建 `cursor/<slug>-489b`；历史 T/P 不要重做。
 5. 只改「允许修改」列表。热点冲突则停。
 6. 写 `<TASK>_HANDOFF.md`，push，不要开 PR。
