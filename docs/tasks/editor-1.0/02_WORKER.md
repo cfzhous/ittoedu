@@ -8,13 +8,13 @@
 
 权威看板：[00_INDEX.md](00_INDEX.md)「合入状态」。状态为 **已合入** 的任务禁止再实现。
 
-当前集成分支：`origin/cursor/cloud-agent-1787062947578-owgrj`（base 是 `main`）。
+当前集成分支：`origin/main`。
 
 ## 1. Git（必须按序）
 
 1. 不要在 `/workspace` 上直接改。只用自己的 isolated worktree。
-2. `git fetch origin cursor/cloud-agent-1787062947578-owgrj`
-3. 从 **该远程 tip** 建分支，名字必须：`cursor/<task-slug>-de5c`（全小写，前缀 `cursor/`，后缀 `-de5c`）。
+2. `git fetch origin main`
+3. 从 **`origin/main`** 建分支，名字必须：`cursor/<task-slug>-de5c`（全小写，前缀 `cursor/`，后缀 `-de5c`）。
 4. 不属于本任务的脏文件一律不要 add。
 5. 每个逻辑步骤一次 commit。任务卡若要求「重命名 / 行为」分开，就两次 commit。
 6. `git diff --check` 必须干净。

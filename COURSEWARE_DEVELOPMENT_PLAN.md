@@ -1,7 +1,8 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.5  
-> 更新日期：2026-08-18  
+> 计划版本：12.6  
+> 更新日期：2026-08-19  
+> 12.6 变更：T6 Windows e2e 27/27 已合入 `main`。自动化仍只是 `engineering candidate`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
 > 12.5 变更：T6 全量在 typecheck 停手。本轮补 T1-A / T1-C 与测试对齐后重开 T6。修红只跑红命令/红测文件；已绿步骤不重跑；整轮五条只在红项清完后跑一次。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
 > 12.4 变更：剩余任务卡（T3/T4/T5/T6/P5-persist/P8）改成逐步算法、允许/禁止文件和停手条件，给高性价比第三方工人执行；父代理只合入与复检。工人协议见 `docs/tasks/editor-1.0/02_WORKER.md`。T1-B 在 T0 `canvas-runtime` 夹具仍写 `legacy-runtime-v2` 前禁止删判别器。P8 在 P1/P3/P4 合入后可领取。  
 > 12.3 变更：补充「互动组件在流式讲义与无限画布中不可用」为车道 P8，排在 P1/P3/P4 之后（同文件宿主）。  
@@ -117,9 +118,9 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
-| T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
+| T6 | **工程门禁已合入 `main`**（合同哈希、CI、禁止项、Windows e2e 27/27）。教师 `accepted` 仍缺 | 视觉/真人清单后才能发布 |
 
-T0、T1（E/A0/A/D/B1/B/C）、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav、T6-tc-tests 已合入。T6 按红项优先重开（已绿不重跑，整轮五条只跑一次）。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
+T0–T6 与 P1–P8 已合入 `main`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
