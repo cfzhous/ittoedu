@@ -9,7 +9,7 @@ import type {
   RuntimeLayerItem,
   SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import type { ShapeType } from '../../shared/projectTypes'
+import type { AssetMeta, ShapeType } from '../../shared/projectTypes'
 import {
   createExternalComponentNode,
   createFormulaNode,
@@ -517,6 +517,7 @@ export interface AddSpatialWorldVideoLayerInput extends AddSpatialWorldLayerInpu
   readonly assetId: string
   readonly width?: number
   readonly height?: number
+  readonly asset?: AssetMeta
 }
 
 export interface AddSpatialWorldComponentLayerInput extends AddSpatialWorldLayerInput {
@@ -680,8 +681,14 @@ export function addSpatialWorldVideoLayer(
   if (stale) return stale
   try {
     requireWorldScope(session)
-    requireAsset(session.history.present, input.assetId, 'video')
-    const asset = session.history.present.assets[input.assetId]!
+    const existing = session.history.present.assets[input.assetId]
+    if (!existing) {
+      if (!input.asset) throw new Error(`找不到素材：${input.assetId}`)
+      if (input.asset.kind !== 'video') throw new Error('素材类型必须是视频')
+    } else {
+      requireAsset(session.history.present, input.assetId, 'video')
+    }
+    const asset = existing ?? input.asset!
     const width = input.width ?? asset.width ?? 640
     const height = input.height ?? asset.height ?? 360
     const origin = defaultWorldOrigin(session, width, height, input.x, input.y)
@@ -696,6 +703,9 @@ export function addSpatialWorldVideoLayer(
     })
     const item = sceneNodeToCourseLayerItem(node)
     const project = commitSpatialProjectMutation(session.history.present, (draft) => {
+      if (!draft.assets[input.assetId] && input.asset) {
+        draft.assets[input.assetId] = structuredClone(input.asset)
+      }
       appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
     }, options.now)
     return commitAdded(session, project, node.id)

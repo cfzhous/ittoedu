@@ -389,6 +389,30 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     return course
   }
 
+  it('renders world video from published assets without resolveAsset and outside foreignObject', async () => {
+    const course = playbackCourse()
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const htmlLayer = container.querySelector('[data-testid="spatial-world-html"]')
+    const video = container.querySelector('video')
+    expect(htmlLayer).not.toBeNull()
+    expect(video).not.toBeNull()
+    expect(video?.controls).toBe(true)
+    expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
+    expect(video?.closest('foreignObject')).toBeNull()
+    expect(htmlLayer?.contains(video)).toBe(true)
+    expect(container.querySelector('[data-spatial-world] video')).toBeNull()
+
+    const world = container.querySelector<SVGGElement>('[data-spatial-world]')!
+    expect(world.querySelector('image[href=""]')).toBeNull()
+    expect(world.querySelector('[data-layer-item-id="world-missing-image"] image')).toBeNull()
+
+    await host.destroy()
+  })
+
   it('renders world video and does not append an empty SVG image href', async () => {
     const course = playbackCourse()
     const container = document.createElement('div')
@@ -399,10 +423,12 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.activate()
 
     const world = container.querySelector<SVGGElement>('[data-spatial-world]')!
-    const video = world.querySelector('video')
+    const video = container.querySelector('video')
     expect(video).not.toBeNull()
     expect(video?.controls).toBe(true)
     expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
+    expect(video?.closest('foreignObject')).toBeNull()
+    expect(world.querySelector('video')).toBeNull()
     expect(world.querySelector('image[href=""]')).toBeNull()
     expect(world.querySelector('[data-layer-item-id="world-missing-image"] image')).toBeNull()
 

@@ -151,30 +151,7 @@ function createWorldItem(
       group.appendChild(image)
     }
   } else if (item.kind === 'native' && item.content.nativeType === 'video') {
-    const url = resolveAsset(item.content.data.assetId)
-    if (url) {
-      const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
-      foreign.setAttribute('x', String(frame.x))
-      foreign.setAttribute('y', String(frame.y))
-      foreign.setAttribute('width', String(frame.width))
-      foreign.setAttribute('height', String(frame.height))
-      const holder = dom.createElement('div')
-      holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
-      holder.style.width = '100%'
-      holder.style.height = '100%'
-      holder.style.pointerEvents = 'auto'
-      const video = dom.createElement('video')
-      video.controls = true
-      video.src = url
-      video.style.width = '100%'
-      video.style.height = '100%'
-      video.style.objectFit = 'contain'
-      video.style.display = 'block'
-      video.style.pointerEvents = 'auto'
-      holder.appendChild(video)
-      foreign.appendChild(holder)
-      group.appendChild(foreign)
-    }
+    // World video is an HTML layer beside the SVG, not a transformed foreignObject.
   } else if (item.kind === 'native' && item.content.nativeType === 'text') {
     const text = dom.createElementNS(SVG_NS, 'text')
     text.textContent = item.content.data.text
@@ -249,6 +226,56 @@ function createWorldItem(
   return group
 }
 
+function spatialWorldHtmlTransform(camera: SpatialRuntimeCamera): string {
+  return `translate(${camera.viewportWidth / 2}px, ${camera.viewportHeight / 2}px) scale(${camera.zoom}) translate(${-camera.x}px, ${-camera.y}px)`
+}
+
+function createWorldVideoHtml(
+  dom: Document,
+  item: PublishedLayerItem,
+  url: string | undefined,
+): HTMLElement {
+  const wrapper = dom.createElement('div')
+  wrapper.className = 'spatial-world-html-item'
+  wrapper.dataset.spatialLayerRecord = 'true'
+  wrapper.dataset.layerItemId = item.layerItemId
+  wrapper.dataset.layerKind = item.kind
+  wrapper.dataset.layerSource = 'world'
+  wrapper.dataset.coordinateSpace = 'world'
+  Object.assign(wrapper.style, {
+    position: 'absolute',
+    left: `${item.frame.x}px`,
+    top: `${item.frame.y}px`,
+    width: `${item.frame.width}px`,
+    height: `${item.frame.height}px`,
+    boxSizing: 'border-box',
+    pointerEvents: 'auto',
+    opacity: String(item.opacity),
+    transform: item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`,
+    transformOrigin: 'center center',
+    zIndex: String(item.order),
+  })
+  if (url) {
+    const video = dom.createElement('video')
+    video.controls = true
+    video.playsInline = true
+    video.preload = 'metadata'
+    video.src = url
+    video.setAttribute('playsinline', '')
+    video.style.width = '100%'
+    video.style.height = '100%'
+    video.style.objectFit = 'contain'
+    video.style.display = 'block'
+    video.style.pointerEvents = 'auto'
+    wrapper.appendChild(video)
+  }
+  return wrapper
+}
+
+function isHtmlWorldWrapper(wrapper: HTMLElement | SVGGElement): wrapper is HTMLElement {
+  return !(wrapper instanceof SVGElement)
+}
+
 function createViewportHud(
   dom: Document,
   item: PublishedLayerItem,
@@ -310,19 +337,21 @@ export class SpatialSurfaceHost {
   #root: HTMLElement | null = null
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
+  #worldHtml: HTMLElement | null = null
   #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialHostRecord>()
   #controllerSession = new Map<string, TeacherControllerDomSession>()
   #muted: boolean
   #audioDisposer: (() => void) | null = null
   #destroyed = false
+  #publishedAssets: PublishedCourseV2Payload['assets'] | undefined
 
   static fromPublishedCourse(
     course: PublishedCourseV2Payload,
     viewport: SpatialRuntimeViewport,
     options: SpatialSurfaceHostOptions & OpenSpatialRuntimeSessionOptions = {},
   ): SpatialSurfaceHost {
-    return new SpatialSurfaceHost(
+    const host = new SpatialSurfaceHost(
       publishedSpatialInputFromCourse(course, {
         surfaceId: options.surfaceId,
         playbackPathId: options.playbackPathId ?? null,
@@ -331,8 +360,11 @@ export class SpatialSurfaceHost {
       {
         ...options,
         components: course.components,
+        resolveAsset: options.resolveAsset ?? ((assetId) => course.assets[assetId]?.url),
       },
     )
+    host.#publishedAssets = course.assets
+    return host
   }
 
   constructor(
@@ -344,6 +376,9 @@ export class SpatialSurfaceHost {
     this.#components = ('components' in source && source.components
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
+    if ('assets' in source && source.assets) {
+      this.#publishedAssets = source.assets
+    }
     this.#session = openSpatialRuntimeSession(source, viewport, {
       surfaceId: options.surfaceId,
       playbackPathId: options.playbackPathId ?? (
@@ -441,6 +476,17 @@ export class SpatialSurfaceHost {
     world.dataset.coordinateSpace = 'world'
     svg.appendChild(world)
     root.appendChild(svg)
+    const worldHtml = dom.createElement('div')
+    worldHtml.className = 'spatial-world-html'
+    worldHtml.setAttribute('data-testid', 'spatial-world-html')
+    Object.assign(worldHtml.style, {
+      position: 'absolute',
+      inset: '0',
+      overflow: 'visible',
+      pointerEvents: 'none',
+      transformOrigin: '0 0',
+    })
+    root.appendChild(worldHtml)
     const screenLayer = dom.createElement('div')
     screenLayer.className = 'spatial-screen-layer'
     screenLayer.dataset.coordinateSpace = 'viewport'
@@ -456,6 +502,7 @@ export class SpatialSurfaceHost {
     this.#root = root
     this.#svg = svg
     this.#world = world
+    this.#worldHtml = worldHtml
     this.#screenLayer = screenLayer
     this.#subscribeAudio()
     this.#renderWorldDecorations()
@@ -499,6 +546,7 @@ export class SpatialSurfaceHost {
     this.#root = null
     this.#svg = null
     this.#world = null
+    this.#worldHtml = null
     this.#screenLayer = null
     this.#session = leaveSpatialRuntimeLocation(this.#session)
   }
@@ -547,12 +595,17 @@ export class SpatialSurfaceHost {
     return this.#session.camera
   }
 
-  #resolveAsset = (assetId: string): string | undefined => this.#options.resolveAsset?.(assetId)
+  #resolveAsset = (assetId: string): string | undefined =>
+    this.#options.resolveAsset?.(assetId) ?? this.#publishedAssets?.[assetId]?.url
 
   #updateWorldTransform(): void {
     if (!this.#world || !this.#svg || !this.#root || !this.#session.camera) return
     const camera = this.#session.camera
     this.#world.setAttribute('transform', spatialWorldGroupTransform(camera))
+    if (this.#worldHtml) {
+      this.#worldHtml.style.transform = spatialWorldHtmlTransform(camera)
+      this.#worldHtml.style.transformOrigin = '0 0'
+    }
     this.#svg.setAttribute('width', String(camera.viewportWidth))
     this.#svg.setAttribute('height', String(camera.viewportHeight))
     this.#svg.setAttribute('viewBox', `0 0 ${camera.viewportWidth} ${camera.viewportHeight}`)
@@ -617,7 +670,7 @@ export class SpatialSurfaceHost {
   }
 
   #reconcileRecords(): void {
-    if (!this.#world || !this.#screenLayer) return
+    if (!this.#world || !this.#worldHtml || !this.#screenLayer) return
     const entries = collectSpatialPlaybackEntries(this.#session.input, this.#session.locationId)
     const nextIds = new Set(entries.map((entry) => entry.item.layerItemId))
     for (const [id, record] of [...this.#records.entries()]) {
@@ -641,7 +694,7 @@ export class SpatialSurfaceHost {
   }
 
   #reconcileWorldVisibility(): void {
-    if (!this.#world || !this.#screenLayer || !this.#session.camera) return
+    if (!this.#world || !this.#worldHtml || !this.#screenLayer || !this.#session.camera) return
     const camera = this.#session.camera
     const rules = this.#session.input.surface.semanticZoom
     for (const record of this.#records.values()) {
@@ -651,8 +704,9 @@ export class SpatialSurfaceHost {
         continue
       }
       const visible = worldItemVisibleInRuntimeCamera(item, camera, rules) || source === 'surface'
+      const parent = isHtmlWorldWrapper(record.wrapper) ? this.#worldHtml : this.#world
       if (visible) {
-        if (!this.#world.contains(record.wrapper)) this.#world.appendChild(record.wrapper)
+        if (!parent.contains(record.wrapper)) parent.appendChild(record.wrapper)
         record.wrapper.removeAttribute('display')
       } else {
         record.wrapper.remove()
@@ -705,6 +759,12 @@ export class SpatialSurfaceHost {
       }
       return { entry, wrapper, controllerDom, componentHandle }
     }
+    if (entry.item.kind === 'native' && entry.item.content.nativeType === 'video') {
+      const url = this.#resolveAsset(entry.item.content.data.assetId)
+      const wrapper = createWorldVideoHtml(dom, entry.item, url)
+      wrapper.dataset.layerSource = entry.source
+      return { entry, wrapper, controllerDom: null, componentHandle: null }
+    }
     const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
       components: this.#components,
       interactive: this.#session.active,
@@ -722,7 +782,7 @@ export class SpatialSurfaceHost {
     const { item, source } = record.entry
     record.wrapper.dataset.layerItemId = item.layerItemId
     record.wrapper.dataset.layerSource = source
-    if (!isSpatialViewportPlaybackItem(source, item)) return
+    if (!isSpatialViewportPlaybackItem(source, item) && !isHtmlWorldWrapper(record.wrapper)) return
     const html = record.wrapper as HTMLElement
     const session = this.#controllerSessionFor(item)
     const offset = session?.offset ?? { dx: 0, dy: 0 }
