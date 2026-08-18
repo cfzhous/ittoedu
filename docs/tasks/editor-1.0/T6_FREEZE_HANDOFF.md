@@ -83,6 +83,7 @@
 - 允许列表外（HANDOFF 记录）：
   - `src/renderer/project/assetManager.ts`：拷贝字节再 SHA-256（jsdom/Node Buffer view）
   - `scripts/windowsPortabilityEvidence.ts`：保留未 resolve 的 Windows 路径形式
-- `npm run build:desktop` / `npm run test:e2e`：未跑
+- `npm run build:desktop`：退出码 0（Vite 500kB chunk 警告忽略）
+- `npm run test:e2e`：未跑
 - 未宣称发布 / 未打 tag / 未 accepted / 未 art candidate
 
