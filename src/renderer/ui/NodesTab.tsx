@@ -234,7 +234,14 @@ function SortableNode({
   )
 }
 
-function groupedVisualRows(visualRows: readonly EffectiveLayerProjectionRow[]): readonly {
+function listedTeacherControllerRow(
+  visualRows: readonly EffectiveLayerProjectionRow[],
+): EffectiveLayerProjectionRow | undefined {
+  return visualRows.find((row) => row.isTeacherController && row.owner === 'global')
+    ?? visualRows.find((row) => row.isTeacherController)
+}
+
+export function groupedVisualRows(visualRows: readonly EffectiveLayerProjectionRow[]): readonly {
   readonly id: 'global' | 'surface' | 'scene' | 'world'
   readonly label: string
   readonly rows: readonly EffectiveLayerProjectionRow[]
@@ -245,8 +252,14 @@ function groupedVisualRows(visualRows: readonly EffectiveLayerProjectionRow[]): 
     { id: 'scene' as const, label: '场景', owner: 'scene' as const },
     { id: 'world' as const, label: '世界', owner: 'world' as const },
   ]
+  const listedController = listedTeacherControllerRow(visualRows)
   return specs.flatMap((spec) => {
-    const rows = visualRows.filter((row) => row.owner === spec.owner)
+    const rows = visualRows.filter((row) => {
+      if (row.isTeacherController) {
+        return spec.id === 'global' && row === listedController
+      }
+      return row.owner === spec.owner
+    })
     return rows.length === 0 ? [] : [{ id: spec.id, label: spec.label, rows }]
   })
 }
@@ -263,11 +276,12 @@ function rowAsNode(row: EffectiveLayerProjectionRow): NodesTabRowNode {
   }
 }
 
-function isForeignTeacherControllerDrop(
+export function isForeignTeacherControllerDrop(
   from: EffectiveLayerProjectionRow,
   to: EffectiveLayerProjectionRow,
 ): boolean {
-  return (from.isTeacherController || to.isTeacherController) && from.ownerKey !== to.ownerKey
+  if (!from.isTeacherController && !to.isTeacherController) return false
+  return from.owner !== 'global' || to.owner !== 'global' || from.ownerKey !== to.ownerKey
 }
 
 function sameOwnerDropRow(
@@ -278,12 +292,15 @@ function sameOwnerDropRow(
   const from = visualRows[fromIndex]
   const over = visualRows[overIndex]
   if (!from || !over) return null
-  if (from.ownerKey === over.ownerKey) return over
+  if (from.ownerKey === over.ownerKey && !isForeignTeacherControllerDrop(from, over)) {
+    return over
+  }
   if (!isForeignTeacherControllerDrop(from, over)) return null
   const direction = overIndex > fromIndex ? 1 : -1
   for (let index = overIndex; index >= 0 && index < visualRows.length; index += direction) {
     const candidate = visualRows[index]
     if (!candidate || candidate.id === from.id) continue
+    if (isForeignTeacherControllerDrop(from, candidate)) continue
     if (candidate.ownerKey === from.ownerKey) return candidate
   }
   return null
@@ -345,8 +362,9 @@ export function NodesTab() {
   const candidate = (backendKind === 'v9-slide-candidate' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
   const unifiedRows = candidate ? projection.unifiedRows : null
   const visualRows = unifiedRows ? visualFrontToBackRows(unifiedRows) : null
-  const nodes = visualRows
-    ? visualRows.map(rowAsNode)
+  const layerGroups = visualRows ? groupedVisualRows(visualRows) : null
+  const nodes = layerGroups
+    ? layerGroups.flatMap((group) => group.rows.map(rowAsNode))
     : [...v8Nodes].reverse()
   const editingScope = useEditorStore((state) => state.editingScope)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
@@ -381,15 +399,13 @@ export function NodesTab() {
       const from = visualRows[oldIndex]!
       const overRow = visualRows[newIndex]!
       let to = overRow
-      if (from.ownerKey !== overRow.ownerKey) {
-        if (isForeignTeacherControllerDrop(from, overRow)) {
-          const snapped = sameOwnerDropRow(visualRows, oldIndex, newIndex)
-          if (!snapped) return
-          to = snapped
-        } else {
-          moveCandidateLayerOwner(from.id, overRow.id)
-          return
-        }
+      if (isForeignTeacherControllerDrop(from, overRow)) {
+        const snapped = sameOwnerDropRow(visualRows, oldIndex, newIndex)
+        if (!snapped) return
+        to = snapped
+      } else if (from.ownerKey !== overRow.ownerKey) {
+        moveCandidateLayerOwner(from.id, overRow.id)
+        return
       }
       const ownerVisual = visualRows.filter((row) => row.ownerKey === from.ownerKey)
       const ownerOld = ownerVisual.findIndex((row) => row.id === from.id)
@@ -449,7 +465,7 @@ export function NodesTab() {
               strategy={verticalListSortingStrategy}
             >
               <div className="nodes-list">
-                {visualRows && candidate ? groupedVisualRows(visualRows).map((group) => (
+                {layerGroups ? layerGroups.map((group) => (
                   <section
                     key={group.id}
                     className="nodes-layer-group"
@@ -464,7 +480,7 @@ export function NodesTab() {
                           node={node}
                           selected={selectedNodeIds.includes(node.id)}
                           sourceLabel={row.isTeacherController
-                            ? `${row.sourceLabel}、不可下沉`
+                            ? '全课、不可下沉'
                             : row.sourceLabel}
                           impactLabel={describeLayerImpact(row.impact)}
                           onSelect={(additive) => {
