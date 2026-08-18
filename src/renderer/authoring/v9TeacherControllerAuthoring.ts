@@ -35,7 +35,7 @@ import {
   SLIDE_BACKEND_NOT_CANDIDATE,
 } from '../store/slideBackendPort'
 import {
-  selectSlideCandidateBackend,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '../store/editorStore'
 import {
@@ -104,7 +104,7 @@ function v8Fallback(): TeacherControllerAuthoringResult {
 }
 
 function readCandidate() {
-  return selectSlideCandidateBackend(useEditorStore.getState())
+  return selectSlideAuthoringBackend(useEditorStore.getState())
 }
 
 function viewportTransform(
@@ -369,7 +369,7 @@ function applyCandidate(
 
 /**
  * Authoring kernel for the global teacher controller. Default V8
- * (`selectSlideCandidateBackend === null`) returns `{ kind: 'v8' }` and never
+ * (`selectSlideAuthoringBackend === null`) returns `{ kind: 'v8' }` and never
  * reports a successful command. Candidate pointermove only previews; pointerup
  * writes one history entry through `applySlideCandidateCommand`.
  */

@@ -51,21 +51,9 @@ const WHITELIST: Record<ForbiddenToken, string[]> = {
     'src/shared/courseProjectSchema.ts',
     'src/shared/courseProjectTypes.ts',
   ],
-  isV9SlideCandidateBackend: [
-    'src/renderer/store/editorStore.ts',
-    'src/renderer/store/slideBackendPort.ts',
-  ],
-  selectSlideCandidateBackend: [
-    'src/renderer/App.tsx',
-    'src/renderer/authoring/v9TeacherControllerAuthoring.ts',
-    'src/renderer/store/editorStore.ts',
-    'src/renderer/ui/PropertiesTab.tsx',
-    'src/renderer/ui/Workspace.tsx',
-  ],
-  executeSlideCandidateCommand: [
-    'src/renderer/store/editorStore.ts',
-    'src/renderer/store/slideBackendPort.ts',
-  ],
+  isV9SlideCandidateBackend: [],
+  selectSlideCandidateBackend: [],
+  executeSlideCandidateCommand: [],
 }
 
 function collectSourceFiles(dir: string): string[] {

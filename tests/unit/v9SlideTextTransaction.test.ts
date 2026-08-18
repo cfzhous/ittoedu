@@ -40,7 +40,7 @@ import {
   selectEditingNodes,
   selectSelectedNode,
   selectSlideBackendKind,
-  selectSlideCandidateBackend,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -261,7 +261,7 @@ describe('V9 Slide text/formula transactions', () => {
 
   it('defaults to the V9 slide authoring backend', () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
   })
 
   it('rejects text edit when no authoring backend is available', () => {
@@ -278,7 +278,7 @@ describe('V9 Slide text/formula transactions', () => {
     const session = openSlideAuthoringSession(v9SlideFixture())
     const backend = createSlideAuthoringBackend(session)
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-    const candidate = selectSlideCandidateBackend(useEditorStore.getState())
+    const candidate = selectSlideAuthoringBackend(useEditorStore.getState())
 
     const textEdit = requireEdit(beginV9SlideContentEdit({
       backend: candidate,

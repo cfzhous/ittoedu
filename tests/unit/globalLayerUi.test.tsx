@@ -8,7 +8,7 @@ import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import {
-  selectSlideCandidateDocument,
+  selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -271,7 +271,7 @@ describe('Project V8 global-layer editor UI', () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     store.addTextNode()
-    const before = selectSlideCandidateDocument(useEditorStore.getState())!
+    const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const text = before.globalLayerItems.find(
       (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'text',
     )
@@ -285,7 +285,7 @@ describe('Project V8 global-layer editor UI', () => {
       target: { value: 'underlay' },
     })
 
-    const after = selectSlideCandidateDocument(useEditorStore.getState())!
+    const after = selectSlideAuthoringDocument(useEditorStore.getState())!
     const sceneOrders = after.surfaces.flatMap((surface) => (
       surface.type === 'slide'
         ? surface.scenes.flatMap((scene) => scene.layerItems.map((item) => item.order))

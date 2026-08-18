@@ -59,8 +59,8 @@ import {
   selectMediaAssetFiles,
   selectSelectedNode,
   selectSlideBackendKind,
-  selectSlideCandidateBackend,
-  selectSlideCandidateDocument,
+  selectSlideAuthoringBackend,
+  selectSlideAuthoringDocument,
   selectActiveCourseProjectDocument,
   selectActiveCourseLocationId,
   useEditorStore,
@@ -1507,7 +1507,7 @@ function SlideLocationWorkspace({
   const [controllerOverlay, setControllerOverlay] =
     useState<StageSelectionOverlayGeometry | null>(null)
   const slideBackendKind = useEditorStore(selectSlideBackendKind)
-  const candidateDocument = useEditorStore(selectSlideCandidateDocument)
+  const candidateDocument = useEditorStore(selectSlideAuthoringDocument)
   const candidateSidecar = useEditorStore((state) => state.slideCandidateSidecar)
   const panRef = useRef<{
     pointerId: number
@@ -3039,18 +3039,18 @@ function SlideLocationWorkspace({
         }
       }),
       handle.bridge.onNodeMoveEnd(({ nodeId, x, y }) => {
-        if (selectSlideCandidateBackend(useEditorStore.getState())) return
+        if (selectSlideAuthoringBackend(useEditorStore.getState())) return
         useEditorStore.getState().updateNode(nodeId, { x, y })
       }),
       handle.bridge.onNodesMoveEnd(({ nodes }) => {
-        if (selectSlideCandidateBackend(useEditorStore.getState())) return
+        if (selectSlideAuthoringBackend(useEditorStore.getState())) return
         useEditorStore.getState().updateNodes(
           nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
         )
       }),
       handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) => {
         const store = useEditorStore.getState()
-        if (selectSlideCandidateBackend(store)) return
+        if (selectSlideAuthoringBackend(store)) return
         const node = selectEditingNodes(store).find(
           (item) => item.id === nodeId,
         )
@@ -3063,12 +3063,12 @@ function SlideLocationWorkspace({
         )
       }),
       handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) => {
-        if (selectSlideCandidateBackend(useEditorStore.getState())) return
+        if (selectSlideAuthoringBackend(useEditorStore.getState())) return
         useEditorStore.getState().updateNode(nodeId, { rotation })
       }),
       handle.bridge.onNodesTransformEnd(({ nodes }) => {
         const store = useEditorStore.getState()
-        if (selectSlideCandidateBackend(store)) return
+        if (selectSlideAuthoringBackend(store)) return
         const currentById = new Map(
           selectEditingNodes(store).map((node) => [node.id, node]),
         )
@@ -3870,7 +3870,7 @@ function SlideLocationWorkspace({
           onCancel={() => setActiveFormulaEditSession(null)}
           onCommit={(ast, accessibleText) => {
             const store = useEditorStore.getState()
-            const backend = selectSlideCandidateBackend(store)
+            const backend = selectSlideAuthoringBackend(store)
             if (backend && store.v9ContentEdit?.kind === 'formula') {
               const edited = updateV9SlideContentFormulaDraft(store.v9ContentEdit, {
                 ast,

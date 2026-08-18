@@ -34,7 +34,7 @@ import {
   openSlideAuthoringSession,
 } from '@/renderer/course/slideAuthoringBackend'
 import {
-  selectSlideCandidateBackend,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -322,7 +322,7 @@ function injectCandidate(project = v9ControllerFixture()) {
 }
 
 function controllerFrame() {
-  const document = selectSlideCandidateBackend(useEditorStore.getState())
+  const document = selectSlideAuthoringBackend(useEditorStore.getState())
     ?.getSession().history.present
   const item = document?.globalLayerItems.find(
     (entry) => entry.item.layerItemId === 'global-teacher-controller',
@@ -344,7 +344,7 @@ describe('v9 teacher controller authoring bridge', () => {
     useEditorStore.setState({ slideBackend: undefined as any })
     const controller = createV9TeacherControllerAuthoringController()
     expect(resolveTeacherControllerAuthoringKind()).toBe('v8')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).toBeNull()
     const down = controller.pointerDown({ x: 640, y: 670 }, VIEW)
     const move = controller.pointerMove({ x: 700, y: 680 }, VIEW)
     const up = controller.pointerUp({ x: 700, y: 680 }, VIEW)

@@ -31,8 +31,8 @@ import {
 import {
   selectEffectiveLayerProjection,
   selectSlideBackendKind,
-  selectSlideCandidateBackend,
-  selectSlideCandidateDocument,
+  selectSlideAuthoringBackend,
+  selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import type { EffectiveLayerProjectionRow } from '@/renderer/course/effectiveLayerProjection'
@@ -273,7 +273,7 @@ function layerGroupNodeIds(groupId: 'global' | 'surface' | 'scene' | 'world'): s
 }
 
 function controllerFrame() {
-  const document = selectSlideCandidateDocument(useEditorStore.getState())
+  const document = selectSlideAuthoringDocument(useEditorStore.getState())
   const item = document?.globalLayerItems.find(
     (entry) => entry.item.layerItemId === 'teacher-controller-main',
   )?.item
@@ -294,7 +294,7 @@ afterEach(() => {
 describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   it('defaults the store backend to V9 and paints candidate source labels', () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).not.toBeNull()
     render(<NodesTab />)
     expect(screen.getByTestId('nodes-tab')).toBeTruthy()
     expect(screen.getByText('有效图层')).toBeTruthy()
@@ -400,7 +400,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
 
   it('hides misplaced teacher-controller copies without rewriting globalLayerItems', () => {
     injectCandidate(v9WithMisplacedControllerCopies())
-    const before = selectSlideCandidateDocument(useEditorStore.getState())!
+    const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const globalBefore = JSON.stringify(before.globalLayerItems)
     render(<NodesTab />)
     expect(screen.queryByTestId('node-item-teacher-controller-scene-copy')).toBeNull()
@@ -413,7 +413,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent)
       .toContain('全课、不可下沉')
 
-    const after = selectSlideCandidateDocument(useEditorStore.getState())!
+    const after = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(JSON.stringify(after.globalLayerItems)).toBe(globalBefore)
     const slide = after.surfaces[0]
     if (!slide || slide.type !== 'slide') throw new Error('expected slide')
@@ -426,25 +426,25 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     injectCandidate()
     useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
-    const before = selectSlideCandidateBackend(useEditorStore.getState())!.getSession().history.past.length
+    const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past.length
     const globals = selectEffectiveLayerProjection(useEditorStore.getState())!
       .unifiedRows
       .filter((row) => row.owner === 'global')
       .map((row) => row.id)
     expect(globals).toEqual(['global-banner', 'teacher-controller-main'])
     useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
-    const after = selectSlideCandidateBackend(useEditorStore.getState())!.getSession()
+    const after = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     expect(after.history.past.length).toBe(before + 1)
     expect(after.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
       .toEqual(['teacher-controller-main', 'global-banner'])
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
 
     useEditorStore.getState().moveCandidateLayerOwner(
       'teacher-controller-main',
       'slide-title',
     )
     expect(useEditorStore.getState().errorMessage).toBe(CONTROLLER_MOVE_REASON)
-    const scene = selectSlideCandidateDocument(useEditorStore.getState())!
+    const scene = selectSlideAuthoringDocument(useEditorStore.getState())!
       .surfaces[0]
     if (!scene || scene.type !== 'slide') throw new Error('expected slide')
     expect(scene.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-main')).toBe(false)
@@ -453,7 +453,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   it('writes per-location visibility without changing startLocationId or location order', () => {
     injectCandidate()
     useEditorStore.getState().selectNode('teacher-controller-main')
-    const before = selectSlideCandidateDocument(useEditorStore.getState())!
+    const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const order = before.locations.map((location) => location.id)
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.getByLabelText('图层位置')).toBeTruthy()
@@ -462,7 +462,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     })
     fireEvent.click(screen.getByTestId('location-visibility-location-scene-1'))
     fireEvent.click(screen.getByLabelText('当前页显示'))
-    const after = selectSlideCandidateDocument(useEditorStore.getState())!
+    const after = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(after.startLocationId).toBe(before.startLocationId)
     expect(after.locations.map((location) => location.id)).toEqual(order)
     expect(after.globalLayerItems.find((entry) => entry.item.layerItemId === 'teacher-controller-main')?.visibility)
@@ -474,7 +474,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   it('uses the same controller layout in Properties as the canvas frame, and west-resizes on pointerup', () => {
     injectCandidate()
     useEditorStore.getState().selectNode('teacher-controller-main')
-    const item = selectSlideCandidateDocument(useEditorStore.getState())!
+    const item = selectSlideAuthoringDocument(useEditorStore.getState())!
       .globalLayerItems
       .find((entry) => entry.item.layerItemId === 'teacher-controller-main')
       ?.item

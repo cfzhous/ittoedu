@@ -34,7 +34,7 @@ import {
 } from '@/renderer/ui/workspaceSlideAuthoring'
 import {
   selectEditingNodes,
-  selectSlideCandidateBackend,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { SLIDE_REJECT_LOCKED } from '@/renderer/course/slideEditorCommands'
@@ -304,7 +304,7 @@ function injectCandidate() {
 }
 
 function nativeFrame(id: string) {
-  const document = selectSlideCandidateBackend(useEditorStore.getState())?.getSession().history.present
+  const document = selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.present
   const surface = document?.surfaces.find((candidate) => candidate.type === 'slide')
   if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
   const item = surface.scenes[0]?.layerItems.find((candidate) => candidate.layerItemId === id)
@@ -325,7 +325,7 @@ describe('V9 Slide viewport adapter', () => {
   it('defaults the Workspace authoring path to the V9 slide candidate', () => {
     const controller = createSlideWorkspaceAuthoringController()
     expect(resolveSlideWorkspaceAuthoringKind()).toBe('slide-authoring')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
     const down = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const move = controller.pointerMove({ x: 220, y: 160 }, VIEW)
     const up = controller.pointerUp({ x: 220, y: 160 }, VIEW)
@@ -339,7 +339,7 @@ describe('V9 Slide viewport adapter', () => {
     useEditorStore.setState({ slideBackend: undefined as any })
     const controller = createSlideWorkspaceAuthoringController()
     expect(resolveSlideWorkspaceAuthoringKind()).toBe('v8')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).toBeNull()
     const down = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const move = controller.pointerMove({ x: 220, y: 160 }, VIEW)
     const up = controller.pointerUp({ x: 220, y: 160 }, VIEW)
@@ -438,11 +438,11 @@ describe('V9 Slide viewport adapter', () => {
     )
     const down = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
     expect(down.kind).toBe('slide-authoring')
-    const revisionAfterDown = selectSlideCandidateBackend(useEditorStore.getState())?.getSnapshot().revision
+    const revisionAfterDown = selectSlideAuthoringBackend(useEditorStore.getState())?.getSnapshot().revision
     const moved = controller.pointerMove({ x: west.x - 40, y: west.y }, VIEW)
     if (moved.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(moved.preview?.[0]).toMatchObject({ x: 80, y: 120, width: 440, height: 80 })
-    expect(selectSlideCandidateBackend(useEditorStore.getState())?.getSnapshot().revision)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())?.getSnapshot().revision)
       .toBe(revisionAfterDown)
     expect(nativeFrame('slide-title')).toMatchObject({ x: 120, y: 120, width: 400, height: 80 })
 

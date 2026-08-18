@@ -22,7 +22,7 @@ import {
   selectEditingNodes,
   selectMediaAssetFiles,
   selectSlideBackendKind,
-  selectSlideCandidateDocument,
+  selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -103,7 +103,7 @@ describe('default Course Project V9 persistence', () => {
   it('creates a schemaVersion 9 document on the V9 authoring backend', () => {
     const state = useEditorStore.getState()
     expect(selectSlideBackendKind(state)).toBe('slide-authoring')
-    expect(selectSlideCandidateDocument(state)?.schemaVersion).toBe(
+    expect(selectSlideAuthoringDocument(state)?.schemaVersion).toBe(
       COURSE_PROJECT_SCHEMA_VERSION,
     )
     expect(state.project.schemaVersion).toBe(8)
@@ -112,7 +112,7 @@ describe('default Course Project V9 persistence', () => {
   it('saves a zip that openCourseProjectArchive can reopen', () => {
     const store = useEditorStore.getState()
     store.addTextNode(40, 50)
-    const document = selectSlideCandidateDocument(useEditorStore.getState())
+    const document = selectSlideAuthoringDocument(useEditorStore.getState())
     expect(document?.schemaVersion).toBe(9)
     const bytes = store.exportV9SlideCandidateArchive()
     expect(bytes).toBeInstanceOf(Uint8Array)
@@ -134,7 +134,7 @@ describe('default Course Project V9 persistence', () => {
     expect(opened.kind).toBe('v8')
     if (opened.kind !== 'v8') return
     expect(opened.pending.report.sourceFormat).toBe('legacy-course')
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
   })
 })
@@ -216,7 +216,7 @@ describe('scene operations', () => {
 
   it('keeps a high defensive scene limit without the former 30-scene product cap', () => {
     const store = useEditorStore.getState()
-    const document = structuredClone(selectSlideCandidateDocument(useEditorStore.getState())!)
+    const document = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     const surface = document.surfaces.find((item) => item.type === 'slide')
     if (!surface || surface.type !== 'slide') throw new Error('missing slide surface')
     const template = surface.scenes[0]!
@@ -521,7 +521,7 @@ describe('node operations', () => {
 
   it('keeps a high defensive node limit without the former 100-node product cap', () => {
     const store = useEditorStore.getState()
-    const document = structuredClone(selectSlideCandidateDocument(useEditorStore.getState())!)
+    const document = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     const surface = document.surfaces.find((item) => item.type === 'slide')
     if (!surface || surface.type !== 'slide') throw new Error('missing slide surface')
     const scene = surface.scenes[0]!
@@ -1542,7 +1542,7 @@ describe('history semantics', () => {
   it('new and opened projects clear history while save keeps it', () => {
     const store = useEditorStore.getState()
     store.addTextNode()
-    const documentToLoad = structuredClone(selectSlideCandidateDocument(useEditorStore.getState())!)
+    const documentToLoad = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     expect(useEditorStore.getState().history.past).toHaveLength(1)
 
     store.markSaved('C:\\course.h5lesson')

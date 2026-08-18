@@ -10,7 +10,7 @@
 | **A0** 合同桶 re-export | **已合入，禁止重做** | `src/shared/contracts/**` |
 | **A** 抽离并改 import | **暂缓** | 等父代理改看板。大范围移动类型。 |
 | **B1** 增加 `canvas-runtime` / `surface-runtime` | **可领取** [T1-B1](T1_B1_ADD_DISCRIMINATORS.md) | 只 additive；不改 `editorStore`、不删旧值 |
-| **B** 切换写入并删除 `legacy-*` | **阻塞** | 等 T3-aliases + T1-B1。未先改夹具 + 生产写入 + round-trip 前，禁止删判别器。 |
+| **B** 切换写入并删除 `legacy-*` | **阻塞** | 等 T1-B1。未先改夹具 + 生产写入 + round-trip 前，禁止删判别器。 |
 | **C** 审计顶层字段 | **暂缓** | 与 A 一起。禁止把 `PROJECT_SCHEMA_VERSION` 改成 9。 |
 | **D** 合同产物脚本 | **已合入，禁止重做** | `generate:contracts` / `check:contracts`；哈希门禁仍是 T6 冻结切片。 |
 

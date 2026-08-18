@@ -1,6 +1,6 @@
 # T3-aliases 去掉 candidate 别名
 
-> 状态：**可领取**（已有工人在写，不要再开第二个）  
+> 状态：**已合入，禁止重做**  
 > 并行：禁止与 T1-B 同时改 `editorStore.ts`  
 > T6-scan 已证明 `selectSlideCandidateBackend` 还出现在 App / PropertiesTab / Workspace / v9TeacherControllerAuthoring，必须一并机械改名。  
 > 合同变化：否  

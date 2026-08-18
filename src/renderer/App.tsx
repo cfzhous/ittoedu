@@ -87,7 +87,7 @@ import {
   selectEditingNodes,
   selectMediaAssetFiles,
   selectSelectedNode,
-  selectSlideCandidateBackend,
+  selectSlideAuthoringBackend,
   useEditorStore,
   MAX_BATCH_CANVAS_ITEMS,
   type ImportedAssetBatchItem,
@@ -224,7 +224,7 @@ async function prepareAssetBatch<T extends {
   build: (file: T) => Promise<ImportedAssetBatchItem>,
 ): Promise<PreparedAssetBatch> {
   const state = useEditorStore.getState()
-  const backend = selectSlideCandidateBackend(state)
+  const backend = selectSlideAuthoringBackend(state)
   const hashes = await buildAssetContentHashIndex(
     kind,
     backend ? backend.getSession().history.present.assets : state.project.assets,
@@ -267,7 +267,7 @@ async function importCandidateMediaIfInjected(input: {
   position?: { x?: number; y?: number }
 }): Promise<boolean> {
   const state = useEditorStore.getState()
-  const backend = selectSlideCandidateBackend(state)
+  const backend = selectSlideAuthoringBackend(state)
   if (!backend) return false
   const document = backend.getSession().history.present
   const sidecar = state.slideCandidateSidecar ?? emptyCourseAssetSidecar()
@@ -1581,7 +1581,7 @@ export default function App() {
           }
           return
         }
-        if (selectSlideCandidateBackend(state)) {
+        if (selectSlideAuthoringBackend(state)) {
           if (shouldIgnoreSlideLayerDeleteForFocus({
             textEditSession: Boolean(
               state.editingTextNodeId || state.v9ContentEdit?.kind === 'text',

@@ -1,6 +1,6 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**全量验证不可领取**，直到 T3-aliases 合入（合同说明 / 扫描 / 快照已合入）  
+> 状态：**全量验证不可领取**，直到 T6-CI 合入（T3-aliases / 合同说明 / 扫描 / 快照已合入）  
 > 预备切片已拆出：[T6-docs](T6_DOCS.md)、[T6-scan](T6_SCAN.md)、[T1-D](T1_D_CONTRACTS_GEN.md)、[T6-CI](T6_CI.md)、[T6-nav](T6_NAV.md)  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
 > **本包唯一允许跑 typecheck / 全量 test / e2e / build:desktop 的任务**

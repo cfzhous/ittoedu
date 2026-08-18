@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { selectActiveScene, selectSlideCandidateBackend, useEditorStore } from '@/renderer/store/editorStore'
+import { selectActiveScene, selectSlideAuthoringBackend, useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { AutomationTab } from '@/renderer/ui/AutomationTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
@@ -142,7 +142,7 @@ describe('scene presentation state UI', () => {
     store.addScene()
     const [firstScene, secondScene] = useEditorStore.getState().project.scenes
     const sharedVideoId = 'legacy_shared_video'
-    const backend = selectSlideCandidateBackend(useEditorStore.getState())
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
     const document = backend?.getSession().history.present
     if (document) {
       for (const surface of document.surfaces) {

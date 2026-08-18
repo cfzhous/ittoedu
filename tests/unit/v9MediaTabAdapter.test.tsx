@@ -16,7 +16,7 @@ import {
   selectMediaAssetFiles,
   selectMediaAssets,
   selectSlideBackendKind,
-  selectSlideCandidateDocument,
+  selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { MediaTab } from '@/renderer/ui/MediaTab'
@@ -126,7 +126,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
     )
     expect(screen.getByTestId(`asset-entry-${imported.meta.id}`)).toBeTruthy()
     expect(selectMediaAssetFiles(useEditorStore.getState())[imported.meta.id]?.byteLength).toBe(4)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.assets[imported.meta.id]).toBeTruthy()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.assets[imported.meta.id]).toBeTruthy()
   })
 
   it('imports image and sound into the candidate sidecar, places on canvas, undoes sidecar, and round-trips archive', async () => {
@@ -140,7 +140,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
       'audio',
       { duration: 1.25 },
     )
-    const document = selectSlideCandidateDocument(useEditorStore.getState())!
+    const document = selectSlideAuthoringDocument(useEditorStore.getState())!
     const sidecar = useEditorStore.getState().slideCandidateSidecar!
     const imageDeduped = await dedupeCourseMediaImports(
       'image',
@@ -165,7 +165,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
     expect(importedImage.ok).toBe(true)
     expect(importedSound.ok).toBe(true)
     expect(importedImage.historyEntry).toBe(true)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.assets[image.meta.id]).toMatchObject({
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.assets[image.meta.id]).toMatchObject({
       filename: 'candidate-photo.png',
       kind: 'image',
     })
@@ -187,17 +187,17 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
     expect(add.disabled).toBe(false)
     fireEvent.click(add)
 
-    const placed = selectSlideCandidateDocument(useEditorStore.getState())!
+    const placed = selectSlideAuthoringDocument(useEditorStore.getState())!
     const surface = placed.surfaces[0]
     if (!surface || surface.type !== 'slide') throw new Error('expected slide')
     expect(surface.scenes[0]!.layerItems.some((item) => (
       item.kind === 'native' && item.content.nativeType === 'image'
     ))).toBe(true)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.assets[image.meta.id]).toBeTruthy()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.assets[image.meta.id]).toBeTruthy()
     expect(selectMediaAssetFiles(useEditorStore.getState())[image.meta.id]?.byteLength).toBe(4)
 
     useEditorStore.getState().undo()
-    const afterUndoPlace = selectSlideCandidateDocument(useEditorStore.getState())!
+    const afterUndoPlace = selectSlideAuthoringDocument(useEditorStore.getState())!
     const undoSurface = afterUndoPlace.surfaces[0]
     if (!undoSurface || undoSurface.type !== 'slide') throw new Error('expected slide')
     expect(undoSurface.scenes[0]!.layerItems.some((item) => (
@@ -211,7 +211,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
     expect(reopened).toBe(true)
     expect(selectMediaAssets(useEditorStore.getState())[image.meta.id]).toBeTruthy()
     expect(selectMediaAssetFiles(useEditorStore.getState())[image.meta.id]?.byteLength).toBe(4)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.assets[image.meta.id]).toBeTruthy()
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.assets[image.meta.id]).toBeTruthy()
   })
 })

@@ -105,8 +105,8 @@ import {
   selectEditingNodes,
   selectSelectedNode,
   selectSlideAuthoringSnapshot,
-  selectSlideCandidateBackend,
-  selectSlideCandidateDocument,
+  selectSlideAuthoringBackend,
+  selectSlideAuthoringDocument,
   type AlignmentMode,
   useEditorStore,
 } from '../store/editorStore'
@@ -775,7 +775,7 @@ function TextProperties({ node, update }: {
     const state = useEditorStore.getState()
     const start = selectionRef.current.start
     const end = selectionRef.current.end
-    if (selectSlideCandidateBackend(state) && end > start) {
+    if (selectSlideAuthoringBackend(state) && end > start) {
       state.commitSlideCandidateTextRunStyle({
         layerItemId: node.id,
         selectionStart: start,
@@ -789,7 +789,7 @@ function TextProperties({ node, update }: {
   }
   const updateTextDraft = (text: string) => {
     let state = useEditorStore.getState()
-    const candidate = selectSlideCandidateBackend(state)
+    const candidate = selectSlideAuthoringBackend(state)
     if (candidate) {
       if (state.v9ContentEdit?.target.layerItemId !== node.id) {
         state.beginTextEdit(node.id, 'properties')
@@ -1210,7 +1210,7 @@ function TeacherControllerProperties({ node, scenes, update }: {
 }) {
   const snapshotRevision = useEditorStore((state) => state.slideCandidateSnapshot?.revision ?? 0)
   const layoutPreview = useMemo(() => {
-    const backend = selectSlideCandidateBackend(useEditorStore.getState())
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
     if (!backend) return null
     const item = findGlobalTeacherController(
       backend.getSession().history.present,
@@ -1703,7 +1703,7 @@ function candidateLocationVisibilityLabel(
 
 function CandidateGlobalLayerSettings({ nodeId }: { nodeId: string }) {
   const document = useEditorStore(selectActiveCourseProjectDocument)
-    ?? useEditorStore(selectSlideCandidateDocument)
+    ?? useEditorStore(selectSlideAuthoringDocument)
   const snapshot = useEditorStore(selectSlideAuthoringSnapshot)
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
@@ -1844,7 +1844,7 @@ function CandidateGlobalLayerSettings({ nodeId }: { nodeId: string }) {
 }
 
 function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
-  const candidate = useEditorStore(selectSlideCandidateBackend)
+  const candidate = useEditorStore(selectSlideAuthoringBackend)
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
   if (candidate || spatialSession || flowSession) return <CandidateGlobalLayerSettings nodeId={nodeId} />

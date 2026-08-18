@@ -2,7 +2,7 @@
 
 > 计划版本：12.5  
 > 更新日期：2026-08-18  
-> 12.5 变更：T6 全量验证等合同预备切片。T6 合同说明、禁止项扫描、T1-D 合同快照、T1-A0 合同桶可并行。P5-persist 已合入。T1-B 生产写入抢 `editorStore`，等 T3-aliases。  
+> 12.5 变更：T6 全量验证等 T6-CI。T3-aliases 已合入。T1-B 删旧判别器等 T1-B1。  
 > 12.4 变更：剩余任务卡（T3/T4/T5/T6/P5-persist/P8）改成逐步算法、允许/禁止文件和停手条件，给高性价比第三方工人执行；父代理只合入与复检。工人协议见 `docs/tasks/editor-1.0/02_WORKER.md`。T1-B 在 T0 `canvas-runtime` 夹具仍写 `legacy-runtime-v2` 前禁止删判别器。P8 在 P1/P3/P4 合入后可领取。  
 > 12.3 变更：补充「互动组件在流式讲义与无限画布中不可用」为车道 P8，排在 P1/P3/P4 之后（同文件宿主）。  
 > 12.2 变更：把 2026-08-18 定位的教师可见缺陷收进车道 P；合同冻结仍走车道 C（T0–T6）。同一提交不得混改 Schema 判别器和教师手感。  
@@ -112,14 +112,14 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | ID | 内容 | 验证 |
 |---|---|---|
 | T0 | tag、V9 夹具、工作区已有产品补丁收口 | 1 个 round-trip 测试 |
-| T1 | **E / A0 / D 已合入**。B1 可并行。A/C 暂缓。B 删旧值等 B1 + T3-aliases | 1–2 个合同测试 |
+| T1 | **E / A0 / D 已合入**。B1 可并行。A/C 暂缓。B 删旧值等 B1 | 1–2 个合同测试 |
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T0、T1-E、T1-A0、T1-D、T2、T3、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan 已合入。可并行：T3-aliases、T6-CI、T6-nav、T1-B1。T6 全量验证等 T3-aliases。T1-B 删旧判别器等 T1-B1 + 别名。T1-A 真迁移 / T1-C 仍暂缓。
+T0、T1-E、T1-A0、T1-D、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan 已合入。可并行：T6-CI、T6-nav、T1-B1。T6 全量验证等 T6-CI。T1-B 删旧判别器等 T1-B1。T1-A 真迁移 / T1-C 仍暂缓。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 

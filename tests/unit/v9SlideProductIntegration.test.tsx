@@ -16,8 +16,8 @@ import {
   selectEditingNodes,
   selectSlideAuthoringSnapshot,
   selectSlideBackendKind,
-  selectSlideCandidateBackend,
-  selectSlideCandidateDocument,
+  selectSlideAuthoringBackend,
+  selectSlideAuthoringDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
@@ -125,7 +125,7 @@ function injectCandidate() {
 }
 
 function nativeFrame(layerItemId: string) {
-  const document = selectSlideCandidateDocument(useEditorStore.getState())
+  const document = selectSlideAuthoringDocument(useEditorStore.getState())
   const surface = document?.surfaces.find((candidate) => candidate.type === 'slide')
   if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
   const item = surface.scenes[0]?.layerItems.find((candidate) => candidate.layerItemId === layerItemId)
@@ -144,7 +144,7 @@ afterEach(() => {
 })
 
 function slideSceneLayerItems() {
-  const document = selectSlideCandidateDocument(useEditorStore.getState())
+  const document = selectSlideAuthoringDocument(useEditorStore.getState())
   const surface = document?.surfaces.find((candidate) => candidate.type === 'slide')
   if (!surface || surface.type !== 'slide') return []
   return surface.scenes[0]?.layerItems ?? []
@@ -153,9 +153,9 @@ function slideSceneLayerItems() {
 describe('V9 slide product integration on the real V8 UI', () => {
   it('defaults to the V9 slide authoring backend and writes inserted text into the candidate document', () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())).not.toBeNull()
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(
       COURSE_PROJECT_SCHEMA_VERSION,
     )
 
@@ -182,7 +182,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     unsubscribe()
     expect(notifications).toBeGreaterThan(0)
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(2)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
     expect(slideSceneLayerItems().some((item) => (
       item.kind === 'native' && item.content.nativeType === 'text'
     ))).toBe(true)
@@ -202,7 +202,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     const ordered = [...nodes].sort((left, right) => left.x - right.x || left.y - right.y)
     expect(ordered[1]?.x).toBe((ordered[0]?.x ?? 0) + 20)
     expect(ordered[1]?.y).toBe(ordered[0]?.y)
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
     expect(slideSceneLayerItems().filter((item) => (
       item.kind === 'native' && item.content.nativeType === 'text'
     ))).toHaveLength(2)
@@ -269,7 +269,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(selectEditingNodes(useEditorStore.getState()).map((node) => node.id)).toEqual(
       expect.arrayContaining([firstId, secondId]),
     )
-    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
     expect(slideSceneLayerItems().map((item) => item.layerItemId)).toEqual(
       expect.arrayContaining([firstId, secondId]),
     )
