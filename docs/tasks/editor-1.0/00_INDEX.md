@@ -1,9 +1,10 @@
 # Editor 1.0 收尾任务包
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.2  
+> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.3  
 > 共享约束：[01_SHARED.md](01_SHARED.md)  
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
+> 12.3：P8 Flow/Spatial 互动组件（后续实现，等 P1/P3/P4）。  
 > 12.2：增加车道 P（教师可见缺陷 P1–P7）。合同冻结仍是 T0–T6。
 
 本包取代已删除的 `docs/tasks/v8-to-v9-rebuild/**`。不要领取 R0–R8，不要从 `f272756` 再开 worktree。
@@ -40,10 +41,10 @@ T2 删 V8 导入   T4 能力链/CLI  T3 单后端   ← 三个独立 worktree �
                               T5 Read Model（T3 之后；与 P7 抢 NodesTab）
  │
  ▼
-T6  全量验证（T2–T5 与 P1–P7 全部完成后，只此一次）
+T6  全量验证（T2–T5 与 P1–P8 全部完成后，只此一次）
 
 
-车道 P 教师可见（12.2 定位）
+车道 P 教师可见（12.2–12.3 定位）
 不阻塞 T0 夹具；T0 未提交的控制器/图层补丁先收口，再领会碰同一文件的 P 任务。
 T1 未合入前，P5 只允许 CSS 默认白，不写新持久化字段。
 
@@ -52,6 +53,8 @@ P3 Flow 编辑媒体 ─┤  与 P1 分文件，可并行
 P4 Spatial 编辑 ──┤  与 P1 抢 SpatialSurfaceHost 时：先 P1 再 P4
 P6 课程树 ────────┤  可与 P1 并行；Store 接线与 T3/P2 互斥
 P7 图层控制器 ────┘  可与 P1 并行；与 T5 抢 NodesTab
+
+P8 Flow/Spatial 组件   ← **后续**。等 P1、P3、P4 合入；禁止与它们并行改同一宿主
 
 P2 Mixed 保留试运行   ← 独占 editorStore 激活路径；与 T3、P6 的 Store 接线互斥
 P5 画布底色           ← CSS 可与 P4 并行；持久化属性等 T1 字段
@@ -72,7 +75,8 @@ P5 画布底色           ← CSS 可与 P4 并行；持久化属性等 T1 字�
 | [P5](P5_CANVAS_BACKGROUND.md) | CSS 可并行；字段等 T1 | T1（持久化） | `globals.css`、Spatial/Flow 属性、宿主背景 |
 | [P6](P6_COURSE_TREE.md) | UI 可与 P1 并行 | 无 | `ScenePanel.tsx`、`AddCourseContentMenu.tsx`、`courseLocationCommands.ts`；Store 接线避开 T3/P2 窗口 |
 | [P7](P7_LAYER_CONTROLLER.md) | 可与 P1 并行；与 T5 互斥同改 | 无 | `NodesTab.tsx` |
-| [T6](T6_FREEZE.md) | 否 | T2–T5 **和** P1–P7 | CI、合同哈希、教师验收 |
+| [P8](P8_FLOW_SPATIAL_COMPONENTS.md) | 否（等 P1/P3/P4） | P1、P3、P4 | Flow/Spatial/Slide Published 宿主 + FlowWorkspace + Spatial 绘制 |
+| [T6](T6_FREEZE.md) | 否 | T2–T5 **和** P1–P8 | CI、合同哈希、教师验收 |
 
 同一 worktree 若要连续做 T2 与 T3：先 T2 再 T3。同一 worktree 若 P2 与 T3 都要改 `editorStore`：先 T3 再 P2（P2 只改激活路径上的 `canvasMode`，不要回退 T3 命名）。P7 与 T5：先 P7 再 T5，或 T5 只改 import 并在 HANDOFF 声明未动分组。
 
@@ -82,7 +86,7 @@ P5 画布底色           ← CSS 可与 P4 并行；持久化属性等 T1 字�
 
 每个任务只跑该文件「最小验证」列出的 1–2 个 Vitest 文件，外加一次对本任务 diff 的 `git diff --check`。
 
-禁止在 T0–T5 与 P1–P7 运行：`npm test`、`npm run typecheck`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。
+禁止在 T0–T5 与 P1–P8 运行：`npm test`、`npm run typecheck`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。
 
 **全量验证只在 T6。** 中间发现的类型/构建风险写入 HANDOFF，交给 T6。P 车道的课例视觉复核也等到 T6 前集中做，中间最多记「工程上已接线」。
 

@@ -1,10 +1,11 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.2  
+> 计划版本：12.3  
 > 更新日期：2026-08-18  
+> 12.3 变更：补充「互动组件在流式讲义与无限画布中不可用」为车道 P8，排在 P1/P3/P4 之后（同文件宿主）。本轮只入计划，实现留给后续，不与正在进行的 P1–P7 抢宿主。  
 > 12.2 变更：把 2026-08-18 定位的教师可见缺陷（试运行/预览控制器与视频、Flow/Spatial 媒体编辑、画布底色、课程树删除与跨组、图层中的全局控制器）收进车道 P；合同冻结仍走车道 C（T0–T6）。两条车道可分 worktree 并行，同一提交不得混改 Schema 判别器和教师手感。  
 > 12.1 变更：教师确认没有要再打开的 V8 `.h5lesson`，删除导入、不保留密封导入器；删除已失效的重建任务包与 V8 Builder Skill；执行拆到 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)，每环最小验证，全量只在最后。  
-> 取代：计划 11.0–12.1。已删除 `docs/tasks/v8-to-v9-rebuild/**`，不得再领取 R0–R8。  
+> 取代：计划 11.0–12.2。已删除 `docs/tasks/v8-to-v9-rebuild/**`，不得再领取 R0–R8。  
 > 当前工程格式：Course Project `schemaVersion: 9`  
 > 发布格式：Published Course V2  
 > 运行时：Runtime API 2 / Surface Runtime API 3  
@@ -47,7 +48,8 @@
 | 无限画布黑底；画布底色不统一、不可改 | P | P5 |
 | Flow 删不了页；Mixed 删不了整组、不能跨组挪页；主按钮文案都是「新增页面」 | P | P6 |
 | 图层树仍列出全局控制器，和场景物件混在一起 | P | P7 |
-| 无合同哈希、无教师 `accepted` | C | T6；**P1–P7 未做视觉复核不得 `accepted`** |
+| 互动组件在 Flow / Spatial 编辑与试运行中不可用（仅文字/后备） | P | P8（P1/P3/P4 之后） |
+| 无合同哈希、无教师 `accepted` | C | T6；**P1–P8 未做视觉复核不得 `accepted`** |
 
 不要从 `f272756` 再开重建分支。不要把 donor HEAD 当产品主干。
 
@@ -115,9 +117,9 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | T5 | Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3。T5 在 T3 后。T6 在 **T2–T5 与 P1–P7** 全部完成后。
+T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3。T5 在 T3 后。T6 在 **T2–T5 与 P1–P8** 全部完成后。
 
-### 3.2 车道 P：教师可见缺陷（12.2）
+### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
 按教师感知排序，不是按文件名排序。稳定性「时好时坏」不单开任务：P1–P4 先去掉双渲染器和跨表面重挂造成的明显竞态；Store/Workspace 大拆仍属 1.0 之后。
 
@@ -130,6 +132,7 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 | P5 | 画布默认白、可改色 | CSS 可先做；持久化等 T1 可选字段 |
 | P6 | 课程树：删除整组/流式页、跨组挪页、主按钮文案 | 不挡播放；可与 P1 并行 |
 | P7 | 图层树不再把全局控制器当成场景物件 | 不挡播放；与 T5 抢 `NodesTab` |
+| P8 | Flow / Spatial（及 CoursePlayer 上的 Slide 试运行）挂载 Component API 4 | 与 P1/P3/P4 抢同一宿主与编辑绘制；**必须等那些任务合入后再做** |
 
 中间任务禁止 `npm test`、`typecheck`、e2e、`build:desktop`、`verify`。P 车道最小验证仍是 1–2 个 Vitest 文件；**艺术验收只在 T6 前的课例复核，不在中间宣称 `art candidate`。**
 
@@ -179,7 +182,7 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 - V9 合同有机器快照与哈希。
 - 真实 V9 夹具可打开、保存、重开、播放、导出。
 - 文档与能力索引不再把 Project V8 写成当前格式。
-- **P1–P7 在真实课例上通过视觉/互动复核**（试运行与整课预览：控制器可拖可点；三种表面视频能播；Flow/Spatial 编辑能看见图/视频；画布默认白可改色；课程树能删组、能跨组挪同类型页；图层不把全局控制器显示成场景物件）。
+- **P1–P8 在真实课例上通过视觉/互动复核**（试运行与整课预览：控制器可拖可点；三种表面视频能播；Flow/Spatial 编辑能看见图/视频；画布默认白可改色；课程树能删组、能跨组挪同类型页；图层不把全局控制器显示成场景物件；Flow/Spatial 中的互动组件在编辑可选、试运行可交互，缺包时才用静态后备）。
 - 自动化、视觉、真人验收通过。
 - **教师明确 `accepted`。**
 - 内部投影适配器可以存在，不得形成第二份工程真相。
@@ -190,7 +193,8 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 
 - 不新增持久化四模式字段。
 - 不取消全局层、MediaTab、动画、组件、图层控制、教师控制器。
-- 不把 Flow 普通 block 当 z-order 图层。
+- 不把 Flow 普通 block 当 z-order 图层。嵌入稿纸的组件仍是文档块；视口浮层组件才进统一图层。
+- 不给 Flow/Spatial 另造一套组件运行时。复用现有 Component API 4 / `ComponentRegistry`；禁止复制 CourseStudio 动态编辑器。
 - 不给 Spatial 另造弱化元素编辑器。
 - 不维护两套可见编辑器。
 - 不以 hidden/no-op 冒充完成。
@@ -252,6 +256,18 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
 - 原因：`NodesTab` 统一有效图层按 owner 分组；控制器在「全局」，标签「全课、不可下沉」，仍在同一棵树。
 - 修：图层树默认不把教师控制器列在「场景 / 本页 / 世界」里。允许只在「全局」保留一条，或收到「全课控件」入口（已有 `global-layer-entry`）。禁止再复制一份进场景。不启动 V10 owner 迁移。
 
+**P8 Flow / Spatial 互动组件（12.3，后续实现）**
+
+- 现象：在流式讲义和无限画布中插入或已有的互动组件不可用：编辑看不到真实组件、不能点选编辑属性所依赖的画布命中；试运行/整课预览不能交互。
+- 原因：Slide **编辑**仍走隔离 Player iframe，有 `componentTargets` 真挂载。Flow/Spatial 与 CoursePlayer 上的 Published 宿主都没有挂 Component API 4：
+  - Flow 编辑稿纸 `case 'component'` 只渲染包名和没有 `src` 的后备 `<img>`；浮层与媒体一样只显示标签。
+  - Flow 运行 `renderBlockDom` / `renderStaticOverlayItem` 只画 `staticFallback` 或 `[组件后备：pkg@version]` 文本。
+  - Spatial 编辑世界层把 `external-component` 落成 `node.name`；HUD 同样。
+  - Spatial 运行 `createWorldItem` 对 component 画蓝底矩形 + `packageId`；`createViewportHud` 只有文字。
+  - `SlidePublishedAdapter` 在试运行路径上也只画静态后备（与 Flow/Spatial 同一缺口）；P8 抽出共用挂载，三种表面试运行一起接，避免三套假完成。
+- 修：在 P1 宿主与 P3/P4 编辑绘制合入之后，用现有 `ComponentRegistry` / 组件会话把 Component API 4 挂进 Flow 稿纸块、Flow 浮层、Spatial 世界（HTML overlay，不要塞进 SVG 当唯一载体）和 Spatial HUD。编辑态可命中、属性可改、`authoringAddress` 稳定；试运行可交互。包缺失或打印/捕获时才用 `staticFallbackAssetId`。不改 Component API 版本，不复制 CourseStudio。
+- 顺序：禁止与正在进行的 P1/P3/P4 并行改同一宿主文件。
+
 **稳定性**
 
 双后端、切位置整棵重挂、编辑 blob vs 运行 data URL、Flow `fixed` 浮层、Slide CSS scale，造成时好时坏。P1–P4 降低这些竞态。不在 1.0 收尾里拆 `editorStore` / `Workspace`。
@@ -265,4 +281,4 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
 1. **车道 C**：过渡命名、合同归属、机器产物仍说 V8。
 2. **车道 P**：Published 试运行/预览与编辑画布尚未成为教师可用的同一课。
 
-> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。合同按 T0–T6 冻结；教师看得见的播放、媒体、课程树、画布底色按 P1–P7 修。两边都完成后才能教师 `accepted` 并发布 Editor 1.0。此后 V9 合同不变，内部实现再逐步解耦。**
+> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。合同按 T0–T6 冻结；教师看得见的播放、媒体、组件、课程树、画布底色按 P1–P8 修。两边都完成后才能教师 `accepted` 并发布 Editor 1.0。此后 V9 合同不变，内部实现再逐步解耦。**
