@@ -2,7 +2,7 @@
 
 - 范围：修复 `scripts/validate-project.ts` 以及测试文件（`courseProjectCoreContract.test.ts`、`editorStore.test.ts`、`spatialCanvasBackground.test.ts`、`v9SlideProductIntegration.test.tsx`）中过时的类型字面量与断言，使其对齐 V9 / T2 / T3 / T1-B 合并后的语义并消除本卡范围内的 tsc 报错。
 - 合同是否变化：否
-- 分支 / SHA：`cursor/t6-tc-tests-de5c` (`c15ba1edf36124b0e61fc45aafa579fb5a54ccaa`)
+- 分支 / SHA：`cursor/t6-tc-tests-de5c` (`e9ff5ec21d13e4517b85023c03c11b463f634c30`)
 - 允许列表外改动：无
 - 最小验证命令与结果：
   1. `npm run typecheck`（退出码 1，本卡 5 个允许文件已全部不在报错列表中，仅剩 T1-A 范围的 `src/player/**`、`src/renderer/ui/**` 与 `tests/unit/publishedComponentMount.test.ts` 错误）
