@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs'
+import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ComponentEditorProperty, ComponentPackageData } from '../src/shared/componentTypes'
@@ -131,6 +131,12 @@ function addStateOverride(
 }
 
 async function main(): Promise<void> {
+  const catalogPath = path.join(componentCatalogRoot, 'catalog.json')
+  if (!existsSync(catalogPath)) {
+    console.warn(`跳过四组件矩阵生成：未找到 ${catalogPath}`)
+    return
+  }
+
   const [catalog, playerBundle] = await Promise.all([
     scanComponentCatalogDirectory(componentCatalogRoot, 'prompt'),
     fs.readFile(playerBundlePath, 'utf8'),

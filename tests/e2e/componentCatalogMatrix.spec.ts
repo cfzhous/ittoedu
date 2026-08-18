@@ -16,10 +16,8 @@ import type {
   Page,
 } from 'playwright'
 import { unzipSync } from 'fflate'
-import {
-  BACKGROUND_E2E_ENV,
-  BACKGROUND_E2E_WINDOW_ORIGIN,
-} from '../../src/main/windowVisibility'
+import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const root = resolve(__dirname, '..', '..')
 const catalogRoot = resolve(root, '..', 'courseware-components')
@@ -325,23 +323,6 @@ async function verifyOfflinePlayer(
   expect(externalRequests).toEqual([])
   expect(pageErrors).toEqual([])
   return { ...stress, externalRequests, pageErrors }
-}
-
-async function expectBackgroundWindowsIsolated(
-  app: ElectronApplication,
-): Promise<void> {
-  if (backgroundE2e !== '1') return
-  await expect.poll(() => app.evaluate(({ BrowserWindow }, origin) => {
-    const windows = BrowserWindow.getAllWindows()
-    return windows.length > 0 && windows.every((window) => {
-      const bounds = window.getBounds()
-      return !window.isVisible() &&
-        !window.isFocused() &&
-        window.getOpacity() === 0 &&
-        bounds.x === origin &&
-        bounds.y === origin
-    })
-  }, BACKGROUND_E2E_WINDOW_ORIGIN)).toBe(true)
 }
 
 async function launchEditor(): Promise<LaunchedEditor> {
