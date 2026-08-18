@@ -17,8 +17,8 @@
 | Runtime API 2 | [场景与全局自由运行时开发指南](RUNTIME_AUTHORING.md) |
 | Component API 4 | [互动组件开发指南](COMPONENT_AUTHORING.md) |
 | 单 HTML / 网页包发布输入 | [PublishedLesson V1](PUBLISHED_LESSON_V1.md) |
-| 机器发现当前契约 | [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)（`project` 字段待 T4 改为 9） |
-| 无界面自检课件工程 | `npm run --silent validate:project -- <file.h5lesson>`（T4 将改为 Course Project V9 文案） |
+| 机器发现当前契约 | [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)（`protocols.project` 为 9） |
+| 无界面自检课件工程 | `npm run --silent validate:course-project -- <file.h5lesson>`（`validate:project` 为同一入口） |
 
 当前主干只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。编排 Skill 只维护两份教师可改 Markdown；确认后 Builder 用真实产品 API 写 V9。教师工作流不使用 Hash、审批或 Evidence 清单。自动管线最多给出 `engineering candidate`；`art candidate` 需要真实视觉/互动证据，`accepted` 必须来自明确的人类验收。
 

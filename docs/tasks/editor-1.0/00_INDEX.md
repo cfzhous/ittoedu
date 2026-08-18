@@ -46,7 +46,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 |---|---|
 | [P5](P5_CANVAS_BACKGROUND.md) **persist** | P8 合入（同宿主文件） |
 | [T5](T5_READ_MODEL.md) | T3 合入 |
-| [T6](T6_FREEZE.md) | T3、T4、T5、P5-persist、P8 |
+| [T6](T6_FREEZE.md) | T3、T5、P5-persist、P8 |
 | [T1](T1_SCHEMA.md) A/C/D | 父代理改看板为可领取 |
 | [T1](T1_SCHEMA.md) B | 先改 T0 `canvas-runtime` 夹具，再删 `legacy-*` |
 
@@ -56,7 +56,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 - 删除 `.agents/skills/build-project-v8-courseware/**` 及其专用测试
 - 删除 `MULTI_SURFACE_DEVELOPMENT_PLAN.md`、根目录评估稿、过时 Skill 重构方案
 
-代码里的双后端、`project: 8` 能力产物由 **T3 / T4** 收口，不要重做 T2。
+代码里的双后端由 **T3** 收口，不要重做 T2 / T4。
 
 ## 并行规则
 
