@@ -1,7 +1,7 @@
 # T1-B 切换生产写入并删除旧 Runtime 判别器
 
 > 状态：**可领取**（T1-B1 / T6-CI / T3-aliases 已合入）  
-> 并行：可与 [T6-nav](T6_NAV.md) 分树（T6-nav 只改 README / `docs/README.md` / `docs/USER_GUIDE.md` / `AGENTS.md`）  
+> 并行：T6-nav 已合入；不要与其他 T1 合同任务抢同一 schema 文件  
 > 合同变化：是  
 > 工人先读：[02_WORKER.md](02_WORKER.md)
 

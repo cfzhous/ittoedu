@@ -5,7 +5,7 @@
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
-> 12.5：T6-CI 与 T1-B1 已合入。T6-nav 与 T1-B 可并行。T6 全量验证等 T1-B。  
+> 12.5：T6-CI 与 T1-B1 已合入。T6-nav 已合入。T6 全量验证等 T1-B。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -44,12 +44,12 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T3-aliases](T3_ALIASES.md) | 去掉 candidate 函数别名；session 字段名未改 |
 | [T6-CI](T6_CI.md) | GitHub Actions 只跑 `check:contracts` |
 | [T1](T1_B1_ADD_DISCRIMINATORS.md) **B1** | 增加 `canvas-runtime` / `surface-runtime`；旧值当时仍合法 |
+| [T6-nav](T6_NAV.md) | 文档导航接到 `docs/contracts/` 与 generate/check:contracts |
 
 **可领取（互斥见表）**
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [T6-nav](T6_NAV.md) | `cursor/t6-nav-de5c` | 只改 README / 文档导航入口 |
 | [T1-B](T1_B_SWITCH.md) | `cursor/t1-b-switch-de5c` | 先切换写入与 T0 夹具，再删 `legacy-*` / `surface-v1` |
 
 **必须等待**
@@ -76,7 +76,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
          P1 P2 P3 P4 P5-CSS P5-persist P6 P7 P8
 
 现在可并行（分 worktree）：
-  T6-nav / T1-B
+  T1-B
 
 然后：
   T1-B 合入 → T6 全量验证（唯一全量）
