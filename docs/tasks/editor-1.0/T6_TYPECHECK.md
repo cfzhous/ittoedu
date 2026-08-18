@@ -7,7 +7,7 @@
 | 切片 | 卡 | 分支 |
 |---|---|---|
 | 合同真迁移 + Published 类型对齐 | [T1-A](T1_A_MOVE.md) | `cursor/t1-a-move-de5c` |
-| 顶层字段审计 | [T1-C](T1_C_AUDIT.md) | `cursor/t1-c-audit-de5c` |
+| 顶层字段审计 | [T1-C](T1_C_AUDIT.md) | **已合入** |
 | 测试与 validate-project | [T6-tc-tests](T6_TC_TESTS.md) | `cursor/t6-tc-tests-de5c` |
 
 禁止改 Runtime 判别器、打 tag、宣称 Editor 1.0 已发布。
