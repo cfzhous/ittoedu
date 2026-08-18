@@ -93,9 +93,18 @@ export function assertEquivalentDirectoryEvidence(
 
 function pathRepresentations(value: string): string[] {
   const resolved = path.resolve(value)
-  const slash = resolved.replaceAll('\\', '/')
-  const backslash = resolved.replaceAll('/', '\\')
-  return [...new Set([resolved, slash, backslash])]
+  const slash = value.replaceAll('\\', '/')
+  const backslash = value.replaceAll('/', '\\')
+  const resolvedSlash = resolved.replaceAll('\\', '/')
+  const resolvedBackslash = resolved.replaceAll('/', '\\')
+  return [...new Set([
+    value,
+    slash,
+    backslash,
+    resolved,
+    resolvedSlash,
+    resolvedBackslash,
+  ])]
 }
 
 /**
