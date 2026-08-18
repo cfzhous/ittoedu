@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 2,
+  "caseId": "e2e-native-fast",
+  "projectPath": "project/e2e-native-fast.h5lesson",
+  "generatedFrom": {
+    "coursewareContractSha256": "{{COURSEWARE_CONTRACT_SHA256}}",
+    "presentationScriptSha256": "{{PRESENTATION_SHA256}}",
+    "capabilityIndexSha256": "{{CAPABILITY_SHA256}}",
+    "developmentPlanSha256": "{{DEVELOPMENT_PLAN_SHA256}}"
+  },
+  "globalEntities": [],
+  "scenes": [
+    {
+      "sceneId": "scene_fraction_choice",
+      "ownership": "hybrid-owned",
+      "entities": [
+        {
+          "id": "fraction-title",
+          "label": "任务标题",
+          "kind": "text",
+          "sourceRef": "CNT-001",
+          "intent": "修改学生看到的任务标题",
+          "authoringEntry": "在画布选中任务标题文本节点并直接编辑",
+          "expectedOutcome": "存档重开后保留新标题，Player 与导出显示同一文本",
+          "authoringOutcomeId": "AUTH-001",
+          "binding": "native:scene:scene_fraction_choice:node_fraction_title:text",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "fraction-prompt",
+          "label": "任务说明",
+          "kind": "text",
+          "sourceRef": "CNT-001",
+          "intent": "修改四分之一判断任务的完整题面",
+          "authoringEntry": "在画布选中任务说明文本节点并直接编辑",
+          "expectedOutcome": "存档重开后保留新题面，Player 的操作前状态与静态导出都显示新文本",
+          "authoringOutcomeId": "AUTH-002",
+          "binding": "native:scene:scene_fraction_choice:node_fraction_prompt:text",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "fraction-feedback",
+          "label": "错误修复反馈",
+          "kind": "text",
+          "sourceRef": "CNT-001",
+          "intent": "修改学生答错后的修复反馈",
+          "authoringEntry": "在画布选中错误修复反馈文本节点并直接编辑",
+          "expectedOutcome": "存档重开后保留新反馈，Player 错误态与导出稳定帧显示同一修复提示",
+          "authoringOutcomeId": "AUTH-003",
+          "binding": "native:scene:scene_fraction_choice:node_fraction_feedback:text",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        }
+      ]
+    }
+  ]
+}

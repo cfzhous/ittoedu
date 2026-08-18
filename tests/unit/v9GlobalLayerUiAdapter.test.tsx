@@ -1,0 +1,351 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import {
+  COURSE_PROJECT_SCHEMA_VERSION,
+  type CourseProjectDocument,
+  type NativeLayerItem,
+  type ScopedLayerItem,
+} from '@/shared/courseProjectTypes'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { createTeacherControllerNode } from '@/renderer/project/createProject'
+import {
+  createSlideCandidateBackend,
+  openSlideAuthoringSession,
+} from '@/renderer/course/v9SlideVerticalSlice'
+import {
+  CONTROLLER_MOVE_REASON,
+} from '@/renderer/course/effectiveLayerCommands'
+import {
+  rowsForListKind,
+} from '@/renderer/course/effectiveLayerProjection'
+import {
+  createV9TeacherControllerAuthoringController,
+  teacherControllerPropertiesPreview,
+} from '@/renderer/authoring/v9TeacherControllerAuthoring'
+import {
+  clientToWorld,
+  createStageViewportTransform,
+  worldToClient,
+} from '@/renderer/authoring/stageViewportTransform'
+import {
+  selectEffectiveLayerProjection,
+  selectSlideBackendKind,
+  selectSlideCandidateBackend,
+  selectSlideCandidateDocument,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
+import { NodesTab } from '@/renderer/ui/NodesTab'
+import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+
+/**
+ * Proves R3-Z wiring of effective-layer display/write and controller authoring
+ * on the real V8 NodesTab / PropertiesTab. Does not prove a live Electron window.
+ */
+const NOW = '2026-08-17T15:00:00.000Z'
+const VIEW = {
+  viewport: { x: 0, y: 0, width: 1280, height: 720 },
+  zoom: 1,
+  pan: { x: 0, y: 0 },
+}
+
+function textStyle() {
+  return {
+    fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+    fontSize: 24,
+    color: '#172033',
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    emphasis: false,
+    highlightColor: null,
+    align: 'left' as const,
+    verticalAlign: 'top' as const,
+    writingMode: 'horizontal' as const,
+    lineSpacing: 1.3,
+    letterSpacing: 0,
+    padding: 4,
+    overflow: 'fixed' as const,
+    backgroundColor: '#ffffff',
+    backgroundOpacity: 0,
+    cornerRadius: 0,
+  }
+}
+
+function nativeText(
+  layerItemId: string,
+  order: number,
+  text: string,
+): NativeLayerItem {
+  return {
+    layerItemId,
+    label: text,
+    frame: { mode: 'absolute', x: 40, y: 40, width: 220, height: 80 },
+    order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'text',
+      data: { text, runs: [], style: textStyle() },
+    },
+  }
+}
+
+function scoped(
+  item: NativeLayerItem,
+  visibility: ScopedLayerItem['visibility'] = { mode: 'all', locationIds: [] },
+): ScopedLayerItem {
+  return { item, visibility }
+}
+
+function v9ThreeLocationFixture(): CourseProjectDocument {
+  const controller = sceneNodeToCourseLayerItem(
+    createTeacherControllerNode({ id: 'teacher-controller-main' }),
+    90,
+  )
+  return courseProjectDocumentSchema.parse({
+    schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+    id: 'r3z-layers',
+    revision: 1,
+    title: 'R3-Z layers',
+    createdAt: NOW,
+    updatedAt: NOW,
+    assets: {},
+    componentPackages: {},
+    designTokens: {
+      fonts: [{
+        id: 'body',
+        label: '正文',
+        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+      }],
+      colors: [
+        { id: 'background', label: '背景', color: '#ffffff' },
+        { id: 'text', label: '正文', color: '#1f2937' },
+      ],
+    },
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+      },
+    },
+    playback: {
+      controls: 'canvas',
+      keyboardNavigation: true,
+      presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+    },
+    courseState: [],
+    navigationGuards: [],
+    globalLayerItems: [
+      scoped(nativeText('global-banner', 0, '全课横幅')),
+      scoped(controller as NativeLayerItem),
+    ],
+    globalInteractions: [],
+    locations: [
+      {
+        id: 'location-scene-1',
+        label: '场景 1',
+        kind: 'slide-scene',
+        surfaceId: 'surface-slide',
+        sceneId: 'scene-1',
+      },
+      {
+        id: 'location-scene-2',
+        label: '场景 2',
+        kind: 'slide-scene',
+        surfaceId: 'surface-slide',
+        sceneId: 'scene-2',
+      },
+      {
+        id: 'location-scene-3',
+        label: '场景 3',
+        kind: 'slide-scene',
+        surfaceId: 'surface-slide',
+        sceneId: 'scene-3',
+      },
+    ],
+    startLocationId: 'location-scene-1',
+    surfaces: [{
+      id: 'surface-slide',
+      title: '演示',
+      type: 'slide',
+      canvas: { width: 1280, height: 720 },
+      surfaceLayerItems: [],
+      scenes: [
+        {
+          id: 'scene-1',
+          name: '场景 1',
+          backgroundColor: '#ffffff',
+          layerItems: [nativeText('slide-title', 20, '本页标题')],
+          interactions: [],
+        },
+        {
+          id: 'scene-2',
+          name: '场景 2',
+          backgroundColor: '#ffffff',
+          layerItems: [nativeText('slide-title-2', 20, '第二页标题')],
+          interactions: [],
+        },
+        {
+          id: 'scene-3',
+          name: '场景 3',
+          backgroundColor: '#ffffff',
+          layerItems: [nativeText('slide-title-3', 20, '第三页标题')],
+          interactions: [],
+        },
+      ],
+    }],
+  })
+}
+
+function injectCandidate(project = v9ThreeLocationFixture()) {
+  const backend = createSlideCandidateBackend(openSlideAuthoringSession(project))
+  useEditorStore.getState().injectV9SlideCandidateBackend(backend)
+  return backend
+}
+
+function controllerFrame() {
+  const document = selectSlideCandidateDocument(useEditorStore.getState())
+  const item = document?.globalLayerItems.find(
+    (entry) => entry.item.layerItemId === 'teacher-controller-main',
+  )?.item
+  if (!item || item.kind !== 'native') throw new Error('missing global controller')
+  return { ...item.frame, rotation: item.rotation, revision: document!.revision }
+}
+
+beforeEach(() => {
+  useEditorStore.getState().clearV9SlideCandidateBackend()
+  useEditorStore.getState().createNewProject()
+})
+
+afterEach(() => {
+  cleanup()
+  useEditorStore.getState().clearV9SlideCandidateBackend()
+})
+
+describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
+  it('defaults the store backend to V9 and paints candidate source labels', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+    expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
+    render(<NodesTab />)
+    expect(screen.getByTestId('nodes-tab')).toBeTruthy()
+    expect(screen.getByText('有效图层')).toBeTruthy()
+    expect(
+      [...document.querySelectorAll('[data-testid^="node-source-"]')]
+        .some((element) => element.textContent?.includes('全课')),
+    ).toBe(true)
+  })
+
+  it('shows unified effective-layer source labels and keeps scene-only free of a fake controller', () => {
+    injectCandidate()
+    const projection = selectEffectiveLayerProjection(useEditorStore.getState())
+    expect(projection).not.toBeNull()
+    expect(rowsForListKind(projection!, 'scene-only').some((row) => row.isTeacherController)).toBe(false)
+    expect(projection!.unifiedRows.some((row) => row.id === 'teacher-controller-main' && row.source === 'global')).toBe(true)
+
+    render(<NodesTab />)
+    expect(screen.getByText('有效图层')).toBeTruthy()
+    expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('全课')
+    expect(screen.getByTestId('node-source-slide-title').textContent).toContain('本页')
+    expect(screen.getByTestId('node-source-global-banner').textContent).toContain('全课')
+  })
+
+  it('reorders inside one owner with one history entry and refuses moving the controller onto a scene', () => {
+    injectCandidate()
+    useEditorStore.getState().setEditingScope('global')
+    render(<NodesTab />)
+    const before = selectSlideCandidateBackend(useEditorStore.getState())!.getSession().history.past.length
+    const globals = selectEffectiveLayerProjection(useEditorStore.getState())!
+      .unifiedRows
+      .filter((row) => row.owner === 'global')
+      .map((row) => row.id)
+    expect(globals).toEqual(['global-banner', 'teacher-controller-main'])
+    useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
+    const after = selectSlideCandidateBackend(useEditorStore.getState())!.getSession()
+    expect(after.history.past.length).toBe(before + 1)
+    expect(after.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
+      .toEqual(['teacher-controller-main', 'global-banner'])
+    expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
+
+    useEditorStore.getState().moveCandidateLayerOwner(
+      'teacher-controller-main',
+      'slide-title',
+    )
+    expect(useEditorStore.getState().errorMessage).toBe(CONTROLLER_MOVE_REASON)
+    const scene = selectSlideCandidateDocument(useEditorStore.getState())!
+      .surfaces[0]
+    if (!scene || scene.type !== 'slide') throw new Error('expected slide')
+    expect(scene.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-main')).toBe(false)
+  })
+
+  it('writes per-location visibility without changing startLocationId or location order', () => {
+    injectCandidate()
+    useEditorStore.getState().selectNode('teacher-controller-main')
+    const before = selectSlideCandidateDocument(useEditorStore.getState())!
+    const order = before.locations.map((location) => location.id)
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    expect(screen.getByLabelText('图层位置')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('场景可见范围'), {
+      target: { value: 'include' },
+    })
+    fireEvent.click(screen.getByTestId('location-visibility-location-scene-1'))
+    fireEvent.click(screen.getByLabelText('当前页显示'))
+    const after = selectSlideCandidateDocument(useEditorStore.getState())!
+    expect(after.startLocationId).toBe(before.startLocationId)
+    expect(after.locations.map((location) => location.id)).toEqual(order)
+    expect(after.globalLayerItems.find((entry) => entry.item.layerItemId === 'teacher-controller-main')?.visibility)
+      .toMatchObject({ mode: expect.stringMatching(/include|exclude|all/) })
+    expect(JSON.stringify(after.globalLayerItems)).not.toContain('sceneIds')
+    expect(useEditorStore.getState().slideCandidateSnapshot?.locationId).toBe('location-scene-1')
+  })
+
+  it('uses the same controller layout in Properties as the canvas frame, and west-resizes on pointerup', () => {
+    injectCandidate()
+    useEditorStore.getState().selectNode('teacher-controller-main')
+    const item = selectSlideCandidateDocument(useEditorStore.getState())!
+      .globalLayerItems
+      .find((entry) => entry.item.layerItemId === 'teacher-controller-main')
+      ?.item
+    if (!item || item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') {
+      throw new Error('missing controller')
+    }
+    const layout = teacherControllerPropertiesPreview(item.content.data, item.frame)
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const preview = screen.getByTestId('teacher-controller-layout-preview')
+    expect(preview.textContent).toContain(`${layout.width} × ${layout.height}`)
+    expect(preview.textContent).toContain(layout.buttons[0]!.label)
+
+    const controller = createV9TeacherControllerAuthoringController()
+    const transform = createStageViewportTransform(VIEW)
+    const west = worldToClient(transform, { x: 190, y: 670 })
+    const down = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
+    expect(down.kind).toBe('v9-controller-candidate')
+    if (down.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(down.overlay).toBeTruthy()
+    const dragged = { x: west.x - 40, y: west.y }
+    expect(clientToWorld(transform, dragged).x).toBeCloseTo(150)
+    const previewMove = controller.pointerMove(dragged, VIEW)
+    if (previewMove.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(previewMove.preview).toEqual({ x: 150, y: 638, width: 940, height: 64 })
+    expect(controllerFrame().revision).toBe(1)
+    const committed = controller.pointerUp(dragged, VIEW)
+    if (committed.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(committed.command?.historyEntry).toBe(true)
+    expect(controllerFrame()).toMatchObject({
+      x: 150,
+      y: 638,
+      width: 940,
+      height: 64,
+      revision: 2,
+    })
+  })
+})

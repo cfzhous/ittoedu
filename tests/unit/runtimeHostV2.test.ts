@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 vi.mock('phaser', () => ({ runtimeMarker: 'phaser-test-module' }))
 
@@ -10,11 +10,17 @@ import {
   type RuntimeMountEnvironment,
 } from '@/player/RuntimeHost'
 import { RuntimeRegistry } from '@/player/RuntimeRegistry'
+import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import type {
   RuntimeApiVersion,
   RuntimeDocument,
   RuntimeRenderMode,
 } from '@/shared/runtimeTypes'
+import {
+  SURFACE_RUNTIME_API_VERSION,
+  type SurfaceRuntimeCreateContext,
+  type SurfaceRuntimeDefinition,
+} from '@/shared/surfaceRuntimeTypes'
 
 class FakeContainer {
   active = true
@@ -646,5 +652,46 @@ describe('RuntimeHost API 2', () => {
 
     host.destroy()
     registry.dispose()
+  })
+
+  it('API 3 surface/viewport 上下文可从 surfaceRuntimeTypes 导入，且不取代 API 2 文档', () => {
+    expect(SURFACE_RUNTIME_API_VERSION).toBe(3)
+    expectTypeOf<RuntimeDocument['runtimeApiVersion']>().toEqualTypeOf<2>()
+    expectTypeOf<SurfaceRuntimeCreateContext['runtimeApiVersion']>().toEqualTypeOf<3>()
+    expectTypeOf<SurfaceRuntimeCreateContext['mode']>().toEqualTypeOf<
+      'playback' | 'inspect' | 'capture'
+    >()
+    expectTypeOf<SurfaceRuntimeCreateContext['width']>().toEqualTypeOf<number>()
+    expectTypeOf<SurfaceRuntimeCreateContext['height']>().toEqualTypeOf<number>()
+    expectTypeOf<SurfaceRuntimeCreateContext['dom']>().toEqualTypeOf<{ root: HTMLElement }>()
+    expectTypeOf<SurfaceRuntimeCreateContext['content']>().toHaveProperty('get')
+    expectTypeOf<SurfaceRuntimeCreateContext['assets']>().toHaveProperty('url')
+    expectTypeOf<SurfaceRuntimeCreateContext['authoring']>().toHaveProperty('registerText')
+    expectTypeOf<SurfaceRuntimeCreateContext['authoring']>().toHaveProperty('registerAsset')
+    expectTypeOf<SurfaceRuntimeCreateContext['authoring']>().toHaveProperty('invalidate')
+
+    const definition: SurfaceRuntimeDefinition = {
+      runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
+      create(context) {
+        expectTypeOf(context.runtimeApiVersion).toEqualTypeOf<3>()
+        expectTypeOf(context.dom.root).toEqualTypeOf<HTMLElement>()
+        return { destroy() {} }
+      },
+    }
+    expect(definition.runtimeApiVersion).toBe(3)
+
+    const address = makeAuthoringAddress({
+      projectId: 'proj-runtime',
+      scope: 'scene',
+      surfaceId: 'surface-slide',
+      sceneId: 'scene-one',
+      carrier: 'runtime',
+      layerItemId: 'runtime-item',
+      field: 'runtime/content/values/title',
+    })
+    expect(address).toContain('courseware://authoring/')
+    expect(address).toContain('/runtime/')
+    expect(address).toContain('field=runtime%2Fcontent%2Fvalues%2Ftitle')
+    expect(address).not.toMatch(/hitId/i)
   })
 })

@@ -1,7 +1,14 @@
 import { strToU8, zip, zipSync } from 'fflate'
+import type { ComponentPackageData } from '../../../shared/componentTypes'
+import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
+import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
+import type { AssetMeta } from '../../../shared/projectTypes'
+import { compareStableStrings } from '../../../shared/stableOrder'
 import {
   buildPublishedCourseV2Payload,
+  collectPublishedCourseAssetIds,
+  collectPublishedCourseComponentKeys,
   type CoursePublishSources,
 } from './buildPublishedCourse'
 
@@ -11,13 +18,54 @@ export interface PublishedCoursePackageOptions {
   lang?: string
 }
 
-const COURSE_PLAYER_CSS = `
+export type CoursePackageDelivery = 'standalone-html' | 'web-package'
+
+export interface CoursePackageExportResources {
+  assetFiles: Readonly<Record<string, Uint8Array>>
+  components: Readonly<Record<string, ComponentPackageData>>
+}
+
+export interface CoursePackagePreflightItem {
+  severity: 'error' | 'warning' | 'info'
+  code:
+    | 'asset-bytes-missing'
+    | 'component-bytes-missing'
+    | 'component-hash-mismatch'
+    | 'player-bundle-empty'
+  message: string
+  path?: ReadonlyArray<string | number>
+}
+
+export interface CoursePackagePreflightReport {
+  reportVersion: 1
+  projectId: string
+  schemaVersion: number
+  delivery: CoursePackageDelivery
+  generatedAt: string
+  items: CoursePackagePreflightItem[]
+  summary: {
+    error: number
+    warning: number
+    info: number
+    total: number
+    canExport: boolean
+  }
+}
+
+export interface BuildCoursePackagesResult {
+  /** Relative archive paths only; no absolute machine paths. */
+  manifest: string[]
+  files: Record<string, Uint8Array>
+  payload: PublishedCourseV2Payload
+}
+
+export const COURSE_PLAYER_CSS = `
 :root{color-scheme:light;font-family:Inter,"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;background:#f8fafc;color:#172033}
 *{box-sizing:border-box}
 html,body,#course-root{width:100%;height:100%;margin:0}
 body{overflow:hidden;background:#f8fafc}
-.course-shell{display:grid;width:100%;height:100%;grid-template-rows:minmax(0,1fr) auto}
-.course-stage{position:relative;min-width:0;min-height:0;overflow:auto}
+.course-shell{width:100%;height:100%}
+.course-stage{position:relative;width:100%;height:100%;min-width:0;min-height:0;overflow:auto}
 .course-surface-host{position:relative;width:100%;min-height:100%}
 .flow-surface-stack{position:relative;min-height:100%;isolation:isolate}
 .flow-surface{box-sizing:border-box;max-width:var(--flow-reading-width,760px);margin:0 auto;padding:48px 32px;line-height:1.75}
@@ -35,7 +83,6 @@ body{overflow:hidden;background:#f8fafc}
 .spatial-controls button:focus-visible{outline:3px solid #60a5fa;outline-offset:1px}
 .spatial-minimap{position:absolute;z-index:2;right:12px;bottom:12px;border:1px solid #94a3b8;border-radius:8px;background:rgba(255,255,255,.92);box-shadow:0 4px 14px rgba(15,23,42,.14)}
 .slide-surface{position:relative;margin:auto;overflow:hidden;transform-origin:top left;background:#fff}
-.course-nav{display:flex;gap:8px;align-items:center;justify-content:center;padding:8px;background:#fff;border-top:1px solid #e2e8f0}
 .course-player-error{display:grid;width:100%;height:100%;place-items:center;padding:32px;color:#991b1b;background:#fef2f2;text-align:center}
 `.trim()
 
@@ -46,6 +93,120 @@ const EXTENSIONS: Readonly<Record<string, string>> = {
   'font/woff2': 'woff2', 'font/ttf': 'ttf', 'font/otf': 'otf',
   'application/json': 'json', 'model/gltf-binary': 'glb', 'model/gltf+json': 'gltf',
   'text/plain': 'txt',
+}
+
+function componentKey(packageId: string, version: string): string {
+  return `${packageId}@${version}`
+}
+
+function findAssetEntry(
+  project: CourseProjectDocument,
+  assetId: string,
+): readonly [string, AssetMeta] | undefined {
+  const direct = project.assets[assetId]
+  if (direct) return [assetId, direct]
+  return Object.entries(project.assets).find(([, metadata]) => metadata.id === assetId)
+}
+
+function findComponentSource(
+  components: Readonly<Record<string, ComponentPackageData>>,
+  packageId: string,
+  version: string,
+): ComponentPackageData | undefined {
+  return components[componentKey(packageId, version)]
+    ?? components[packageId]
+    ?? Object.values(components).find(({ manifest }) => (
+      manifest.id === packageId && manifest.version === version
+    ))
+}
+
+function summarize(items: readonly CoursePackagePreflightItem[]): CoursePackagePreflightReport['summary'] {
+  const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: true }
+  items.forEach(({ severity }) => { summary[severity] += 1 })
+  summary.canExport = summary.error === 0
+  return summary
+}
+
+export function collectCoursePackageExportPreflight(
+  project: CourseProjectDocument,
+  delivery: CoursePackageDelivery,
+  resources: CoursePackageExportResources,
+  playerBundle = '',
+  now = new Date(),
+): CoursePackagePreflightReport {
+  const items: CoursePackagePreflightItem[] = []
+  if (!playerBundle.trim()) {
+    items.push({
+      severity: 'error',
+      code: 'player-bundle-empty',
+      message: 'Player Runtime 为空，无法生成课程导出物。',
+    })
+  }
+
+  for (const assetId of [...collectPublishedCourseAssetIds({ project, components: resources.components })].sort()) {
+    const entry = findAssetEntry(project, assetId)
+    if (!entry) continue
+    const [recordKey, meta] = entry
+    const bytes = resources.assetFiles[meta.id]
+      ?? resources.assetFiles[recordKey]
+    if (!bytes) {
+      items.push({
+        severity: 'error',
+        code: 'asset-bytes-missing',
+        message: `素材“${meta.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
+        path: ['assets', recordKey],
+      })
+    }
+  }
+
+  for (const key of [...collectPublishedCourseComponentKeys(project)].sort()) {
+    const separator = key.lastIndexOf('@')
+    const packageId = key.slice(0, separator)
+    const version = key.slice(separator + 1)
+    const metadataEntry = Object.entries(project.componentPackages).find(([, metadata]) => (
+      metadata.packageId === packageId && metadata.version === version
+    ))
+    const recordKey = metadataEntry?.[0] ?? key
+    const embedded = metadataEntry?.[1]
+    const component = findComponentSource(resources.components, packageId, version)
+    if (!component) {
+      items.push({
+        severity: 'error',
+        code: 'component-bytes-missing',
+        message: `组件包“${key}”没有可嵌入导出物的执行内容。`,
+        path: ['componentPackages', recordKey],
+      })
+      continue
+    }
+    if (embedded) {
+      const actualHash = component.contentSha256 ?? componentContentSha256(component.files)
+      if (embedded.contentSha256 !== actualHash) {
+        items.push({
+          severity: 'error',
+          code: 'component-hash-mismatch',
+          message: `组件包“${key}”的工程锁定内容哈希与当前执行内容不一致。`,
+          path: ['componentPackages', recordKey, 'contentSha256'],
+        })
+      }
+    }
+  }
+
+  const sorted = [...items].sort((left, right) => {
+    const severityOrder = { error: 0, warning: 1, info: 2 }
+    return severityOrder[left.severity] - severityOrder[right.severity] ||
+      compareStableStrings(left.code, right.code) ||
+      compareStableStrings(left.message, right.message)
+  })
+
+  return {
+    reportVersion: 1,
+    projectId: project.id,
+    schemaVersion: project.schemaVersion,
+    delivery,
+    generatedAt: now.toISOString(),
+    items: sorted,
+    summary: summarize(sorted),
+  }
 }
 
 function escapeHtml(value: string): string {
@@ -69,7 +230,7 @@ function options(input: string | PublishedCoursePackageOptions): Required<Publis
   const normalized = typeof input === 'string'
     ? { playerBundle: input, lang: 'zh-CN' }
     : { playerBundle: input.playerBundle, lang: input.lang ?? 'zh-CN' }
-  if (!normalized.playerBundle.trim()) throw new Error('Course Player bundle is empty')
+  if (!normalized.playerBundle.trim()) throw new Error('Player Runtime 为空，无法生成课程导出物')
   return normalized
 }
 
@@ -93,14 +254,16 @@ function addFile(
     !path || path.startsWith('/') || path.includes('\\') || path.includes('\0') ||
     /^[A-Za-z]:/.test(path) || parts.some((part) => !part || part === '.' || part === '..')
   ) {
-    throw new Error(`Unsafe course package path: ${path}`)
+    throw new Error(`网页包包含不安全路径：${path}`)
   }
-  if (Object.hasOwn(files, path)) throw new Error(`Duplicate course package path: ${path}`)
+  if (Object.hasOwn(files, path)) throw new Error(`网页包文件路径重复：${path}`)
   files[path] = bytes
 }
 
 function serializedAssignment(payload: PublishedCourseV2Payload): string {
-  const serialized = JSON.stringify(payload).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  const serialized = JSON.stringify(payload)
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
   return `window.__H5_COURSE_PAYLOAD__=${serialized};`
 }
 
@@ -147,26 +310,21 @@ export function buildPublishedCourseStandaloneHtml(
 `
 }
 
-/** Builds a file://-compatible package without a Base64 round-trip for binary assets. */
-export function buildPublishedCourseWebPackageFiles(
+function buildPublishedCourseWebPackageBundle(
   sources: CoursePublishSources,
-  playerBundleOrOptions: string | PublishedCoursePackageOptions,
-): Record<string, Uint8Array> {
-  const normalized = options(playerBundleOrOptions)
+  normalized: Required<PublishedCoursePackageOptions>,
+): { files: Record<string, Uint8Array>; payload: PublishedCourseV2Payload } {
   const files = Object.create(null) as Record<string, Uint8Array>
-  const projectAssetPaths = new Map<string, string>()
-  const componentAssetPaths = new Map<string, string>()
   const payload = buildPublishedCourseV2Payload(sources, {
     projectAssetUrl(assetId, meta, bytes) {
-      const path = `assets/${String(projectAssetPaths.size).padStart(3, '0')}-${safeSegment(assetId)}.${extension(meta.mimeType)}`
-      projectAssetPaths.set(assetId, path)
+      const path = `assets/${String(Object.keys(files).filter((key) => key.startsWith('assets/')).length).padStart(3, '0')}-${safeSegment(assetId)}.${extension(meta.mimeType)}`
       addFile(files, path, bytes)
       return `./${path}`
     },
     componentAssetUrl(componentKey, assetKey, mimeType, bytes) {
-      const identity = `${componentKey}\0${assetKey}`
-      const path = `component-assets/${safeSegment(componentKey)}/${String(componentAssetPaths.size).padStart(3, '0')}-${safeSegment(assetKey)}.${extension(mimeType)}`
-      componentAssetPaths.set(identity, path)
+      const directory = `component-assets/${safeSegment(componentKey)}`
+      const prefix = `${directory}/`
+      const path = `${prefix}${String(Object.keys(files).filter((key) => key.startsWith(prefix)).length).padStart(3, '0')}-${safeSegment(assetKey)}.${extension(mimeType)}`
       addFile(files, path, bytes)
       return `./${path}`
     },
@@ -175,7 +333,16 @@ export function buildPublishedCourseWebPackageFiles(
   addFile(files, 'player/player.iife.js', strToU8(normalized.playerBundle))
   addFile(files, 'player/player.css', strToU8(COURSE_PLAYER_CSS))
   addFile(files, 'index.html', strToU8(packageIndex(payload, normalized.lang)))
-  return files
+  return { files, payload }
+}
+
+/** Builds a file://-compatible package without a Base64 round-trip for binary assets. */
+export function buildPublishedCourseWebPackageFiles(
+  sources: CoursePublishSources,
+  playerBundleOrOptions: string | PublishedCoursePackageOptions,
+): Record<string, Uint8Array> {
+  const normalized = options(playerBundleOrOptions)
+  return buildPublishedCourseWebPackageBundle(sources, normalized).files
 }
 
 export function buildPublishedCourseWebPackage(
@@ -199,4 +366,33 @@ export function buildPublishedCourseWebPackageAsync(
       else resolve(bytes)
     })
   })
+}
+
+function manifestFromFiles(files: Record<string, Uint8Array>): string[] {
+  return Object.keys(files).sort(compareStableStrings)
+}
+
+/** Unified V2 export entry returning a relative-path file manifest. */
+export function buildCoursePackages(
+  sources: CoursePublishSources,
+  delivery: CoursePackageDelivery,
+  playerBundleOrOptions: string | PublishedCoursePackageOptions,
+): BuildCoursePackagesResult {
+  const normalized = options(playerBundleOrOptions)
+  if (delivery === 'standalone-html') {
+    const payload = buildPublishedCourseV2Payload(sources)
+    const html = buildPublishedCourseStandaloneHtml(sources, normalized)
+    const files = { 'index.html': strToU8(html) }
+    return {
+      manifest: ['index.html'],
+      files,
+      payload,
+    }
+  }
+  const bundle = buildPublishedCourseWebPackageBundle(sources, normalized)
+  return {
+    manifest: manifestFromFiles(bundle.files),
+    files: bundle.files,
+    payload: bundle.payload,
+  }
 }

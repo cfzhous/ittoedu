@@ -179,8 +179,6 @@ export function renderVideoNode(
 ): RenderedNodeHandle {
   let node = initialNode
   let destroyed = false
-  let inspectionSuspended = false
-  let resumeAfterInspection = false
   let sourceAvailable = false
   let hasStarted = false
   let reportedPlaying = false
@@ -747,19 +745,6 @@ export function renderVideoNode(
       syncInput()
       redrawControls()
       applyNodeFrame(scene, node, root, transition)
-    },
-    suspend(): void {
-      if (destroyed || inspectionSuspended) return
-      inspectionSuspended = true
-      resumeAfterInspection = video.isPlaying()
-      if (resumeAfterInspection) pause()
-    },
-    resume(): void {
-      if (destroyed || !inspectionSuspended) return
-      inspectionSuspended = false
-      const shouldResume = resumeAfterInspection
-      resumeAfterInspection = false
-      if (shouldResume && effectiveVisible() && !captureMode) commands.play()
     },
     destroy(): void {
       if (destroyed) return

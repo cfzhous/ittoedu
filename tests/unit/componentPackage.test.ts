@@ -1,10 +1,16 @@
 import { strToU8, zipSync } from 'fflate'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ComponentManifest } from '@/shared/componentTypes'
+import { UserFacingError } from '@/shared/errors'
 import {
   importComponentPackage,
   parseComponentPackageFiles,
 } from '@/renderer/components/importComponentPackage'
+import {
+  ComponentRegistry,
+  executeComponentRuntime,
+  tryExecuteComponentRuntime,
+} from '@/renderer/components/executeComponentRuntime'
 import {
   ComponentPackageStore,
   componentPackagesFromArchive,
@@ -202,6 +208,81 @@ describe('component package import', () => {
     expect(() => importComponentPackage(zipSync(packageFiles))).toThrowError(
       expect.objectContaining({ message: expect.stringContaining('import') }),
     )
+  })
+})
+
+describe('component runtime registry', () => {
+  const validRuntime = `
+    window.CoursewareComponent.define({
+      id: 'com.example.counter',
+      runtimeApiVersion: 4,
+      create: function () {
+        return { destroy: function () {} }
+      }
+    })
+  `
+
+  it('registers a matching runtime definition in a pure registry', () => {
+    const registry = new ComponentRegistry()
+    const definition = executeComponentRuntime(validRuntime, 'com.example.counter', {
+      registry,
+    })
+
+    expect(definition.id).toBe('com.example.counter')
+    expect(registry.get('com.example.counter')).toBe(definition)
+    expect(registry.size).toBe(1)
+  })
+
+  it('rejects a runtime definition whose ID does not match the package', () => {
+    const source = validRuntime.replace('com.example.counter', 'com.example.other')
+    expect(() => executeComponentRuntime(source, 'com.example.counter')).toThrowError(
+      expect.objectContaining({
+        title: '组件注册失败',
+        message: expect.stringContaining('ID 不匹配'),
+      }),
+    )
+  })
+
+  it('returns an error result instead of crashing when runtime evaluation throws', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = tryExecuteComponentRuntime(
+      "throw new Error('boom')",
+      'com.example.counter',
+    )
+    consoleSpy.mockRestore()
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(UserFacingError)
+      expect(result.error.title).toBe('组件加载失败')
+      expect(result.error.message).not.toContain('boom')
+    }
+  })
+
+  it('does not leave a partial registry entry when code throws after define()', () => {
+    const registry = new ComponentRegistry()
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = tryExecuteComponentRuntime(
+      `${validRuntime}\nthrow new Error('after registration')`,
+      'com.example.counter',
+      { registry },
+    )
+    consoleSpy.mockRestore()
+
+    expect(result.ok).toBe(false)
+    expect(registry.size).toBe(0)
+  })
+
+  it('rejects missing registration and duplicate registry definitions', () => {
+    expect(() =>
+      executeComponentRuntime('void 0', 'com.example.counter'),
+    ).toThrowError(expect.objectContaining({ message: expect.stringContaining('没有注册') }))
+
+    const registry = new ComponentRegistry()
+    executeComponentRuntime(validRuntime, 'com.example.counter', { registry })
+    expect(() =>
+      executeComponentRuntime(validRuntime, 'com.example.counter', { registry }),
+    ).toThrowError(expect.objectContaining({ message: expect.stringContaining('重复注册') }))
   })
 })
 

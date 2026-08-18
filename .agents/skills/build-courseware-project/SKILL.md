@@ -1,6 +1,6 @@
 ---
 name: build-courseware-project
-description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md 构建、增量修复和验证当前编辑器支持的可编辑互动课件。Use when Codex should act as a clean Build Coordinator, discover current capabilities, select Native/Runtime/Component ownership, build a high-risk vertical slice before the whole lesson, coordinate bounded workers, assemble through Courseware Agent Kit, export deliverables, or apply a revision-protected patch to a stable authoringAddress。
+description: 从已确认的 01-teaching-plan.md 与 02-presentation-script.md 构建、增量修复和验证当前编辑器支持的可编辑互动课件。Use when Codex should act as a clean Build Coordinator, discover current capabilities, select Native/Runtime/Component ownership, build a high-risk vertical slice before the whole lesson, coordinate bounded workers, assemble through Courseware Agent Kit, export deliverables, or make a revision-protected edit at a stable authoringAddress using the same V9 commands a teacher would use。
 ---
 
 # 构建互动课件工程
@@ -62,9 +62,11 @@ Coordinator 是唯一能写权威 Project、构建图和共享接口的人。小
 
 所有画布项、控制器、Runtime 和 Component 都作为显式图层项参与同一层级关系。稳定内容尽可能是 Native；动态载体公开可编辑内容、素材、关键参数和可选择区域。
 
-首次构建后保留稳定 project/surface/scene/layerItem/binding ID。教师手工编辑后不得全量重建覆盖。对“修改当前选中项”先运行 `npm run current:course-selection` 读取编辑器发布的 `projectPath + dirty + projectRevision + authoringAddress`，不要用会话 `hitId` 定位。
+首次构建后保留稳定 project/surface/scene/layerItem/binding ID。教师手工编辑后不得全量重建覆盖。定位目标只用跨保存稳定的 `authoringAddress`，不要用会话 `hitId`。正式编辑器（`ProductApp` → `App`）没有「复制 AI 稳定引用」或「应用 AI Patch」；`courseAiHandoff` / `courseAiPatch` 是 internal/reserved、未挂载。不要要求教师使用可见 AI，也不要把 `npm run current:course-selection` / `npm run patch:course-project` 写成已验收工作流。
 
-输出单个 `op=replace` 的 JSON Patch。工程正在编辑器中打开时，让教师用“应用 AI Patch”导入，使修改进入同一 Undo/Redo 事务；工程关闭时才运行 `npm run patch:course-project -- --project <project.h5lesson> --patch <patch.json>`，它会验证临时副本并原子更新 Project 与 `course.html`。revision 冲突或选择失效时重新读取，不猜测合并。Agent Kit `patch` 只用于尚未编译的语义构建状态，不替代产品工程 Patch。
+增量修改走与教师相同的 V9 命令和一次 history：打开工程、改稳定地址上的字段、保存。Agent Kit `patch` 只用于尚未编译的语义构建状态，不替代产品工程写入，也不等于编辑器内 AI。revision 冲突或地址失效时重新读取工程，不猜测合并。
+
+当前不要依赖尚未接线的能力：V9 会话没有 `replaceCourseComponentPackage`；开发工作台没有 `addCourseRuntimeLayer`；Flow 的 cut/paste 命令未实现。缺能力就停并报告产品缺口，不造假入口。
 
 交互后返回编辑的当前画面是会话检查点，不自动写成默认答案；只有教师显式保存为命名状态时才持久化。
 

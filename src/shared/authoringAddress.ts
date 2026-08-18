@@ -59,8 +59,8 @@ export interface AiSelectionReference {
 }
 
 /**
- * Ephemeral, read-only handoff published by the running editor for local AI
- * tooling. It is deliberately separate from the persisted Course Project.
+ * Internal/reserved selection snapshot. It is not a persisted Course Project
+ * field and must not be wired into the product App as a visible AI workflow.
  */
 export interface CurrentCourseSelectionUpdate {
   projectPath: string | null

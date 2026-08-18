@@ -12,6 +12,7 @@ import type {
   ShapeNode,
   TeacherControllerNode,
   TextNode,
+  TextRun,
   VideoNode,
   AssetMeta,
 } from './projectTypes'
@@ -191,26 +192,38 @@ export interface FlowBlockBase {
   id: string
 }
 
-export interface FlowHeadingBlock extends FlowBlockBase {
-  type: 'heading'
-  level: 1 | 2 | 3 | 4 | 5 | 6
+/**
+ * Plain-text plus optional V8 `TextRun[]` selection styles.
+ * `text` remains the glyph source; `runs` are range styles over that string.
+ */
+export interface FlowRichText {
   text: string
+  runs?: TextRun[]
 }
 
-export interface FlowParagraphBlock extends FlowBlockBase {
+export type FlowTableCell = string | FlowRichText
+
+export interface FlowListItem extends FlowRichText {
+  id: string
+}
+
+export interface FlowHeadingBlock extends FlowBlockBase, FlowRichText {
+  type: 'heading'
+  level: 1 | 2 | 3 | 4 | 5 | 6
+}
+
+export interface FlowParagraphBlock extends FlowBlockBase, FlowRichText {
   type: 'paragraph'
-  text: string
 }
 
 export interface FlowListBlock extends FlowBlockBase {
   type: 'list'
   ordered: boolean
-  items: Array<{ id: string; text: string }>
+  items: FlowListItem[]
 }
 
-export interface FlowQuoteBlock extends FlowBlockBase {
+export interface FlowQuoteBlock extends FlowBlockBase, FlowRichText {
   type: 'quote'
-  text: string
   citation?: string
 }
 
@@ -231,7 +244,7 @@ export interface FlowTableBlock extends FlowBlockBase {
   type: 'table'
   caption?: string
   columns: Array<{ id: string; header: string }>
-  rows: Array<{ id: string; cells: Record<string, string> }>
+  rows: Array<{ id: string; cells: Record<string, FlowTableCell> }>
 }
 
 export interface FlowFormulaBlock extends FlowBlockBase {
@@ -313,6 +326,31 @@ export interface SpatialSemanticZoomRule {
   visible: boolean
 }
 
+export type SpatialPathDash = 'solid' | 'dashed' | 'dotted'
+
+export interface SpatialPathStyle {
+  color?: string
+  width?: number
+  dash?: SpatialPathDash
+}
+
+export interface SpatialPathDocument {
+  id: string
+  name: string
+  layerItemIds: string[]
+  style?: SpatialPathStyle
+}
+
+export type SpatialRelationKind = 'line' | 'arrow' | 'bidirectional'
+
+export interface SpatialRelationDocument {
+  id: string
+  sourceLayerItemId: string
+  targetLayerItemId: string
+  label?: string
+  kind: SpatialRelationKind
+}
+
 export interface SpatialSurfaceDocument extends SurfaceBase {
   type: 'spatial-2d'
   world: {
@@ -326,6 +364,8 @@ export interface SpatialSurfaceDocument extends SurfaceBase {
           height: number
         }
     layerItems: LayerItem[]
+    paths?: SpatialPathDocument[]
+    relations?: SpatialRelationDocument[]
   }
   camera: {
     home: SpatialCameraPose

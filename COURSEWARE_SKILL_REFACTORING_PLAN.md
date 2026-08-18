@@ -1,576 +1,513 @@
-# 互动课件产品与 AI 创作唯一开发计划
+# 互动课件两套 Skill 重构统一方案
 
-> 日期：2026-08-14
-> 状态：工程实现已落地；仓库整体为 `engineering candidate`，尚未取得教师 `accepted`
-> 范围：编辑器产品基建、AI 构建底座、通用 Skill 重写、多表面路线与验收
-> 当前事实：Course Project V9 / Published Course V2 已成为默认主线；Runtime API 3 是 V9 surface 协议，Runtime API 2 与 Component API 4 保留必要兼容
+- 日期：2026-08-13
+- 状态：重构完成；已发布能力闭集的真实 Authoring/Behavior/Evidence 正链与仓库回归通过。W2 原件已稳定转红，绿化必须重新取得人类批准
+- 目标：重构 `orchestrate-courseware` 与 `build-project-v8-courseware`，让 `implementation-ready` 真正冻结可实现的教学体验，让 `engineering candidate` 至少代表教师可操作、互动真实、可恢复且可编辑的 HTML 工程候选
+- 主产品：固定 1280×720、Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4
 
-本计划吸收并取代根目录旧的多表面路线与上一版 Skill 重构计划，也是长期方向的唯一计划。源码、Schema、测试与当前 Capability Index 是“已经实现什么”的机器真相；本文同时记录已经落地的裁决、不得回归的合同和仍需真人验证的结果门禁，不把自动化绿色写成人类验收。
+## 1. 最终裁决
 
----
+### 1.1 2026-08-13 实施结果
 
-## 1. 目标与总裁决
+本方案的产品 P0、两套 Skill 协议、统一 Playwright behavior/authoring runner、Inventory/Evidence v2 和关键正负回归已经落地。自动化结果严格停留在工程验证层，不把协议绿色写成课件产品 `art candidate | accepted`。
 
-目标不是让 AI 一次生成无需修改的终稿，而是更快得到一个教学、视觉和互动质量足够高，且教师能继续可视化编辑、AI 能精确局部修改的真实工程。
+- 产品：Project Schema/Health/Editor 建立 `playback.controls` 与交付可见控制器的双向不变量；Player 增加不拥有课程状态的顶层教师逃生控制面。
+- 编排：模板、reference、parser、validator 和 rubric 已覆盖产品能力、`RESP/TOL/AUTH/ACT/ESC`、三档判定与容量。
+- 构建：Development Plan、Implementation State、Inventory v2、Behavior Spec v2、Evidence v2 与 Project/Capability/脚本/计划哈希闭合；候选由总入口现场重建 Editor、重放编辑/四格式导出/行为并重算六门，不信 manifest 自填命令或状态。初次交付物仍按原始字节哈希精确绑定；跨运行重放对 HTML 使用 raw SHA-256，对 Web ZIP、PDF、PPTX 使用格式限定的 canonical fingerprint，消除时间元数据漂移但不忽略语义差异。
+- 行为：`npm run run-courseware-behavior` 只经公开 DOM 输入；自动评估、required ACT、教师控制/逃生还必须分别留下 RuntimeHost/PlayerHost 的 `assessment-evaluated`、`action-recorded`、`teacher-escape-recorded` 宿主回执，并按同一 session、连续 sequence、声明顺序、源 scene/state 和 action step 精确匹配。公开 `CustomEvent` 只作可观察反馈，状态注入不满足行为门。
+- 作者与导出：`npm run run-courseware-authoring` 已打通精确 binding `native:scene:<scene>:<node>:text` 的真实选中→改→存→关→重开→Player→Editor UI 四格式导出纵切；除该 binding 外的所有 authoring carrier/field 当前均明确 fail-closed。
+- 回归：本轮末次全仓 Vitest 为 136 files / 855 tests 全绿；另有 Orchestrate Python 30/30、两套 Skill quick validation、TypeScript typecheck、Capability 一致性、桌面构建、W3 可移植性 7/7、Presenter 离线 Playwright 1/1，以及真实 Authoring generate→verify 和总入口 Evidence 正链各 1/1。测试增长后的数字应以命令输出为准，不沿用旧评估稿计数。
+- W2：数学/语文原件在新上游分别稳定返回 47/38 个精确错误；旧 Inventory/Evidence v1 不再能维持 candidate。修改合同与脚本会使当前人类批准 scope 失效，因此未在本轮伪造新批准或覆盖原件。
 
-上一版产物失败不能主要归咎于单一模型。模型能力会影响上限，但质量大幅下滑更直接来自四个系统性问题：
+计划中“先红后绿”的红阶段已完成；绿阶段属于新的课例审批与重建工作，合法前置是用户重新审阅并批准新增合同。Phase 5 已补齐四类新鲜合同的正反向闭包测试，但四类完整 Builder 产物仍应在批量生成前分别做真实前向验收，不能把合同 fixture 写成成品课例。
 
-1. 通用 Skill 与制品过厚，占用了本应留给教学内容和视觉判断的上下文；
-2. Builder 直接面对大而底层的 Project/Runtime/Component API，并大量手写 TypeScript、内联 Runtime 源码和重复机制；
-3. 一次性构建范围过大，缺少先纵切、再复用、再集成的反馈回路；
-4. 编辑器只对初始作者态提供较完整的可视化入口，运行后的动态画面、稳定点选和 AI 修改链路没有闭合。
+仍有一个产品外信任边界：当前本地 `approve --approved-by` 只能靠流程约束，不能证明操作者确为人类。生产级审批需要 workspace 外 host 签发并验签的 `trusted-human-approval-receipt-v1`；在宿主提供 signer/trust root 前，不把本地字段表述为不可伪造的人类身份凭据。
 
-因此采用以下路线：
+当前两套 Skill 的主流程不需要推倒重来。本轮已补上四类可执行合同、产品级教师控制不变量，以及从“文件真实”跨到“行为真实”的可信执行门；未发布载体和外部信任能力继续明确失败关闭。
 
-- **产品协议先行。** 先解决真实统一图层、交互态冻结编辑和稳定作者地址，再重写 Builder；Skill 文案不能补偿产品能力缺失。
-- **建设智能体底座。** 让 AI 组合小而稳定的语义 API 和已验证能力块，主要编写课例内容、构图和少量胶水，不再重复手写输入、命中、状态、资源、控制器与导出基础设施。
-- **通用 Skill 保持薄。** 它只管理教师决策、阶段边界、职责、能力发现和质量门禁，不规定教学法、场景模板、页面结构和视觉风格。
-- **编辑与局部修改是一等能力。** “可编辑”不是交付粗糙骨架的借口，但初稿也不需要伪装成最终定稿。
-- **HTML 是主产品。** `.h5lesson` 是作者工程，离线互动 HTML 是默认交付；PDF/PPTX 是按需兼容导出，不反向限制 HTML。
+推荐的最短充分路径是：
 
-### 1.1 当前落地快照
+1. 先完成教师控制一致性与顶层逃生控制面的产品 P0；Skill 无法修复 Player 合成平面和坏工程自愈。
+2. 在现有合同、脚本、开发计划、Inventory 和 evidence manifest 中补齐四类合同，不增加新的默认文档阶段。
+3. 保留现有 outcome 枚举，不新增 `behavior-verified` 状态；改由六个机器可计算的 `behaviorGates` 共同约束 `engineering candidate`。
+4. 把视觉帧与行为路径彻底分离：状态注入可用于确定性视觉取帧，但不能证明学生完成了真实动作。
+5. 用原 W2 数学、语文工程作为负向回归样本，先证明新门禁能稳定拦截，再修复到新基线；最后才做全新冷启动。
 
-- V9 以统一 `surfaces` 判别联合承载 Slide、Flow 与 Spatial 2D，Mixed 通过统一 location、目录、课程状态和导航守卫组织；V8 仅走显式迁移和兼容测试。
-- Published Course V2、统一图层、同实例 playback ↔ inspect、稳定 `authoringAddress`、会话 `hitId`、revision 保护 Patch、有限声明式课程状态与导航守卫已经进入产品代码。
-- Courseware Agent Kit 已提供能力检索、脚手架、构建图、纵切 rig、确定性装配、V9 编译与局部 Patch；三个差异课例覆盖 Slide、Flow、Spatial 与 Mixed 的工程闭环。
-- `orchestrate-courseware` 与 `build-courseware-project` 已重写为两套薄 Skill；教师工作流只长期维护两份自由结构 Markdown、作者工程和默认 HTML，不再维护 Hash、签名、审批状态机、候选等级或 Evidence 清单。
-- 旧 V8 Builder、旧计划/评估、冗余测试与生成缓存已经退出当前入口；当前回归仍保留 V8、PublishedLesson V1、Runtime API 2 与 Component API 4 的必要兼容面。
+这是一项“协议与门禁重构”，不是“给 SKILL.md 再加一批原则”。`SKILL.md` 继续只保留路由、不变量和执行顺序；字段合同进入 references/templates，确定性检查进入 scripts，真实行为进入统一 Playwright harness。
 
-当前状态严格分层：
+## 2. 核查方法与证据权重
 
-| 层级 | 当前结论 | 谁可以给出 |
-|---|---|---|
-| Pipeline | Schema、类型、测试、构建、保存重开、发布、导出与隔离 Windows 门禁可形成工程证据 | 自动化 |
-| Outcome：`engineering candidate` | 当前仓库和样例可以进入真实体验复核 | 自动化 + 工程审阅 |
-| Outcome：`art candidate` | 只能授予经过真实画面、关键交互状态和课堂可读性复核的具体课例，不是仓库全局标签 | 人工视觉/互动复核 |
-| Outcome：`accepted` | 尚未取得；必须由教师实际创建、修改、授课式操作并明确确认 | 教师/用户 |
+本方案核查了根目录 7 份评估稿、两套当前 Skill 的全文与脚本、编辑器/Player 源码，以及相邻 `courseware-cases` 仓库中的两份真实 W2 工程。
 
----
+采用以下证据优先级，而不是按模型投票：
 
-## 2. 当前基线：保留什么，替换什么
+1. 当前源码、解包后的 `.h5lesson`、Builder 源码、Inventory、manifest、测试与截图；
+2. 能给出可复算路径的实测报告；
+3. 源码抽查报告；
+4. 仅依据问题说明给出的方案性建议。
 
-### 2.1 必须保留且不得回归
+因此，Opus 对真实 W2 工程的实测是事实基线；GPTpro 的价值主要是字段结构；GLM、SeedPro、DeepSeek 的价值主要是补充控制器、容量、编辑性与迁移策略。任何报告中的普遍规则仍须经过源码和反例检查。
 
-- 固定 1280×720 幻灯片表面，以及真实保存、关闭、重开、Undo/Redo；
-- 自包含 `.h5lesson`、单 HTML 和网页包，不依赖课例外部运行路径；
-- 语义化公式、素材管理、组件嵌入、缩略图和现有静态导出能力；
-- 默认教师控制器、导航守卫、PageUp/PageDown 演示输入和教师逃生路径；
-- Headless Schema/Project Health/导出预检及真实 Player 验证入口；
-- 编辑器核心、可复用能力库和课例库分离。
+| 评估稿 | 主要采用 | 主要修正/降级 |
+| --- | --- | --- |
+| [`opus_evaluate.md`](opus_evaluate.md) | W2 解包事实、控制器四段故障、capture 预填、视觉/行为分证、薄兜底控制面 | “相同 Runtime hash”“空 nodeOverrides”仅作合同相对信号，不作无条件硬错误 |
+| [`GPTpro_evaluate.md`](GPTpro_evaluate.md) | 四类跨 Skill 合同、Action/Assessment/Authoring Map、六门禁、分阶段回归 | 不新增 `behavior-verified` outcome；七档 authority 收敛为三档 |
+| [`GLM_evaluate.md`](GLM_evaluate.md) | 视觉遮挡与功能阻断双测、编辑性结果合同、控制器自愈与门禁双修 | 不采用仅靠 Phaser depth 解决跨平面问题，也不把全部行为规则留在散文 |
+| [`seedpro_evaluate.md`](seedpro_evaluate.md) | 教师导航权威、真实 UI E2E、容量类型下限、Inventory 几何检查 | 不立即全面 DOM 迁移；70% 重叠率和 1.2/1.5 倍仅作政策信号，不作普遍定理 |
+| [`deepseek_evaluate.md`](deepseek_evaluate.md) | 六类核心问题收敛、能力缺口与 review scope 失效意识 | 数学 T3/CAS 路线由后续实测推翻，当前止步规范化短答案 |
+| [`deepseek_cross_evaluate.md`](deepseek_cross_evaluate.md) | 汇总三方共识、双证控制器、教师逃生与动作真实性组合 | 已被后续 W2 实测修正的部分不作为最终事实 |
+| [`deepseek_evaluate_v2.md`](deepseek_evaluate_v2.md) | 以 Opus 为事实基线、W2 红→绿顺序、开发计划归属问题 | “21 条全部硬门禁”重新归并为六个 outcome gate，并剔除误报率高的静态规则 |
 
-这些能力的实现可以随新协议重构，但用户结果不能丢失。
+## 3. 关键事实核查与修正
 
-### 2.2 已替换；只保留显式兼容
+| 断言 | 核查结论 | 本方案处理 |
+| --- | --- | --- |
+| 数学工程有控制器但 `playback.controls: none`，且 `defaultCollapsed: true` | 属实；解包工程复算确认 | Project Schema、Project Health、Builder 和真实 E2E 四层同时拦截 |
+| 语文工程无控制器且 `playback.controls: none`，但上游要求教师接管 | 属实 | 上游教师控制合同与 Project 实现做交叉校验，不能只看 Project 自洽 |
+| Phaser 控制器位于 canvas `z=2`，scene DOM overlay 位于 `z=3` | 属实 | 采用独立的薄顶层逃生控制面；不把完整 DOM 迁移绑入本轮 |
+| Runtime 容器 `pointer-events: none`，视觉遮挡不一定等于点击阻断 | 属实 | 控制器必须同时做截图/几何检查和 `elementFromPoint`/真实点击检查 |
+| 交互条件没有“答案”概念 | 基本属实；`INTERACTION_CONDITION_TYPES` 只有 `presentation.in`、`scene.in` | 冻结判定权威；自动判定只能使用已登记能力 |
+| 因此全屏 Runtime 是唯一实现方式 | 结论过强 | 当前已有 `runtime.event → presentation.set` 路径；判定可留在 Runtime/Component，稳定内容与状态仍可 Native/Hybrid |
+| 两工程各有 14 个 state 且 `nodeOverrides` 全空 | 属实 | 作为合同相对的退化信号，不作为所有 Runtime 场景的无条件硬错误 |
+| 数学四幕 Runtime source 哈希相同 | 属实 | 仅作为审查信号；通用 Runtime 复用本身可以是好设计，不能“一样即失败” |
+| 语文 capture 在稳定帧预填 `modelAnswer` | 属实 | 视觉帧标记来源；行为证据禁止由 capture 注入，capture 不得制造学习证据 |
+| 语文 86 个实体均为 Runtime，54 个 `visible` 多数共享大区域 bounds | 属实 | Inventory 改为结果级访问档位，并要求真实 Authoring target 几何/选择证据 |
+| `editRoundTrips.binding` 未按 binding grammar fullmatch | 属实 | evidence v2 强制 fullmatch，并按实际载体覆盖合同要求 |
+| artifact kind 可用自定义字符串绕过格式检查 | 属实 | evidence v2 使用闭集 kind，每类有格式/引用检查 |
+| 所有 Python 校验器完全未接线 | 只部分成立 | 重构前 `validate_v8_case.py` 与多项 Vitest 已调用部分校验器，但缺少针对任意课例的完整入口，`validate_formula_markup.py` 当时仍是孤立脚本。本轮已将其接入 implementation/evidence 总入口；永久 fixture 进入 `npm test`，实际交付课例显式运行总校验器，不盲目把带参数脚本塞进全局 `npm verify` |
+| `03-development-plan.md` 完全无人读取 | 不属实 | 当前总校验器检查标题及脚本/Capability 哈希，但 implementation state/evidence 未绑定计划自身哈希 |
 
-- Project V8 的固定 DOM underlay → Phaser Canvas → Component DOM → DOM overlay 合成平面；
-- `scene.runtime/globalRuntime` 单例和作者协议中的 `underlay/overlay` 二选一；
-- 运行与编辑切换时必然重建 Player、丢失 Runtime/Component 内部交互画面的模式；
-- 只在当前挂载有效的 `registered:*`、`dom:*`、`targetId` 被 UI 或 AI 当成对象身份；
-- Component 只登记文字区域、图片等可替换可见内容无法统一点选的限制；
-- Builder 直接手写大段底层 Project 和 Runtime 源码的默认方式；
-- Hash 审批、签名、候选等级、固定合同套件和旧 V8 Builder 工作流。
+复算的 W2 基线：
 
-### 2.3 旧多表面计划的处置
+| 项目 | 数学 | 语文 |
+| --- | ---: | ---: |
+| 场景 / Runtime 场景 | 4 / 4 | 4 / 4 |
+| Project state / 空 `nodeOverrides` | 14 / 14 | 14 / 14 |
+| Inventory 实体 | 15 | 86 |
+| Native / Runtime binding | 4 / 11 | 0 / 86 |
+| `visible` / `property-only` | 8 / 7 | 54 / 32 |
 
-本轮迁移了旧计划中当时尚未开发且仍成立的事项，不把已完成历史重新塞回路线：
-
-- Slide / Flow / Spatial 2D 的选择规则、交付矩阵、共享工程模型和各自独立宿主迁入第 11 节；
-- Flow、Slide + Flow 生产化、混合工程、Spatial 2D 与 3D 复审迁入 Phase 7–10；
-- Component Publish Units 仅保留为第 11.8 节的条件项，真实大组件不能证明收益时不立项；
-- 旧 Unified Authoring Blueprint 提案中仍有效的“只派生索引、不复制内容事实”边界迁入第 5.4 节；
-- 声明式课程状态与导航守卫的有效方向迁入第 7 节。
-
-不迁移的内容包括：已完成的 V8 断代与三仓拆分、旧测试计数、旧 W1/W2/W3 状态、旧 Hash/审批/候选等级流程、历史提交和已被当前产品事实取代的 underlay/overlay 方案。旧文档被删除不表示多表面功能被取消；其有效要求已经进入 V9 与本计划的验收边界。
-
----
-
-## 3. 当前产品合同 A：真实统一图层
-
-### 3.1 作者模型
-
-- 当前场景只有一份有效图层顺序，包含 Native 节点、公式、教师控制器、Component 实例和一个或多个 Runtime surface；全局项带作用域，但参与当前场景的同一顺序。
-- 每个图层项具有稳定 `layerItemId`、作用域、可见范围、位置、尺寸、旋转、透明度、锁定和命中策略。
-- 图层顺序是编辑画布、当前位置试运行、整课 Player、HTML、缩略图、命中测试和静态导出的唯一层级事实。
-- Runtime/Component 是可选择、移动、缩放、旋转和排序的原子 surface。一个 surface 内部共享外部层级；确需夹在其他节点前后的内容应拆成多个 surface 或提升为 Native，不在内部重建另一套全局图层树。
-- 教师控制器是默认创建的全局图层项，初始位于最前。教师可以调整，但每个关键状态仍须通过可见、可点击和未被截获的门禁。
-
-公开作者协议取消固定 `underlay/overlay`。渲染器内部可以使用多个 Canvas/DOM/WebGL surface 或相邻同后端的 renderer band，但实现分组不得改变逐项顺序。
-
-### 3.2 工程要求
-
-- 当前版本边界已经冻结为 Course Project V9 / Published Course V2 / Surface Runtime API 3；V8 / Runtime API 2 与 Component API 4 只按明确兼容边界读取，不静默改变旧版本语义。
-- Runtime 从场景/全局单例变为可重复出现的图层项；Component 与 Native 使用同一几何、排序和选择模型。
-- 在“相邻同后端分带”“每项独立 surface”“统一渲染器”之间做最小性能纵切，以任意交错、文字清晰度、输入、内存和导出结果决定实现，不先按旧代码结构拍板。
-- 状态覆盖、复制、保存重开、Undo/Redo、素材引用、AI Patch 和导出都支持新图层项。
-- 视觉最上层必须也是命中最上层；透明或声明为非交互的区域不能截获下层输入。
-- Flow 的语义块属于文档流，不伪装成自由定位图层；仅 surface/global 视觉项在文档上方组成统一覆盖层，并在该层内按同一 `order` 事实任意交错。语义块与覆盖层之间不宣称逐项交错。
-
-### 3.3 退出条件
-
-用至少 `Native → Runtime → Native → Component → 公式 → 控制器` 的交错夹具证明：图层面板、编辑画布、真实 Player、离线 HTML、命中和静态导出顺序一致。仅更改面板列表、字段名或 CSS z-index 不算完成。
-
----
-
-## 4. 当前产品合同 B：冻结当前交互画面后编辑
-
-### 4.1 对设想的裁决
-
-旧实现曾在 `run` 与 `edit` 间创建不同宿主，Runtime/Component 的临时内部状态随 iframe 重建丢失。V9 编辑器现以同一 Player 实例在 playback 与 inspect/edit 间切换；截图仍只用于证据，不能代替当前实例、作者目标和结构化检查点。
-
-当前合同：
+## 4. 重构后的职责边界
 
 ```text
-当前位置试运行
-→ 教师完成拖动、选择、模拟或反馈
-→ 点击“返回编辑”
-→ 当前 Player 原地暂停，画面不跳回初态
-→ 可直接点选当前可见文字、图片和 surface
-→ 编辑写回稳定 Project 字段
-→ 可从当前检查点继续试运行，或显式重置
+orchestrate-courseware
+  冻结 RESP / Assessment / AUTH / ACT+ESC 以及产品能力前提
+  ↓ 人类明确批准，scope hash 当前有效
+  （当前本地记录可审计但不可验签；生产身份需外部可信 receipt）
+validate_case.py
+  派生 implementation-ready
+  ↓
+build-project-v8-courseware
+  选择 carrier，生成 Plan / Inventory / Behavior Spec / Project
+  ↓
+静态校验 + 真实 Player/Editor 行为 harness + 证据校验
+  ↓ 六个 behaviorGates 全绿
+engineering candidate
+  ↓ 视觉与互动实证
+art candidate
+  ↓ 指定人类对精确 scope 明确验收
+accepted
 ```
 
-### 4.2 两层实现
+边界规则：
 
-1. **同实例冻结是默认路径。** 编辑器宿主在不重建 Player 的情况下把当前会话切到 `inspect/edit`：冻结输入、课程写入、导航、媒体、计时器和动画推进，保持最后一帧，并重新测量作者目标。
-2. **结构化检查点是恢复路径。** 新 Runtime/Component 协议可导出受限、可 structured-clone 的 `authoringCheckpoint`，并在确需重挂载、源级修改或崩溃恢复时恢复。检查点只保存渲染所需的课例状态，不保存 DOM、Canvas 位图、函数、网络对象或任意引擎实例。
+- 编排 Skill 不选择 Native、Runtime、Component，也不臆造当前产品能力。
+- Builder 不改变采集通道、判定权威、教师接管、编辑结果或容量；发现不可实现时返回编排。
+- 产品代码保证教师控制和健康不变量；Skill 不能用第二套影子机制绕过产品缺陷。
+- 仓库自动化最多给出 `engineering candidate`；本地 validator 不签发 `art candidate | accepted`，二者需要仓库外可信审阅系统与精确 scope。
 
-当前协议提供并持续回归以下等价能力：
+## 5. 四类跨 Skill 可执行合同
 
-- 进入/退出作者检查模式；
-- 暂停并恢复运行循环；
-- 导出/恢复可选检查点；
-- 在当前检查点枚举作者目标；
-- 不重挂载地更新 Runtime content/assets/parameters 和 Component props；
-- 在状态变化或布局变化后主动使目标区域失效并重测。
+不新增 Content Spec、Implementation Handoff 或独立合同 JSON。合同记录直接进入现有 Markdown，并由稳定 ID 和固定字段解析；Markdown 全字节已进入现有 review scope hash，因此字段变化会自然使批准失效。
 
-### 4.3 写入语义
+### 5.1 Evidence / Response Contract：`RESP-*`
 
-- 当前交互检查点默认是**会话态观察上下文**，不是 Project 默认状态；返回编辑不能把学生作答、随机结果或已揭示答案自动保存为初始画面。
-- 文字、图片、参数、位置和层级的作者修改正常进入 Project 与 Undo/Redo。
-- 只有教师显式选择“保存为命名状态/复核态”时，才把可表达的检查点转换为 Project 状态；无法结构化表达的内部引擎状态不得伪装成已保存。
-- 旧 Runtime/Component 若不能恢复检查点，仍可在当前实例冻结编辑；一旦修改要求重挂载，应明确提示将回到已保存状态。
+每个需要观察或收集的响应都建立一个记录，不再把每项学习证据默认变成页面输入。
 
-### 4.4 退出条件
+必填字段：
 
-至少用拖拽、连续模拟、随机过程和组件内部状态四类夹具证明：交互后返回编辑画面不跳变；当前可见目标可点选；修改内容后能继续运行；保存重开不会误把学生临时状态写成默认答案。
+| 字段 | 允许值/含义 |
+| --- | --- |
+| `responseId` | `RESP-001` 等稳定 ID |
+| `evidenceRef` | 对应 `EVD-*` |
+| `contentRef` | 对应 `CNT-*` 或精确子项 |
+| `mode` | `digital-required`、`digital-optional`、`oral-check`、`paper-work`、`teacher-observed`、`discussion-only` |
+| `responseType` | `choice`、`normalized-short`、`gesture`、`open-text`、`oral`、`paper` 等闭集 |
+| `requiredForProgress` | `true | false` |
+| `firstAttemptSeconds` | 首答预算 |
+| `retrySeconds` | 一次典型修复预算；不适用写 0 |
+| `teacherDiscussionSeconds` | 教师检查/讨论预算 |
 
----
-
-## 5. 当前产品合同 C：稳定作者地址与 AI 精确修改
-
-### 5.1 不把临时 `targetId` 强行持久化
-
-V9 将统一的一等地址、图片/文字/属性目标、运行后目标与 Editor→AI 桥接入主线。顺序号或 DOM 元素生成的标识只作为当次命中的 `hitId`，不跨挂载保存；可修改对象由稳定 `authoringAddress` 定位。
-
-每次命中必须同时返回：
+容量按全课计算：
 
 ```text
-hitId                 # 当前 session/revision 内验证这次点击
-authoringAddress      # 跨保存重开可解析的数据地址
-projectRevision       # 防止覆盖教师刚完成的其它修改，不是审批 Hash
-visibleBounds         # 当前画面几何，只用于高亮，不作为身份
+阅读/观察 + 场景过渡
++ Σ max(声明首答时间, 类型下限)
++ Σ 重试预留
++ Σ 教师检查/讨论
+≤ 课例总时长
 ```
 
-稳定地址最少包含：
+初始类型下限作为可版本化政策值，不写死在 `SKILL.md`：
 
-| 载体 | `authoringAddress` |
-|---|---|
-| Native | scope + sceneId + layerItemId + field/path |
-| Runtime | scope + sceneId + runtime layerItemId + content/asset/parameter key |
-| Component | scope + sceneId + component layerItemId + prop path |
+| 类型 | 首答 | 一次修复 | 教师检查/讨论 |
+| --- | ---: | ---: | ---: |
+| 有限选择 | 20 秒 | 10 秒 | 15 秒 |
+| 规范化短答案 | 35 秒 | 20 秒 | 20 秒 |
+| 圈画/拖放/参数操作 | 45 秒 | 20 秒 | 30 秒 |
+| 50 字内开放表达 | 90 秒 | 0 秒 | 45 秒 |
 
-同一数据在画面出现多次时，可增加稳定 `regionKey` 区分视图区域；AI 修改仍指向同一数据地址。复制图层项时生成新的 `layerItemId`，旧选择必须明确失效，不能模糊匹配。
+低于下限只能由有证据的 `DEC-*` 覆盖。`N/D > 1.5` 或开放表达超过 3 项只作风险 warning，不作为跨学科硬定理；真正的 blocker 是按字段和下限计算后超过总时长。
 
-### 5.2 画布命中要求
+### 5.2 Assessment Authority Contract
 
-- Runtime/Component 当前可见的全部作者文案必须登记并可在画布命中；状态或布局改变后实时更新区域。
-- 所有由 Project asset 或公开图片 Prop 驱动、教师可能替换的可见图片必须命中。纯程序粒子、纹理细节或不可单独替换的合成像素可只选择 surface，但不能把普通课件图片烘进源码逃避登记。
-- Component Authoring 从“仅文字区域”扩展为至少 `text | asset`，二者都绑定稳定 prop path；Runtime 对应绑定 content/asset key。
-- 颜色、数字、枚举、行为等不适合几何命中的属性继续在属性栏公开；若它们与明确可见区域对应，可以登记通用 property region。
-- 未公开结构化字段的内部图形、布局和行为仍是源码级修改，不得因 surface 可选就宣称精确可编辑。
+判定只使用三档，避免七值枚举和当前不存在的“数学等价能力”被写成事实：
 
-### 5.3 “告诉 AI 修改当前选中项”的闭环
+| authority | 范围 | 可否硬门禁 |
+| --- | --- | --- |
+| `finite-auto` | 有限选项、枚举、确定配对/排序 | 可以，但必须绑定 `ESC-*` 教师接管 |
+| `normalized-auto` | 当前 Capability 明确支持的数字、坐标、短符号等规范化域 | 可以，但必须有 tolerance matrix 与教师接管 |
+| `human` | 开放数学解释、证据引用、概括、论证、写作、语义判断 | 不可以；只能记录、自检、同伴或教师判断 |
 
-第一阶段不需要把聊天 UI 塞进编辑器，但必须提供两条等价入口：
+每个 `RESP-*` 还必须声明：
 
-1. 编辑器的“复制 AI 修改引用”复制工程路径、当前 revision、稳定地址、类型、标签和当前值；教师粘贴到 Codex 后即可提出修改。
-2. 一个只读本地命令读取当前编辑器选择并输出同一 JSON，供 Codex 在用户说“修改当前选中项”时调用。
+- `navigationGate: hard | soft | none`；
+- `teacherOverrideRef: ESC-* | none`；
+- `evaluatorCapabilityRef`：自动档必须指向当前 Capability 或批准的标准组件；
+- `toleranceCaseRefs`：自动档的正反例矩阵。
 
-配套 Patch API 按稳定地址修改 Project：
+硬规则：
 
-- 编辑器正在打开且有未保存修改时，通过编辑器事务应用，进入 Undo/Redo；AI 不直接覆盖磁盘归档。
-- 编辑器未打开时，在临时副本上应用、验证后原子替换，并重新导出 HTML。
-- revision 已变化、地址失效、类型不匹配或目标没有公开字段时明确拒绝，不用文本相似度猜目标。
-- 素材替换须嵌入工程、更新真实引用并保持其它实例不变。
+- `human` 只能是 `soft | none`，不得成为唯一导航条件。
+- 当前不引 CAS，不设置 `symbolic-equivalence` 档。将来若发布真实、可解释且可测试的等价能力，再通过能力与合同版本升级引入。
+- 当前正式调用路径是 `src/shared/assessmentEvaluators.ts` 经 `ctx.assessment.evaluate` 暴露，并由 Capability Index 登记；Builder 不得另写正则或仅靠同名事件冒充 `normalized-auto`。
 
-### 5.4 派生作者索引，不新增影子内容模型
+### 5.3 Authoring Outcome Contract：`AUTH-*`
 
-稳定作者事实分为三层：
+上游只冻结结果，不指定载体：
 
-1. **Project + Authoring Inventory** 保存内容、载体责任、稳定地址和编辑入口；
-2. **Authoring View** 指向当前场景、稳定状态或显式检查点，只描述作者正在复核哪个画面；
-3. **Layout Snapshot** 保存当前 session/revision 下的命中几何和 `hitId`，实例重挂载、状态或 revision 变化后立即失效。
+| 字段 | 允许值/含义 |
+| --- | --- |
+| `authoringId` | `AUTH-001` 等稳定 ID |
+| `contentRef` | `CNT-*` 精确内容或子项 |
+| `access` | `direct-canvas`、`authoring-view`、`structured-property`、`developer-only` |
+| `layoutAdjustment` | `required | optional | none` |
+| `styleAdjustment` | `required | basic | none` |
+| `requiredForAcceptance` | 是否属于候选/验收必达项 |
 
-统一作者索引只能从上述事实重算：不复制正文、Props、Runtime 源码、素材字节或几何矩形，不成为第三份 Project，也不因像素、文本相似或 DOM 顺序自动创造新身份。教师界面优先显示“内容和修改入口”，载体与协议细节只进入高级诊断。
+默认原则：稳定标题、题面、正文、标签、核心反馈、教师提示和公式至少需要结构化入口；经常移动、缩放或重排的内容需要 `direct-canvas | authoring-view`；复杂算法内部和不可配置装饰才可 `developer-only`。
 
-### 5.5 退出条件
+Builder 可以用 Native、Runtime、Hybrid 或 Component 达成同一结果。若实现把获批的 `direct-canvas` 降为 `structured-property`，必须返回编排取得明确取舍，不能只写进 `differences` 后放行。
 
-保存重开、场景/状态切换、Runtime/Component 重挂载后，对同一文字或图片重新点选得到相同稳定地址；把引用交给一个干净 Codex 上下文，可以只修改该目标并保留邻近内容和教师手工编辑。
+### 5.4 Required Action / Teacher Escape Contract：`ACT-*`、`ESC-*`
 
----
+每个脚本要求的真实学生/教师动作建立 `ACT-*`：
 
-## 6. 当前产品合同 D：面向智能体的课件构建底座
+- `actor: student | teacher | system`；
+- `kind: click | select | text-input | formula-input | drag | sort | circle-text | highlight | parameter-change | oral | paper | teacher-command`；
+- `target`；
+- `evidenceProduced: RESP-* | none`；
+- `requiredForCompletion`；
+- 操作前必须可见信息、错误/重试/揭示和稳定结果。
 
-### 6.1 外部路线研究
+每幕至少建立一个 `ESC-*`，覆盖错误、空白和未完成状态：
 
-| 路线 | 值得吸收 | 不直接采用的原因 |
-|---|---|---|
-| [Phaser Game Agent / Phaser AE](https://phaser.io/news/2026/06/how-we-built-the-phaser-game-agent-with-claude-managed-agents-and-superserve) | 面向意图的小 API；复杂机制藏入引擎；按能力检索的已验证叶子模块；预装沙箱；自动测试后人工试玩；把可复用成果回收到库 | [Phaser AE 是闭源且 Game Agent 不生成 Phaser 代码](https://phaser.io/news/2026/07/no-you-didn-t-miss-a-3d-update)，不能成为本地可控课件协议的依赖 |
-| [TapTap Maker 本地开发](https://github.com/taptap/instant-games-open-mcp/blob/main/docs/MAKER.md) | CLI-first 初始化；把引擎文档、示例、模板、库和 Skill 作为 AI dev kit 预装；窄 MCP；素材工具；统一构建与运行日志 | 公开资料主要证明其云端 Maker/Git/构建工作流，运行时面向游戏和平台发布；不满足本编辑器本地作者工程、统一图层和教师编辑要求 |
-| [H5P](https://h5p.org/technical-overview) | 成熟的教育内容类型库、编辑库和可嵌入内容；可作为题型或活动机制来源 | 内容类型天然带较强结构和平台集成假设，全面采用会重新引入模板感；只允许做可选组件适配 |
-| [Rive](https://rive.app/docs/editor/data-binding/overview) | 状态机、暂停保留末帧、View Model 数据绑定和图片属性适合高质量动态组件 | 视觉作者态位于外部工具，内部文字/对象不能自动映射为本编辑器节点；只作为可选动态 surface |
+- 适用 `STATE-*`；
+- `retry | reveal | continue-incomplete | scene-picker | previous | replay` 中至少一项；
+- 是否先提示“未完成仍继续”；
+- 不得依赖学生先答对或 `human` 响应被机器判对。
 
-结论：不更换产品为上述平台，也不继续让 AI 直接裸写当前底层。仓库已建设本地、开放、课件专用的 **Courseware Agent Kit**；其职责保持如下。
+`RESP-*`、`AUTH-*`、`ACT-*`、`ESC-*` 加入稳定 ID 白名单、未知引用检查和 review rubric。不要用“关键词扫描全班/多人/分布”代替能力合同；合同新增显式产品剖面：`single-device`、`teacher-display`、`offline`、`multi-user-aggregation` 等，并要求每个非当前能力有降级或 blocking decision。
 
-### 6.2 底座的最小组成
+## 6. 必须先完成的产品 P0
 
-1. **小型语义 Authoring SDK**
-   面向“放置可编辑内容、绑定状态、连接交互、添加动态能力、登记作者目标”等意图，不暴露渲染器平面、挂载顺序和大段 Schema 细节。API 必须单一惯用法、强类型、短文档，并由编译器生成真实 Project。
+Skill 重构开始前可先写测试与合同，但在以下 P0 通过前，不应签发新的 `engineering candidate`。
 
-2. **能力块库**
-   保存经过真实 Player 验证的低层行为/数据机制，例如约束拖动、坐标映射、状态推进、判定与反馈、标注或连续模拟。能力块按能力命名，不按课型、学科课例或成功案例命名；输入数据和样式可配置，输出稳定事件与作者地址。
+### P0-1 Project 控制一致性
 
-3. **预备好的构建工作区**
-   干净 Builder 启动时已经拥有项目脚手架、SDK、选中的能力块、素材入口、类型检查、Player 和测试工具。它不重复安装环境，不读取整个编辑器源码，也不把全部能力库塞入上下文。
+修改位置：
 
-4. **确定性装配器**
-   把 SDK 调用、能力块和少量自定义模块装配为新 Project 协议，自动创建教师控制器、稳定 ID、统一图层、作者地址和离线资源。Runtime/Component 源码来自普通模块构建，不再把巨型 JavaScript 字符串手写进 `build.ts`。
+- `src/shared/projectSchema.ts`
+- `src/shared/projectHealth.ts`
+- `src/renderer/project/createProject.ts`
+- `src/renderer/store/editorStore.ts`
+- `src/renderer/ui/PropertiesTab.tsx`
 
-5. **能力发现与取用**
-   Capability Index 只向 Builder返回当前课例相关的短能力卡：用途、输入/输出、编辑边界、限制、示例入口和验证状态。Builder 先检索复用，再决定是否写自定义代码。
+不变量：
 
-6. **纵切、测试与回收循环**
-   缺失能力先在独立微型 test rig 中实现并做行为、视觉、命中、保存和导出验证，再用于整课。只有机制跨课例成立、去除课例文案/视觉身份并经人工复核后，才回收到能力库。
+1. `playback.controls === "canvas"` 必须存在至少一个交付态可用的 `teacher-controller`。
+2. 存在交付态可见的 `teacher-controller` 时，`playback.controls` 不得为 `none`。
+3. `ensureTeacherController()` 命中已有节点时也修复 controls，而不是只定位。
+4. Builder 默认走 `createProject()` 的完整控制器路径；确需自定义时必须显式设置 controls，不依赖 `includeDefaultController` 的隐式副作用。
+5. Schema 负责阻断，Project Health 提供可定位错误码和修复建议，Properties UI 在制造冲突前明确警示。
 
-### 6.3 防止底座重新变成模板
+### P0-2 薄顶层教师逃生控制面
 
-- 能力块是行为叶子和结构化数据机制，不是整页布局、教学流程或场景模板；
-- SDK 不包含“探究课”“讲练课”“二次函数页”之类入口；
-- 默认不生成卡片、双栏、固定场景数、固定颜色或统一互动节奏；
-- 能力块继承课件主题和外部几何，允许 Native 内容自由构图；
-- 没有合适能力块时允许小型自定义模块，但重复基础机制必须回到底座修复；
-- Build-time block 不是新的作者载体类型，它最终编译为 Native、Runtime 或 Component，避免再造第四套运行模型。
+采用 Opus/GPTpro 的第三条路：保留 Project 中的 `TeacherControllerNode` 和现有 Phaser 作者真相，本轮只增加一个独立于 scene DOM overlay 的最小 DOM 逃生条，不重写完整 `renderTeacherController.ts`。
 
-### 6.4 退出条件
+要求：
 
-选择至少三种差异明显的课例，对比“直接底层手写”和“Agent Kit 组合”两条路径。新路径必须同时降低首次可评审耗时、模型生成代码量、底层 API 错误和修复轮次，并保持视觉/教学差异；只减少 Token 但结果更模板化不算成功。
+- 使用现有 `playback.presenter.enabled` 激活交付态教师逃生能力，不新增伪造 Project 字段；
+- 位于内容层之上，`pointer-events: auto`，至少提供上一幕、下一幕/带未完成继续、场景目录、重播；
+- 上一幕、重播、目录不受 scene navigation guard 阻断；下一幕被 guard 拦截时必须给出明确“未完成仍继续”确认，确认后使用现有 `bypassNavigationGuards` 路径，不得死锁；
+- capture/authoring/static export 中明确排除，不污染 PDF/PPTX/静态帧；
+- 保留键盘/翻页笔语义，并验证焦点在输入控件时仍存在可发现的鼠标/触控逃生路径。
 
----
+完整 DOM 化教师控制器是后续产品重构，不作为本轮 Skill 重构前置条件。
 
-## 7. 当前产品合同 E：有限声明式课程状态与导航守卫
+### P0-3 统一真实行为 harness
 
-这项能力不是另造状态机，而是把当前 `CourseStateStore` 中高频、可确定的语义公开给作者和 Agent Kit，避免尝试次数、检查点和简单门禁都由 AI 写成一次性 Runtime。
+在仓库提供永久、可复跑的 Playwright 行为执行器，而不是让每个课例临时复制 spec 后删除。
 
-V9 首版只提供：
+已落地产物：
 
-- 预先声明的课程级 `boolean | number | string | null` 状态、稳定 key、严格类型和默认值；
-- `exists` 与同类型比较条件，以及 `set | increment | delete` 原子动作；
-- 只负责“条件不满足时阻断”的声明式跨场景/跨表面导航守卫；复杂计算、仿真和重定向继续由 Runtime/Component 承担；
-- 所有普通导航入口进入同一守卫链；Runtime 重定向后的目标必须重检，初始进入、重播、重启、作者强制检查和静态捕获使用明确的独立语义；
-- 作者检查模式可观察第 4 节的当前会话检查点，但缩略图和办公格式捕获只能使用默认值或作者指定的确定检查点，不能依赖前一次随机运行；
-- 作者 UI 使用“课程变量”和“翻页条件”等教学语言，不暴露表达式或可执行脚本。
+- `implementation/behavior-spec.json`：由 `ACT-*`、`ESC-*` 和 Assessment Map 派生；
+- 标准步骤闭集：`click | fill | press | select-option | check | drag | wait-visible | reload`；断言闭集：`visible | hidden | text | value | attribute | count | enabled | url`；
+- 执行报告记录 spec/contract/script/plan/target/runner hash、步骤/断言、公开 witnessed events、宿主 evidence、截图和 runtime errors；
+- 行为路径禁止 `page.evaluate(setPresentationState)`、直接 emit 完成事件或测试专用“完成”接口；视觉定位路径可用状态注入，但必须标 `state-injection`。
 
-该能力已经进入 V9，不向 Project V8 偷塞字段，也不建立第二套 Store。禁止任意 JavaScript、字符串表达式、隐式类型转换和未知 key 自动创建。
+不要把 agent-browser 固化为唯一执行器；仓库内 Playwright harness 可版本化、可进 CI、可复跑，更适合作为协议真相。Agent/browser 工具可用于人工探索和补充复核。
 
-退出条件：用“尝试次数”“完成检查点后才能继续”“重启恢复默认值”三个夹具证明保存重开、Undo/Redo、Presenter/控制器/Runtime/Component 入口、离线 HTML、作者检查和确定性静态捕获语义一致；多表面阶段再补跨表面状态连续性夹具。
+## 7. `orchestrate-courseware` 文件级重构
 
----
+| 文件 | 改动 |
+| --- | --- |
+| `.agents/skills/orchestrate-courseware/SKILL.md` | 只补四类合同、产品能力前提和返回 Builder 的不变量；保持短小，不内嵌完整字段表 |
+| `references/artifact-contracts.md` | 增加 `RESP/AUTH/ACT/ESC` 记录格式、稳定 ID、交叉引用和哈希失效语义 |
+| 新增 `references/response-assessment-authoring.md` | 放完整枚举、容量政策、三档判定与反例；由 SKILL.md 直接链接，保持一层引用 |
+| `references/review-rubrics.md` | 人类审阅增加采集通道、容量、判定权威、编辑结果、能力假设、动作与逃生六项 |
+| `assets/case-templates/01-courseware-contract.md` | 加产品剖面、RESP/Assessment、AUTH 与容量汇总，不新增独立文档 |
+| `assets/case-templates/02-presentation-script.md` | 场景内增加 ACT、ESC、响应引用和真实行为/视觉帧区分 |
+| `scripts/contract_records.py`（新增） | 确定性解析四类记录，避免继续把复杂正则堆进已接近 500 行的 `validate_case.py` |
+| `scripts/validate_case.py` | 调用记录解析器，校验引用、容量、authority/gate 组合、能力前提和每幕逃生；阻止不闭合案例晋级 |
+| `scripts/courseware_case_v2.py` | 仅增加稳定 ID/必要辅助，不把四类合同复制进 `case.json` |
+| `tests/test_v2_workflow.py` | 更新正向 fixture，并新增超容量、human 硬锁、未知 ACT/RESP、缺 ESC、未批准能力等负例 |
 
-## 8. 教师工作流与两套薄 Skill
+`case.json.schemaVersion` 可保持 2：真相仍是原有 Markdown，现有 review scope 已覆盖其全部字节。旧案例缺新合同会变为 `not-ready`；补写后文件哈希变化，自然要求重新批准。不要自动继承旧审批。
 
-### 8.1 默认教师体验
+## 8. `build-project-v8-courseware` 文件级重构
+
+| 文件 | 改动 |
+| --- | --- |
+| `.agents/skills/build-project-v8-courseware/SKILL.md` | 增加“先读四合同、行为与视觉分证、六门禁全绿才可 candidate”的不可妥协规则；不塞 schema 全文 |
+| `references/carrier-selection.md` | 从“能实现”升级为 Experience Fit + Authoring Fit 双合同；不设 Native/Runtime 比例 |
+| 新增 `references/assessment-behavior.md` | 记录 authority 到 evaluator、ACT 到真实控件、ESC 到教师命令的实现规则 |
+| `references/authoring-inventory.md` | Inventory schema v2；状态改为 `canvas-distinct | authoring-view | property | developer | blocked`，绑定 `AUTH-*` 和几何证据 |
+| `references/development-plan-contract.md` | 增加 Response/Assessment Map、Action Map、Teacher Escape Map、Authoring Coverage 四张表 |
+| `references/runtime-implementation.md` | 要求 Runtime 只承担必要行为/动态层；自动档引用正式 evaluator；human 只记录不硬判；语义事件连接 Project 稳定状态 |
+| `references/export-and-evidence.md` | evidence schema v2、视觉/行为分离、六门禁、闭集 artifact/command、精确 acceptance scope |
+| `assets/case-templates/03-development-plan.md` | 加四张映射表和行为测试派生位置 |
+| `scripts/init_v8_implementation.py` | 初始化 Inventory v2、evidence v2、behavior spec 骨架和 plan hash 槽位 |
+| `scripts/validate_authoring_inventory.py` | binding fullmatch；对照 `AUTH-*`；校验访问档位、必达项、几何证据和载体实际存在性 |
+| `scripts/validate_behavior_spec.py`（新增） | 校验 ACT/ESC/RESP 覆盖、步骤闭集、禁止内部 API、spec/report hash 和 witnessed events |
+| `scripts/validate_evidence.py` | 计算六个 gates；artifact kind 闭集；拒绝自报 commands；校验行为/宿主 receipt、authoring replay 与 acceptance scope v2 |
+| `scripts/validate_v8_case.py` | 在 `implementation` 阶段先跑静态/行为 spec；在 `evidence` 阶段现场重建并重放 authoring/export/behavior，输出 `trustedExecution`；绑定 development plan 自身哈希 |
+| `scripts/validate_formula_markup.py` | 已接入 `validate_v8_case.py` 的 implementation/evidence 总入口；公式标记失败会阻断总校验，不再是孤立脚本 |
+
+### 8.1 Development Plan 的最终归属
+
+`03-development-plan.md` 继续是 Builder 内部执行合同，不进入上游 `ARTIFACT_SPECS`，也不要求用户为工程细节重新批准。
+
+但必须：
+
+- 在 `implementation-state.json` 增加 `developmentPlanSha256`；
+- evidence inputs 绑定同一 plan hash；
+- plan/script/Capability/Project 任一变化使实现和证据失效；
+- plan 发现任何用户可见取舍时返回编排，修改获批合同/脚本并重新走人类审批。
+
+这比“把计划纳入上游 review hash”更符合职责边界，也消除了当前计划变化不使证据失效的盲区。
+
+### 8.2 Authoring 几何证明
+
+不采用统一“重叠度必须低于 70%”硬阈值。该阈值会误伤合法叠层和不同 authoring view。
+
+采用更可靠的组合门禁：
+
+1. `canvas-distinct | authoring-view` 的静态 target snapshot 只能证明 Project 结构/几何；候选还必须由当前总入口的真实 Editor replay 证明选择与持久化；
+2. 同一 scene/view 中多个内容项使用相同或近相同大区域 bounds 时失败；IoU 高于 0.85 只有在显式 `overlapGroup` 且不会同时可见时允许；
+3. 所有 `requiredForAcceptance` 目标必须能通过真实点击/选择回报正确 binding；
+4. `property` 必须有稳定属性入口；`developer`/`blocked` 不能承载合同要求的普通教师可编辑内容。
+
+## 9. `engineering candidate` 的六个机器门禁
+
+不新增 outcome 状态。evidence manifest v2 记录证据，校验器计算结果；不能靠 Builder 自填 `passed`。
+
+| Gate | 必须证明 |
+| --- | --- |
+| `teacherControl` | Behavior Spec 声明的源场景/状态中，顶层控制可见、在视口内、可真实点击；声明顺序与宿主 `teacher-escape-recorded` 的 requested/completed、源 scene/state、step 和结果逐项一致，公开事件只作观察 |
+| `teacherEscape` | 每个 `ESC-*` 在错误/空白/未完成态可执行；guard 被拦时有明确 confirmation-required 并可继续，且 requested→confirmation-required/completed 必须由同一宿主 session 的连续有序 ledger 证明 |
+| `requiredActions` | 每个 required `ACT-*` 由真实控件路径产生与 ACT/RESP/scene/step 对齐的 host-owned `action-recorded`；公开 witnessed event 只作补充观察 |
+| `assessmentTolerance` | 每个自动响应覆盖标准正确、至少两种正确变体、空白、典型近错、关键词/子串假阳性，且真实调用登记 evaluator 留下宿主回执；human 响应证明只记录、不硬锁 |
+| `authoringOutcome` | 每个 required `AUTH-*` 达到获批访问等级；可信 Editor replay 完成改→存→关→重开→Player/HTML 更新。当前仅 native scene text 有正路径，其他 adapter 缺失即失败关闭 |
+| `responseCapacity` | 实现的必答单元与获批 `RESP-*` 一致，预算未超时；不得用自动预填或测试加速掩盖超载 |
+
+候选条件：
 
 ```text
-教师提供主题或材料
-→ AI 按材料完整度追问并形成教学策划
-→ 教师确认
-→ AI 继续追问呈现取舍并形成教学呈现脚本
-→ 教师确认并开始制作
-→ 干净 Builder 先做最高风险纵切，再增量构建与验证
-→ 可编辑 Project + 离线 HTML
-→ 教师在当前画面手工编辑，或点选后要求 AI 精确修改
+pipelineStatus == passed
+AND 六个 behaviorGates 均由校验器计算为 passed
+AND 无 P0 blocker
+AND outcomeStatus == engineering candidate
+AND humanAcceptance == null
 ```
 
-教师长期只需看到：
+### 9.1 静态门禁
 
-```text
-01-teaching-plan.md
-02-presentation-script.md
-<lesson>.h5lesson
-<lesson>.html
-```
+- 四合同引用与容量闭合；
+- authority/gate/override 组合合法；
+- Project 控制器与 controls 一致；
+- plan、Inventory、behavior spec、Project、Capability 与呈现脚本哈希闭合；
+- Inventory binding fullmatch，访问等级与实际 carrier/target 对应；
+- artifact kind 闭集，manifest `commands` 必须为空；只有总入口当前进程产生的 `trustedExecution` 可作为命令执行证据；
+- evidence slot 只能引用预期 kind，不能用自定义 kind 绕过格式检查；
+- capture 与 behavior provenance 明确。
 
-两份 Markdown 自由组织。教学策划与呈现脚本均可向教师提问：材料越完整，问题越少；只有主题时可以多轮渐进追问，不设置问题总数上限。默认只有两次生产前硬确认：策划确认、呈现确认；材料已经完整时可以合并。
+### 9.2 真实浏览器门禁
 
-场景划分、教学形式、师生动作、反馈和教师操作都属于教师可感知设计，必须在呈现脚本中确认。Builder 只决定不改变这些体验的技术分解。
+- 对每个互动幕的 pre-interaction、至少一个 error/feedback、stable-result 状态检查顶层控制；
+- 视觉检查与功能检查分别执行，不能互相推断；
+- ACT 行为从脚本初态通过 `click | fill | press | select-option | check | drag` 等闭集路径到达；
+- ESC 在输入焦点、错误答案、空白和未完成条件下可用；
+- 自动判定跑 tolerance matrix；
+- Editor 中选择目标、修改、保存、重开，再核对 Player/HTML；
+- 行为报告保留 witnessed events、host evidence、步骤后时序、截图和 runtime errors；录屏属于外部 art 审阅材料，不是本地 engineering 门的自证字段。
 
-### 8.2 `orchestrate-courseware`
+### 9.3 人类门禁
 
-目标正文约 50–80 行，只负责：输入诊断、两个阶段的渐进提问、两份自由结构教学文件、两次停止、确认后启动干净 Builder。不得包含教学模式枚举、固定模板、技术 Schema、Hash、签名或 Evidence 状态机。
+- 载体/编辑能力降级是否接受；
+- 教学有效性、课堂节奏、视觉品质和开放表达质量；
+- `accepted` 的具名审阅人、时间、精确 scope hash、证据和明确意见。
 
-### 8.3 `build-courseware-project`
+## 10. 不采纳或降级为信号的建议
 
-目标正文约 80–120 行，只负责：读取两份当前文件、发现相关能力、形成最小构建图、先做高风险纵切、使用 Agent Kit 增量构建、验证、导出和局部 Patch。产品 API 细节由按需引用和确定性工具提供，不复制进 Skill。
+| 建议 | 裁决与原因 |
+| --- | --- |
+| 本轮完整迁移 TeacherController 到 DOM | 不采纳；先做薄顶层逃生面，完整迁移牵动 800+ 行渲染、作者预览、无障碍和 capture，应另立产品任务 |
+| 引入 CAS 或自动语义判分 | 不采纳；当前 W2 失败由字符串规范化和职责错误导致，且开放表达不应硬判 |
+| Native/Runtime 硬比例 | 不采纳；可凑数且惩罚合理 Runtime，改按 `AUTH-*` 结果门禁 |
+| Runtime source 跨场景同哈希即失败 | 不采纳为硬门禁；共享实现可以是正确复用，仅在结合分支大脚本、编辑能力退化时报警 |
+| `nodeOverrides` 全空即失败 | 不采纳为通用硬门禁；Runtime-owned 状态可合法存在，只有与获批稳定状态/编辑合同冲突时失败 |
+| 所有 `visible` bounds 重叠必须低于 70% | 不采纳；改用真实 target snapshot、近重复检测、view/overlapGroup 和选择回报 |
+| 新增 `behavior-verified` outcome | 不采纳；避免状态迁移涟漪，用 candidate 的六个必要子条件表达 |
+| 把 `03-development-plan.md` 纳入人类 review scope | 不采纳；绑定 Builder implementation/evidence scope，用户可见变化仍返回上游 |
+| 立即增加 `state.equals` 条件 | 延后到 P1 spike；现有 semantic runtime event 已能连接稳定 Project 状态，新增条件并不提供归一化能力 |
+| 将所有 Python case validator 直接塞入 `npm verify` | 不采纳；全局 verify 无具体 case 参数。应以永久正负 fixture 覆盖校验器，并让每个交付显式运行总校验入口 |
+| 继续扩大正则/同义词表 | 不采纳；会同时扩大假阳性和假阴性 |
+| 围绕 PPTX 对象级编辑做 P0 重构 | 不采纳；HTML 是主产品，PDF/PPTX 保持可读、完整、差异诚实即可 |
 
-### 8.4 干净上下文与模块 Worker
+## 11. 实施顺序与每阶段退出条件
 
-- 呈现确认后启动不继承完整聊天历史的 Build Coordinator，只传 Skill、两份教学文件、材料路径、当前能力入口和用户额外约束。
-- Coordinator 不一次性盲写全课，按“能力核对 → 高风险纵切 → 共享基础 → 实现单元 → 集成 → 验证修复”推进。
-- 小型强耦合课件由单 Coordinator 分段完成；只有边界清楚、可独立验收的场景组、复杂互动或共享能力才使用干净 Worker。
-- Worker 只获得本单元脚本、共享视觉/接口简报和相关能力，不直接写权威工程；Coordinator 是唯一集成者。
-- 完整首次构建由全新上下文做一次只读体验 QA。确定性工具查工程事实，QA 查教学、视觉、互动和教师操作。
+### Phase 0：冻结失败基线
 
-通用 Skill 不绑定具体模型。先用同一模型比较长上下文、干净单 Builder、分段 Coordinator 和适用时的 Worker，再比较强弱模型，分别测出上下文、底座、工作流和模型的影响。
+状态：完成。
 
----
+- 保留两份 W2 基线原件、Builder/manifest 和当前 validator 输出；既有视觉材料仅按原始文件留档，不虚构截图或录屏证据；
+- 建立不修改原件的回归 fixture/清单；
+- 记录当前能错误取得 `engineering candidate` 的路径。
 
-## 9. 载体与编辑边界
+退出条件：基线可重复解包、验证和复现，不依赖聊天摘要。
 
-载体选择遵循“满足效果所需的最少黑箱”，不设比例：
+### Phase 1：产品教师控制 P0
 
-1. 稳定、常改的标题、正文、题目、公式、图片、提示、反馈、控制器和可枚举状态优先 Native。
-2. Runtime 用于连续操控、算法/物理模拟、复杂判定、事件协调和瞬态效果；稳定结果尽量驱动 Native 状态。
-3. Component 用于真实复用、独立发布或稳定 Props 边界；一次性效果不为抽象而抽象。
-4. Agent Kit 能力块可编译成上述任一载体，但必须公开作者数据、点选目标、检查点和稳定地址。
+状态：完成；顶层逃生面、控制一致性、自愈、Shadow DOM 输入保护和源场景事件时序已有回归。
 
-硬边界：
+- 先写 Project 一致性、坏状态自愈、top escape plane、guard override、capture exclusion 的测试；
+- 再修改 Schema/Health/Editor/Player；
+- 覆盖真实 DOM 鼠标点击、键盘/翻页笔和输入焦点；触控命中语义由单元测试覆盖，不把 Electron 无法可信合成的触控事件写成真实 E2E 结论。
 
-- 所有作者文案和稳定可见文字必须能在画布命中并双击编辑；公式使用公式入口；
-- 所有可替换的作者图片必须有画布命中或明确的 surface→图片属性入口；
-- 关键内容不得烘进图片或源码；
-- 教师控制器必须真实可见、可点击、可拖动且不被意外遮挡；
-- 学生动作不能用状态注入、完成按钮或错误快捷键冒充；
-- 初态不能泄露答案，错误后必须有教师可恢复路径；
-- 后续 Patch 以当前 Project 为基线，不按旧脚本整课重生覆盖教师修改。
+退出条件：数学坏工程被 Schema/Health 阻断但新版 Player 仍有可发现逃生；合法全屏 Runtime 工程在所有 required states 中控制面可见、可点、可继续且不污染静态导出。
 
----
+### Phase 2：Skill 1 合同协议
 
-## 10. 质量门禁
+状态：完成；四类合同、能力/容量政策、引用图谱、审批哈希链与 30 个 workflow 回归已落地。
 
-首次结果称为**高质量可编辑初稿**。它必须同时通过：
+- 实现四类记录、模板、parser、validator 和 review rubric；
+- 保持 case schema v2 与现有哈希审批机制；
+- 用最小正向 fixture 和 W2 负向 fixture 回归。
 
-### 10.1 工程与作者门禁
+退出条件：正向课例可重新批准并派生 readiness；原 W2 因缺合同/容量/authority/ESC 精确失败，而不是泛化报错。
 
-- Project 可加载、保存、关闭和重开；HTML 来自当前 Project 且离线可用；
-- 图层、命中、检查点、稳定地址和 AI Patch 在真实 Editor/Player 中成立；
-- 文字、图片、公式、控制器和关键参数具有真实可视化入口；
-- 没有严重裁切、遮挡、空白、状态错位、外部依赖或伪造 API。
+### Phase 3：Skill 2 实现与证据协议
 
-### 10.2 教学与体验门禁
+状态：核心协议与可信执行主链完成；只有精确 binding `native:scene:<scene>:<node>:text` 已有真实 authoring 正路径，其他 native/global/field 以及 runtime/component/property/authoring-view 均按能力缺口失败关闭。
 
-- 已确认内容完整准确，没有占位、静默删减或擅自补写；
-- 互动服务教学目标，并对真实学生动作给出有效反馈和恢复；
-- 视觉层级、阅读顺序、字号、对比、密度和状态变化适合课堂投屏；
-- 全课协调但不套同一页面模板；
-- 关键初态、中间态、成功、错误和教师接管状态经过真实操作与截图复核。
+- 升级 Plan、Inventory v2、evidence v2；
+- 落地统一 behavior harness、六门禁和 plan hash；
+- 将新 validator 的正负 fixture 接入现有 Vitest/Python 测试链。
 
-验证按实际能力加载，不规定固定截图数、卡片数、场景数或 Native/Runtime 配额。工程检查通过不能替代结果判断，“可以继续编辑”不能成为初次质量差的理由。
+退出条件：仅 Schema/导出/三张图全绿不能再取得 candidate；状态注入只能获得视觉证据，不能满足行为 gate。
 
----
+### Phase 4：W2 红→绿回归
 
-## 11. 多表面当前基线与剩余结果验收
+状态：红阶段完成，绿阶段未执行。原因是合同/脚本变化依法使原批准失效；没有新的人类批准就不能重建并宣称 candidate。
 
-多表面已经进入 Course Project V9、Published Course V2、Course Player、编辑器、Agent Kit、静态导出与真实样例，不是独立于主线的未来协议。当前实现状态是 `engineering candidate`：结构、运行和交付闭环已有自动化证据；不同 surface 的真实教师创作效率、课堂品质和大规模性能仍要按本节边界继续验证。
+- 重开两课的合同/脚本，重新冻结 RESP、authority、AUTH、ACT、ESC 与容量；
+- 获得新的精确人类批准；
+- 修 Builder/Project，不覆盖失败基线；
+- 跑完整候选门禁。
 
-### 11.1 表面类型与选择规则
+数学必须证明：响应容量已缩减或改采集通道；开放理由不硬锁；规范化能力有真实来源；教师控制可达。语文必须证明：脚本要求的圈画/选择/输入有真实动作，capture 不预填学习证据，开放结论不硬锁，稳定内容达到获批编辑等级。
 
-| 表面 | 内部类型 | 主要内容 | 编辑空间 | 主要质量目标 |
-|---|---|---|---|---|
-| 幻灯片 | `slide` | 演示、逐幕讲授、互动实验、测验 | 固定 1280×720 | 单帧构图、投影可读、互动节奏、PPTX 映射 |
-| 流式长文 | `flow` | 讲义、教程、阅读材料、知识库、研究笔记 | 固定/最大阅读宽度、无限纵向 | 结构、阅读流、检索、分页、DOCX 映射 |
-| 空间二维 | `spatial-2d` | 概念图、关系网、时间线、空间探索 | 大范围或无限世界坐标 | 定向、语义缩放、镜头路径、空间关系、性能 |
-| 混合课件 | 工程能力，不是第四种表面 | 多种表面的课程组合 | 有序表面集合 | 跨表面导航、主题、状态和共同交付 |
+退出条件：两课均在新协议下达到 `engineering candidate`；人工未验收前仍不得写 `accepted`。
 
-默认按内容意图路由：一屏一屏讲授、投影或明确需要 PPTX 时选 Slide；连续阅读、目录和较长正文选 Flow；理解依赖位置、关系、缩放或漫游时选 Spatial；同一课程同时存在两种强需求时才建立 Mixed。不能为了沿用旧 Slide 习惯把长文拆成大量文字页，也不能因为空间画布自由就把普通讲义塞进无限画布。
+### Phase 5：冷启动与前向验证
 
-### 11.2 交付与兼容导出矩阵
+状态：四类新鲜合同 profile 的闭包与核心反例已覆盖；四类完整 Builder/视觉成品前向验收尚未全部执行。
 
-| 表面/工程 | `.h5lesson` | 单 HTML / 网页包 | PDF | PPTX | DOCX |
-|---|---|---|---|---|---|
-| Slide | 作者态 | 原生互动 | 每场景确定帧 | 原生节点 + 复杂内容快照 | 不提供 |
-| Flow | 作者态 | 原生阅读与互动 | 真正分页排版 | 不提供 | 结构化块映射 + 组件静态后备 |
-| Spatial 2D | 作者态 | 原生平移、缩放与互动 | 总览 + 作者镜头帧 | 不提供 | 不提供 |
-| Mixed | 作者态 | 原生多表面运行 | 按打印配置共同导出 | 只导出兼容的 Slide | 只导出兼容的 Flow |
+至少使用四类未泄漏预期答案的任务：
 
-共同原则：
+1. Native 为主的有限选择课；
+2. Hybrid 的规范化短答案课；
+3. 开放表达 + 教师接管课；
+4. 全屏 Runtime + 顶层控制 + 隐藏 authoring view 课。
 
-- HTML 始终保留完整互动，办公格式不能反向裁剪作者工程或 HTML；
-- 每次兼容导出都报告原生保留、静态化、忽略和失败后备，不能静默丢失；
-- 互动内容使用作者指定或协议确定的静态帧，Flow 折叠内容默认展开；
-- Spatial PDF 不打印无限世界，只输出总览与作者选定镜头；
-- Mixed PDF 的页面尺寸策略必须先用真实样例决定，不能预设为统一尺寸或任意混排。
+按 `skill-creator` 的 forward-test 原则，用新鲜上下文、原始材料和最小任务提示运行；不把已知 bug、期望修复或参考答案泄漏给执行者。输出与临时制品隔离，评估后清理，避免下一轮污染。
 
-### 11.3 工程模型与 Surface Host
+退出条件：正向任务通过、蓄意负例被拦、未见新的普遍误报，才允许继续批量生成课例。
 
-V9 没有在旧 `SceneDocument` 上堆叠 Flow/Spatial 可选字段，而是已经冻结判别联合：
+## 12. 测试与接线清单
 
-```text
-Project
-  ├─ shared assets / components / theme / media / courseState
-  ├─ shared navigation / directory / deep links / diagnostics / publishing
-  └─ surfaces: Slide | Flow | Spatial2D
-```
+必须覆盖：
 
-多表面、统一图层与作者协议共同落在 Course Project V9；V8 只通过显式迁移进入 V9，Project V1–V7 不重新进入当前主程序。
+- `python .agents/skills/orchestrate-courseware/tests/test_v2_workflow.py`；
+- `tests/unit/projectV8CoursewareSkill.test.ts`；
+- `tests/unit/projectV8CoursewareForwardFixtures.test.ts`；
+- `tests/unit/projectV8CoursewareEndToEnd.test.ts`；
+- `tests/unit/projectV8EvidenceAuthenticity.test.ts`；
+- 新增控制平面与 behavior harness 的 Playwright spec；
+- `npm run check:ai-capabilities`、`npm run typecheck`、定向 Vitest、定向 Playwright；
+- 每个实际课例运行 `validate_v8_case.py --target evidence`，而不是假设仓库 `npm verify` 自动知道 case 路径。
 
-Player 已演进为 Course Player：共享导航、课程状态、媒体、素材、错误隔离和发布编排；Slide Host 使用固定画布，Flow Host 使用流式 DOM 语义，Spatial Host 使用世界坐标与相机。三者不要求使用同一种渲染器，但都必须持续回归创建、编辑、保存重开、预览、缩略图/捕获、重播/重置、销毁、局部失败和静态后备。
+Skill 文件完成后还必须：
 
-### 11.4 Flow 当前生产边界
+1. 用 `skill-creator/scripts/quick_validate.py` 分别验证两个 Skill；
+2. 重新生成或核对 `agents/openai.yaml`，确保触发描述仍与职责一致；
+3. 运行 `scripts/install-courseware-skills.ps1` 的安装器测试，确认仓库权威副本与用户安装副本安全同步；
+4. 检查 SKILL.md 仍低于 500 行、任务需要的 references 可从 SKILL 直达、无循环追链和 README/CHANGELOG 等冗余文件。
 
-Flow 使用结构化块，不使用“超高 TextNode”或长截图：
+## 13. 迁移规则
 
-- 标题、多级标题、段落、引用、列表、分隔线；
-- 图片、音视频、图注、表格、公式、代码；
-- 提示、例题、结论、折叠章节、目录和锚点；
-- 受控互动组件嵌入块。
+- 旧 case 不自动补写 RESP/AUTH/ACT/ESC，不继承语义猜测；新 validator 将其置为 `not-ready`。
+- 修改合同或脚本后，现有 scope hash 自动失效，必须重新获得具名人类批准。
+- 当前本地 approval 记录仍是可审计声明，不是密码学身份凭据；宿主未提供签名 receipt 时不得把它描述为不可伪造。
+- Authoring Inventory v1 与 evidence manifest v1 可保留为历史证据，但不能在新 validator 下签发 candidate；重新实现时生成 v2 派生元数据。
+- 旧 `engineering candidate` 不自动升级或延续；其 `humanAcceptance: null` 保持不变。
+- W2 原件只读保留，修复版使用新工程/新 evidence scope，便于证明门禁确实从红变绿。
+- Project 仍严格使用 V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4；本方案不宣称未发布字段或无限画布、多表面协议已存在。
 
-作者能力至少包括直接输入、块插入/移动/复制/删除/层级调整、基于标题的大纲导航、搜索、Undo/Redo、保存恢复，以及正文稳定阅读宽度和局部通栏内容。首版不提供整页自由 Runtime；复杂互动通过具有响应式尺寸、作者入口和确定静态后备的组件嵌入。
+## 14. 重构完成定义
 
-Flow 的结构事实是“语义文档流 + surface/global 统一覆盖层”。覆盖层内的 Native、Runtime、Component 和教师控制器共用稀疏 `order`，但不能插入两个语义块之间。实时 Player、capture 和 PDF 使用同一覆盖顺序；DOCX 保留语义块，另以“画布图层（后→前）”章节写入 Native 内容及 Runtime/Component 后备/差异说明，不静默丢失。
+完整路线的最终完成条件与当前状态如下：
 
-DOCX 优先映射为原生标题、段落、列表、引用、图片/题注和表格；公式优先可编辑表示，超出能力时静态化并警告；互动组件输出确定帧、名称/说明和可选 HTML 引用。PDF 必须真实处理分页、孤行寡行、标题保持、表格/组件跨页、页眉页脚、目录和字体嵌入，同时使用同一覆盖图层捕获，不得用整页长截图冒充文档排版。
+1. **完成**：产品 P0 让教师控制不再依赖场景内容层，并能从任意未完成态逃生；
+2. **完成**：四类合同进入模板、references、validator 和人类 rubric，且参与现有哈希失效链；
+3. **核心完成、能力闭集诚实**：Plan、Inventory、Behavior Spec、Project、Evidence 与批准输入/Capability 哈希闭合；只有已发布 adapter 可通过；
+4. **完成**：六个行为门禁由 validator、真实 runner 和宿主 receipt 重算，不接受 manifest 自填字符串；
+5. **完成**：视觉状态注入、公开观察事件与宿主行为证明分层，不再互相冒充；
+6. **红阶段完成，绿阶段待人类审批**：两份原 W2 已稳定失败；未经新批准不修改原件、不宣称 candidate；
+7. **合同级完成、成品级待扩展**：四类新鲜 profile 与负例已验证，四类完整 Builder/视觉课件仍需逐类真实前向验收；
+8. **完成**：Pipeline status 与 outcome status 分开报告；本地不签发 `art candidate | accepted`。
 
-### 11.5 Spatial 2D 当前生产边界
+外部依赖与能力边界：生产级人类审批身份还需要宿主提供 `trusted-human-approval-receipt-v1` 的 signer/trust root；当前 authoring 正路径仅覆盖 `native:scene:<scene>:<node>:text`，除此以外的全部 authoring binding/carrier/field 都需要按真实 Editor UI 逐类发布；`oral | paper` 非数字动作还没有可重放的 Browser step 或外部教师观察 receipt，不能作为 required ACT 取得本地候选。`art candidate | accepted` 只能由仓库外可信人类审阅系统对精确 scope 提升，前者还需要真实视觉/互动证据；上游目前也没有可独立派生 `recordingRequired` 的结构化合同字段。Runner 的离线结论限于进程级阻断与本次零外连观察，不冒充 OS 网络命名空间或防火墙隔离。这些能力缺失时一律失败关闭，不以模板、JSON、DOM 点击或说明文字冒充完成。
 
-Spatial 2D 的工程实现覆盖以下合同；真实规模、定向体验与性能预算继续用实际课例复核：
-
-- 世界坐标、平移、缩放、框选、对齐和统一图层；
-- 当前镜头、主页/适配内容、镜头书签、命名帧和可选教学镜头路径；
-- 小地图、方向和当前位置反馈，以及基于缩放级别的语义显示；
-- 文字、图片、图形、视频和受控组件的复用与作者地址；
-- 大量节点的视口裁剪、分级加载、资源释放和性能诊断；
-- HTML 中保留探索与镜头调度，PDF 输出总览和作者镜头帧。
-
-首版明确不做通用 3D、任意网页嵌入、复杂物理世界、无限分辨率打印，以及没有边界或镜头定义的自动 PDF。
-
-### 11.6 三维内容的近期策略
-
-3D 继续作为 Runtime/Component 能力：Three.js、GLB 和依赖随具体内容离线嵌入；模块负责相机、灯光、材质、交互、确定捕获和 GPU 释放，稳定文字、反馈和课程状态接入工程模型。只有多个真实课例反复证明教师需要直接编辑通用 3D 场景，才启动独立 3D 表面 RFC。
-
-### 11.7 Mixed 工程
-
-Mixed 已在各表面之上实现以下工程能力：
-
-- 有序表面集合、统一目录、前后导航和返回目录；
-- 跨表面稳定 ID、深链接和显式过渡；
-- 共享主题、素材、声音、课程状态和学习进度；
-- 每个表面独立的重播/重置语义；
-- 整课 HTML、共同 PDF，以及选择性 PPTX/DOCX 和逐项差异报告。
-
-跨表面保持术语、视觉语言、导航位置和进度连续，但不强迫各表面采用相同布局或渲染器。一个表面失败应被局部隔离，不能使整课空白。
-
-### 11.8 条件项：Component Publish Units
-
-这只是大型组件的潜在发布体积优化，不是课件质量、教师控制或可编辑性的修复手段。当前没有真实目标组件证明完整包含有显著未用代码或素材，因此结论为 **No-Go**，不进入实现主线。
-
-若启动，最薄顺序为：保留完整作者包和 canonical 内容校验 → 先做显式素材闭包 → 验证离线 Single HTML → 只有独立 JavaScript 收益成立时才做代码 Unit → 再统一 Web Package 与诊断。不得用正则、覆盖率或 AST 猜不可达代码；未声明 Unit 的现有组件保持原行为；若 `manifest.entry` 不再能独立执行和编辑，必须升级组件 Schema 并明确拒绝旧读取器，不能在同版本静默硬断。
-
-### 11.9 已冻结的决定与仍需真人复核的门禁
-
-结构决定已经由 V9、Published Course V2 和三个 surface host 冻结：Flow 使用语义块与 DOCX/分页映射；Slide scene 是 slide surface 内部结构；跨表面通过 location、状态、链接和统一控制器连接；Spatial 使用显式世界边界、相机与打印镜头。后续不得绕过版本升级在同一 Schema 中静默改变这些语义。
-
-自动化继续共同验证 Schema、编辑/复制/删除/Undo、保存/恢复/损坏输入、素材/文字/组件、预览与离线 HTML、专属导出、异步资源、键盘/焦点/缩放/无障碍、局部失败和资源释放。真人复核必须覆盖真实长文的阅读与分页、空间课件的定向和镜头、Mixed 的往返连续性，以及教师完成创建和修改所需的实际步骤。性能预算必须由真实课例测量：Slide 看节点和捕获，Flow 看块数/文档长度/分页，Spatial 看视口节点/缩放/加载；不凭空设数字。
-
----
-
-## 12. 实施状态与下一步顺序
-
-原 Phase 0–10 不再是尚未开始的路线。当前状态如下：
-
-| 原阶段 | 当前仓库状态 | 仍不能由自动化替代的结果 |
-|---|---|---|
-| Phase 0–4：协议、统一图层、检查态、稳定地址、课程状态 | 已进入 V9/V2、Editor、Player、发布与 Patch 链路；V8 只保留迁移/兼容 | 教师在真实运行状态下点选、修改和继续授课的顺畅度 |
-| Phase 5：Courseware Agent Kit | SDK、能力卡、脚手架、构建图、rig、装配、V9 编译和 Patch 已落地；三个差异课例可重复构建 | 与旧裸写路线的长期耗时、缺陷、代码量和修复轮次对照 |
-| Phase 6：薄 Skill、冷启动、接线与清理 | 两套 Skill、安装器、文档路由和干净 Windows 门禁已改为新默认；旧 Hash/Evidence/V8 Builder 路线已清理 | 材料充分/稀缺两类真实教师会话与干净 Builder 使用体验 |
-| Phase 7：Flow | 结构化块、组件嵌入、统一图层、Published V2、分页输入和 DOCX 已进入产品与样例 | 真实长文的写作、阅读、分页和 DOCX 继续编辑体验 |
-| Phase 8：多表面 Schema | Course Project V9 判别联合、Slide/Flow/Spatial Host、V8 显式迁移与 V2 发布已经冻结 | 真实工程规模下的稳定性、无障碍和专属导出复核 |
-| Phase 9：Mixed | 目录、location、深链接、共享状态、导航守卫、共同发布/打印计划与真实混合样例已落地 | 教师授课式往返导航、控制器连续性和导出差异理解 |
-| Phase 10：Spatial 2D 与 3D 复审 | Spatial 2D 已进入 V9；通用 3D 因缺少反复出现的直接编辑需求明确 No-Go，3D 继续作为 Runtime/Component 能力 | 真实空间任务的定向、语义缩放、镜头与规模性能 |
-
-接下来只按证据缺口推进，不再追加新工作流层：
-
-1. 保持 Schema、类型、单元/集成、真实 V9 E2E、三课例、保存重开、离线发布、导出和 clean-Windows 门禁持续绿色。
-2. 对每个代表课例实际操作初态、中间态、成功、错误、教师接管和返回编辑状态；保存截图/录屏只作复核证据，不引入 Evidence 状态机。
-3. 让教师从材料开始实际完成两份 Markdown、首次构建、画布修改、AI 局部 Patch、保存重开和交付；记录阻塞步骤并优先修产品或能力块，不把说明继续堆进 Skill。
-4. 只有具体课例通过真实视觉/互动复核，才可称 `art candidate`；只有教师明确确认，才可称 `accepted`。
-5. 仅当真实案例反复暴露相同缺口时新增 Agent Kit 能力；不新增课型模板、固定页面、通用 3D 表面或 Component Publish Units。
-
----
-
-## 13. 最小文件结构与清理
-
-当前 Skill 文件结构：
-
-```text
-orchestrate-courseware/
-├── SKILL.md
-└── agents/openai.yaml
-
-build-courseware-project/
-├── SKILL.md
-├── agents/openai.yaml
-└── references/
-    ├── current-capabilities.md   # 短路由，不复制 Schema
-    └── validation-boundaries.md
-```
-
-Agent Kit 属于产品/构建工具，不塞入 Skill 目录；能力块库与课例库继续分离。构建图、Worker 任务、截图和 QA 报告默认是本轮临时制品，成功后清理。长期保留的课例文件只有两份教学 Markdown、Project 和默认 HTML。
-
-单人本地工作流不使用 Review Scope Hash、具名签名、审批状态机或候选等级。若组件包或归档内部继续使用内容校验，它只用于检测损坏和锁定可执行依赖，不进入教师流程，也不成为 AI 开工门票。
-
----
-
-## 14. 完成定义
-
-“实现完成”和“结果验收”必须分开判断。当前源码已覆盖下列定义的工程部分，因此仓库可以称为 `engineering candidate`；真实教师创作、长期课堂使用和明确确认尚未发生，所以本计划不把当前状态写成 `accepted`。任何具体课例也只有在真实视觉与互动复核后才可能单独进入 `art candidate`。
-
-### 14.1 当前主线工程回归定义（Phase 0–6）
-
-当前产品与 AI 创作重构必须持续满足：
-
-1. 根目录只存在本计划，旧多表面计划与旧 Skill 计划内容已吸收或删除；
-2. 新协议以真实统一图层替代公开 `underlay/overlay`，并在 Editor、Player、HTML、命中和导出中一致；
-3. 当前位置试运行后可原地冻结并编辑当前画面，临时学生状态不会自动污染 Project；
-4. Runtime/Component 当前可见作者文字全部可命中，可替换图片具有可视化命中或明确入口；
-5. 临时 `hitId` 与稳定 `authoringAddress` 分离，AI 可以根据当前选择精确 Patch 且不覆盖其它教师修改；
-6. Authoring Inventory、Authoring View 与会话 Layout Snapshot 各司其职，没有新增影子内容模型；
-7. 有限课程状态和普通导航守卫进入同一事实源，作者检查与静态捕获语义确定；
-8. Builder 默认使用小语义 SDK、能力块和装配器，不再全量手写底层工程；
-9. 能力块是可组合行为原语，不是教学/页面模板，多类课例不会收敛为同一种外观；
-10. 两套 Skill 保持短小，只管理教师决策、上下文、职责、能力路由、停止条件和质量门禁；
-11. 教师默认只审阅两份自由结构 Markdown，问题数量随材料完整度变化，生产前最多两次硬确认；
-12. 干净 Coordinator 先做高风险纵切，再增量构建；只有边界清楚时使用 Worker，且只有 Coordinator 集成权威 Project；
-13. 高质量可编辑初稿同时通过工程/作者门禁和独立教学/视觉/互动 QA；
-14. 当前 Project 支持安全局部 Patch、保存重开和离线 HTML，教师手工修改不会被整课重生覆盖；
-15. 现有公式、控制器、翻页笔、自包含交付和 Headless 检查没有回归；
-16. 冷启动对照证明新路线相对旧手写 Builder 在质量、速度、代码量、缺陷和修复轮次上有可观察改进。
-
-### 14.2 多表面结果验收定义（Phase 7–10）
-
-多表面的协议与工程宿主已经落地，但产品结果只有同时满足以下要求才算完成：
-
-1. 产品能按内容意图选择 Slide、Flow、Spatial 2D 或 Mixed，而不是用当前实现或办公导出格式倒推表面；
-2. Slide、Flow 和 Spatial 2D 都能独立创作、编辑、保存重开、预览、离线 HTML 发布并完成模式专属兼容导出；
-3. Mixed 能统一目录、导航、主题、素材、媒体、课程状态、进度和 HTML 播放，同时保留各表面的布局与渲染优势；
-4. 当前生产 Project 能显式迁移到实际落地的多表面版本，旧 V1–V7 不重新进入主程序；
-5. PDF/PPTX/DOCX 的保留、静态化、忽略和后备语义都经过真实文件复查；
-6. Flow 的 PDF/DOCX 不是长截图，Spatial 的 PDF 由总览/镜头定义，Mixed 的共同 PDF 有明确打印配置；
-7. 每种表面至少有一个真实课例经过教师实际创作、修改和结果确认，不以测试夹具代替；
-8. 性能预算来自真实课例，单个表面、块或组件失败可局部隔离；
-9. 通用 3D 是否进入产品已基于多个真实课例需求作出明确决定。
-
-### 14.3 条件项
-
-Component Publish Units 不阻塞上述两条主线。它在真实大组件基准无法证明收益时以 No-Go 关闭；证明收益时，必须完成第 11.8 节的作者包完整性、Single HTML 离线闭包、旧组件不回归和必要的 Schema 治理，才算完成。
-
-最终判断标准不是生成了多少规范、任务文件或组件，而是：教师能否以很低的流程负担获得一个真正值得评审的课件，并在看到任何运行状态时直接点选、修改，或把同一个稳定目标交给 AI 精确修改。
+因此，管线仅在已发布能力闭集内最多签发 `engineering candidate`；文件存在、Schema 绿色或导出成功本身从不等于产品完成。

@@ -10,6 +10,8 @@ export type SurfaceLifecyclePhase =
   | 'reset'
   | 'capture'
   | 'destroy'
+  /** Declarative interaction rule execution (navigation/state/motion failures). */
+  | 'execute'
 
 export type SurfaceStatus =
   | 'idle'
@@ -77,6 +79,9 @@ export interface SurfaceHost {
   reset(scope: SurfaceResetScope): void | Promise<void>
   capture(request: SurfaceCaptureRequest): SurfaceCapture | Promise<SurfaceCapture>
   destroy(): void | Promise<void>
+  /** Published V2 location. Optional so fake hosts in isolation tests stay thin. */
+  setLocationId?(locationId: string): void | Promise<void>
+  getLocationId?(): string | null
 }
 
 export interface SurfaceFailure {

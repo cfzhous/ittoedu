@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene",
+    "global"
+  ],
+  "id": "com.example.render-host-editable-table",
+  "name": "V4 DOM 可编辑对比表",
+  "version": "4.0.0",
+  "description": "用 props.content 开放全部文案、用 Shadow DOM 承载的可复用交互表格",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.svg",
+  "defaultSize": {
+    "width": 1140,
+    "height": 420
+  },
+  "minSize": {
+    "width": 520,
+    "height": 260
+  },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "content": {
+      "ariaLabel": "渲染路径对比表",
+      "title": "同一份 Project V8 中的渲染路径",
+      "caption": "点击行可高亮，点击排序可按适用度重排；教师可在组件属性中修改所有文案。",
+      "headers": {
+        "route": "路径",
+        "fit": "适用内容",
+        "editability": "编辑边界",
+        "score": "适用度"
+      },
+      "rows": [
+        {
+          "route": "原生节点",
+          "fit": "稳定文字、图形、排版",
+          "editability": "画布直接编辑",
+          "score": "95"
+        },
+        {
+          "route": "Phaser 运行时",
+          "fit": "粒子、拖拽、碰撞、程序动画",
+          "editability": "文案表 + 运行时代码",
+          "score": "88"
+        },
+        {
+          "route": "DOM / Three.js 增强",
+          "fit": "表格、表单、真 3D",
+          "editability": "组件参数或运行时文案表",
+          "score": "92"
+        }
+      ],
+      "sortLabel": "按适用度排序",
+      "resetLabel": "恢复原顺序",
+      "readyStatus": "表格已就绪",
+      "selectedStatusTemplate": "已选中：{route}",
+      "sortedStatus": "已按适用度从高到低排序",
+      "resetStatus": "已恢复创作顺序",
+      "suspendedStatus": "组件已暂停"
+    },
+    "accent": "#14b8a6",
+    "surface": "#0f172a",
+    "rowSurface": "#134e4a",
+    "compact": false
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "content.title",
+        "label": "表格标题",
+        "type": "text",
+        "maxLength": 80
+      },
+      {
+        "key": "content.caption",
+        "label": "表格说明",
+        "type": "textarea",
+        "maxLength": 240
+      },
+      {
+        "key": "content.headers.route",
+        "label": "路径列标题",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.headers.fit",
+        "label": "内容列标题",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.headers.editability",
+        "label": "编辑列标题",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.headers.score",
+        "label": "适用度列标题",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.sortLabel",
+        "label": "排序按钮",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.resetLabel",
+        "label": "重置按钮",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "accent",
+        "label": "强调色",
+        "type": "color"
+      },
+      {
+        "key": "surface",
+        "label": "面板底色",
+        "type": "color"
+      },
+      {
+        "key": "rowSurface",
+        "label": "行高亮色",
+        "type": "color"
+      },
+      {
+        "key": "compact",
+        "label": "紧凑密度",
+        "type": "boolean"
+      }
+    ]
+  }
+}

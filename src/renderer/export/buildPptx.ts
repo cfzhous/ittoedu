@@ -180,6 +180,41 @@ function addPptxWarnings(slide: PptxSlide, warnings: string[]): void {
   slide.addNotes(text)
 }
 
+function sceneHasVisibleExternalComponent(
+  project: ExportPayload['project'],
+  scene: ExportPayload['project']['scenes'][number],
+): boolean {
+  if (materializeScene(scene).nodes.some((node) => (
+    node.type === 'external-component' && node.visible
+  ))) {
+    return true
+  }
+  return visibleGlobalLayerItemsForScene(project, scene.id).some(
+    (item) => item.node.type === 'external-component',
+  )
+}
+
+function addSuccessfulComponentStaticHint(slide: PptxSlide): void {
+  const text = '静态导出提示：本页互动组件已转为静态快照，播放交互不会进入 PPTX。'
+  slide.addText(text, {
+    x: 0.15,
+    y: WIDE_SLIDE_HEIGHT - 0.5,
+    w: WIDE_SLIDE_WIDTH - 0.3,
+    h: 0.42,
+    objectName: '导出差异说明',
+    margin: 3,
+    fontFace: 'Microsoft YaHei',
+    fontSize: 8.5,
+    bold: true,
+    color: '7C2D12',
+    fill: { color: 'FEF3C7', transparency: 5 },
+    line: { color: 'F59E0B', width: 0.75 },
+    fit: 'shrink',
+    valign: 'middle',
+  })
+  slide.addNotes(text)
+}
+
 export async function buildPptx(
   payload: ExportPayload,
   assetFiles: Record<string, Uint8Array>,
@@ -465,6 +500,9 @@ export async function buildPptx(
         options.onWarning?.(warning)
       }
       addPptxWarnings(slide, warnings)
+      if (warnings.length === 0 && sceneHasVisibleExternalComponent(project, scene)) {
+        addSuccessfulComponentStaticHint(slide)
+      }
     }
     const output = await pptx.write({
       outputType: 'arraybuffer',

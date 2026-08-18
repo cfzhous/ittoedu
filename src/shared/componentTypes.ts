@@ -166,44 +166,31 @@ export interface ComponentEditableTextRegion {
   getBounds(): ComponentEditableTextBounds
 }
 
-export interface ComponentEditableAssetRegion {
-  /** Dot-separated path of an editor `image` property containing an AssetMeta.id. */
-  key: string
-  label?: string
-  getBounds(): ComponentEditableTextBounds
-}
-
 export type ComponentAuthoringTargetSource = 'registered' | 'dom'
 
 /** Explicit component text target measured in the canonical stage space. */
-interface ComponentAuthoringTargetBase {
-  /** Ephemeral hit identity; never use this value as a saved authoring address. */
+export interface ComponentAuthoringTextTarget {
+  kind: 'component-text'
+  /** Stable for the lifetime of the registration or DOM element. */
   targetId: string
   scope: ComponentScope
   sceneId?: string
   nodeId: string
   componentId: string
-  /** Stable dot-separated path inside effective component props. */
+  /** Dot-separated path inside the effective component props. */
   key: string
   label: string
-  source: ComponentAuthoringTargetSource
-  bounds: Readonly<ComponentEditableTextBounds>
-  rotation: number
-}
-
-export interface ComponentAuthoringTextTarget extends ComponentAuthoringTargetBase {
-  kind: 'component-text'
   multiline: boolean
   maxLength?: number
+  source: ComponentAuthoringTargetSource
+  /**
+   * Stage-space rectangle before rotation. Rotate around its center by
+   * `rotation` to obtain the visible target in the 1280 x 720 canvas.
+   */
+  bounds: Readonly<ComponentEditableTextBounds>
+  /** Clockwise degrees inherited from the authored component node. */
+  rotation: number
 }
-
-export interface ComponentAuthoringAssetTarget extends ComponentAuthoringTargetBase {
-  kind: 'component-asset'
-}
-
-export type ComponentAuthoringTarget =
-  | ComponentAuthoringTextTarget
-  | ComponentAuthoringAssetTarget
 
 export interface ComponentAuthoringTargetUpdate {
   revision: number
@@ -211,7 +198,7 @@ export interface ComponentAuthoringTargetUpdate {
   scope: ComponentScope
   sceneId?: string
   nodeId: string
-  targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>
+  targets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
 }
 
 export interface ComponentEditorHost {
@@ -220,9 +207,6 @@ export interface ComponentEditorHost {
    * may be called before component destruction when a region is no longer used.
    */
   registerTextRegion(region: ComponentEditableTextRegion): () => void
-
-  /** Registers a visible image/media region backed by a stable image prop path. */
-  registerAssetRegion(region: ComponentEditableAssetRegion): () => void
 
   /**
    * Requests a recomputation after component-internal layout or motion changes
@@ -305,13 +289,6 @@ export interface ComponentInstanceLifecycle {
   suspend?(): void
   resume?(): void
   prepareCapture?(): void | Promise<void>
-  /**
-   * Optional authoring-only continuity contract used when executable identity
-   * changes and a host must rebuild the component. The returned value must be
-   * finite JSON data and structured-cloneable; hosts reject invalid values.
-   */
-  exportAuthoringCheckpoint?(): unknown
-  restoreAuthoringCheckpoint?(checkpoint: unknown): void
   destroy(): void
 }
 

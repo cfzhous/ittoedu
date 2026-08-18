@@ -23,6 +23,7 @@ import {
 import {
   constrainTeacherControllerOffset,
   logicalDragDelta,
+  runtimeTeacherControllerButtons,
   teacherControllerGestureOutcome,
   TEACHER_CONTROLLER_KEYBOARD_FINE_STEP,
   TEACHER_CONTROLLER_KEYBOARD_STEP,
@@ -191,6 +192,11 @@ export function renderTeacherController(
   context: RenderNodeContext,
 ): RenderedNodeHandle {
   let node = initialNode
+  const layoutNode = (): TeacherControllerNode => (
+    isPreviewContext(context)
+      ? { ...node, buttons: runtimeTeacherControllerButtons(node.buttons) }
+      : node
+  )
   let destroyed = false
   let currentSceneId: string | null = null
   let currentStateLabel: string | null = null
@@ -584,7 +590,7 @@ export function renderTeacherController(
   ): void {
     if (!accessibilityGroup) return
     const layout = suppliedLayout ??
-      createTeacherControllerLayout(node, node.width, node.height)
+      createTeacherControllerLayout(layoutNode(), node.width, node.height)
     const visible = controllerVisible() && isPreviewContext(context)
     accessibilityGroup.hidden = !visible
     accessibilityGroup.setAttribute(
@@ -643,7 +649,7 @@ export function renderTeacherController(
         teacherControllerButtonDisplayLabel(button, status),
       )
       element.onclick = () => {
-        const current = createTeacherControllerLayout(node, node.width, node.height)
+        const current = createTeacherControllerLayout(layoutNode(), node.width, node.height)
           .buttons.find((candidate) => candidate.id === button.id)
         if (current && controllerVisible() && isPreviewContext(context)) {
           invokeControllerAction(current.action, context)
@@ -688,7 +694,11 @@ export function renderTeacherController(
 
   const redraw = (): void => {
     if (destroyed) return
-    const layout = createTeacherControllerLayout(node, node.width, node.height)
+    const layout = createTeacherControllerLayout(
+      layoutNode(),
+      node.width,
+      node.height,
+    )
     const { palette } = layout
     content.setPosition(-node.width / 2, -node.height / 2)
     dragZone

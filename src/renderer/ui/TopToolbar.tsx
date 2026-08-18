@@ -21,11 +21,13 @@ import { useEffect, useState } from 'react'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { ProjectHealthSummary } from '../../shared/projectHealth'
 import { APP_NAME } from '../../shared/constants'
-import { useEditorStore } from '../store/editorStore'
+import { useEditorStore, selectActiveCourseProjectDocument } from '../store/editorStore'
 
 interface TopToolbarProps {
   busy: boolean
   onNew(): void
+  onNewSpatial?(): void
+  onNewFlow?(): void
   onOpen(): void
   recentProjects: RecentProjectEntry[]
   onOpenRecent(path: string): void
@@ -36,7 +38,7 @@ interface TopToolbarProps {
   onExport(format: ExportFormat): void
 }
 
-export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf'
+export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
 
 interface ToolButtonProps {
   label: string
@@ -73,6 +75,8 @@ function ToolButton({
 export function TopToolbar({
   busy,
   onNew,
+  onNewSpatial,
+  onNewFlow,
   onOpen,
   recentProjects,
   onOpenRecent,
@@ -91,6 +95,8 @@ export function TopToolbar({
   const redo = useEditorStore((state) => state.redo)
   const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const renameProject = useEditorStore((state) => state.renameProject)
+  const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
+  const hasFlowSurface = Boolean(courseDocument?.surfaces.some((surface) => surface.type === 'flow'))
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(project.title)
   useEffect(() => setTitleDraft(project.title), [project.title])
@@ -133,9 +139,48 @@ export function TopToolbar({
       </div>
 
       <div className="toolbar__group">
-        <ToolButton label="新建" title="新建课件（Ctrl+N）" disabled={busy} onClick={onNew}>
-          <FilePlus2 size={18} />
-        </ToolButton>
+        <div className="new-project-split">
+          <ToolButton label="新建" title="新建课件（Ctrl+N）" disabled={busy} onClick={onNew}>
+            <FilePlus2 size={18} />
+          </ToolButton>
+          {onNewSpatial || onNewFlow ? (
+            <details className="new-project-menu">
+              <summary className="tool-button" title="更多新建选项" aria-label="更多新建选项">
+                <ChevronDown size={14} />
+              </summary>
+              <div className="new-project-menu__list" role="menu">
+                {onNewSpatial ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="new-spatial-project"
+                    disabled={busy}
+                    onClick={(event) => {
+                      event.currentTarget.closest('details')?.removeAttribute('open')
+                      onNewSpatial()
+                    }}
+                  >
+                    空白无限画布
+                  </button>
+                ) : null}
+                {onNewFlow ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="new-flow-project"
+                    disabled={busy}
+                    onClick={(event) => {
+                      event.currentTarget.closest('details')?.removeAttribute('open')
+                      onNewFlow()
+                    }}
+                  >
+                    空白流式讲义
+                  </button>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </div>
         <ToolButton label="打开" title="打开工程（Ctrl+O）" disabled={busy} onClick={onOpen}>
           <FolderOpen size={18} />
         </ToolButton>
@@ -392,6 +437,22 @@ export function TopToolbar({
           >
             <FileText size={18} />
             <span><strong>PDF</strong><small>静态页面，互动组件将静态化</small></span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="export-docx"
+            className="export-menu__item"
+            disabled={!hasFlowSurface}
+            title={hasFlowSurface ? undefined : '请先新增流式讲义页面'}
+            onClick={(event) => {
+              if (!hasFlowSurface) return
+              event.currentTarget.closest('details')?.removeAttribute('open')
+              onExport('docx')
+            }}
+          >
+            <FileText size={18} />
+            <span><strong>DOCX 讲义</strong><small>Flow 内容导出为可编辑 Word 文档</small></span>
           </button>
         </div>
       </details>

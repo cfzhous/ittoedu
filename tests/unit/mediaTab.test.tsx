@@ -80,21 +80,8 @@ function seedAssets(): string {
     Uint8Array.from([1, 2, 3]),
     { name: '雨声', channel: 'sfx' },
   )
-  useEditorStore.setState((state) => ({
-    project: {
-      ...state.project,
-      assets: {
-        ...state.project.assets,
-        [videoAsset.id]: videoAsset,
-        [imageAsset.id]: imageAsset,
-      },
-    },
-    assetFiles: {
-      ...state.assetFiles,
-      [videoAsset.id]: Uint8Array.from([4, 5, 6]),
-      [imageAsset.id]: Uint8Array.from([7, 8, 9]),
-    },
-  }))
+  useEditorStore.getState().importAsset(videoAsset, Uint8Array.from([4, 5, 6]))
+  useEditorStore.getState().importAsset(imageAsset, Uint8Array.from([7, 8, 9]))
   return soundId
 }
 
@@ -247,9 +234,17 @@ describe('MediaTab', () => {
   it('删除声音定义，并在素材字节缺失时禁用视频添加', () => {
     const soundId = seedAssets()
     useEditorStore.setState((state) => {
+      const sidecar = state.slideCandidateSidecar
+      const files = { ...(sidecar?.files ?? {}) }
+      delete files[videoAsset.id]
       const assetFiles = { ...state.assetFiles }
       delete assetFiles[videoAsset.id]
-      return { assetFiles }
+      return {
+        slideCandidateSidecar: sidecar
+          ? { ...sidecar, files }
+          : sidecar,
+        assetFiles,
+      }
     })
     render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
 

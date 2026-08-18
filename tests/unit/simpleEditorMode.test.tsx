@@ -158,10 +158,7 @@ describe('simple and professional editor modes', () => {
   it('creates, updates, removes, and restores a complete entrance animation atomically', () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
     const nodeId = useEditorStore.getState().selectedNodeId!
-    useEditorStore.setState({
-      history: { past: [], future: [] },
-      dirty: false,
-    })
+    const historyBefore = useEditorStore.getState().history.past.length
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -192,7 +189,7 @@ describe('simple and professional editor modes', () => {
         },
       }],
     })
-    expect(state.history.past).toHaveLength(1)
+    expect(state.history.past).toHaveLength(historyBefore + 1)
     expect(collectProjectHealth(state.project).some(
       (diagnostic) => diagnostic.code === 'interaction-enter-target-initially-visible',
     )).toBe(false)
@@ -206,7 +203,7 @@ describe('simple and professional editor modes', () => {
       type: 'node.enter',
       effect: 'scale',
     })
-    expect(state.history.past).toHaveLength(2)
+    expect(state.history.past).toHaveLength(historyBefore + 2)
 
     fireEvent.click(screen.getByRole('button', { name: '无' }))
 
@@ -215,7 +212,7 @@ describe('simple and professional editor modes', () => {
     node = scene.nodes.find((item) => item.id === nodeId)!
     expect(scene.interactions).toHaveLength(0)
     expect(node.playbackInitialVisibility).toBe('inherit')
-    expect(state.history.past).toHaveLength(3)
+    expect(state.history.past).toHaveLength(historyBefore + 3)
 
     act(() => useEditorStore.getState().undo())
 

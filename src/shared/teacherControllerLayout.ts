@@ -51,7 +51,7 @@ export interface TeacherControllerViewStatus {
   fullscreen: boolean
 }
 
-type TeacherControllerLayoutSource = Pick<
+export type TeacherControllerLayoutSource = Pick<
   TeacherControllerNode,
   'compact' | 'showSceneProgress' | 'collapsible' | 'buttons' | 'style'
 >
@@ -237,4 +237,84 @@ export function teacherControllerButtonDisplayLabel(
     return '退出全屏'
   }
   return button.label
+}
+
+/** Authoring action set. Collapse is chrome, not a button type. */
+export const TEACHER_CONTROLLER_AUTHORING_ACTIONS = [
+  { type: 'scene.previous', label: '上一场景' },
+  { type: 'scene.next', label: '下一场景' },
+  { type: 'scene.open-picker', label: '场景目录' },
+  { type: 'scene.replay', label: '重播' },
+  { type: 'audio.toggle-mute', label: '声音' },
+  { type: 'player.fullscreen.toggle', label: '全屏' },
+] as const
+
+export const TEACHER_CONTROLLER_COLLAPSE_ACTION = 'collapse' as const
+
+/** Spatial hosts the controller on the viewport overlay, not the world camera. */
+export const TEACHER_CONTROLLER_SPATIAL_LAYER = 'viewport' as const
+
+export const TEACHER_CONTROLLER_RESIZE_HANDLES = [
+  'nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w',
+] as const
+
+export type TeacherControllerResizeHandle =
+  (typeof TEACHER_CONTROLLER_RESIZE_HANDLES)[number]
+
+export type TeacherControllerHitTarget = 'collapse' | 'button' | 'panel'
+
+function copyRect(rect: TeacherControllerRect): TeacherControllerRect {
+  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+}
+
+/** Canonical authored box shared by Player content, Properties preview and selection chrome. */
+export function teacherControllerContentRect(
+  node: TeacherControllerRect,
+): TeacherControllerRect {
+  return copyRect(node)
+}
+
+/**
+ * Selection chrome uses the same canonical box as the controller content.
+ * Callers map both through `stageViewportTransform` — never a second matrix.
+ */
+export function teacherControllerSelectionChrome(
+  content: TeacherControllerRect,
+): TeacherControllerRect {
+  return copyRect(content)
+}
+
+export function pointInTeacherControllerRect(
+  x: number,
+  y: number,
+  rect: TeacherControllerRect,
+): boolean {
+  return x >= rect.x &&
+    x <= rect.x + rect.width &&
+    y >= rect.y &&
+    y <= rect.y + rect.height
+}
+
+/** Hit-test in layout-local coordinates produced by `createTeacherControllerLayout`. */
+export function teacherControllerHitTarget(
+  local: { x: number; y: number },
+  layout: TeacherControllerLayout,
+  collapsed: boolean,
+): TeacherControllerHitTarget | null {
+  if (layout.collapse && pointInTeacherControllerRect(local.x, local.y, layout.collapse)) {
+    return 'collapse'
+  }
+  if (collapsed) return null
+  for (const button of layout.buttons) {
+    if (pointInTeacherControllerRect(local.x, local.y, button)) return 'button'
+  }
+  if (
+    local.x >= 0 &&
+    local.y >= 0 &&
+    local.x <= layout.width &&
+    local.y <= layout.height
+  ) {
+    return 'panel'
+  }
+  return null
 }

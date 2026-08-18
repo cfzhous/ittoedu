@@ -3,6 +3,39 @@ import { bytesToBase64 } from './base64'
 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 10_000
 
+function waitUntil(
+  isReady: () => boolean,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (action: () => void) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      action()
+    }
+    const timeout = window.setTimeout(() => {
+      finish(() => reject(new Error(timeoutMessage)))
+    }, timeoutMs)
+    const check = () => {
+      if (settled) return
+      try {
+        if (isReady()) {
+          finish(() => resolve())
+          return
+        }
+      } catch (error) {
+        finish(() => reject(error instanceof Error ? error : new Error(String(error))))
+        return
+      }
+      requestAnimationFrame(check)
+    }
+    check()
+  })
+}
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -28,49 +61,38 @@ export function waitForPlayerScene(
   expectedIndex: number,
   timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const started = performance.now()
-    const check = () => {
-      if (player.getCurrentSceneIndex() === expectedIndex) {
-        resolve()
-        return
-      }
-      if (performance.now() - started > timeoutMs) {
-        reject(new Error(`静态导出播放器切换到第 ${expectedIndex + 1} 页超时`))
-        return
-      }
-      requestAnimationFrame(check)
-    }
-    check()
-  })
+  return waitUntil(
+    () => player.getCurrentSceneIndex() === expectedIndex,
+    timeoutMs,
+    `静态导出播放器切换到第 ${expectedIndex + 1} 页超时`,
+  )
 }
 
 export function waitForPlayerLoaderIdle(
   player: PlayerApp,
   timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const started = performance.now()
-    const check = () => {
+  return waitUntil(
+    () => {
       const scene = player.game.scene.getScene('courseware-player')
-      if (!scene.load.isLoading()) {
-        resolve()
-        return
-      }
-      if (performance.now() - started > timeoutMs) {
-        reject(new Error('静态导出等待场景素材加载超时'))
-        return
-      }
-      requestAnimationFrame(check)
-    }
-    check()
-  })
+      return !scene?.load?.isLoading()
+    },
+    timeoutMs,
+    '静态导出等待场景素材加载超时',
+  )
 }
 
 export function settleCaptureFrames(milliseconds = 120): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    window.setTimeout(finish, milliseconds + 80)
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.setTimeout(resolve, milliseconds))
+      requestAnimationFrame(() => window.setTimeout(finish, milliseconds))
     })
   })
 }
@@ -688,43 +710,6 @@ function stageHasCompositedDom(stage: HTMLElement): boolean {
     '[data-courseware-runtime-root]',
     '[data-courseware-component-root]',
   ].join(',')) !== null
-}
-
-/**
- * Rasterizes one already-mounted DOM subtree after its Runtime/Component
- * capture hook has settled. Keeping this beside the Player compositor makes
- * PPTX item snapshots use the same image, canvas, SVG and text painting rules
- * as the existing PDF/PPTX player captures.
- */
-export async function captureMountedElementPng(
-  element: HTMLElement,
-): Promise<string> {
-  const rect = element.getBoundingClientRect()
-  const width = Math.ceil(rect.width)
-  const height = Math.ceil(rect.height)
-  if (width <= 0 || height <= 0) {
-    throw new Error('动态实例没有可捕获的画面尺寸')
-  }
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('无法创建动态实例快照画布')
-  context.imageSmoothingEnabled = true
-  context.imageSmoothingQuality = 'high'
-  await paintNode(element, 1, {
-    context,
-    stageRect: rect,
-    imageCache: new Map(),
-    // Copy every live Canvas immediately. This is essential for current
-    // Runtime/Component instances whose drawing buffer may be transient.
-    canvasCache: snapshotDomCanvases(element),
-  })
-  const dataUrl = canvas.toDataURL('image/png')
-  if (!dataUrl.startsWith('data:image/png')) {
-    throw new Error('动态实例快照未生成 PNG')
-  }
-  return dataUrl
 }
 
 function phaserSnapshot(player: PlayerApp): Promise<string> {

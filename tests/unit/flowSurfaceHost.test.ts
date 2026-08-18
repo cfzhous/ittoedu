@@ -1,0 +1,280 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { strFromU8, unzipSync } from 'fflate'
+import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
+import type { PublishedFlowSurface, PublishedNativeLayerItem } from '@/shared/publishedCourseTypes'
+import { FlowSurfaceHost } from '@/player/surfaces/flow/FlowSurfaceHost'
+import { isPublishedFlowSurface } from '@/player/surfaces/flow/flowModel'
+import {
+  FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL,
+  FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX,
+  FLOW_RUNTIME_TOC_OPEN_ARIA_LABEL,
+  flowRuntimeTocAnchorId,
+} from '@/player/surfaces/flow/flowRuntimeToc'
+import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
+import {
+  buildFlowPrintPlan,
+  flowPrintPlanHasRuntimeToc,
+  renderFlowPrintHtml,
+} from '@/renderer/export/course/flowPrintPlan'
+
+function teacherController(): PublishedNativeLayerItem {
+  return {
+    layerItemId: 'flow-controller',
+    kind: 'native',
+    frame: { mode: 'absolute', x: 24, y: 640, width: 520, height: 64 },
+    order: 20,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    content: {
+      nativeType: 'teacher-controller',
+      data: {
+        title: '教师控制',
+        showSceneProgress: true,
+        compact: false,
+        collapsible: true,
+        defaultCollapsed: false,
+        buttons: [
+          { id: 'prev', label: '上一场景', visible: true, action: { type: 'scene.previous' } },
+          { id: 'next', label: '下一场景', visible: true, action: { type: 'scene.next' } },
+          { id: 'mute', label: '声音', visible: true, action: { type: 'audio.toggle-mute' } },
+        ],
+        style: {
+          backgroundColor: '#ffffff',
+          backgroundOpacity: 1,
+          accentColor: '#2563eb',
+          textColor: '#172033',
+          cornerRadius: 8,
+        },
+        includeInStaticExports: false,
+      },
+    },
+  }
+}
+
+function flowSurface(): PublishedFlowSurface {
+  return {
+    id: 'flow-host',
+    type: 'flow',
+    title: '运行讲义',
+    layout: { readingWidth: 760, wideContentWidth: 1120 },
+    blocks: [
+      { id: 'h1', type: 'heading', level: 1, text: '阅读任务' },
+      { id: 'p1', type: 'paragraph', text: '长文正文' },
+      {
+        id: 'list-1',
+        type: 'list',
+        ordered: false,
+        items: [{ id: 'li-1', text: '证据一' }],
+      },
+      {
+        id: 'table-1',
+        type: 'table',
+        caption: '工厂记录',
+        columns: [{ id: 'col-a', header: '年份' }],
+        rows: [{ id: 'row-1', cells: { 'col-a': { text: '1894' } } }],
+      },
+      {
+        id: 'formula-1',
+        type: 'formula',
+        formulaId: 'fx',
+        accessibleText: 'x',
+        ast: { type: 'token', value: 'x' },
+      },
+      {
+        id: 'media-1',
+        type: 'media',
+        assetId: 'missing-audio',
+        mediaKind: 'audio',
+        altText: '厂区录音',
+        layout: 'content-width',
+      },
+      { id: 'h2', type: 'heading', level: 2, text: '材料 B' },
+    ],
+    surfaceLayerItems: [],
+  }
+}
+
+function publishedCourse(): PublishedCourseV2Payload {
+  const surface = flowSurface()
+  return {
+    format: 'h5course-published',
+    formatVersion: 2,
+    sourceSchemaVersion: 9,
+    courseId: 'published-flow',
+    title: '运行讲义课',
+    assets: {},
+    components: {},
+    designTokens: {
+      fonts: [{
+        id: 'body',
+        label: '正文',
+        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+      }],
+      colors: [
+        { id: 'background', label: '背景', color: '#ffffff' },
+        { id: 'text', label: '正文', color: '#1f2937' },
+      ],
+    },
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: true, musicVolume: 0.3, fadeMs: 250 },
+      },
+    },
+    playback: {
+      controls: 'canvas',
+      keyboardNavigation: true,
+      presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+    },
+    courseState: [],
+    navigationGuards: [],
+    locations: [
+      { id: 'loc-h1', label: '阅读任务', kind: 'flow-block', surfaceId: 'flow-host', blockId: 'h1' },
+      { id: 'loc-h2', label: '材料 B', kind: 'flow-block', surfaceId: 'flow-host', blockId: 'h2' },
+    ],
+    startLocationId: 'loc-h1',
+    globalLayerItems: [
+      {
+        item: teacherController(),
+        visibility: { mode: 'all', locationIds: [] },
+      },
+    ],
+    globalInteractions: [],
+    surfaces: [surface],
+  }
+}
+
+async function mountHost(course = publishedCourse()) {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const host = new FlowSurfaceHost(course)
+  await host.mount(container)
+  await host.activate()
+  return { host, container, course }
+}
+
+afterEach(() => {
+  document.body.innerHTML = ''
+  vi.clearAllMocks()
+})
+
+describe('FlowSurfaceHost runtime TOC', () => {
+  it('starts collapsed against the viewport left edge and does not read author DOM', async () => {
+    const { host, container, course } = await mountHost()
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-toc-toggle"]')!
+    const drawer = container.querySelector<HTMLElement>('[data-testid="flow-runtime-toc-drawer"]')!
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    expect(host.tocOpen).toBe(false)
+    expect(toggle.getAttribute('aria-label')).toBe(FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.style.position).toBe('fixed')
+    expect(toggle.style.left).toBe('0px')
+    expect(toggle.querySelector('[data-flow-runtime-toc-chevron="right"]')).not.toBeNull()
+    expect(drawer.style.position).toBe('fixed')
+    expect(drawer.style.transform).toBe('translateX(-100%)')
+    expect(article.style.marginLeft).toBe('0px')
+    const publishedFlow = course.surfaces.find(isPublishedFlowSurface)
+    expect(host.playbackDocument.surfaces[0]?.blocks).toEqual(publishedFlow?.blocks)
+    article.innerHTML = '<p data-forged="true">forged from author DOM</p>'
+    expect(host.playbackDocument.surfaces[0]?.blocks[1]).toMatchObject({ id: 'p1', type: 'paragraph' })
+    await host.destroy()
+  })
+
+  it('opens a left inset drawer, jumps heading anchors, and keeps paragraphs out of TOC', async () => {
+    const { host, container } = await mountHost()
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-toc-toggle"]')!
+    const drawer = container.querySelector<HTMLElement>('[data-testid="flow-runtime-toc-drawer"]')!
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    toggle.click()
+    expect(host.tocOpen).toBe(true)
+    expect(toggle.getAttribute('aria-label')).toBe(FLOW_RUNTIME_TOC_OPEN_ARIA_LABEL)
+    expect(toggle.style.left).toBe(`${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px`)
+    expect(toggle.querySelector('[data-flow-runtime-toc-chevron="left"]')).not.toBeNull()
+    expect(drawer.style.transform).toBe('translateX(0)')
+    expect(article.style.marginLeft).toBe(`${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px`)
+
+    const items = [...container.querySelectorAll<HTMLElement>('[data-flow-runtime-toc-item]')]
+    expect(items.map((item) => item.dataset.flowTocBlockId).filter(Boolean)).toEqual(['h1', 'h2'])
+    expect(container.querySelector('[data-flow-toc-block-id="p1"]')).toBeNull()
+    expect(container.querySelector(`#${flowRuntimeTocAnchorId('h1')}`)?.tagName).toBe('H1')
+
+    const heading = container.querySelector<HTMLElement>(`#${flowRuntimeTocAnchorId('h2')}`)!
+    heading.scrollIntoView = vi.fn()
+    items.find((item) => item.dataset.flowTocBlockId === 'h2')!.click()
+    expect(heading.scrollIntoView).toHaveBeenCalled()
+
+    drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(host.tocOpen).toBe(false)
+    expect(toggle.getAttribute('aria-label')).toBe(FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL)
+    expect(article.style.marginLeft).toBe('0px')
+    await host.destroy()
+  })
+})
+
+describe('FlowSurfaceHost course session overlay', () => {
+  it('mounts the shared teacher controller on the viewport overlay, not as a document footer', async () => {
+    const { host, container } = await mountHost()
+    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const overlay = container.querySelector<HTMLElement>('[data-testid="flow-runtime-overlay"]')!
+    const controller = overlay.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')
+    expect(controller).not.toBeNull()
+    expect(article.contains(controller)).toBe(false)
+    expect(article.querySelector('.slide-native-teacher-controller')).toBeNull()
+    expect(overlay.querySelector('.slide-native-teacher-controller')).not.toBeNull()
+    const progress = overlay.querySelector<HTMLElement>('.slide-teacher-controller-progress')
+    expect(progress?.textContent).toContain('运行讲义')
+    expect(progress?.textContent).not.toContain('语义长文覆盖图层')
+    expect(host.surface.id).toBe('flow-host')
+    await host.destroy()
+  })
+})
+
+describe('Flow print and DOCX helpers', () => {
+  it('keeps document structure and never ships the runtime TOC drawer', async () => {
+    const { host, container } = await mountHost()
+    expect(container.querySelector('[data-testid="flow-runtime-toc-drawer"]')).not.toBeNull()
+
+    const plan = buildFlowPrintPlan(host.surface)
+    expect(plan.includesRuntimeToc).toBe(false)
+    expect(flowPrintPlanHasRuntimeToc(plan)).toBe(false)
+    expect(plan.nodes.map((node) => node.type)).toEqual([
+      'document-title',
+      'heading',
+      'paragraph',
+      'list',
+      'table',
+      'formula',
+      'media',
+      'heading',
+    ])
+    const html = renderFlowPrintHtml(plan)
+    expect(html).toContain('阅读任务')
+    expect(html).toContain('长文正文')
+    expect(html).toContain('证据一')
+    expect(html).toContain('1894')
+    expect(html).toContain('公式说明：x')
+    expect(html).toContain('[媒体后备：厂区录音]')
+    expect(html).not.toContain('flow-runtime-toc')
+    expect(html).not.toContain('打开目录')
+
+    const docx = buildFlowDocx(host.surface)
+    const files = unzipSync(docx.bytes)
+    const documentXml = strFromU8(files['word/document.xml']!)
+    expect(documentXml).toContain('阅读任务')
+    expect(documentXml).toContain('长文正文')
+    expect(documentXml).toContain('证据一')
+    expect(documentXml).toContain('1894')
+    expect(documentXml).toContain('公式说明：x')
+    expect(documentXml).toContain('[媒体后备：厂区录音]')
+    expect(documentXml).not.toContain('flow-runtime-toc')
+    expect(documentXml).not.toContain('打开目录')
+    expect(documentXml).not.toContain('收起目录')
+    await host.destroy()
+  })
+})

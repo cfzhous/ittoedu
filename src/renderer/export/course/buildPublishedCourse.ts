@@ -23,6 +23,7 @@ import {
   PUBLISHED_COURSE_VERSION,
   type PublishedComponentLayerItem,
   type PublishedCourseComponent,
+  type PublishedCourseExecutableCode,
   type PublishedCourseSurface,
   type PublishedCourseV2Payload,
   type PublishedLayerItem,
@@ -31,8 +32,7 @@ import {
 } from '../../../shared/publishedCourseTypes'
 import { publishedCourseV2Schema } from '../../../shared/publishedCourseSchema'
 import type { AssetMeta, EmbeddedComponentPackageMeta } from '../../../shared/projectTypes'
-import { bytesToDataUrl } from '../base64'
-import { encodePublishedCode } from '../buildPublishedLesson'
+import { bytesToBase64, bytesToDataUrl } from '../base64'
 
 export interface CoursePublishSources {
   project: CourseProjectDocument
@@ -75,6 +75,23 @@ function cloneJson<T>(value: T): T {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Same UTF-16LE encoding as V8 `encodePublishedCode`, copied here so the V9
+ * producer does not import or alter the default lesson publisher.
+ */
+function encodePublishedCode(source: string): PublishedCourseExecutableCode {
+  const bytes = new Uint8Array(source.length * 2)
+  for (let index = 0; index < source.length; index += 1) {
+    const codeUnit = source.charCodeAt(index)
+    bytes[index * 2] = codeUnit & 0xff
+    bytes[index * 2 + 1] = codeUnit >>> 8
+  }
+  return {
+    encoding: 'base64-utf16le',
+    data: bytesToBase64(bytes),
+  }
 }
 
 function mergeLayerOverride(
@@ -495,6 +512,8 @@ function publishSurface(
     world: {
       bounds: cloneJson(surface.world.bounds),
       layerItems: surface.world.layerItems.map((item) => publishLayerItem(sources, item)),
+      paths: cloneJson(surface.world.paths ?? []),
+      relations: cloneJson(surface.world.relations ?? []),
     },
     camera: cloneJson(surface.camera),
     semanticZoom: cloneJson(surface.semanticZoom),
@@ -505,6 +524,10 @@ function publishSurface(
  * Compile a validated authoring project into the one-way Published Course V2
  * contract. Author-only labels, locks, timestamps and Runtime source strings
  * are deliberately absent from the returned object.
+ *
+ * This producer copies Flow `blocks` and Spatial `world`/`camera` as data. It
+ * does not reconstruct a project from DOM, Phaser proxies, or a Player host,
+ * and it does not claim that unimplemented hosts have played the payload.
  */
 export function buildPublishedCourseV2Payload(
   input: CoursePublishSources,

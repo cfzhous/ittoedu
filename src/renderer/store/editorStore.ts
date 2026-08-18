@@ -41,9 +41,11 @@ import type {
   SoundDefinition,
   TextNode,
   TextRun,
+  TextRunStyle,
   VideoNode,
 } from '../../shared/projectTypes'
 import {
+  applySceneNodeOverride,
   createDefaultScenePresentation,
   deriveSceneNodeOverride,
   ensureScenePresentation,
@@ -69,7 +71,10 @@ import {
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
+  isCourseTeacherControllerLayerItem,
+  restoreCourseTeacherControllerLayer,
   restoreTeacherControllerForDelivery,
+  synchronizeCourseTeacherControllerControls,
   synchronizeTeacherControllerControls,
 } from '../../shared/teacherControllerConsistency'
 import {
@@ -99,14 +104,1225 @@ import {
   pushHistory,
   type AssetFileHistoryChange,
   type ComponentPackageHistoryChange,
+  type HistoryEntry,
   type HistoryState,
 } from './history'
 import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
 } from '../components/importComponentPackage'
+import {
+  beginV9SlideContentEdit,
+  cancelV9SlideContentEdit,
+  commitV9SlideContentEdit,
+  commitV9SlideTextRunStyle,
+  updateV9SlideContentTextDraft,
+  type V9SlideContentEditSession,
+  type V9SlideFormulaContentDraft,
+  type V9SlideTextContentDraft,
+} from '../authoring/v9SlideContentEdit'
+import { commitTeacherControllerAuthoringFrame } from '../authoring/v9TeacherControllerAuthoring'
+import {
+  commandTargetFromRow,
+  projectEffectiveLayers,
+  scopeTokenForSelectingRow,
+  type EffectiveLayerProjection,
+  type EffectiveLayerProjectionRow,
+} from '../course/effectiveLayerProjection'
+import {
+  CROSS_OWNER_REORDER_REASON,
+  deleteEffectiveLayerItem,
+  duplicateEffectiveLayerItem,
+  findGlobalTeacherController,
+  moveEffectiveLayerOwner,
+  patchEffectiveLayerItem,
+  reorderEffectiveLayerItems,
+  restoreDefaultTeacherController,
+  setGlobalLayerLocationVisibility,
+  setGlobalLayerVisibleAtLocation,
+  type EffectiveLayerOwnerDestination,
+  type LayerCommandResult,
+} from '../course/effectiveLayerCommands'
+import {
+  addCourseLibraryMediaToCanvas,
+  bindCourseMediaSession,
+  deleteCourseAsset,
+  deleteCourseSound,
+  importAndPlaceCourseMedia,
+  importCourseMediaAssets,
+  importCourseSounds,
+  replaceCourseLayerMedia,
+  updateCourseAudioSettings,
+  updateCourseSound,
+  type CourseMediaCommandResult,
+  type CourseMediaSession,
+} from '../course/v9MediaAudioCommands'
+import {
+  addSlideComponentLayer,
+  addSlideFormulaLayer,
+  addSlideImageLayer,
+  addSlideShapeLayer,
+  addSlideTextLayer,
+  addSlideVideoLayer,
+  updateSlideNativeLayerContent,
+  setSlideSimpleEntranceAnimation as writeSlideSimpleEntranceAnimation,
+} from '../course/v9SlideContentCommands'
+import {
+  addSlideSceneInteractionRule,
+  executeSlideSceneAction,
+  shouldIgnoreSlideLayerDeleteForFocus,
+  updateSlideSceneInteractionRule,
+  type SlideSceneActionId,
+} from '../course/v9SlideActionCommands'
+import type { V9SlideClipboardPayload } from '../course/v9SlideClipboard'
+import {
+  commitSlideAuthoringHistory,
+  commitSlideProjectMutation,
+  selectSlideEditorLayers,
+  type SlideAuthoringHistory,
+} from '../course/slideEditorCommands'
+import {
+  allocateCourseLayerOrder,
+  setGlobalLayerScenePlane,
+  sortLayerItemList,
+  sortScopedLayerList,
+} from '../course/globalLayerCommands'
+import { createBlankCourseProject } from '../project/createCourseProject'
+import {
+  courseProjectStartsAsSpatial,
+  createBlankSpatialCourseProject,
+} from '../project/createSpatialCourseProject'
+import {
+  courseProjectStartsAsFlow,
+  createBlankFlowCourseProject,
+  openFlowAuthoringSession,
+  type FlowAuthoringSession,
+} from '../project/createFlowCourseProject'
+import {
+  classifyFlowDeleteIntent,
+  commitFlowEditorHistory,
+  createFlowEditorHistory,
+  redoFlowEditorHistory,
+  selectFlowEditorBlock,
+  selectFlowEditorBlocks,
+  selectFlowOverlay,
+  undoFlowEditorHistory,
+  type FlowEditorHistory,
+  type FlowEditorSelection,
+} from '../course/flowEditorSlice'
+import {
+  executeFlowEditorCommand,
+  executeFlowDelete,
+  insertFlowEditorBlock,
+  updateFlowEditorBlock,
+  type FlowCommandResult,
+} from '../course/flowEditorCommands'
+import {
+  enterFlowGlobalAuthoring,
+  executeFlowSharedDelete,
+  insertFlowSharedComponent,
+  insertFlowSharedMedia,
+  insertFlowSharedShape,
+  type FlowSharedAuthoringResult,
+} from '../course/flowSharedAuthoringAdapters'
+import {
+  formatFlowAuthoringBlock,
+  formatFlowAuthoringTextStyle,
+  isFlowTextDraftDirty,
+  type FlowTextEditSession,
+} from '../authoring/flowTextEdit'
+import { listFlowCourseTreePages } from '../course/flowEditorView'
+import {
+  addCourseFlowPage,
+  addCourseScene,
+  addCourseSlidePage,
+  addCourseSpatialPage,
+  reorderCourseSurfaces as applyReorderCourseSurfaces,
+  type CourseLocationCommandResult,
+} from '../course/courseLocationCommands'
+import type {
+  CourseEditorDropdownAction,
+  CourseEditorPrimaryAction,
+} from '../course/courseEditorLayout'
+import { deriveCourseEditorLayout } from '../course/courseEditorLayout'
+import {
+  createEditorSelectionSnapshot,
+  resolveFlowDeleteRoute,
+  routeEditorAction as routeEditorActionCore,
+  type EditorActionId,
+  type EditorActionResult,
+  type EditorFocusKind,
+  type EditorSelectionSnapshot,
+} from '../course/editorActionRouting'
+import {
+  COURSE_AUTHORING_TEXT_COMPOSING_SWITCH_REASON,
+  createCourseAuthoringSession,
+  selectionSnapshotFromSession,
+  switchCourseAuthoringLocation,
+  updateCourseAuthoringSessionItems,
+  updateCourseAuthoringSessionRevision,
+  type CourseAuthoringSession,
+  type CourseAuthoringSurfaceType,
+} from '../authoring/courseAuthoringSession'
+import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
+import {
+  migrateProjectV8ToCourseProjectV9,
+  sceneNodeToCourseLayerItem,
+} from '../../shared/courseProjectModel'
+import type {
+  CourseLocation,
+  CourseProjectDocument,
+  CourseRuntimeDefinition,
+  LayerItem,
+  LayerItemOverride,
+  LocationVisibility,
+  SlideSceneDocument,
+  SpatialSurfaceDocument,
+} from '../../shared/courseProjectTypes'
+import {
+  addSpatialWorldComponentLayer,
+  addSpatialWorldFormulaLayer,
+  addSpatialWorldImageLayer,
+  addSpatialWorldShapeLayer,
+  addSpatialWorldTextLayer,
+  addSpatialWorldVideoLayer,
+  buildSpatialAuthoringSnapshot,
+  openSpatialAuthoringSession,
+  redoSpatialAuthoring,
+  selectSpatialLayers,
+  setSpatialEditingScope,
+  transformSpatialWorldLayersInSession,
+  undoSpatialAuthoring,
+  type SpatialAuthoringSession,
+  type SpatialAuthoringSnapshot,
+  type SpatialCommandResult,
+} from '../course/spatialEditorCommands'
+import {
+  activateSpatialCameraFrame,
+  addSpatialCameraFrameFromSession,
+  deleteSpatialCameraFrameInSession,
+  fitSpatialSessionToHomeCamera,
+  fitSpatialSessionToWorldContent,
+  renameSpatialCameraFrameInSession,
+  reorderSpatialCameraFramesInSession,
+  setSpatialCameraHomeFromSession,
+  updateActiveSpatialCameraFrameFromSession,
+} from '../course/spatialCameraCommands'
+import {
+  addSpatialPathInSession,
+  deleteSpatialPathInSession,
+  deleteSpatialWorldLayersReportingReferences,
+  reorderSpatialPathWaypointsInSession,
+  setSpatialShowCameraFrames,
+  updateSpatialPathInSession,
+} from '../course/spatialPathCommands'
+import {
+  addSpatialRelationInSession,
+  deleteSpatialRelationInSession,
+  updateSpatialRelationInSession,
+} from '../course/spatialRelationCommands'
+import {
+  addSpatialSemanticZoomRuleInSession,
+  deleteSpatialSemanticZoomRuleInSession,
+  updateSpatialSemanticZoomRuleInSession,
+} from '../course/spatialSemanticZoom'
+import {
+  beginSpatialWorldContentEdit,
+  commitSpatialWorldContentEdit,
+  commitSpatialWorldTextRunStyle,
+  updateSpatialWorldContentFormulaDraft,
+  updateSpatialWorldContentTextDraft,
+  type SpatialWorldContentEditSession,
+} from '../authoring/spatialWorldAuthoring'
+import { commitSpatialAuthoringHistory, commitSpatialProjectMutation, rejectSpatialCommand, succeedSpatialCommand } from '../course/spatialAuthoringHistory'
+import { buildSpatialEditorView } from '../course/spatialEditorView'
+import {
+  createSlideCandidateBackend,
+  openSlideAuthoringSession,
+  slideAuthoringGeneration,
+  type SlideAuthoringSession,
+  transformSlideNativeLayers,
+  type SlideAuthoringSnapshot,
+  type SlideCandidateBackend,
+  type SlideCommandResult,
+} from '../course/v9SlideVerticalSlice'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '../project/courseProjectArchive'
+import {
+  emptyCourseAssetSidecar,
+  freezeCourseAssetSidecar,
+  listCourseAssetReferences,
+  type CourseAssetSidecar,
+} from '../project/v9AssetAdapter'
+import {
+  SLIDE_BACKEND_DUAL_WRITE_REFUSED,
+  SLIDE_BACKEND_NOT_CANDIDATE,
+  V8_SLIDE_BACKEND,
+  executeSlideCandidateCommand,
+  getSlideBackendKind,
+  isV9SlideCandidateBackend,
+  type SlideBackend,
+  type SlideBackendKind,
+} from './slideBackendPort'
+import {
+  courseLayerItemToSceneNode,
+  projectV9EditingNodes,
+  projectV9SlideScenes,
+} from './v9SlideUiProjection'
 
 enablePatches()
+
+interface SlideCandidateUiProjection {
+  scenes: SceneDocument[]
+  activeScene: SceneDocument
+  nodes: SceneNode[]
+}
+
+function withV9ContentDraft(
+  edit: V9SlideContentEditSession | null,
+  nodes: SceneNode[],
+): SceneNode[] {
+  if (!edit) return nodes
+  return nodes.map((node) => {
+    if (node.id !== edit.target.layerItemId) return node
+    if (edit.kind === 'text' && node.type === 'text') {
+      const draft = edit.draft as V9SlideTextContentDraft
+      return {
+        ...node,
+        text: draft.text,
+        runs: structuredClone(draft.runs),
+        ...(typeof draft.width === 'number' ? { width: draft.width } : {}),
+        ...(typeof draft.height === 'number' ? { height: draft.height } : {}),
+      }
+    }
+    if (edit.kind === 'formula' && node.type === 'formula') {
+      const draft = edit.draft as V9SlideFormulaContentDraft
+      return {
+        ...node,
+        ast: structuredClone(draft.ast),
+        ...(draft.accessibleText === undefined
+          ? {}
+          : { accessibleText: draft.accessibleText }),
+      }
+    }
+    return node
+  })
+}
+
+function isV9SlideTextContentDraft(
+  draft: V9SlideTextContentDraft | V9SlideFormulaContentDraft,
+): draft is V9SlideTextContentDraft {
+  return 'text' in draft && 'runs' in draft
+}
+
+function flowLocationBlockId(
+  locations: readonly CourseLocation[],
+  locationId: string,
+): string | undefined {
+  const location = locations.find((item) => item.id === locationId)
+  return location?.kind === 'flow-block' ? location.blockId : undefined
+}
+
+function emptySidecarStacks(): Pick<
+  EditorState,
+  | 'slideCandidateSidecar'
+  | 'slideCandidateSidecarPast'
+  | 'slideCandidateSidecarFuture'
+  | 'slideCandidateComponentPackagesPast'
+  | 'slideCandidateComponentPackagesFuture'
+> {
+  return {
+    slideCandidateSidecar: emptyCourseAssetSidecar(),
+    slideCandidateSidecarPast: [],
+    slideCandidateSidecarFuture: [],
+    slideCandidateComponentPackagesPast: [],
+    slideCandidateComponentPackagesFuture: [],
+  }
+}
+
+function cloneSidecar(sidecar: CourseAssetSidecar): CourseAssetSidecar {
+  return freezeCourseAssetSidecar(sidecar.files)
+}
+
+function projectedAssetFiles(sidecar: CourseAssetSidecar | null | undefined): Record<string, Uint8Array> {
+  if (!sidecar) return {}
+  return Object.fromEntries(
+    Object.entries(sidecar.files).map(([assetId, bytes]) => [assetId, bytes.slice()]),
+  )
+}
+
+function courseRuntimeToDocument(runtime: CourseRuntimeDefinition): RuntimeDocument {
+  return {
+    runtimeApiVersion: 2,
+    enabled: runtime.enabled,
+    renderMode: runtime.renderMode,
+    source: runtime.source,
+    content: structuredClone(runtime.content),
+    assets: structuredClone(runtime.assets),
+    ...(runtime.nodeBindings ? { nodeBindings: structuredClone(runtime.nodeBindings) } : {}),
+    ...(runtime.staticFallback
+      ? {
+          staticFallback: {
+            assetId: runtime.staticFallback.assetId,
+            coverage: runtime.staticFallback.coverage === 'scene' ? 'full-scene' : 'runtime-layer',
+            layer: 'overlay' as const,
+          },
+        }
+      : {}),
+  }
+}
+
+function runtimeDocumentToCourseRuntime(runtime: RuntimeDocument): CourseRuntimeDefinition {
+  return {
+    protocol: 'legacy-runtime-v2',
+    runtimeApiVersion: 2,
+    enabled: runtime.enabled,
+    renderMode: runtime.renderMode,
+    source: runtime.source,
+    content: structuredClone(runtime.content),
+    assets: structuredClone(runtime.assets),
+    ...(runtime.nodeBindings ? { nodeBindings: structuredClone(runtime.nodeBindings) } : {}),
+    ...(runtime.staticFallback
+      ? {
+          staticFallback: {
+            assetId: runtime.staticFallback.assetId,
+            coverage: runtime.staticFallback.coverage === 'full-scene' ? 'scene' : 'surface',
+          },
+        }
+      : {}),
+  }
+}
+
+function makeRuntimeLayerItem(
+  draft: CourseProjectDocument,
+  runtime: RuntimeDocument,
+  label: string,
+  preferredId: string,
+): LayerItem {
+  return {
+    layerItemId: preferredId,
+    label,
+    kind: 'runtime',
+    frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+    order: allocateCourseLayerOrder(draft, 0),
+    visible: runtime.enabled,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    runtime: runtimeDocumentToCourseRuntime(runtime),
+  }
+}
+
+function writeSceneRuntime(
+  draft: CourseProjectDocument,
+  sceneId: string,
+  runtime: RuntimeDocument | undefined,
+): void {
+  for (const surface of draft.surfaces) {
+    if (surface.type !== 'slide') continue
+    const scene = surface.scenes.find((item) => item.id === sceneId)
+    if (!scene) continue
+    const existing = scene.layerItems.find((item) => item.kind === 'runtime')
+    if (!runtime) {
+      scene.layerItems = scene.layerItems.filter((item) => item.kind !== 'runtime')
+      return
+    }
+    if (existing && existing.kind === 'runtime') {
+      existing.runtime = runtimeDocumentToCourseRuntime(runtime)
+      existing.visible = runtime.enabled
+      return
+    }
+    scene.layerItems.push(makeRuntimeLayerItem(draft, runtime, '场景运行时', `runtime-${sceneId}`))
+    sortLayerItemList(scene.layerItems)
+    return
+  }
+}
+
+function writeGlobalRuntime(
+  draft: CourseProjectDocument,
+  runtime: RuntimeDocument | undefined,
+): void {
+  const existing = draft.globalLayerItems.find((entry) => entry.item.kind === 'runtime')
+  if (!runtime) {
+    draft.globalLayerItems = draft.globalLayerItems.filter((entry) => entry.item.kind !== 'runtime')
+    return
+  }
+  if (existing && existing.item.kind === 'runtime') {
+    existing.item.runtime = runtimeDocumentToCourseRuntime(runtime)
+    existing.item.visible = runtime.enabled
+    return
+  }
+  draft.globalLayerItems.push({
+    item: makeRuntimeLayerItem(draft, runtime, '全局运行时', `runtime-global-${draft.id}`),
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  sortScopedLayerList(draft.globalLayerItems)
+}
+
+function firstRuntimeItem(items: readonly LayerItem[]): LayerItem | undefined {
+  return items.find((item) => item.kind === 'runtime')
+}
+
+function attachProjectedRuntimes(
+  document: CourseProjectDocument,
+  scenes: SceneDocument[],
+): { scenes: SceneDocument[]; globalRuntime?: RuntimeDocument } {
+  const globalRuntimeItem = firstRuntimeItem(document.globalLayerItems.map((entry) => entry.item))
+  const nextScenes = scenes.map((scene) => {
+    const surface = document.surfaces.find((candidate) => (
+      candidate.type === 'slide' && candidate.scenes.some((item) => item.id === scene.id)
+    ))
+    const source = surface && surface.type === 'slide'
+      ? surface.scenes.find((item) => item.id === scene.id)
+      : undefined
+    const runtimeItem = source ? firstRuntimeItem(source.layerItems) : undefined
+    if (!runtimeItem || runtimeItem.kind !== 'runtime') return scene
+    return { ...scene, runtime: courseRuntimeToDocument(runtimeItem.runtime) }
+  })
+  return {
+    scenes: nextScenes,
+    ...(globalRuntimeItem?.kind === 'runtime'
+      ? { globalRuntime: courseRuntimeToDocument(globalRuntimeItem.runtime) }
+      : {}),
+  }
+}
+
+function findMutableCourseLayerItem(
+  draft: CourseProjectDocument,
+  layerItemId: string,
+): LayerItem | null {
+  const global = draft.globalLayerItems.find((entry) => entry.item.layerItemId === layerItemId)
+  if (global) return global.item
+  for (const surface of draft.surfaces) {
+    if (surface.type !== 'slide') continue
+    for (const scene of surface.scenes) {
+      const item = scene.layerItems.find((candidate) => candidate.layerItemId === layerItemId)
+      if (item) return item
+    }
+    const shared = surface.surfaceLayerItems.find((entry) => entry.item.layerItemId === layerItemId)
+    if (shared) return shared.item
+  }
+  return null
+}
+
+function applySceneNodePatchToLayerItem(
+  item: LayerItem,
+  patch: DeepPartial<SceneNode>,
+  componentPackages: Record<string, ComponentPackageData>,
+): void {
+  const current = courseLayerItemToSceneNode(item)
+  if (!current) return
+  const next = normalizeNodeGeometry(
+    current,
+    patchSceneNode(current, patch),
+    patch,
+    componentPackages,
+  )
+  const converted = sceneNodeToCourseLayerItem(next, item.order)
+  converted.hitPolicy = item.hitPolicy
+  Object.assign(item, converted)
+}
+
+function layerItemOverrideToNodeOverride(
+  override: LayerItemOverride,
+): SceneNodeOverride {
+  const next: Record<string, unknown> = {}
+  if (override.label !== undefined) next.name = override.label
+  if (override.frame?.x !== undefined) next.x = override.frame.x
+  if (override.frame?.y !== undefined) next.y = override.frame.y
+  if (override.frame?.width !== undefined) next.width = override.frame.width
+  if (override.frame?.height !== undefined) next.height = override.frame.height
+  if (override.rotation !== undefined) next.rotation = override.rotation
+  if (override.opacity !== undefined) next.opacity = override.opacity
+  if (override.visible !== undefined) next.visible = override.visible
+  if (override.locked !== undefined) next.locked = override.locked
+  if (override.playbackInitialVisibility !== undefined) {
+    next.playbackInitialVisibility = override.playbackInitialVisibility
+  }
+  if (override.nativeData) Object.assign(next, structuredClone(override.nativeData))
+  if (override.componentProps) next.props = structuredClone(override.componentProps)
+  return next as SceneNodeOverride
+}
+
+function sceneNodeOverrideToLayerItemOverride(
+  override: SceneNodeOverride,
+  node: SceneNode,
+): LayerItemOverride {
+  const source = structuredClone(override) as Record<string, unknown>
+  const migrated: LayerItemOverride = {}
+  if (typeof source.name === 'string') migrated.label = source.name
+  delete source.name
+
+  const frame: LayerItemOverride['frame'] = {}
+  ;(['x', 'y', 'width', 'height'] as const).forEach((key) => {
+    if (typeof source[key] === 'number') frame[key] = source[key] as never
+    delete source[key]
+  })
+  if (Object.keys(frame).length > 0) migrated.frame = frame
+
+  if (typeof source.visible === 'boolean') migrated.visible = source.visible
+  if (typeof source.locked === 'boolean') migrated.locked = source.locked
+  if (typeof source.rotation === 'number') migrated.rotation = source.rotation
+  if (typeof source.opacity === 'number') migrated.opacity = source.opacity
+  if (source.playbackInitialVisibility === 'inherit' || source.playbackInitialVisibility === 'hidden') {
+    migrated.playbackInitialVisibility = source.playbackInitialVisibility
+  }
+  delete source.visible
+  delete source.rotation
+  delete source.opacity
+  delete source.locked
+  delete source.playbackInitialVisibility
+  delete source.id
+  delete source.type
+  delete source.component
+
+  if (node.type === 'external-component') {
+    if (source.props && typeof source.props === 'object' && !Array.isArray(source.props)) {
+      migrated.componentProps = source.props as Record<string, unknown>
+    }
+    delete source.props
+  }
+  if (Object.keys(source).length > 0) migrated.nativeData = source
+  return migrated
+}
+
+function applySceneNodePatchToCourseOverride(
+  draft: CourseProjectDocument,
+  sceneId: string,
+  stateId: string,
+  nodeId: string,
+  patch: DeepPartial<SceneNode>,
+  componentPackages: Record<string, ComponentPackageData>,
+): void {
+  const scene = findCourseSlideScene(draft, sceneId)
+  if (!scene) return
+  const baseItem = scene.layerItems.find((item) => item.layerItemId === nodeId)
+  if (!baseItem || (baseItem.locked && patch.locked !== false)) return
+  const baseNode = courseLayerItemToSceneNode(baseItem)
+  if (!baseNode) return
+  const presentation = scene.presentation
+  const state = presentation?.states.find((candidate) => candidate.id === stateId)
+  if (!state) return
+  const currentOverride = state.layerItemOverrides[nodeId]
+  const currentNode = applySceneNodeOverride(
+    baseNode,
+    currentOverride ? layerItemOverrideToNodeOverride(currentOverride) : undefined,
+  )
+  const next = normalizeNodeGeometry(
+    currentNode,
+    patchSceneNode(currentNode, patch),
+    patch,
+    componentPackages,
+  )
+  const nodeOverride = deriveSceneNodeOverride(baseNode, next)
+  if (!nodeOverride || Object.keys(nodeOverride).length === 0) {
+    delete state.layerItemOverrides[nodeId]
+    return
+  }
+  state.layerItemOverrides[nodeId] = sceneNodeOverrideToLayerItemOverride(nodeOverride, baseNode)
+}
+
+function visitCourseLayerItems(
+  draft: CourseProjectDocument,
+  visit: (item: LayerItem) => void,
+): void {
+  for (const entry of draft.globalLayerItems) visit(entry.item)
+  for (const surface of draft.surfaces) {
+    for (const shared of surface.surfaceLayerItems) visit(shared.item)
+    if (surface.type === 'slide') {
+      for (const scene of surface.scenes) {
+        for (const item of scene.layerItems) visit(item)
+      }
+    } else if (surface.type === 'spatial-2d') {
+      for (const item of surface.world.layerItems) visit(item)
+    }
+  }
+}
+
+function removeCourseComponentPackage(
+  draft: CourseProjectDocument,
+  packageId: string,
+): void {
+  for (const [key, meta] of Object.entries(draft.componentPackages)) {
+    if (meta.packageId === packageId) delete draft.componentPackages[key]
+  }
+}
+
+function retargetCourseComponentInstances(
+  draft: CourseProjectDocument,
+  packageId: string,
+  next: { packageId: string; version: string },
+): void {
+  visitCourseLayerItems(draft, (item) => {
+    if (item.kind === 'component' && item.component.packageId === packageId) {
+      item.component = { packageId: next.packageId, version: next.version }
+    }
+  })
+}
+
+function appendGlobalCourseNode(draft: CourseProjectDocument, node: SceneNode): void {
+  const item = sceneNodeToCourseLayerItem(node)
+  let preferred = 0
+  for (const entry of draft.globalLayerItems) {
+    if (entry.item.order >= preferred) preferred = entry.item.order + 1
+  }
+  item.order = allocateCourseLayerOrder(draft, preferred)
+  draft.globalLayerItems.push({
+    item,
+    visibility: { mode: 'all', locationIds: [] },
+  })
+  sortScopedLayerList(draft.globalLayerItems)
+}
+
+const V9_SPECIALIZED_NODE_PATCH_KEYS = new Set([
+  'locked',
+  'visible',
+  'x',
+  'y',
+  'width',
+  'height',
+  'rotation',
+  'text',
+  'style',
+  'name',
+])
+
+function v9NodePatchNeedsRoundTrip(patch: DeepPartial<SceneNode>): boolean {
+  return Object.keys(patch).some((key) => !V9_SPECIALIZED_NODE_PATCH_KEYS.has(key))
+}
+
+function locationIdsToSceneIds(
+  document: SlideAuthoringSession['history']['present'],
+  locationIds: readonly string[],
+): string[] {
+  return locationIds.flatMap((locationId) => {
+    const location = document.locations.find((candidate) => candidate.id === locationId)
+    return location?.kind === 'slide-scene' ? [location.sceneId] : []
+  })
+}
+
+function sceneIdsToLocationIds(
+  document: CourseProjectDocument,
+  sceneIds: readonly string[],
+): string[] {
+  const wanted = new Set(sceneIds)
+  return document.locations.flatMap((location) => (
+    location.kind === 'slide-scene'
+      && location.stateId === undefined
+      && wanted.has(location.sceneId)
+      ? [location.id]
+      : []
+  ))
+}
+
+function locationVisibilityFromScenePatch(
+  document: CourseProjectDocument,
+  visibility: GlobalLayerVisibility,
+): LocationVisibility {
+  const remaining = document.locations.filter(
+    (location) => location.kind === 'slide-scene' && location.stateId === undefined,
+  )
+  if (visibility.mode === 'all') return { mode: 'all', locationIds: [] }
+  const locationIds = sceneIdsToLocationIds(document, visibility.sceneIds)
+  if (locationIds.length > 0) return { mode: visibility.mode, locationIds }
+  if (visibility.mode === 'exclude') return { mode: 'all', locationIds: [] }
+  const fallback = remaining[0]?.id
+  if (!fallback) return { mode: 'all', locationIds: [] }
+  return { mode: visibility.mode, locationIds: [fallback] }
+}
+
+type V9PreviewState = Pick<
+  EditorState,
+  'slideBackend' | 'slideCandidateUi' | 'slideCandidateSidecar' | 'v9ContentEdit'
+>
+
+export function projectCandidatePreviewDocument(
+  state: V9PreviewState,
+): { project: ProjectDocument; assetFiles: Record<string, Uint8Array> } | null {
+  const backend = isV9SlideCandidateBackend(state.slideBackend) ? state.slideBackend : null
+  if (!backend) return null
+  const document = backend.getSession().history.present
+  const ui = state.slideCandidateUi ?? buildSlideCandidateUi(backend, state.v9ContentEdit)
+  const sidecar = state.slideCandidateSidecar ?? emptyCourseAssetSidecar()
+  const globalLayer = document.globalLayerItems.flatMap((entry) => {
+    const node = courseLayerItemToSceneNode(entry.item)
+    if (!node) return []
+    return [{
+      node,
+      layer: 'overlay' as const,
+      visibility: {
+        mode: entry.visibility.mode,
+        sceneIds: locationIdsToSceneIds(document, entry.visibility.locationIds),
+      },
+    }]
+  })
+  const runtimes = attachProjectedRuntimes(document, ui.scenes)
+  return {
+    project: {
+      schemaVersion: 8,
+      id: document.id,
+      title: document.title,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      canvas: { width: 1280, height: 720 },
+      scenes: runtimes.scenes,
+      assets: structuredClone(document.assets),
+      componentPackages: structuredClone(document.componentPackages),
+      globalLayer,
+      globalInteractions: structuredClone(document.globalInteractions),
+      designTokens: structuredClone(document.designTokens),
+      media: structuredClone(document.media),
+      playback: structuredClone(document.playback),
+      ...(runtimes.globalRuntime ? { globalRuntime: runtimes.globalRuntime } : {}),
+    },
+    assetFiles: projectedAssetFiles(sidecar),
+  }
+}
+
+function buildCandidateEffectiveLayers(
+  state: Pick<EditorState, 'slideBackend' | 'slideCandidateSnapshot' | 'spatialSession' | 'flowSession'>,
+): EffectiveLayerProjection | null {
+  if (state.spatialSession) {
+    return spatialEffectiveLayers(state.spatialSession)
+  }
+  if (state.flowSession) {
+    return flowEffectiveLayers(state.flowSession)
+  }
+  const backend = isV9SlideCandidateBackend(state.slideBackend) ? state.slideBackend : null
+  if (!backend) return null
+  const session = backend.getSession()
+  return projectEffectiveLayers({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: session.selection.stateId,
+    selectedIds: session.selection.selectionIds,
+    owner: session.scope === 'global' ? 'global' : 'scene',
+  })
+}
+
+function findCandidateLayerRow(
+  state: Pick<EditorState, 'slideBackend' | 'slideCandidateSnapshot' | 'spatialSession' | 'flowSession'>,
+  layerItemId: string,
+): EffectiveLayerProjectionRow | null {
+  return buildCandidateEffectiveLayers(state)?.unifiedRows.find((row) => row.id === layerItemId) ?? null
+}
+
+function commandTargetForRow(row: EffectiveLayerProjectionRow) {
+  const input = commandTargetFromRow(row)
+  return {
+    authoringAddress: input.authoringAddress,
+    locationId: input.locationId,
+    stateId: input.stateId,
+  }
+}
+
+function refusesTeacherControllerOwnerMove(
+  from: EffectiveLayerProjectionRow,
+  to: EffectiveLayerProjectionRow,
+): boolean {
+  return (from.isTeacherController || to.isTeacherController) && from.ownerKey !== to.ownerKey
+}
+
+function sessionFromLayerResult(
+  session: SlideAuthoringSession,
+  result: LayerCommandResult,
+): SlideCommandResult {
+  if (!result.ok || !result.nextDocument) {
+    return {
+      ok: false,
+      reason: result.reason,
+      historyEntry: false,
+      nextSession: session,
+      selection: session.selection,
+    }
+  }
+  const nextHistory = result.historyEntry
+    ? commitSlideAuthoringHistory(session.history, result.nextDocument)
+    : {
+        present: result.nextDocument,
+        past: session.history.past,
+        future: session.history.future,
+      }
+  const createdId = result.createdLayerItemId
+  const remainingIds = existingLayerItemIds(result.nextDocument)
+  const selectionIds = createdId
+    ? [createdId]
+    : session.selection.selectionIds.filter((id) => remainingIds.has(id))
+  return {
+    ok: true,
+    reason: result.reason,
+    historyEntry: Boolean(result.historyEntry),
+    nextSession: {
+      sessionId: session.sessionId,
+      history: nextHistory,
+      selection: {
+        locationId: session.selection.locationId,
+        stateId: session.selection.stateId,
+        selectionIds,
+      },
+      scope: session.scope,
+      generation: session.generation,
+    },
+    selection: {
+      locationId: session.selection.locationId,
+      stateId: session.selection.stateId,
+      selectionIds,
+    },
+  }
+}
+
+function existingLayerItemIds(project: CourseProjectDocument): Set<string> {
+  const ids = new Set<string>()
+  project.globalLayerItems.forEach((entry) => ids.add(entry.item.layerItemId))
+  for (const surface of project.surfaces) {
+    surface.surfaceLayerItems.forEach((entry) => ids.add(entry.item.layerItemId))
+    if (surface.type === 'slide') {
+      surface.scenes.forEach((scene) => {
+        scene.layerItems.forEach((item) => ids.add(item.layerItemId))
+      })
+    } else if (surface.type === 'spatial-2d') {
+      surface.world.layerItems.forEach((item) => ids.add(item.layerItemId))
+    }
+  }
+  return ids
+}
+
+function buildSlideCandidateUi(
+  backend: SlideCandidateBackend,
+  edit: V9SlideContentEditSession | null,
+): SlideCandidateUiProjection {
+  const document = backend.getSession().history.present
+  const scenes = attachProjectedRuntimes(document, projectV9SlideScenes(backend)).scenes
+  const snapshotSceneId = backend.getSnapshot().sceneId
+  const activeScene = scenes.find((scene) => scene.id === snapshotSceneId) ?? scenes[0]
+  const namedStateActive = backend.getSnapshot().stateId !== null
+  if (!activeScene) {
+    return { scenes, activeScene: {
+      id: snapshotSceneId,
+      name: '场景',
+      backgroundColor: '#ffffff',
+      nodes: [],
+      interactions: [],
+    }, nodes: [] }
+  }
+  return {
+    scenes,
+    activeScene: {
+      ...activeScene,
+      nodes: namedStateActive
+        ? activeScene.nodes
+        : withV9ContentDraft(edit, activeScene.nodes),
+    },
+    nodes: withV9ContentDraft(edit, projectV9EditingNodes(backend)),
+  }
+}
+
+function candidateViewState(
+  backend: SlideCandidateBackend,
+  edit: V9SlideContentEditSession | null,
+): Pick<EditorState, 'slideCandidateUi' | 'slideCandidateEffectiveLayers'> {
+  return {
+    slideCandidateUi: buildSlideCandidateUi(backend, edit),
+    slideCandidateEffectiveLayers: buildCandidateEffectiveLayers({
+      slideBackend: backend,
+      slideCandidateSnapshot: backend.getSnapshot(),
+      spatialSession: null,
+      flowSession: null,
+    }),
+  }
+}
+
+function emptyCandidateViewState(): Pick<
+  EditorState,
+  'slideCandidateUi' | 'slideCandidateEffectiveLayers'
+> {
+  return {
+    slideCandidateUi: null,
+    slideCandidateEffectiveLayers: null,
+  }
+}
+
+function v9HistoryToStoreHistory(history: {
+  readonly past: readonly unknown[]
+  readonly future: readonly unknown[]
+}): HistoryState {
+  const entry = (): HistoryEntry => ({
+    patches: [{ op: 'replace', path: ['revision'], value: 1 }],
+    inversePatches: [{ op: 'replace', path: ['revision'], value: 0 }],
+  })
+  return {
+    past: history.past.map(entry),
+    future: history.future.map(entry),
+  }
+}
+
+function findCourseSlideScene(
+  project: CourseProjectDocument,
+  sceneId: string,
+): SlideSceneDocument | null {
+  for (const surface of project.surfaces) {
+    if (surface.type !== 'slide') continue
+    const scene = surface.scenes.find((item) => item.id === sceneId)
+    if (scene) return scene
+  }
+  return null
+}
+
+function derivedV8ProjectFromBackend(
+  backend: SlideCandidateBackend,
+  sidecar: CourseAssetSidecar | null,
+  edit: V9SlideContentEditSession | null,
+): ProjectDocument {
+  const view = candidateViewState(backend, edit)
+  const preview = projectCandidatePreviewDocument({
+    slideBackend: backend,
+    slideCandidateUi: view.slideCandidateUi,
+    slideCandidateSidecar: sidecar,
+    v9ContentEdit: edit,
+  })
+  if (!preview) {
+    throw new Error('V9 会话缺少可投影的课程工程')
+  }
+  return preview.project
+}
+
+export type SpatialGraphSelection =
+  | { readonly kind: 'path'; readonly id: string }
+  | { readonly kind: 'relation'; readonly id: string }
+
+function spatialSurfaceFromSession(
+  session: SpatialAuthoringSession,
+): SpatialSurfaceDocument {
+  const surface = session.history.present.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId,
+  )
+  if (!surface || surface.type !== 'spatial-2d') {
+    throw new Error('当前会话没有 Spatial 表面')
+  }
+  return surface
+}
+
+function spatialEditingNodes(
+  session: SpatialAuthoringSession,
+  edit: SpatialWorldContentEditSession | null,
+): SceneNode[] {
+  const view = buildSpatialEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+  })
+  const wanted = session.scope === 'global' ? 'viewport' : 'world'
+  return view.layers.flatMap((layer): SceneNode[] => {
+    if (layer.coordinateSpace !== wanted) return []
+    const node = courseLayerItemToSceneNode(layer.item as LayerItem)
+    if (!node) return []
+    if (
+      edit?.kind === 'text' &&
+      edit.target.layerItemId === node.id &&
+      node.type === 'text' &&
+      isV9SlideTextContentDraft(edit.draft)
+    ) {
+      return [{
+        ...node,
+        text: edit.draft.text,
+        runs: structuredClone(edit.draft.runs),
+        ...(typeof edit.draft.width === 'number' ? { width: edit.draft.width } : {}),
+        ...(typeof edit.draft.height === 'number' ? { height: edit.draft.height } : {}),
+      }]
+    }
+    return [node]
+  })
+}
+
+function derivedV8ProjectFromSpatial(
+  session: SpatialAuthoringSession,
+  sidecar: CourseAssetSidecar | null,
+  edit: SpatialWorldContentEditSession | null,
+): ProjectDocument {
+  const document = session.history.present
+  const view = buildSpatialEditorView({
+    project: document,
+    locationId: session.selection.locationId,
+  })
+  const nodes = spatialEditingNodes(session, edit)
+  const globalLayer = document.globalLayerItems.flatMap((entry) => {
+    const node = courseLayerItemToSceneNode(entry.item)
+    if (!node) return []
+    return [{
+      node,
+      layer: 'overlay' as const,
+      visibility: {
+        mode: entry.visibility.mode,
+        sceneIds: [],
+      },
+    }]
+  })
+  return {
+    schemaVersion: 8,
+    id: document.id,
+    title: document.title,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+    canvas: { width: 1280, height: 720 },
+    scenes: [{
+      id: view.camera.activeFrameId,
+      name: view.surfaceTitle,
+      backgroundColor: '#111318',
+      backgroundAssetId: null,
+      nodes: session.scope === 'global' ? [] : nodes,
+      presentation: createDefaultScenePresentation(),
+      interactions: [],
+    }],
+    assets: structuredClone(document.assets),
+    componentPackages: structuredClone(document.componentPackages),
+    globalLayer,
+    globalInteractions: structuredClone(document.globalInteractions),
+    designTokens: structuredClone(document.designTokens),
+    media: structuredClone(document.media),
+    playback: structuredClone(document.playback),
+    ...(sidecar ? {} : {}),
+  }
+}
+
+function spatialViewState(
+  session: SpatialAuthoringSession,
+  sidecar: CourseAssetSidecar | null,
+  edit: SpatialWorldContentEditSession | null,
+): Pick<EditorState, 'project' | 'slideCandidateUi' | 'slideCandidateEffectiveLayers'> {
+  const project = derivedV8ProjectFromSpatial(session, sidecar, edit)
+  return {
+    project,
+    slideCandidateUi: {
+      scenes: project.scenes,
+      activeScene: project.scenes[0]!,
+      nodes: spatialEditingNodes(session, edit),
+    },
+    slideCandidateEffectiveLayers: spatialEffectiveLayers(session),
+  }
+}
+
+function spatialEffectiveLayers(
+  session: SpatialAuthoringSession,
+) {
+  return projectEffectiveLayers({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: null,
+    selectedIds: session.selection.selectionIds,
+    owner: session.scope === 'global' ? 'global' : 'world',
+  })
+}
+
+function spatialHistoryToStoreHistory(
+  history: SpatialAuthoringSession['history'],
+): HistoryState {
+  return v9HistoryToStoreHistory(history)
+}
+
+function flowEffectiveLayers(session: FlowAuthoringSession) {
+  return projectEffectiveLayers({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: null,
+    selectedIds: [...session.selection.selectedOverlayIds],
+    owner: session.selection.authoringScope === 'global' ? 'global' : 'surface',
+  })
+}
+
+function flowEditingNodes(session: FlowAuthoringSession): SceneNode[] {
+  const projection = flowEffectiveLayers(session)
+  const wanted = session.selection.authoringScope === 'global' ? 'global' : null
+  return projection.unifiedRows.flatMap((row) => {
+    if (wanted && row.owner !== wanted) return []
+    const node = courseLayerItemToSceneNode(row.item)
+    return node ? [node] : []
+  })
+}
+
+function derivedV8ProjectFromFlow(
+  session: FlowAuthoringSession,
+  sidecar: CourseAssetSidecar | null,
+): ProjectDocument {
+  const document = session.history.present
+  const pages = listFlowCourseTreePages(document)
+  const currentPage = pages.find((page) => (
+    page.startLocationId === session.selection.locationId
+    || page.headings.some((heading) => heading.locationId === session.selection.locationId)
+  ))
+  const nodes = flowEditingNodes(session)
+  const globalLayer = document.globalLayerItems.flatMap((entry) => {
+    const node = courseLayerItemToSceneNode(entry.item)
+    if (!node) return []
+    return [{
+      node,
+      layer: 'overlay' as const,
+      visibility: {
+        mode: entry.visibility.mode,
+        sceneIds: [],
+      },
+    }]
+  })
+  return {
+    schemaVersion: 8,
+    id: document.id,
+    title: document.title,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+    canvas: { width: 1280, height: 720 },
+    scenes: [{
+      id: session.selection.locationId,
+      name: currentPage?.surfaceTitle ?? '流式讲义',
+      backgroundColor: '#ffffff',
+      backgroundAssetId: null,
+      nodes: session.selection.authoringScope === 'global' ? [] : nodes,
+      presentation: createDefaultScenePresentation(),
+      interactions: [],
+    }],
+    assets: structuredClone(document.assets),
+    componentPackages: structuredClone(document.componentPackages),
+    globalLayer,
+    globalInteractions: structuredClone(document.globalInteractions),
+    designTokens: structuredClone(document.designTokens),
+    media: structuredClone(document.media),
+    playback: structuredClone(document.playback),
+    ...(sidecar ? {} : {}),
+  }
+}
+
+function flowViewState(
+  session: FlowAuthoringSession,
+  sidecar: CourseAssetSidecar | null,
+): Pick<EditorState, 'project' | 'slideCandidateUi' | 'slideCandidateEffectiveLayers'> {
+  const project = derivedV8ProjectFromFlow(session, sidecar)
+  const nodes = flowEditingNodes(session)
+  return {
+    project,
+    slideCandidateUi: {
+      scenes: project.scenes,
+      activeScene: project.scenes[0]!,
+      nodes,
+    },
+    slideCandidateEffectiveLayers: flowEffectiveLayers(session),
+  }
+}
+
+function documentWithFlowAsset(
+  document: CourseProjectDocument,
+  asset: AssetMeta,
+): CourseProjectDocument {
+  if (document.assets[asset.id]) return document
+  return {
+    ...document,
+    assets: {
+      ...document.assets,
+      [asset.id]: structuredClone(asset),
+    },
+  }
+}
 
 const PROJECT_AUDIO_CHANNELS = [
   'music',
@@ -212,10 +1428,44 @@ export interface EditorState {
   textEditSession: TextEditSession | null
   statusMessage: string | null
   errorMessage: string | null
+  /** Default product backend is V9 Slide candidate. V8 remains only for tests/explicit import. */
+  slideBackend: SlideBackend
+  /** Cached after successful candidate commands so Zustand subscribers refresh. */
+  slideCandidateSnapshot: SlideAuthoringSnapshot | null
+  slideCandidateClipboard: V9SlideClipboardPayload | null
+  v9ContentEdit: V9SlideContentEditSession | null
+  /** Stable V8-shaped projection so React 19 getSnapshot does not loop. */
+  slideCandidateUi: SlideCandidateUiProjection | null
+  /** Cached R3-D projection; rebuilt only when the candidate session is persisted. */
+  slideCandidateEffectiveLayers: EffectiveLayerProjection | null
+  /** Candidate asset bytes. Not V8 `assetFiles`. Undo/redo restores this with session history. */
+  slideCandidateSidecar: CourseAssetSidecar | null
+  slideCandidateSidecarPast: CourseAssetSidecar[]
+  slideCandidateSidecarFuture: CourseAssetSidecar[]
+  /** Executable component payloads. Undo/redo restores this with session history. */
+  slideCandidateComponentPackagesPast: Record<string, ComponentPackageData>[]
+  slideCandidateComponentPackagesFuture: Record<string, ComponentPackageData>[]
+  /** Pure Spatial authoring session. Null on the default Slide product path. */
+  spatialSession: SpatialAuthoringSession | null
+  spatialContentEdit: SpatialWorldContentEditSession | null
+  spatialGraphSelection: SpatialGraphSelection | null
+  spatialPlaybackPathId: string | null
+  /** Pure Flow authoring session. Null on the default Slide product path. */
+  flowSession: FlowAuthoringSession | null
+  flowTextEdit: FlowTextEditSession | null
+  courseAuthoringSession: CourseAuthoringSession | null
 
   createNewProject(): void
+  createNewSpatialProject(): void
+  createNewFlowProject(): void
   loadProject(
     project: ProjectDocument,
+    path: string | null,
+    assetFiles?: Record<string, Uint8Array>,
+    componentPackages?: Record<string, ComponentPackageData>,
+  ): void
+  loadCourseProject(
+    project: CourseProjectDocument,
     path: string | null,
     assetFiles?: Record<string, Uint8Array>,
     componentPackages?: Record<string, ComponentPackageData>,
@@ -241,6 +1491,19 @@ export interface EditorState {
   cancelTextEdit(): void
 
   addScene(): void
+  addCourseContent(
+    action: CourseEditorPrimaryAction | CourseEditorDropdownAction,
+    options?: { surfaceId?: string },
+  ): void
+  reorderCourseSurfaces(surfaceIds: string[]): void
+  activateCourseLocation(locationId: string): void
+  createLiveEditorSelectionSnapshot(
+    focus?: EditorFocusKind | EventTarget | null,
+  ): EditorSelectionSnapshot | null
+  routeEditorAction(
+    actionId: EditorActionId,
+    snapshot?: EditorSelectionSnapshot,
+  ): EditorActionResult
   duplicateScene(sceneId: string): void
   deleteScene(sceneId: string): boolean
   reorderScenes(sceneIds: string[]): void
@@ -347,6 +1610,73 @@ export interface EditorState {
 
   undo(): void
   redo(): void
+
+  /** Test/dev only. Do not bind to App, menus, or URL query. */
+  injectV9SlideCandidateBackend(backend: SlideCandidateBackend): void
+  /** Test/dev only. Discards the in-memory candidate and returns the session to V8. */
+  clearV9SlideCandidateBackend(): void
+  runSlideCandidateCommand(
+    run: (backend: SlideCandidateBackend) => SlideCommandResult,
+  ): SlideCommandResult
+  applySlideCandidateSession(session: SlideAuthoringSession): void
+  applySlideCandidateCommand(
+    run: (session: SlideAuthoringSession) => SlideCommandResult,
+    extra?: {
+      clipboard?: V9SlideClipboardPayload | null
+      statusMessage?: string | null
+      clearContentEdit?: boolean
+      sidecar?: CourseAssetSidecar
+      sidecarDirection?: 'undo' | 'redo'
+    },
+  ): SlideCommandResult
+  importV9CandidateMedia(input: {
+    items: ImportedAssetBatchItem[]
+    nativeType?: 'image' | 'video' | 'audio'
+    mode?: 'add' | 'library'
+    x?: number
+    y?: number
+  }): CourseMediaCommandResult
+  /** Test helper. Reloads a V9 zip into the default V9 session. */
+  exportV9SlideCandidateArchive(): Uint8Array | null
+  /** Reopens a V9 zip as the current session. Does not call V8 loadProject. */
+  reopenV9SlideCandidateArchive(bytes: Uint8Array): boolean
+  runSpatialCommand(
+    run: (session: SpatialAuthoringSession) => SpatialCommandResult,
+    extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar; clearContentEdit?: boolean },
+  ): SpatialCommandResult
+  applySpatialAuthoringSession(
+    session: SpatialAuthoringSession,
+    extra?: { historyEntry?: boolean; statusMessage?: string | null },
+  ): SpatialCommandResult
+  applyFlowCommand(
+    result: FlowCommandResult | FlowSharedAuthoringResult,
+    extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar },
+  ): FlowCommandResult | FlowSharedAuthoringResult
+  applyFlowSelection(selection: FlowEditorSelection | null): void
+  setFlowTextEdit(edit: FlowTextEditSession | null): void
+  insertFlowLibraryMedia(
+    assetId: string,
+    request?: { altKey?: boolean; menuAction?: 'insert-document' | 'insert-overlay' },
+  ): FlowSharedAuthoringResult
+  formatFlowTextStyle(style: TextRunStyle): FlowCommandResult
+  formatFlowBlock(spec: Parameters<typeof formatFlowAuthoringBlock>[2]): FlowCommandResult
+  renameFlowHeading(locationId: string, title: string): void
+  renameFlowPage(surfaceId: string, title: string): void
+  setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
+  setSpatialPlaybackPathId(pathId: string | null): void
+  moveCandidateLayerOwner(fromId: string, toId: string): void
+  setCandidateGlobalLayerLocationVisibility(
+    nodeId: string,
+    visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
+  ): void
+  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
+  commitSlideCandidateTextRunStyle(input: {
+    layerItemId: string
+    selectionStart: number
+    selectionEnd: number
+    patch: TextRunStyle
+    source?: TextEditSource
+  }): SlideCommandResult | SpatialCommandResult
 }
 
 function currentScene(state: Pick<EditorState, 'project' | 'activeSceneId'>) {
@@ -1388,14 +2718,889 @@ function applyAssetFileHistoryChanges(
   return nextFiles
 }
 
+function surfaceTypeForLocation(
+  project: CourseProjectDocument,
+  locationId: string,
+): CourseAuthoringSurfaceType {
+  const location = project.locations.find((candidate) => candidate.id === locationId)
+  if (!location) throw new Error(`找不到课程位置：${locationId}`)
+  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+  if (!surface || (
+    surface.type !== 'slide' &&
+    surface.type !== 'flow' &&
+    surface.type !== 'spatial-2d'
+  )) {
+    throw new Error(`找不到可编辑表面：${location.surfaceId}`)
+  }
+  return surface.type
+}
+
+function openFlowAuthoringSessionAtLocation(
+  project: CourseProjectDocument,
+  locationId: string,
+): FlowAuthoringSession {
+  const parsed = courseProjectDocumentSchema.parse(structuredClone(project))
+  const location = parsed.locations.find(
+    (candidate) => candidate.id === locationId && candidate.kind === 'flow-block',
+  )
+  if (!location || location.kind !== 'flow-block') {
+    throw new Error(`找不到 Flow 位置：${locationId}`)
+  }
+  return {
+    history: createFlowEditorHistory(parsed),
+    selection: selectFlowEditorBlock(parsed, location.id, location.blockId),
+  }
+}
+
+function buildCourseAuthoringSessionForProject(
+  project: CourseProjectDocument,
+  locationId: string,
+  itemIds: readonly string[] = [],
+): CourseAuthoringSession {
+  return createCourseAuthoringSession({
+    locationId,
+    surfaceType: surfaceTypeForLocation(project, locationId),
+    revision: project.revision,
+    itemIds,
+  })
+}
+
+function resolveEditorFocus(
+  state: EditorState,
+  focus?: EditorFocusKind | EventTarget | null,
+): EditorFocusKind {
+  if (focus === 'text' || focus === 'block' || focus === 'overlay' || focus === 'layer' || focus === 'none') {
+    return focus
+  }
+  if (state.flowSession) {
+    if (state.flowTextEdit?.composing || state.flowSession.selection.focus === 'text') return 'text'
+    if (state.flowSession.selection.focus === 'block') return 'block'
+    if (state.flowSession.selection.selectedOverlayIds.length > 0) return 'overlay'
+    return 'none'
+  }
+  if (state.spatialSession) {
+    if (state.spatialContentEdit || state.editingTextNodeId) return 'text'
+    if (state.selectedNodeIds.length > 0) return 'layer'
+    return 'none'
+  }
+  if (selectSlideCandidateBackend(state)) {
+    const tagName = focus instanceof HTMLElement ? focus.tagName : undefined
+    const isContentEditable = focus instanceof HTMLElement ? focus.isContentEditable : false
+    if (shouldIgnoreSlideLayerDeleteForFocus({
+      textEditSession: Boolean(state.editingTextNodeId || state.v9ContentEdit?.kind === 'text'),
+      formulaEditSession: state.v9ContentEdit?.kind === 'formula',
+      tagName,
+      isContentEditable,
+    })) return 'text'
+    if (state.selectedNodeIds.length > 0) return 'layer'
+    return 'none'
+  }
+  if (state.editingTextNodeId) return 'text'
+  if (state.selectedNodeIds.length > 0) return 'layer'
+  return 'none'
+}
+
+function collectLiveEditorItemIds(state: EditorState): readonly string[] {
+  if (state.flowSession) {
+    if (state.flowSession.selection.selectedOverlayIds.length > 0) {
+      return state.flowSession.selection.selectedOverlayIds
+    }
+    if (state.flowSession.selection.selectedBlockIds.length > 0) {
+      return state.flowSession.selection.selectedBlockIds
+    }
+    return []
+  }
+  return state.selectedNodeIds
+}
+
 export const useEditorStore = create<EditorState>((set, get) => {
-  const initialProject = createProject()
+  const initialCourse = createBlankCourseProject()
+  const initialBackend = createSlideCandidateBackend(openSlideAuthoringSession(initialCourse))
+  const initialSidecar = emptyCourseAssetSidecar()
+  const initialSnapshot = initialBackend.getSnapshot()
+  const initialProject = derivedV8ProjectFromBackend(initialBackend, initialSidecar, null)
+
+  const applyV9Backend = (
+    backend: SlideCandidateBackend,
+    extra: {
+      sidecar?: CourseAssetSidecar
+      path?: string | null
+      dirty?: boolean
+      statusMessage?: string | null
+      componentPackages?: Record<string, ComponentPackageData>
+      clearClipboard?: boolean
+    } = {},
+  ) => {
+    const snapshot = backend.getSnapshot()
+    const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
+    const project = derivedV8ProjectFromBackend(backend, sidecar, null)
+    const courseProject = backend.getSession().history.present
+    set({
+      spatialSession: null,
+      spatialContentEdit: null,
+      spatialGraphSelection: null,
+      spatialPlaybackPathId: null,
+      flowSession: null,
+      flowTextEdit: null,
+      slideBackend: backend,
+      slideCandidateSnapshot: snapshot,
+      slideCandidateClipboard: extra.clearClipboard === false
+        ? get().slideCandidateClipboard
+        : null,
+      v9ContentEdit: null,
+      ...candidateViewState(backend, null),
+      ...emptySidecarStacks(),
+      slideCandidateSidecar: sidecar,
+      project,
+      activeSceneId: snapshot.sceneId,
+      activePresentationStateId: snapshot.stateId,
+      editingScope: snapshot.scope === 'global' ? 'global' : 'scene',
+      selectedNodeIds: [...snapshot.selection.selectionIds],
+      selectedNodeId: snapshot.selection.selectionIds.at(-1) ?? null,
+      editingTextNodeId: null,
+      textEditSession: null,
+      canvasMode: 'edit',
+      errorMessage: null,
+      history: v9HistoryToStoreHistory(backend.getSession().history),
+      dirty: extra.dirty ?? false,
+      projectPath: extra.path === undefined ? null : extra.path,
+      statusMessage: extra.statusMessage ?? `已打开“${project.title}”`,
+      componentPackages: extra.componentPackages ?? {},
+      assetFiles: projectedAssetFiles(sidecar),
+      clipboardNodes: [],
+      clipboardGlobalItems: [],
+      clipboardInteractionRules: [],
+      courseAuthoringSession: buildCourseAuthoringSessionForProject(
+        courseProject,
+        snapshot.locationId,
+        snapshot.selection.selectionIds,
+      ),
+    })
+  }
+
+  const rejectV8WriteIfCandidate = (): boolean => {
+    if (get().spatialSession || get().flowSession) {
+      set({
+        errorMessage: SLIDE_BACKEND_DUAL_WRITE_REFUSED,
+        statusMessage: null,
+      })
+      return true
+    }
+    if (!isV9SlideCandidateBackend(get().slideBackend)) return false
+    set({
+      errorMessage: SLIDE_BACKEND_DUAL_WRITE_REFUSED,
+      statusMessage: null,
+    })
+    return true
+  }
+
+  const persistCandidateResult = (
+    result: SlideCommandResult,
+    extra: {
+      clipboard?: V9SlideClipboardPayload | null
+      statusMessage?: string | null
+      clearContentEdit?: boolean
+      sidecar?: CourseAssetSidecar
+      sidecarDirection?: 'undo' | 'redo'
+      componentPackages?: Record<string, ComponentPackageData>
+    } = {},
+  ): SlideCommandResult => {
+    const current = get()
+    if (!isV9SlideCandidateBackend(current.slideBackend)) return result
+    if (!result.ok) {
+      if (result.reason) {
+        set({ errorMessage: result.reason, statusMessage: null })
+      }
+      return result
+    }
+    let nextBackend = result.nextSession
+      ? createSlideCandidateBackend(result.nextSession)
+      : current.slideBackend
+    const editedLayerItemId = extra.clearContentEdit
+      ? current.v9ContentEdit?.target.layerItemId
+      : undefined
+    if (editedLayerItemId) {
+      const liveSnapshot = nextBackend.getSnapshot()
+      if (!liveSnapshot.selection.selectionIds.includes(editedLayerItemId)) {
+        const restored = nextBackend.selectLayers([editedLayerItemId], false, {
+          expectedRevision: liveSnapshot.revision,
+        })
+        if (restored.ok && restored.nextSession) {
+          nextBackend = createSlideCandidateBackend(restored.nextSession)
+        }
+      }
+    }
+    const snapshot = nextBackend.getSnapshot()
+    const generation = slideAuthoringGeneration(snapshot.sessionId)
+    const keepEdit = extra.clearContentEdit
+      ? null
+      : current.v9ContentEdit && current.v9ContentEdit.target.generation === generation
+        ? current.v9ContentEdit
+        : null
+    const presentSidecar = current.slideCandidateSidecar ?? emptyCourseAssetSidecar()
+    let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+    let nextPast = current.slideCandidateSidecarPast
+    let nextFuture = current.slideCandidateSidecarFuture
+    let nextPackagePast = current.slideCandidateComponentPackagesPast ?? []
+    let nextPackageFuture = current.slideCandidateComponentPackagesFuture ?? []
+    let nextPackages: Record<string, ComponentPackageData> = {
+      ...current.componentPackages,
+      ...(extra.componentPackages ?? {}),
+    }
+    if (extra.sidecarDirection === 'undo') {
+      const previous = current.slideCandidateSidecarPast.at(-1)
+      if (previous) {
+        nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
+        nextSidecar = previous
+        nextPast = current.slideCandidateSidecarPast.slice(0, -1)
+      }
+      const previousPackages = (current.slideCandidateComponentPackagesPast ?? []).at(-1)
+      if (previousPackages) {
+        nextPackageFuture = [current.componentPackages, ...(current.slideCandidateComponentPackagesFuture ?? [])]
+        nextPackages = previousPackages
+        nextPackagePast = (current.slideCandidateComponentPackagesPast ?? []).slice(0, -1)
+      }
+    } else if (extra.sidecarDirection === 'redo') {
+      const upcoming = current.slideCandidateSidecarFuture[0]
+      if (upcoming) {
+        nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
+        nextSidecar = upcoming
+        nextFuture = current.slideCandidateSidecarFuture.slice(1)
+      }
+      const upcomingPackages = (current.slideCandidateComponentPackagesFuture ?? [])[0]
+      if (upcomingPackages) {
+        nextPackagePast = [...(current.slideCandidateComponentPackagesPast ?? []), current.componentPackages]
+        nextPackages = upcomingPackages
+        nextPackageFuture = (current.slideCandidateComponentPackagesFuture ?? []).slice(1)
+      }
+    } else if (result.historyEntry) {
+      nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
+      nextFuture = []
+      nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+      nextPackagePast = [...(current.slideCandidateComponentPackagesPast ?? []), current.componentPackages]
+      nextPackageFuture = []
+      nextPackages = {
+        ...current.componentPackages,
+        ...(extra.componentPackages ?? {}),
+      }
+    } else if (extra.sidecar) {
+      nextSidecar = cloneSidecar(extra.sidecar)
+    }
+    const presentPackageIds = new Set(
+      Object.keys(nextBackend.getSession().history.present.componentPackages),
+    )
+    const nextComponentPackages = Object.fromEntries(
+      Object.entries(nextPackages).filter(([packageId]) => presentPackageIds.has(packageId)),
+    )
+    set({
+      slideBackend: nextBackend,
+      slideCandidateSnapshot: snapshot,
+      activeSceneId: snapshot.sceneId,
+      activePresentationStateId: snapshot.stateId,
+      slideCandidateSidecar: nextSidecar,
+      slideCandidateSidecarPast: nextPast,
+      slideCandidateSidecarFuture: nextFuture,
+      slideCandidateComponentPackagesPast: nextPackagePast,
+      slideCandidateComponentPackagesFuture: nextPackageFuture,
+      project: derivedV8ProjectFromBackend(nextBackend, nextSidecar, keepEdit),
+      history: v9HistoryToStoreHistory(nextBackend.getSession().history),
+      dirty: extra.sidecarDirection || result.historyEntry ? true : current.dirty,
+      ...(extra.clipboard !== undefined
+        ? { slideCandidateClipboard: extra.clipboard }
+        : {}),
+      componentPackages: nextComponentPackages,
+      selectedNodeIds: [...snapshot.selection.selectionIds],
+      selectedNodeId: snapshot.selection.selectionIds.at(-1) ?? null,
+      editingScope: snapshot.scope === 'global' ? 'global' : 'scene',
+      v9ContentEdit: keepEdit,
+      ...candidateViewState(nextBackend, keepEdit),
+      ...(extra.clearContentEdit || (current.v9ContentEdit && !keepEdit)
+        ? { editingTextNodeId: null }
+        : {}),
+      errorMessage: null,
+      ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
+      assetFiles: projectedAssetFiles(nextSidecar),
+    })
+    return result
+  }
+
+  const persistSpatialResult = (
+    result: SpatialCommandResult,
+    extra: {
+      statusMessage?: string | null
+      sidecar?: CourseAssetSidecar
+      sidecarDirection?: 'undo' | 'redo'
+      componentPackages?: Record<string, ComponentPackageData>
+      clearContentEdit?: boolean
+    } = {},
+  ): SpatialCommandResult => {
+    const current = get()
+    const session = result.nextSession ?? current.spatialSession
+    if (!session) return result
+    if (!result.ok) {
+      if (result.reason) {
+        set({ errorMessage: result.reason, statusMessage: null })
+      }
+      return result
+    }
+    const keepEdit = extra.clearContentEdit
+      ? null
+      : current.spatialContentEdit
+    const presentSidecar = current.slideCandidateSidecar ?? emptyCourseAssetSidecar()
+    let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+    let nextPast = current.slideCandidateSidecarPast
+    let nextFuture = current.slideCandidateSidecarFuture
+    if (extra.sidecarDirection === 'undo') {
+      const previous = current.slideCandidateSidecarPast.at(-1)
+      if (previous) {
+        nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
+        nextSidecar = previous
+        nextPast = current.slideCandidateSidecarPast.slice(0, -1)
+      }
+    } else if (extra.sidecarDirection === 'redo') {
+      const upcoming = current.slideCandidateSidecarFuture[0]
+      if (upcoming) {
+        nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
+        nextSidecar = upcoming
+        nextFuture = current.slideCandidateSidecarFuture.slice(1)
+      }
+    } else if (result.historyEntry) {
+      nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
+      nextFuture = []
+      nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+    } else if (extra.sidecar) {
+      nextSidecar = cloneSidecar(extra.sidecar)
+    }
+    const snapshot = buildSpatialAuthoringSnapshot(session)
+    const graphSelection = current.spatialGraphSelection
+    const keep = extra.clearContentEdit ? null : keepEdit
+    set({
+      spatialSession: session,
+      spatialContentEdit: extra.clearContentEdit ? null : keepEdit,
+      slideBackend: V8_SLIDE_BACKEND,
+      slideCandidateSnapshot: null,
+      ...spatialViewState(session, nextSidecar, keep),
+      slideCandidateSidecar: nextSidecar,
+      slideCandidateSidecarPast: nextPast,
+      slideCandidateSidecarFuture: nextFuture,
+      history: spatialHistoryToStoreHistory(session.history),
+      dirty: extra.sidecarDirection || result.historyEntry ? true : current.dirty,
+      selectedNodeIds: [...session.selection.selectionIds],
+      selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
+      editingScope: session.scope === 'global' ? 'global' : 'scene',
+      activeSceneId: snapshot.activeCameraFrameId,
+      activePresentationStateId: null,
+      ...(extra.componentPackages ? { componentPackages: extra.componentPackages } : {}),
+      ...(extra.clearContentEdit ? { editingTextNodeId: null } : {}),
+      errorMessage: null,
+      ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
+      ...(graphSelection && session.selection.selectionIds.length > 0
+        ? { spatialGraphSelection: null }
+        : {}),
+      assetFiles: projectedAssetFiles(nextSidecar),
+    })
+    return result
+  }
+
+  const persistSpatialLayerCommand = (
+    result: LayerCommandResult,
+    extra?: { statusMessage?: string | null },
+  ): SpatialCommandResult => {
+    const session = get().spatialSession
+    if (!session) {
+      return {
+        ok: false,
+        reason: 'not-spatial-session',
+        historyEntry: false,
+        nextSession: session as unknown as SpatialAuthoringSession,
+        selection: { locationId: '', surfaceId: '', selectionIds: [] },
+      }
+    }
+    if (!result.ok || !result.nextDocument) {
+      if (result.reason) set({ errorMessage: result.reason, statusMessage: null })
+      return rejectSpatialCommand(session, result.reason ?? 'layer-command-failed')
+    }
+    const history = result.historyEntry
+      ? commitSpatialAuthoringHistory(session.history, result.nextDocument)
+      : { ...session.history, present: result.nextDocument }
+    return persistSpatialResult(
+      succeedSpatialCommand({ ...session, history }, Boolean(result.historyEntry)),
+      extra,
+    )
+  }
+
+  const applySpatialBackend = (
+    session: SpatialAuthoringSession,
+    extra: {
+      sidecar?: CourseAssetSidecar
+      path?: string | null
+      dirty?: boolean
+      statusMessage?: string | null
+      componentPackages?: Record<string, ComponentPackageData>
+    } = {},
+  ) => {
+    const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
+    const snapshot = buildSpatialAuthoringSnapshot(session)
+    set({
+      spatialSession: session,
+      spatialContentEdit: null,
+      spatialGraphSelection: null,
+      spatialPlaybackPathId: null,
+      flowSession: null,
+      flowTextEdit: null,
+      slideBackend: V8_SLIDE_BACKEND,
+      slideCandidateSnapshot: null,
+      slideCandidateClipboard: null,
+      v9ContentEdit: null,
+      ...spatialViewState(session, sidecar, null),
+      ...emptySidecarStacks(),
+      slideCandidateSidecar: sidecar,
+      activeSceneId: snapshot.activeCameraFrameId,
+      activePresentationStateId: null,
+      editingScope: session.scope === 'global' ? 'global' : 'scene',
+      selectedNodeIds: [...session.selection.selectionIds],
+      selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
+      editingTextNodeId: null,
+      textEditSession: null,
+      canvasMode: 'edit',
+      errorMessage: null,
+      history: spatialHistoryToStoreHistory(session.history),
+      dirty: extra.dirty ?? false,
+      projectPath: extra.path === undefined ? null : extra.path,
+      statusMessage: extra.statusMessage ?? `已打开“${session.history.present.title}”`,
+      componentPackages: extra.componentPackages ?? {},
+      assetFiles: projectedAssetFiles(sidecar),
+      clipboardNodes: [],
+      clipboardGlobalItems: [],
+      clipboardInteractionRules: [],
+      courseAuthoringSession: buildCourseAuthoringSessionForProject(
+        session.history.present,
+        session.selection.locationId,
+        session.selection.selectionIds,
+      ),
+    })
+  }
+
+  const persistFlowResult = (
+    result: FlowCommandResult | FlowSharedAuthoringResult,
+    extra: {
+      statusMessage?: string | null
+      sidecar?: CourseAssetSidecar
+      sidecarDirection?: 'undo' | 'redo'
+      componentPackages?: Record<string, ComponentPackageData>
+      selection?: FlowEditorSelection | null
+      clearTextEdit?: boolean
+      replaceHistory?: FlowEditorHistory
+    } = {},
+  ): FlowCommandResult | FlowSharedAuthoringResult => {
+    const current = get()
+    const session = current.flowSession
+    if (!session) return result
+    if (!result.ok) {
+      if (result.reason) {
+        set({ errorMessage: result.reason, statusMessage: null })
+      }
+      return result
+    }
+    const nextDocument = extra.replaceHistory?.present ?? result.nextDocument ?? session.history.present
+    const history = extra.replaceHistory ?? (result.historyEntry
+      ? commitFlowEditorHistory(session.history, nextDocument)
+      : { ...session.history, present: nextDocument })
+    const nextSelection = extra.selection === undefined
+      ? (result.selection ?? session.selection)
+      : extra.selection
+    const selection = nextSelection ?? session.selection
+    const presentSidecar = current.slideCandidateSidecar ?? emptyCourseAssetSidecar()
+    let nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+    let nextPast = current.slideCandidateSidecarPast
+    let nextFuture = current.slideCandidateSidecarFuture
+    if (extra.sidecarDirection === 'undo') {
+      const previous = current.slideCandidateSidecarPast.at(-1)
+      if (previous) {
+        nextFuture = [presentSidecar, ...current.slideCandidateSidecarFuture]
+        nextSidecar = previous
+        nextPast = current.slideCandidateSidecarPast.slice(0, -1)
+      }
+    } else if (extra.sidecarDirection === 'redo') {
+      const upcoming = current.slideCandidateSidecarFuture[0]
+      if (upcoming) {
+        nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
+        nextSidecar = upcoming
+        nextFuture = current.slideCandidateSidecarFuture.slice(1)
+      }
+    } else if (result.historyEntry) {
+      nextPast = [...current.slideCandidateSidecarPast, presentSidecar]
+      nextFuture = []
+      nextSidecar = extra.sidecar ? cloneSidecar(extra.sidecar) : presentSidecar
+    } else if (extra.sidecar) {
+      nextSidecar = cloneSidecar(extra.sidecar)
+    }
+    const nextSession: FlowAuthoringSession = { history, selection }
+    set({
+      flowSession: nextSession,
+      flowTextEdit: extra.clearTextEdit ? null : current.flowTextEdit,
+      spatialSession: null,
+      slideBackend: V8_SLIDE_BACKEND,
+      slideCandidateSnapshot: null,
+      ...flowViewState(nextSession, nextSidecar),
+      slideCandidateSidecar: nextSidecar,
+      slideCandidateSidecarPast: nextPast,
+      slideCandidateSidecarFuture: nextFuture,
+      history: v9HistoryToStoreHistory(history),
+      dirty: extra.sidecarDirection || result.historyEntry ? true : current.dirty,
+      selectedNodeIds: [...selection.selectedOverlayIds],
+      selectedNodeId: selection.selectedOverlayIds.at(-1) ?? null,
+      editingScope: selection.authoringScope === 'global' ? 'global' : 'scene',
+      activeSceneId: selection.locationId,
+      activePresentationStateId: null,
+      ...(extra.componentPackages ? { componentPackages: extra.componentPackages } : {}),
+      errorMessage: null,
+      ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
+      assetFiles: projectedAssetFiles(nextSidecar),
+    })
+    return result
+  }
+
+  const persistFlowLayerCommand = (
+    result: LayerCommandResult,
+    extra?: { statusMessage?: string | null },
+  ) => {
+    const session = get().flowSession
+    if (!session) {
+      return { ok: false, reason: 'not-flow-session', historyEntry: false } as const
+    }
+    if (!result.ok || !result.nextDocument) {
+      if (result.reason) set({ errorMessage: result.reason, statusMessage: null })
+      return { ok: false, reason: result.reason ?? 'layer-command-failed', historyEntry: false } as const
+    }
+    const overlayId = result.createdLayerItemId ?? session.selection.selectedOverlayIds[0]
+    let selection = session.selection
+    if (overlayId) {
+      try {
+        selection = selectFlowOverlay(
+          result.nextDocument,
+          session.selection.locationId,
+          session.selection.selectedOverlayIds.includes(overlayId)
+            ? [...session.selection.selectedOverlayIds]
+            : [overlayId],
+          session.selection.authoringScope,
+        )
+      } catch {
+        selection = session.selection
+      }
+    }
+    return persistFlowResult({
+      ok: true,
+      reason: result.reason,
+      nextDocument: result.nextDocument,
+      historyEntry: Boolean(result.historyEntry),
+      selection,
+    }, extra)
+  }
+
+  const persistCourseProjectCommand = (
+    result: CourseLocationCommandResult,
+    extra: { statusMessage?: string | null } = {},
+  ) => {
+    if (!result.ok) {
+      if (result.reason) set({ errorMessage: result.reason, statusMessage: null })
+      return
+    }
+    const state = get()
+    const nextProject = result.project
+    if (state.spatialSession) {
+      const history = commitSpatialAuthoringHistory(state.spatialSession.history, nextProject)
+      persistSpatialResult(
+        succeedSpatialCommand({ ...state.spatialSession, history }, true),
+        extra,
+      )
+      return
+    }
+    if (state.flowSession) {
+      persistFlowResult({
+        ok: true,
+        nextDocument: nextProject,
+        historyEntry: true,
+        selection: state.flowSession.selection,
+      }, extra)
+      return
+    }
+    const backend = selectSlideCandidateBackend(state)
+    if (backend) {
+      const session = backend.getSession()
+      const history = commitSlideAuthoringHistory(session.history, nextProject)
+      persistCandidateResult({
+        ok: true,
+        nextSession: { ...session, history },
+        historyEntry: true,
+      }, extra)
+    }
+  }
+
+  const applyFlowBackend = (
+    session: FlowAuthoringSession,
+    extra: {
+      sidecar?: CourseAssetSidecar
+      path?: string | null
+      dirty?: boolean
+      statusMessage?: string | null
+      componentPackages?: Record<string, ComponentPackageData>
+    } = {},
+  ) => {
+    const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
+    set({
+      flowSession: session,
+      flowTextEdit: null,
+      spatialSession: null,
+      spatialContentEdit: null,
+      spatialGraphSelection: null,
+      spatialPlaybackPathId: null,
+      slideBackend: V8_SLIDE_BACKEND,
+      slideCandidateSnapshot: null,
+      slideCandidateClipboard: null,
+      v9ContentEdit: null,
+      ...flowViewState(session, sidecar),
+      ...emptySidecarStacks(),
+      slideCandidateSidecar: sidecar,
+      activeSceneId: session.selection.locationId,
+      activePresentationStateId: null,
+      editingScope: session.selection.authoringScope === 'global' ? 'global' : 'scene',
+      selectedNodeIds: [...session.selection.selectedOverlayIds],
+      selectedNodeId: session.selection.selectedOverlayIds.at(-1) ?? null,
+      editingTextNodeId: null,
+      textEditSession: null,
+      canvasMode: 'edit',
+      errorMessage: null,
+      history: v9HistoryToStoreHistory(session.history),
+      dirty: extra.dirty ?? false,
+      projectPath: extra.path === undefined ? null : extra.path,
+      statusMessage: extra.statusMessage ?? `已打开“${session.history.present.title}”`,
+      componentPackages: extra.componentPackages ?? {},
+      assetFiles: projectedAssetFiles(sidecar),
+      clipboardNodes: [],
+      clipboardGlobalItems: [],
+      clipboardInteractionRules: [],
+      courseAuthoringSession: buildCourseAuthoringSessionForProject(
+        session.history.present,
+        session.selection.locationId,
+        session.selection.selectedOverlayIds,
+      ),
+    })
+  }
+
+  const persistLayerCommand = (
+    result: LayerCommandResult,
+    extra?: { statusMessage?: string | null },
+  ): SlideCommandResult => {
+    const backend = selectSlideCandidateBackend(get())
+    if (!backend) {
+      return {
+        ok: false,
+        reason: SLIDE_BACKEND_NOT_CANDIDATE,
+        historyEntry: false,
+      }
+    }
+    return persistCandidateResult(sessionFromLayerResult(backend.getSession(), result), extra)
+  }
+
+  const currentMediaSession = (): CourseMediaSession | null => {
+    const backend = selectSlideCandidateBackend(get())
+    if (!backend) return null
+    return bindCourseMediaSession(
+      backend.getSession(),
+      get().slideCandidateSidecar ?? emptyCourseAssetSidecar(),
+    )
+  }
+
+  const persistMediaResult = (
+    result: CourseMediaCommandResult,
+  ): CourseMediaCommandResult => {
+    const capacityError =
+      `当前场景已达到或将超过 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`
+    const keepCapacityError = get().errorMessage === capacityError
+    persistCandidateResult({
+      ok: result.ok,
+      reason: result.reason,
+      nextSession: result.nextSession,
+      historyEntry: result.historyEntry,
+      selection: result.selection,
+    }, {
+      sidecar: result.sidecar,
+      statusMessage: result.ok ? result.reason ?? null : undefined,
+    })
+    if (result.ok && (result.libraryFallback === 'scene-capacity' || keepCapacityError)) {
+      set({
+        errorMessage: capacityError,
+        statusMessage: null,
+        activeTab: 'elements',
+      })
+    }
+    return result
+  }
+
+  const runV9DocumentMutation = (
+    recipe: (draft: CourseProjectDocument) => void,
+    extra: {
+      statusMessage?: string | null
+      sidecar?: CourseAssetSidecar
+      selectionIds?: readonly string[]
+      scope?: 'global' | 'scene'
+      componentPackages?: Record<string, ComponentPackageData>
+    } = {},
+  ): SlideCommandResult => {
+    return runCandidateSession((session) => {
+      try {
+        const project = commitSlideProjectMutation(session.history.present, recipe)
+        const selectionIds = extra.selectionIds
+          ? [...extra.selectionIds]
+          : [...session.selection.selectionIds]
+        const selection = selectSlideEditorLayers({
+          project,
+          locationId: session.selection.locationId,
+          stateId: session.selection.stateId,
+          selectionIds,
+        })
+        return {
+          ok: true,
+          historyEntry: true,
+          nextSession: {
+            ...session,
+            history: commitSlideAuthoringHistory(session.history, project),
+            selection,
+            scope: extra.scope ?? session.scope,
+          },
+          selection,
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          reason: error instanceof Error ? error.message : '无法写入当前课件',
+          historyEntry: false,
+          nextSession: session,
+          selection: session.selection,
+        }
+      }
+    }, extra)
+  }
+
+  const appendV9GlobalNode = (
+    node: SceneNode,
+    extra: { statusMessage?: string | null; sidecar?: CourseAssetSidecar } = {},
+  ): boolean => {
+    if (!selectSlideCandidateBackend(get()) || get().editingScope !== 'global') return false
+    runV9DocumentMutation((draft) => {
+      appendGlobalCourseNode(draft, node)
+    }, {
+      ...extra,
+      selectionIds: [node.id],
+      scope: 'global',
+    })
+    return true
+  }
+
+  const runCandidateSession = (
+    run: (session: SlideAuthoringSession) => SlideCommandResult,
+    extra?: {
+      clipboard?: V9SlideClipboardPayload | null
+      statusMessage?: string | null
+      clearContentEdit?: boolean
+      sidecar?: CourseAssetSidecar
+      sidecarDirection?: 'undo' | 'redo'
+      componentPackages?: Record<string, ComponentPackageData>
+    },
+  ): SlideCommandResult => {
+    const backend = selectSlideCandidateBackend(get())
+    if (!backend) {
+      return {
+        ok: false,
+        reason: SLIDE_BACKEND_NOT_CANDIDATE,
+        historyEntry: false,
+      }
+    }
+    return persistCandidateResult(run(backend.getSession()), extra)
+  }
+
+  const runCandidateAction = (
+    actionId: SlideSceneActionId,
+    extra: {
+      orderedLayerItemIds?: readonly string[]
+      focus?: Parameters<typeof shouldIgnoreSlideLayerDeleteForFocus>[0]
+    } = {},
+  ) => {
+    const backend = selectSlideCandidateBackend(get())
+    if (!backend) {
+      return {
+        ok: false,
+        reason: SLIDE_BACKEND_NOT_CANDIDATE,
+        historyEntry: false,
+        actionId,
+        clipboard: get().slideCandidateClipboard,
+      }
+    }
+    const execution = executeSlideSceneAction(actionId, backend.getSession(), {
+      clipboard: get().slideCandidateClipboard,
+      expectedRevision: backend.getSnapshot().revision,
+      orderedLayerItemIds: extra.orderedLayerItemIds,
+      focus: extra.focus,
+    })
+    persistCandidateResult(execution, {
+      clipboard: execution.clipboard,
+      statusMessage: execution.ok ? execution.reason ?? null : undefined,
+    })
+    return execution
+  }
+
+  const commitOpenCandidateContentEdit = (
+    nextSelectionIds: readonly string[],
+  ): SlideCandidateBackend | null => {
+    const state = get()
+    const backend = selectSlideCandidateBackend(state)
+    const edit = state.v9ContentEdit
+    if (!backend) return null
+    if (!edit) return backend
+    const keep =
+      nextSelectionIds.length === 1 &&
+      nextSelectionIds[0] === edit.target.layerItemId
+    if (keep) return backend
+    persistCandidateResult(
+      commitV9SlideContentEdit(backend.getSession(), edit),
+      { clearContentEdit: true },
+    )
+    return selectSlideCandidateBackend(get())
+  }
+
+  const persistOpenV9ContentEdit = (): SlideCandidateBackend | null => {
+    const state = get()
+    const backend = selectSlideCandidateBackend(state)
+    const edit = state.v9ContentEdit
+    if (!backend) return null
+    if (!edit) return backend
+    persistCandidateResult(
+      commitV9SlideContentEdit(backend.getSession(), edit),
+      { clearContentEdit: true },
+    )
+    return selectSlideCandidateBackend(get())
+  }
+
+  const persistOpenSpatialContentEdit = (): SpatialAuthoringSession | null => {
+    const state = get()
+    const session = state.spatialSession
+    const edit = state.spatialContentEdit
+    if (!session) return null
+    if (!edit) return session
+    persistSpatialResult(
+      commitSpatialWorldContentEdit(session, edit),
+      { clearContentEdit: true },
+    )
+    return get().spatialSession
+  }
 
   const commit = (
     recipe: (draft: ProjectDocument) => void,
     selection?: string | null,
     componentPackageMutation?: ComponentPackageMutation | ComponentPackageMutation[],
   ) => {
+    if (rejectV8WriteIfCandidate()) return
     set((state) => {
       const prepared = commitTextEditSessionState(state)
       const componentPackageMutations = componentPackageMutation
@@ -1450,8 +3655,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   const canAddNodes = (count = 1): boolean => {
     const state = get()
-    const nodes = editingNodes(state)
-    if (count > 0 && nodes.length + count <= MAX_SCENE_NODES) return true
+    const backend = selectSlideCandidateBackend(state)
+    const length = backend
+      ? state.editingScope === 'global'
+        ? backend.getSession().history.present.globalLayerItems.length
+        : findCourseSlideScene(
+            backend.getSession().history.present,
+            backend.getSnapshot().sceneId,
+          )?.layerItems.length ?? 0
+      : editingNodes(state).length
+    if (count > 0 && length + count <= MAX_SCENE_NODES) return true
     set({
       errorMessage: state.editingScope === 'global'
         ? `全局层已达到或将超过 ${MAX_SCENE_NODES} 个元素上限。请删除不需要的全局元素后继续。`
@@ -1504,6 +3717,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     selectedNodeIds: string[] | undefined,
     statusMessage: string,
   ): void => {
+    if (rejectV8WriteIfCandidate()) return
     set((state) => {
       const prepared = commitTextEditSessionState(state)
       const nextFiles = { ...prepared.assetFiles }
@@ -1625,60 +3839,614 @@ export const useEditorStore = create<EditorState>((set, get) => {
     textEditSession: null,
     statusMessage: '已创建新课件',
     errorMessage: null,
+    slideBackend: initialBackend,
+    slideCandidateSnapshot: initialSnapshot,
+    slideCandidateClipboard: null,
+    v9ContentEdit: null,
+    ...candidateViewState(initialBackend, null),
+    slideCandidateSidecar: initialSidecar,
+    slideCandidateSidecarPast: [],
+    slideCandidateSidecarFuture: [],
+    slideCandidateComponentPackagesPast: [],
+    slideCandidateComponentPackagesFuture: [],
+    spatialSession: null,
+    spatialContentEdit: null,
+    spatialGraphSelection: null,
+    spatialPlaybackPathId: null,
+    flowSession: null,
+    flowTextEdit: null,
+    courseAuthoringSession: buildCourseAuthoringSessionForProject(
+      initialCourse,
+      initialSnapshot.locationId,
+      initialSnapshot.selection.selectionIds,
+    ),
 
-    createNewProject() {
-      const project = createProject()
+    injectV9SlideCandidateBackend(backend) {
+      if (!isV9SlideCandidateBackend(backend)) return
+      applyV9Backend(backend, {
+        sidecar: emptyCourseAssetSidecar(),
+        dirty: false,
+        statusMessage: null,
+        path: null,
+      })
+    },
+
+    clearV9SlideCandidateBackend() {
       set({
-        project,
-        activeSceneId: project.scenes[0].id,
-        activePresentationStateId: null,
-        editingScope: 'scene',
-        canvasMode: 'edit',
+        slideBackend: V8_SLIDE_BACKEND,
+        slideCandidateSnapshot: null,
+        slideCandidateClipboard: null,
+        v9ContentEdit: null,
+        ...emptyCandidateViewState(),
+        slideCandidateSidecar: null,
+        slideCandidateSidecarPast: [],
+        slideCandidateSidecarFuture: [],
+        slideCandidateComponentPackagesPast: [],
+        slideCandidateComponentPackagesFuture: [],
         selectedNodeId: null,
         selectedNodeIds: [],
-        clipboardNodes: [],
-        clipboardGlobalItems: [],
-        clipboardInteractionRules: [],
-        projectPath: null,
-        dirty: false,
-        history: emptyHistory(),
-        assetFiles: {},
-        componentPackages: {},
         editingTextNodeId: null,
-        textEditSession: null,
-        statusMessage: '已创建新课件',
         errorMessage: null,
       })
+    },
+
+    runSlideCandidateCommand(run) {
+      return persistCandidateResult(
+        executeSlideCandidateCommand(get().slideBackend, run),
+      )
+    },
+
+    applySlideCandidateSession(session) {
+      if (!isV9SlideCandidateBackend(get().slideBackend)) return
+      persistCandidateResult({
+        ok: true,
+        nextSession: session,
+        historyEntry: false,
+      })
+    },
+
+    applySlideCandidateCommand(run, extra) {
+      return runCandidateSession(run, extra)
+    },
+
+    importV9CandidateMedia(input) {
+      const media = currentMediaSession()
+      if (!media) {
+        return {
+          ok: false,
+          reason: SLIDE_BACKEND_NOT_CANDIDATE,
+          nextSession: undefined as unknown as SlideAuthoringSession,
+          sidecar: emptyCourseAssetSidecar(),
+          historyEntry: false,
+        }
+      }
+      const items = input.items.map((item) => ({ meta: item.meta, bytes: item.bytes }))
+      if (input.nativeType === 'audio') {
+        return persistMediaResult(importCourseSounds(media, items, {
+          expectedRevision: media.session.history.present.revision,
+        }))
+      }
+      if (!input.nativeType) {
+        return persistMediaResult(importCourseMediaAssets(media, items, {
+          expectedRevision: media.session.history.present.revision,
+        }))
+      }
+      if (
+        get().editingScope === 'global'
+        && (input.mode ?? 'library') === 'add'
+        && (input.nativeType === 'image' || input.nativeType === 'video')
+      ) {
+        for (const item of items) {
+          if (input.nativeType === 'image') {
+            get().addImageNode(item.meta, item.bytes, input.x, input.y)
+          } else {
+            get().addVideoNode(item.meta, item.bytes, input.x, input.y)
+          }
+        }
+        const backend = selectSlideCandidateBackend(get())
+        return {
+          ok: Boolean(backend),
+          reason: backend ? '图片已添加到全局层' : SLIDE_BACKEND_NOT_CANDIDATE,
+          nextSession: backend?.getSession() ?? media.session,
+          sidecar: get().slideCandidateSidecar ?? emptyCourseAssetSidecar(),
+          historyEntry: Boolean(backend),
+          selection: backend?.getSession().selection ?? media.session.selection,
+        }
+      }
+      return persistMediaResult(importAndPlaceCourseMedia(media, {
+        items,
+        nativeType: input.nativeType,
+        mode: input.mode ?? 'library',
+        ...(typeof input.x === 'number' ? { x: input.x } : {}),
+        ...(typeof input.y === 'number' ? { y: input.y } : {}),
+      }, {
+        expectedRevision: media.session.history.present.revision,
+      }))
+    },
+
+    exportV9SlideCandidateArchive() {
+      const spatial = get().spatialSession
+      const flow = get().flowSession
+      const backend = selectSlideCandidateBackend(get())
+      const project = spatial?.history.present
+        ?? flow?.history.present
+        ?? backend?.getSession().history.present
+      if (!project) return null
+      const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
+      return createCourseProjectArchive({
+        project,
+        assetFiles: Object.fromEntries(
+          Object.entries(sidecar.files).map(([assetId, bytes]) => [assetId, bytes.slice()]),
+        ),
+        componentFiles: {},
+      })
+    },
+
+    reopenV9SlideCandidateArchive(bytes) {
+      try {
+        const archive = openCourseProjectArchive(bytes)
+        if (courseProjectStartsAsSpatial(archive.project)) {
+          applySpatialBackend(openSpatialAuthoringSession(archive.project), {
+            sidecar: freezeCourseAssetSidecar(archive.assetFiles),
+            dirty: false,
+            statusMessage: `已打开“${archive.project.title}”`,
+            path: get().projectPath,
+          })
+          return true
+        }
+        if (courseProjectStartsAsFlow(archive.project)) {
+          applyFlowBackend(openFlowAuthoringSession(archive.project), {
+            sidecar: freezeCourseAssetSidecar(archive.assetFiles),
+            dirty: false,
+            statusMessage: `已打开“${archive.project.title}”`,
+            path: get().projectPath,
+          })
+          return true
+        }
+        const backend = createSlideCandidateBackend(openSlideAuthoringSession(archive.project))
+        applyV9Backend(backend, {
+          sidecar: freezeCourseAssetSidecar(archive.assetFiles),
+          dirty: false,
+          statusMessage: `已打开“${archive.project.title}”`,
+          path: get().projectPath,
+        })
+        return true
+      } catch (error) {
+        set({
+          errorMessage: error instanceof Error ? error.message : '无法打开课程工程',
+          statusMessage: null,
+        })
+        return false
+      }
+    },
+
+    runSpatialCommand(run, extra) {
+      const session = get().spatialSession
+      if (!session) {
+        return {
+          ok: false,
+          reason: 'not-spatial-session',
+          historyEntry: false,
+          nextSession: session as unknown as SpatialAuthoringSession,
+          selection: { locationId: '', surfaceId: '', selectionIds: [] },
+        }
+      }
+      return persistSpatialResult(run(session), extra)
+    },
+
+    applySpatialAuthoringSession(session, extra = {}) {
+      return persistSpatialResult(
+        succeedSpatialCommand(session, extra.historyEntry === true),
+        { statusMessage: extra.statusMessage },
+      )
+    },
+
+    applyFlowCommand(result, extra = {}) {
+      return persistFlowResult(result, extra)
+    },
+
+    applyFlowSelection(selection) {
+      const flow = get().flowSession
+      if (!flow) return
+      persistFlowResult({
+        ok: true,
+        nextDocument: flow.history.present,
+        historyEntry: false,
+        selection: selection ?? flow.selection,
+      }, {
+        selection: selection ?? flow.selection,
+        clearTextEdit: selection?.focus !== 'text',
+      })
+    },
+
+    setFlowTextEdit(edit) {
+      set({ flowTextEdit: edit })
+    },
+
+    insertFlowLibraryMedia(assetId, request = {}) {
+      const flow = get().flowSession
+      if (!flow) {
+        return { ok: false, reason: '请先选择一个流式页面', historyEntry: false }
+      }
+      return persistFlowResult(
+        insertFlowSharedMedia(flow.history.present, flow.selection, {
+          assetId,
+          altKey: request.altKey,
+          menuAction: request.menuAction,
+        }, { expectedRevision: flow.history.present.revision }),
+      ) as FlowSharedAuthoringResult
+    },
+
+    formatFlowTextStyle(style) {
+      const flow = get().flowSession
+      if (!flow) {
+        return { ok: false, reason: '请先选择一个流式页面', historyEntry: false }
+      }
+      const formatted = formatFlowAuthoringTextStyle({
+        document: flow.history.present,
+        selection: flow.selection,
+        style,
+        edit: get().flowTextEdit,
+        expectedRevision: flow.history.present.revision,
+      })
+      if (formatted.nextEdit) {
+        set({ flowTextEdit: formatted.nextEdit })
+      }
+      return persistFlowResult(formatted, {
+        selection: formatted.nextSelection ?? flow.selection,
+      }) as FlowCommandResult
+    },
+
+    formatFlowBlock(spec) {
+      const flow = get().flowSession
+      if (!flow) {
+        return { ok: false, reason: '请先选择一个流式页面', historyEntry: false }
+      }
+      return persistFlowResult(
+        formatFlowAuthoringBlock(flow.history.present, flow.selection, spec, {
+          expectedRevision: flow.history.present.revision,
+        }),
+      ) as FlowCommandResult
+    },
+
+    renameFlowHeading(locationId, title) {
+      const flow = get().flowSession
+      if (!flow) return
+      const document = flow.history.present
+      const location = document.locations.find((candidate) => candidate.id === locationId)
+      if (!location || location.kind !== 'flow-block') return
+      persistFlowResult(updateFlowEditorBlock(document, {
+        surfaceId: location.surfaceId,
+        blockId: location.blockId,
+        parentId: findFlowBlockRecursive(
+          flowSurfaceIn(document, location.surfaceId).blocks,
+          location.blockId,
+        )?.parentId ?? null,
+      }, { text: title }, { expectedRevision: document.revision }), {
+        selection: flow.selection,
+      })
+    },
+
+    renameFlowPage(surfaceId, title) {
+      const flow = get().flowSession
+      if (!flow) return
+      const next = commitSlideProjectMutation(flow.history.present, (draft) => {
+        const surface = draft.surfaces.find((candidate) => candidate.id === surfaceId)
+        if (surface) surface.title = title
+      })
+      persistFlowResult({
+        ok: true,
+        nextDocument: next,
+        historyEntry: true,
+        selection: flow.selection,
+      }, { statusMessage: '已重命名页面' })
+    },
+
+    setSpatialGraphSelection(selection) {
+      set({
+        spatialGraphSelection: selection,
+        ...(selection
+          ? { selectedNodeId: null, selectedNodeIds: [], activeTab: 'properties' as const }
+          : {}),
+      })
+    },
+
+    setSpatialPlaybackPathId(pathId) {
+      set({ spatialPlaybackPathId: pathId })
+    },
+
+    moveCandidateLayerOwner(fromId, toId) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const projection = buildCandidateEffectiveLayers(get())
+        const from = projection?.unifiedRows.find((row) => row.id === fromId)
+        const to = projection?.unifiedRows.find((row) => row.id === toId)
+        if (!from || !to) return
+        if (refusesTeacherControllerOwnerMove(from, to)) return
+        const destination: EffectiveLayerOwnerDestination = {
+          source: to.owner,
+          surfaceId: to.scopeToken.surfaceId,
+          sceneId: to.scopeToken.sceneId,
+        }
+        persistSpatialLayerCommand(moveEffectiveLayerOwner(
+          spatial.history.present,
+          commandTargetForRow(from),
+          destination,
+          { expectedRevision: spatial.history.present.revision },
+        ))
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const projection = buildCandidateEffectiveLayers(get())
+        const from = projection?.unifiedRows.find((row) => row.id === fromId)
+        const to = projection?.unifiedRows.find((row) => row.id === toId)
+        if (!from || !to) return
+        if (refusesTeacherControllerOwnerMove(from, to)) return
+        const destination: EffectiveLayerOwnerDestination = {
+          source: to.owner,
+          surfaceId: to.scopeToken.surfaceId,
+          sceneId: to.scopeToken.sceneId,
+        }
+        persistFlowLayerCommand(moveEffectiveLayerOwner(
+          flow.history.present,
+          commandTargetForRow(from),
+          destination,
+          { expectedRevision: flow.history.present.revision },
+        ))
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (!backend) return
+      const projection = buildCandidateEffectiveLayers(get())
+      const from = projection?.unifiedRows.find((row) => row.id === fromId)
+      const to = projection?.unifiedRows.find((row) => row.id === toId)
+      if (!from || !to) return
+      if (refusesTeacherControllerOwnerMove(from, to)) return
+      const destination: EffectiveLayerOwnerDestination = {
+        source: to.owner,
+        surfaceId: to.scopeToken.surfaceId,
+        sceneId: to.scopeToken.sceneId,
+      }
+      persistLayerCommand(moveEffectiveLayerOwner(
+        backend.getSession().history.present,
+        commandTargetForRow(from),
+        destination,
+        { expectedRevision: backend.getSnapshot().revision },
+      ))
+    },
+
+    setCandidateGlobalLayerLocationVisibility(nodeId, visibility) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row || row.owner !== 'global') return
+        persistSpatialLayerCommand(setGlobalLayerLocationVisibility(
+          spatial.history.present,
+          commandTargetForRow(row),
+          visibility,
+          { expectedRevision: spatial.history.present.revision },
+        ))
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row || row.owner !== 'global') return
+        persistFlowLayerCommand(setGlobalLayerLocationVisibility(
+          flow.history.present,
+          commandTargetForRow(row),
+          visibility,
+          { expectedRevision: flow.history.present.revision },
+        ))
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (!backend) return
+      const row = findCandidateLayerRow(get(), nodeId)
+      if (!row || row.owner !== 'global') return
+      persistLayerCommand(setGlobalLayerLocationVisibility(
+        backend.getSession().history.present,
+        commandTargetForRow(row),
+        visibility,
+        { expectedRevision: backend.getSnapshot().revision },
+      ))
+    },
+
+    setCandidateGlobalLayerVisibleAtLocation(nodeId, visible) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row || row.owner !== 'global') return
+        persistSpatialLayerCommand(setGlobalLayerVisibleAtLocation(
+          spatial.history.present,
+          commandTargetForRow(row),
+          visible,
+          { expectedRevision: spatial.history.present.revision },
+        ))
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row || row.owner !== 'global') return
+        persistFlowLayerCommand(setGlobalLayerVisibleAtLocation(
+          flow.history.present,
+          commandTargetForRow(row),
+          visible,
+          { expectedRevision: flow.history.present.revision },
+        ))
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (!backend) return
+      const row = findCandidateLayerRow(get(), nodeId)
+      if (!row || row.owner !== 'global') return
+      persistLayerCommand(setGlobalLayerVisibleAtLocation(
+        backend.getSession().history.present,
+        commandTargetForRow(row),
+        visible,
+        { expectedRevision: backend.getSnapshot().revision },
+      ))
+    },
+
+    commitSlideCandidateTextRunStyle(input) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        return persistSpatialResult(commitSpatialWorldTextRunStyle(spatial, {
+          layerItemId: input.layerItemId,
+          selectionStart: input.selectionStart,
+          selectionEnd: input.selectionEnd,
+          patch: input.patch,
+          source: input.source ?? 'properties',
+        }), { clearContentEdit: true })
+      }
+      return runCandidateSession(
+        (session) => commitV9SlideTextRunStyle(session, {
+          layerItemId: input.layerItemId,
+          selectionStart: input.selectionStart,
+          selectionEnd: input.selectionEnd,
+          patch: input.patch,
+          source: input.source ?? 'properties',
+        }),
+        { clearContentEdit: true },
+      )
+    },
+
+    createNewProject() {
+      const project = createBlankCourseProject()
+      applyV9Backend(
+        createSlideCandidateBackend(openSlideAuthoringSession(project)),
+        {
+          sidecar: emptyCourseAssetSidecar(),
+          path: null,
+          dirty: false,
+          statusMessage: '已创建新课件',
+        },
+      )
+    },
+
+    createNewSpatialProject() {
+      const project = createBlankSpatialCourseProject()
+      applySpatialBackend(openSpatialAuthoringSession(project), {
+        sidecar: emptyCourseAssetSidecar(),
+        path: null,
+        dirty: false,
+        statusMessage: '已创建空白无限画布课件',
+      })
+    },
+
+    createNewFlowProject() {
+      const project = createBlankFlowCourseProject()
+      applyFlowBackend(openFlowAuthoringSession(project), {
+        sidecar: emptyCourseAssetSidecar(),
+        path: null,
+        dirty: false,
+        statusMessage: '已创建空白流式讲义课件',
+      })
+    },
+
+    loadCourseProject(project, path, assetFiles = {}, componentPackages = {}) {
+      if (courseProjectStartsAsSpatial(project)) {
+        applySpatialBackend(openSpatialAuthoringSession(project), {
+          sidecar: freezeCourseAssetSidecar(assetFiles),
+          path,
+          dirty: false,
+          statusMessage: `已打开“${project.title}”`,
+          componentPackages,
+        })
+        return
+      }
+      if (courseProjectStartsAsFlow(project)) {
+        applyFlowBackend(openFlowAuthoringSession(project), {
+          sidecar: freezeCourseAssetSidecar(assetFiles),
+          path,
+          dirty: false,
+          statusMessage: `已打开“${project.title}”`,
+          componentPackages,
+        })
+        return
+      }
+      applyV9Backend(
+        createSlideCandidateBackend(openSlideAuthoringSession(project)),
+        {
+          sidecar: freezeCourseAssetSidecar(assetFiles),
+          path,
+          dirty: false,
+          statusMessage: `已打开“${project.title}”`,
+          componentPackages,
+        },
+      )
     },
 
     loadProject(project, path, assetFiles = {}, componentPackages = {}) {
-      const copy = normalizeProjectPresentations(cloneProject(project))
-      set({
-        project: copy,
-        activeSceneId: copy.scenes[0].id,
-        activePresentationStateId: null,
-        editingScope: 'scene',
-        canvasMode: 'edit',
-        selectedNodeId: null,
-        selectedNodeIds: [],
-        clipboardNodes: [],
-        clipboardGlobalItems: [],
-        clipboardInteractionRules: [],
-        projectPath: path,
-        dirty: false,
-        history: emptyHistory(),
-        assetFiles: Object.fromEntries(
-          Object.entries(assetFiles).map(([id, bytes]) => [id, bytes.slice()]),
-        ),
-        componentPackages,
-        editingTextNodeId: null,
-        textEditSession: null,
-        statusMessage: `已打开“${copy.title}”`,
-        errorMessage: null,
-      })
+      const migrated = migrateProjectV8ToCourseProjectV9(project)
+      get().loadCourseProject(migrated, path, assetFiles, componentPackages)
     },
 
     markSaved(path, project) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistOpenSpatialContentEdit()
+        const live = get().spatialSession ?? spatial
+        set({
+          projectPath: path,
+          dirty: false,
+          statusMessage: `已保存到 ${path}`,
+          editingTextNodeId: null,
+          textEditSession: null,
+          spatialContentEdit: null,
+          ...(project
+            ? { project: normalizeProjectPresentations(cloneProject(project)) }
+            : {
+                project: derivedV8ProjectFromSpatial(
+                  live,
+                  get().slideCandidateSidecar,
+                  null,
+                ),
+              }),
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        set({
+          projectPath: path,
+          dirty: false,
+          statusMessage: `已保存到 ${path}`,
+          flowTextEdit: null,
+          ...(project
+            ? { project: normalizeProjectPresentations(cloneProject(project)) }
+            : {
+                project: derivedV8ProjectFromFlow(flow, get().slideCandidateSidecar),
+              }),
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistOpenV9ContentEdit()
+        const nextBackend = selectSlideCandidateBackend(get()) ?? backend
+        set({
+          projectPath: path,
+          dirty: false,
+          statusMessage: `已保存到 ${path}`,
+          editingTextNodeId: null,
+          textEditSession: null,
+          v9ContentEdit: null,
+          ...(project
+            ? { project: normalizeProjectPresentations(cloneProject(project)) }
+            : {
+                project: derivedV8ProjectFromBackend(
+                  nextBackend,
+                  get().slideCandidateSidecar,
+                  null,
+                ),
+              }),
+        })
+        return
+      }
+      if (rejectV8WriteIfCandidate()) return
       set((state) => ({
         ...commitTextEditSessionState(state),
         ...(project
@@ -1691,6 +4459,61 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setEditingScope(editingScope) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialResult(setSpatialEditingScope(
+          spatial,
+          editingScope === 'global' ? 'global' : 'world',
+        ), {
+          statusMessage: editingScope === 'global' ? '正在编辑全局层' : '正在编辑无限画布',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const document = flow.history.present
+        if (editingScope === 'global') {
+          const entered = enterFlowGlobalAuthoring(document, flow.selection.locationId)
+          if (!entered.ok || !('selection' in entered)) {
+            if (entered.reason) set({ errorMessage: entered.reason, statusMessage: null })
+            return
+          }
+          persistFlowResult({
+            ok: true,
+            nextDocument: document,
+            historyEntry: false,
+            selection: entered.selection,
+          }, {
+            statusMessage: '正在编辑全局层',
+            clearTextEdit: true,
+          })
+          return
+        }
+        persistFlowResult({
+          ok: true,
+          nextDocument: document,
+          historyEntry: false,
+          selection: selectFlowEditorBlock(
+            document,
+            flow.selection.locationId,
+            flow.selection.selectedBlockId
+              ?? flowLocationBlockId(document.locations, flow.selection.locationId)
+              ?? flow.selection.locationId,
+          ),
+        }, {
+          statusMessage: '正在编辑流式讲义',
+          clearTextEdit: true,
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistCandidateResult(backend.setScope(
+          editingScope === 'global' ? 'global' : 'scene',
+          { expectedRevision: backend.getSnapshot().revision },
+        ))
+        return
+      }
       set((state) => {
         if (state.editingScope === editingScope) return state
         return {
@@ -1709,6 +4532,61 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setCanvasMode(canvasMode) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        set({
+          canvasMode,
+          selectedNodeId: canvasMode === 'run' ? null : get().selectedNodeId,
+          selectedNodeIds: canvasMode === 'run' ? [] : get().selectedNodeIds,
+          editingTextNodeId: null,
+          textEditSession: null,
+          spatialContentEdit: null,
+          spatialGraphSelection: canvasMode === 'run' ? null : get().spatialGraphSelection,
+          statusMessage: canvasMode === 'run'
+            ? '正在运行当前课件；切回编辑可直接修改元素'
+            : '已返回无限画布编辑',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        set({
+          canvasMode,
+          flowTextEdit: canvasMode === 'run' ? null : get().flowTextEdit,
+          statusMessage: canvasMode === 'run'
+            ? '正在运行当前流式讲义；切回编辑可继续改稿纸'
+            : '已返回流式讲义编辑',
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistOpenV9ContentEdit()
+        const live = selectSlideCandidateBackend(get()) ?? backend
+        const scene = currentScene(get())
+        const nextStateId =
+          canvasMode === 'run' && get().activePresentationStateId === null && scene
+            ? ensureScenePresentation(scene).initialStateId
+            : get().activePresentationStateId
+        if (nextStateId !== live.getSession().selection.stateId) {
+          persistCandidateResult(live.activateState(nextStateId, {
+            expectedRevision: live.getSnapshot().revision,
+          }))
+        }
+        const after = get()
+        set({
+          canvasMode,
+          selectedNodeId: canvasMode === 'run' ? null : after.selectedNodeId,
+          selectedNodeIds: canvasMode === 'run' ? [] : after.selectedNodeIds,
+          editingTextNodeId: null,
+          textEditSession: null,
+          v9ContentEdit: null,
+          statusMessage: canvasMode === 'run'
+            ? '正在运行当前课件；切回编辑可直接修改元素'
+            : '已返回状态编辑画布',
+        })
+        return
+      }
       set((state) => {
         const prepared = commitTextEditSessionState(state)
         const scene = currentScene(prepared)
@@ -1765,6 +4643,41 @@ export const useEditorStore = create<EditorState>((set, get) => {
         set({ errorMessage: '课件名称不能为空。' })
         return
       }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        if (normalized === backend.getSession().history.present.title) return
+        runCandidateSession(
+          (session) => {
+            const project = commitSlideProjectMutation(session.history.present, (draft) => {
+              draft.title = normalized
+            })
+            return {
+              ok: true,
+              nextSession: {
+                ...session,
+                history: commitSlideAuthoringHistory(session.history, project),
+              },
+              historyEntry: true,
+              selection: session.selection,
+            }
+          },
+          { statusMessage: `课件已重命名为“${normalized}”` },
+        )
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        if (normalized === flow.history.present.title) return
+        persistFlowResult({
+          ok: true,
+          nextDocument: commitSlideProjectMutation(flow.history.present, (draft) => {
+            draft.title = normalized
+          }),
+          historyEntry: true,
+          selection: flow.selection,
+        }, { statusMessage: `课件已重命名为“${normalized}”` })
+        return
+      }
       if (normalized === get().project.title) return
       commit((draft) => {
         draft.title = normalized
@@ -1776,6 +4689,92 @@ export const useEditorStore = create<EditorState>((set, get) => {
       else get().commitTextEdit()
     },
     beginTextEdit(nodeId, source = 'canvas') {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const existingSpatial = get().spatialContentEdit
+        if (
+          existingSpatial?.target.layerItemId === nodeId &&
+          existingSpatial.source === source
+        ) {
+          return
+        }
+        if (existingSpatial) get().commitTextEdit()
+        const nextSpatial = get().spatialSession
+        if (!nextSpatial) return
+        const begun = beginSpatialWorldContentEdit({
+          session: nextSpatial,
+          layerItemId: nodeId,
+          source,
+        })
+        if (!begun.ok) {
+          set({ errorMessage: begun.reason, statusMessage: null })
+          return
+        }
+        set({
+          spatialContentEdit: begun.edit,
+          editingTextNodeId: source === 'canvas' && begun.edit.kind === 'text' ? nodeId : null,
+          textEditSession: null,
+          errorMessage: null,
+          ...spatialViewState(nextSpatial, get().slideCandidateSidecar, begun.edit),
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const existing = get().v9ContentEdit
+        if (
+          existing?.target.layerItemId === nodeId &&
+          existing.source === source
+        ) {
+          return
+        }
+        if (existing) get().commitTextEdit()
+        const nextBackend = selectSlideCandidateBackend(get())
+        if (!nextBackend) return
+        const begun = beginV9SlideContentEdit({
+          backend: nextBackend,
+          layerItemId: nodeId,
+          source,
+        })
+        if (begun.ok) {
+          set({
+            v9ContentEdit: begun.edit,
+            ...candidateViewState(nextBackend, begun.edit),
+            editingTextNodeId: source === 'canvas' && begun.edit.kind === 'text' ? nodeId : null,
+            textEditSession: null,
+            errorMessage: null,
+          })
+          return
+        }
+        const current = get()
+        const node = editingNodes(current).find((item) => item.id === nodeId)
+        const scene = currentScene(current)
+        if (node?.type === 'text' && scene && current.editingScope !== 'global') {
+          set({
+            errorMessage: null,
+            editingTextNodeId: source === 'canvas' ? nodeId : null,
+            textEditSession: {
+              scope: current.editingScope,
+              sceneId: scene.id,
+              presentationStateId: current.editingScope === 'scene'
+                ? current.activePresentationStateId
+                : null,
+              nodeId,
+              source,
+              original: {
+                text: node.text,
+                runs: structuredClone(node.runs),
+                width: node.width,
+                height: node.height,
+              },
+              dirtyBefore: current.dirty,
+            },
+          })
+          return
+        }
+        set({ errorMessage: begun.reason, statusMessage: null })
+        return
+      }
       set((state) => {
         if (
           state.textEditSession?.nodeId === nodeId &&
@@ -1810,6 +4809,42 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     },
     updateTextEditDraft(nodeId, text, runs, height, width) {
+      const state = get()
+      if (state.spatialSession && state.spatialContentEdit) {
+        if (state.spatialContentEdit.target.layerItemId !== nodeId) return
+        if (state.spatialContentEdit.kind !== 'text') return
+        const nextEdit = updateSpatialWorldContentTextDraft(state.spatialContentEdit, {
+          text,
+          runs,
+          ...(width !== undefined ? { width } : {}),
+          ...(height !== undefined ? { height } : {}),
+        })
+        set({
+          spatialContentEdit: nextEdit,
+          ...spatialViewState(
+            state.spatialSession,
+            state.slideCandidateSidecar,
+            nextEdit,
+          ),
+        })
+        return
+      }
+      if (selectSlideCandidateBackend(state) && state.v9ContentEdit) {
+        if (state.v9ContentEdit.target.layerItemId !== nodeId) return
+        if (state.v9ContentEdit.kind !== 'text') return
+        const nextEdit = updateV9SlideContentTextDraft(state.v9ContentEdit, {
+          text,
+          runs,
+          ...(width !== undefined ? { width } : {}),
+          ...(height !== undefined ? { height } : {}),
+        })
+        const backend = selectSlideCandidateBackend(get())
+        set({
+          v9ContentEdit: nextEdit,
+          ...(backend ? candidateViewState(backend, nextEdit) : {}),
+        })
+        return
+      }
       set((state) => {
         const session = state.textEditSession
         if (!session || session.nodeId !== nodeId) return state
@@ -1840,37 +4875,417 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     },
     commitTextEdit() {
+      const state = get()
+      if (state.spatialSession && state.spatialContentEdit) {
+        persistSpatialResult(
+          commitSpatialWorldContentEdit(state.spatialSession, state.spatialContentEdit),
+          { clearContentEdit: true },
+        )
+        return
+      }
+      const backend = selectSlideCandidateBackend(state)
+      if (backend && state.v9ContentEdit) {
+        persistCandidateResult(
+          commitV9SlideContentEdit(backend.getSession(), state.v9ContentEdit),
+          { clearContentEdit: true },
+        )
+        return
+      }
+      if (backend && state.textEditSession) {
+        const session = state.textEditSession
+        const node = textNodeForSession(state.project, session)
+        if (node && node.type === 'text' && !sameTextSnapshot(node, session.original)) {
+          runV9DocumentMutation((draft) => {
+            const item = findMutableCourseLayerItem(draft, session.nodeId)
+            if (!item) return
+            applySceneNodePatchToLayerItem(item, {
+              text: node.text,
+              runs: node.runs,
+              width: node.width,
+              height: node.height,
+            }, get().componentPackages)
+          }, { statusMessage: '已更新文字' })
+        }
+        set({ editingTextNodeId: null, textEditSession: null })
+        return
+      }
       set((state) => commitTextEditSessionState(state))
     },
     cancelTextEdit() {
+      const state = get()
+      if (state.spatialSession && state.spatialContentEdit) {
+        set({
+          spatialContentEdit: null,
+          editingTextNodeId: null,
+          project: derivedV8ProjectFromSpatial(
+            state.spatialSession,
+            state.slideCandidateSidecar,
+            null,
+          ),
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(state)
+      if (backend && state.v9ContentEdit) {
+        cancelV9SlideContentEdit(backend.getSession(), state.v9ContentEdit)
+        set({
+          v9ContentEdit: null,
+          editingTextNodeId: null,
+          ...candidateViewState(backend, null),
+        })
+        return
+      }
       set((state) => cancelTextEditSessionState(state))
     },
 
+    addCourseContent(action, options = {}) {
+      const project = selectActiveCourseProjectDocument(get())
+      if (!project) return
+      let result: CourseLocationCommandResult
+      const expectedRevision = project.revision
+      if (action === 'scene') {
+        if (!options.surfaceId) {
+          set({ errorMessage: '找不到当前 Slide 表面', statusMessage: null })
+          return
+        }
+        const slideSurface = project.surfaces.find(
+          (surface) => surface.id === options.surfaceId && surface.type === 'slide',
+        )
+        const sceneCount = slideSurface?.type === 'slide' ? slideSurface.scenes.length : 0
+        if (sceneCount >= MAX_PROJECT_SCENES) {
+          set({
+            errorMessage: `工程已达到 ${MAX_PROJECT_SCENES} 个场景上限。请删除不需要的场景后再试。`,
+            statusMessage: null,
+          })
+          return
+        }
+        result = addCourseScene(project, {
+          surfaceId: options.surfaceId,
+          title: `场景 ${sceneCount + 1}`,
+          expectedRevision,
+        })
+      } else if (action === 'slide-page') {
+        result = addCourseSlidePage(project, { expectedRevision })
+      } else if (action === 'flow-page') {
+        result = addCourseFlowPage(project, { expectedRevision })
+      } else {
+        result = addCourseSpatialPage(project, { expectedRevision })
+      }
+      if (!result.ok) {
+        set({ errorMessage: result.reason, statusMessage: null })
+        return
+      }
+      const statusMessage = action === 'scene'
+        ? '已新建场景'
+        : action === 'slide-page'
+          ? '已新增演示页面'
+          : action === 'flow-page'
+            ? '已新增流式讲义'
+            : '已新增无限画布'
+      persistCourseProjectCommand(result, { statusMessage })
+      get().activateCourseLocation(result.activatedLocationId)
+    },
+
+    reorderCourseSurfaces(surfaceIds) {
+      const project = selectActiveCourseProjectDocument(get())
+      if (!project) return
+      persistCourseProjectCommand(applyReorderCourseSurfaces(project, surfaceIds, {
+        expectedRevision: project.revision,
+        activeLocationId: selectActiveCourseLocationId(get()) ?? undefined,
+      }))
+    },
+
     addScene() {
-      if (get().project.scenes.length >= MAX_PROJECT_SCENES) {
+      const project = selectActiveCourseProjectDocument(get())
+      if (!project) return
+      const activeLocationId = selectActiveCourseLocationId(get())
+      const layout = deriveCourseEditorLayout(project, activeLocationId ?? undefined)
+      if (layout.primary.action === 'scene' && layout.primary.surfaceId) {
+        get().addCourseContent('scene', { surfaceId: layout.primary.surfaceId })
+        return
+      }
+      get().addCourseContent(layout.primary.action)
+    },
+
+    activateCourseLocation(locationId) {
+      const state = get()
+      const project = selectActiveCourseProjectDocument(state)
+      if (!project) return
+      const location = project.locations.find((candidate) => candidate.id === locationId)
+      if (!location) return
+
+      const composing = Boolean(
+        state.flowTextEdit?.composing ||
+        state.v9ContentEdit ||
+        state.spatialContentEdit ||
+        state.editingTextNodeId,
+      )
+      if (composing) {
+        set({ errorMessage: COURSE_AUTHORING_TEXT_COMPOSING_SWITCH_REASON, statusMessage: null })
+        return
+      }
+
+      let nextAuthoringSession = state.courseAuthoringSession
+      try {
+        const surfaceType = surfaceTypeForLocation(project, locationId)
+        if (nextAuthoringSession) {
+          const switched = switchCourseAuthoringLocation(nextAuthoringSession, {
+            locationId,
+            surfaceType,
+            revision: project.revision,
+            composing: false,
+          })
+          if ('ok' in switched && switched.ok === false) {
+            set({ errorMessage: switched.reason, statusMessage: null })
+            return
+          }
+          nextAuthoringSession = switched as CourseAuthoringSession
+        } else {
+          nextAuthoringSession = buildCourseAuthoringSessionForProject(project, locationId)
+        }
+      } catch (error) {
         set({
-          errorMessage: `工程已达到 ${MAX_PROJECT_SCENES} 个场景上限。请删除不需要的场景后再试。`,
+          errorMessage: error instanceof Error ? error.message : '无法切换课程位置',
           statusMessage: null,
         })
         return
       }
-      const name = `场景 ${get().project.scenes.length + 1}`
-      const scene = createScene(name)
-      commit((draft) => {
-        draft.scenes.push(scene)
+
+      const preserve = {
+        sidecar: state.slideCandidateSidecar ?? emptyCourseAssetSidecar(),
+        path: state.projectPath,
+        dirty: state.dirty,
+        componentPackages: state.componentPackages,
+        statusMessage: null as string | null,
+      }
+
+      if (location.kind === 'flow-block') {
+        if (
+          state.flowSession?.selection.locationId === locationId &&
+          state.editingScope !== 'global'
+        ) {
+          set({
+            courseAuthoringSession: updateCourseAuthoringSessionItems(nextAuthoringSession, []),
+            selectedNodeIds: [],
+            selectedNodeId: null,
+            flowTextEdit: null,
+          })
+          return
+        }
+        applyFlowBackend(openFlowAuthoringSessionAtLocation(project, locationId), preserve)
+        set({ courseAuthoringSession: nextAuthoringSession })
+        return
+      }
+
+      if (location.kind === 'spatial-camera') {
+        if (
+          state.spatialSession?.selection.locationId === locationId &&
+          state.editingScope !== 'global'
+        ) {
+          set({
+            courseAuthoringSession: updateCourseAuthoringSessionItems(nextAuthoringSession, []),
+            selectedNodeIds: [],
+            selectedNodeId: null,
+            spatialContentEdit: null,
+            editingTextNodeId: null,
+          })
+          return
+        }
+        applySpatialBackend(openSpatialAuthoringSession(project, { locationId }), preserve)
+        set({ courseAuthoringSession: nextAuthoringSession })
+        return
+      }
+
+      if (location.kind === 'slide-scene') {
+        if (state.spatialSession || state.flowSession) {
+          applyV9Backend(
+            createSlideCandidateBackend(openSlideAuthoringSession(project, { locationId })),
+            preserve,
+          )
+          set({ courseAuthoringSession: nextAuthoringSession })
+          return
+        }
+        const backend = selectSlideCandidateBackend(state)
+        if (backend) {
+          persistOpenV9ContentEdit()
+          const live = selectSlideCandidateBackend(get()) ?? backend
+          persistCandidateResult(live.activateScene(location.sceneId, {
+            expectedRevision: live.getSnapshot().revision,
+          }), { clearContentEdit: true })
+          set({
+            courseAuthoringSession: updateCourseAuthoringSessionItems(nextAuthoringSession, []),
+            selectedNodeIds: [],
+            selectedNodeId: null,
+          })
+        }
+      }
+    },
+
+    createLiveEditorSelectionSnapshot(focus) {
+      const state = get()
+      const project = selectActiveCourseProjectDocument(state)
+      if (!project) return null
+      const locationId = selectActiveCourseLocationId(state)
+      if (!locationId) return null
+      let session = state.courseAuthoringSession
+      if (!session) {
+        try {
+          session = buildCourseAuthoringSessionForProject(
+            project,
+            locationId,
+            collectLiveEditorItemIds(state),
+          )
+        } catch {
+          return null
+        }
+      } else if (session.token.revision !== project.revision) {
+        session = updateCourseAuthoringSessionRevision(session, project.revision)
+      }
+      const scope = state.editingScope === 'global' ? 'global' : 'location'
+      const focusKind = resolveEditorFocus(state, focus)
+      const itemIds = collectLiveEditorItemIds(state)
+      return createEditorSelectionSnapshot(
+        selectionSnapshotFromSession(
+          updateCourseAuthoringSessionItems(session, itemIds),
+          { scope, focus: focusKind },
+        ),
+      )
+    },
+
+    routeEditorAction(actionId, snapshot) {
+      const live = snapshot ?? get().createLiveEditorSelectionSnapshot()
+      if (!live) {
+        const reason = '当前没有可路由的编辑会话'
+        set({ errorMessage: reason, statusMessage: null })
+        return { actionId, ok: false, reason, adapter: 'none' }
+      }
+      const result = routeEditorActionCore({
+        actionId,
+        snapshot: live,
+        adapters: {
+          slide: {
+            execute: (id) => {
+              if (id !== 'delete') {
+                return { ok: false, reason: `Slide 尚未接入${id}` }
+              }
+              const backend = selectSlideCandidateBackend(get())
+              if (!backend) return { ok: false, reason: '当前不是 Slide 编辑会话' }
+              if (live.itemIds.length === 0) {
+                return { ok: false, reason: '没有可删除的选择' }
+              }
+              for (const nodeId of live.itemIds) {
+                const row = findCandidateLayerRow(get(), nodeId)
+                if (!row) continue
+                persistLayerCommand(deleteEffectiveLayerItem(
+                  backend.getSession().history.present,
+                  commandTargetForRow(row),
+                  { expectedRevision: backend.getSnapshot().revision },
+                ))
+              }
+              return { ok: true, reason: live.scope === 'global' ? '全局元素已删除' : '节点已删除' }
+            },
+          },
+          flow: {
+            execute: (id) => {
+              if (id !== 'delete') {
+                return { ok: false, reason: `Flow 尚未接入${id}` }
+              }
+              const flow = get().flowSession
+              if (!flow) return { ok: false, reason: '当前不是 Flow 编辑会话' }
+              const route = resolveFlowDeleteRoute(live)
+              if (route === 'document') {
+                persistFlowResult(executeFlowDelete(
+                  flow.history.present,
+                  flow.selection,
+                  { expectedRevision: flow.history.present.revision },
+                ))
+                return { ok: true, reason: '已删除' }
+              }
+              if (route === 'overlay') {
+                persistFlowResult(executeFlowSharedDelete(
+                  flow.history.present,
+                  flow.selection,
+                  { expectedRevision: flow.history.present.revision },
+                ))
+                return { ok: true, reason: '已删除浮层' }
+              }
+              return { ok: false, reason: '没有可删除的选择' }
+            },
+          },
+          spatial: {
+            execute: (id) => {
+              if (id !== 'delete') {
+                return { ok: false, reason: `Spatial 尚未接入${id}` }
+              }
+              const spatial = get().spatialSession
+              if (!spatial) return { ok: false, reason: '当前不是 Spatial 编辑会话' }
+              if (get().spatialContentEdit || get().editingTextNodeId) {
+                return { ok: false, reason: '文字编辑中，Delete/Backspace 只编辑文本，不删除元素' }
+              }
+              if (live.itemIds.length === 0) {
+                return { ok: false, reason: '没有可删除的选择' }
+              }
+              for (const nodeId of live.itemIds) {
+                get().deleteNode(nodeId)
+              }
+              return { ok: true, reason: '节点已删除' }
+            },
+          },
+          global: {
+            execute: (id) => {
+              if (id !== 'delete') {
+                return { ok: false, reason: `全局层尚未接入${id}` }
+              }
+              const current = get()
+              const flow = current.flowSession
+              if (flow) {
+                persistFlowResult(executeFlowSharedDelete(
+                  flow.history.present,
+                  flow.selection,
+                  { expectedRevision: flow.history.present.revision },
+                ))
+                return { ok: true, reason: '已删除' }
+              }
+              const backend = selectSlideCandidateBackend(current)
+              if (backend && live.itemIds.length > 0) {
+                for (const nodeId of live.itemIds) {
+                  const row = findCandidateLayerRow(current, nodeId)
+                  if (!row) continue
+                  persistLayerCommand(deleteEffectiveLayerItem(
+                    backend.getSession().history.present,
+                    commandTargetForRow(row),
+                    { expectedRevision: backend.getSnapshot().revision },
+                  ))
+                }
+                return { ok: true, reason: '全局元素已删除' }
+              }
+              if (current.spatialSession) {
+                for (const nodeId of [...current.selectedNodeIds]) {
+                  current.deleteNode(nodeId)
+                }
+                return { ok: true, reason: '全局元素已删除' }
+              }
+              return { ok: false, reason: '没有可删除的选择' }
+            },
+          },
+        },
       })
-      set({
-        activeSceneId: scene.id,
-        activePresentationStateId: null,
-        editingScope: 'scene',
-        selectedNodeId: null,
-        selectedNodeIds: [],
-        activeTab: 'properties',
-        statusMessage: `已新增“${name}”`,
-      })
+      if (!result.ok) {
+        set({ errorMessage: result.reason, statusMessage: null })
+      } else {
+        set({ statusMessage: result.reason, errorMessage: null })
+      }
+      return result
     },
 
     duplicateScene(sceneId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistCandidateResult(backend.duplicateScene(sceneId, {
+          expectedRevision: backend.getSnapshot().revision,
+        }))
+        return
+      }
       if (get().project.scenes.length >= MAX_PROJECT_SCENES) {
         set({ errorMessage: `工程已达到 ${MAX_PROJECT_SCENES} 个场景上限。`, statusMessage: null })
         return
@@ -1949,6 +5364,32 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (state.project.scenes.length <= 1) return false
       const index = state.project.scenes.findIndex((scene) => scene.id === sceneId)
       if (index < 0) return false
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        runV9DocumentMutation((draft) => {
+          const removing = new Set(
+            draft.locations
+              .filter((location) => location.kind === 'slide-scene' && location.sceneId === sceneId)
+              .map((location) => location.id),
+          )
+          const remaining = draft.locations
+            .filter((location) => location.kind === 'slide-scene' && location.sceneId !== sceneId)
+            .map((location) => location.id)
+          for (const entry of draft.globalLayerItems) {
+            if (entry.visibility.mode !== 'include') continue
+            const nextIds = entry.visibility.locationIds.filter((id) => !removing.has(id))
+            if (nextIds.length === 0 && remaining[0]) {
+              entry.visibility = { mode: 'include', locationIds: [remaining[0]] }
+            }
+          }
+        })
+        const live = selectSlideCandidateBackend(get())
+        if (!live) return false
+        const result = persistCandidateResult(live.deleteScene(sceneId, {
+          expectedRevision: live.getSnapshot().revision,
+        }))
+        return result.ok
+      }
       const fallback =
         state.project.scenes[index - 1] ?? state.project.scenes[index + 1]
       commit((draft) => {
@@ -2013,6 +5454,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     reorderScenes(sceneIds) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistCandidateResult(backend.reorderScenes(sceneIds, {
+          expectedRevision: backend.getSnapshot().revision,
+        }))
+        return
+      }
       const scenes = get().project.scenes
       if (!sameIds(scenes.map((scene) => scene.id), sceneIds)) return
       const byId = new Map(scenes.map((scene) => [scene.id, scene]))
@@ -2023,6 +5471,61 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateScene(sceneId, patch) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        runCandidateSession((session) => {
+          const current = findCourseSlideScene(session.history.present, sceneId)
+          if (!current) {
+            return {
+              ok: false,
+              reason: '找不到当前幻灯片',
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const nextName = patch.name !== undefined ? patch.name.trim() : current.name
+          const nextBackground = patch.backgroundColor ?? current.backgroundColor
+          const nextAsset = patch.backgroundAssetId !== undefined
+            ? patch.backgroundAssetId
+            : current.backgroundAssetId
+          if (
+            nextName === current.name &&
+            nextBackground === current.backgroundColor &&
+            nextAsset === current.backgroundAssetId
+          ) {
+            return {
+              ok: true,
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            if (!scene) return
+            if (nextName) scene.name = nextName
+            if (patch.backgroundColor !== undefined) scene.backgroundColor = patch.backgroundColor
+            if (patch.backgroundAssetId !== undefined) scene.backgroundAssetId = patch.backgroundAssetId
+            draft.locations.forEach((location) => {
+              if (location.kind === 'slide-scene' && location.sceneId === sceneId && location.stateId === undefined) {
+                const surface = draft.surfaces.find((item) => item.id === location.surfaceId)
+                location.label = `${surface?.title ?? draft.title} · ${scene.name}`
+              }
+            })
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        })
+        return
+      }
       const activeStateId = get().activeSceneId === sceneId && get().editingScope === 'scene'
         ? get().activePresentationStateId
         : null
@@ -2067,6 +5570,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updateSceneRuntime(sceneId, patch) {
       const safePatch = editableRuntimePatch(patch)
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          for (const surface of draft.surfaces) {
+            if (surface.type !== 'slide') continue
+            const scene = surface.scenes.find((item) => item.id === sceneId)
+            if (!scene) continue
+            const existing = scene.layerItems.find((item) => item.kind === 'runtime')
+            if (!existing || existing.kind !== 'runtime') return
+            const next = { ...courseRuntimeToDocument(existing.runtime), ...safePatch }
+            existing.runtime = runtimeDocumentToCourseRuntime(next)
+            existing.visible = next.enabled
+            return
+          }
+        })
+        return
+      }
       commit((draft) => {
         const runtime = draft.scenes.find((scene) => scene.id === sceneId)?.runtime
         if (!runtime) return
@@ -2076,6 +5595,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updateGlobalRuntime(patch) {
       const safePatch = editableRuntimePatch(patch)
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          const existing = draft.globalLayerItems.find((entry) => entry.item.kind === 'runtime')
+          if (!existing || existing.item.kind !== 'runtime') return
+          const next = { ...courseRuntimeToDocument(existing.item.runtime), ...safePatch }
+          existing.item.runtime = runtimeDocumentToCourseRuntime(next)
+          existing.item.visible = next.enabled
+        })
+        return
+      }
       commit((draft) => {
         if (!draft.globalRuntime) return
         Object.assign(draft.globalRuntime, safePatch)
@@ -2083,6 +5612,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setSceneRuntime(sceneId, runtime) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          writeSceneRuntime(draft, sceneId, runtime)
+        }, { statusMessage: runtime ? '已创建场景运行时模板' : '已移除场景运行时' })
+        return
+      }
       commit((draft) => {
         const scene = draft.scenes.find((item) => item.id === sceneId)
         if (!scene) return
@@ -2095,6 +5630,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setGlobalRuntime(runtime) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          writeGlobalRuntime(draft, runtime)
+        }, { statusMessage: runtime ? '已创建全局运行时模板' : '已移除全局运行时' })
+        return
+      }
       commit((draft) => {
         if (runtime) draft.globalRuntime = structuredClone(runtime)
         else delete draft.globalRuntime
@@ -2105,6 +5646,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setActiveScene(activeSceneId) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialResult(activateSpatialCameraFrame(spatial, activeSceneId))
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const document = flow.history.present
+        const location = document.locations.find((candidate) => candidate.id === activeSceneId)
+        if (!location || location.kind !== 'flow-block') return
+        persistFlowResult({
+          ok: true,
+          nextDocument: document,
+          historyEntry: false,
+          selection: selectFlowEditorBlock(document, location.id, location.blockId),
+        }, { clearTextEdit: true })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistOpenV9ContentEdit()
+        const live = selectSlideCandidateBackend(get()) ?? backend
+        persistCandidateResult(live.activateScene(activeSceneId, {
+          expectedRevision: live.getSnapshot().revision,
+        }))
+        return
+      }
       const target = get().project.scenes.find((scene) => scene.id === activeSceneId)
       if (!target) return
       set((state) => ({
@@ -2121,6 +5689,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setActivePresentationState(activePresentationStateId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistOpenV9ContentEdit()
+        const live = selectSlideCandidateBackend(get()) ?? backend
+        persistCandidateResult(live.activateState(activePresentationStateId, {
+          expectedRevision: live.getSnapshot().revision,
+        }))
+        return
+      }
       const scene = currentScene(get())
       if (!scene || (
         activePresentationStateId !== null &&
@@ -2144,6 +5721,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addPresentationState(name) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const scene = currentScene(get())
+        if (!scene) return
+        if (ensureScenePresentation(scene).states.length >= MAX_SCENE_PRESENTATION_STATES) {
+          set({ errorMessage: `当前场景已达到 ${MAX_SCENE_PRESENTATION_STATES} 个状态上限。` })
+          return
+        }
+        const nextName = name?.trim() || `状态 ${ensureScenePresentation(scene).states.length + 1}`
+        persistCandidateResult(backend.addState(nextName, {
+          expectedRevision: backend.getSnapshot().revision,
+        }), { statusMessage: `已新增状态“${nextName}”` })
+        return
+      }
       const state = get()
       const scene = currentScene(state)
       if (!scene) return
@@ -2171,6 +5762,20 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicatePresentationState(stateId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const scene = currentScene(get())
+        const source = scene && findPresentationState(scene, stateId)
+        if (!scene || !source) return
+        if (ensureScenePresentation(scene).states.length >= MAX_SCENE_PRESENTATION_STATES) {
+          set({ errorMessage: `当前场景已达到 ${MAX_SCENE_PRESENTATION_STATES} 个状态上限。` })
+          return
+        }
+        persistCandidateResult(backend.duplicateState(stateId, {
+          expectedRevision: backend.getSnapshot().revision,
+        }), { statusMessage: `已复制状态“${source.name}”` })
+        return
+      }
       const scene = currentScene(get())
       const source = scene && findPresentationState(scene, stateId)
       if (!scene || !source) return
@@ -2206,6 +5811,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deletePresentationState(stateId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const scene = currentScene(get())
+        const presentation = scene && ensureScenePresentation(scene)
+        if (!scene || !presentation || presentation.states.length <= 1) return false
+        if (!presentation.states.some((state) => state.id === stateId)) return false
+        const result = persistCandidateResult(backend.deleteState(stateId, {
+          expectedRevision: backend.getSnapshot().revision,
+        }), { statusMessage: '状态已删除' })
+        return result.ok
+      }
       const scene = currentScene(get())
       const presentation = scene && ensureScenePresentation(scene)
       if (!scene || !presentation || presentation.states.length <= 1) return false
@@ -2289,6 +5905,36 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setInitialPresentationState(stateId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const sceneId = backend.getSnapshot().sceneId
+        runCandidateSession((session) => {
+          const current = findCourseSlideScene(session.history.present, sceneId)
+          if (!current?.presentation?.states.some((item) => item.id === stateId)) {
+            return {
+              ok: false,
+              reason: '找不到当前状态',
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            if (scene?.presentation) scene.presentation.initialStateId = stateId
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: '已设为运行时初始状态' })
+        return
+      }
       const scene = currentScene(get())
       if (!scene || !findPresentationState(scene, stateId)) return
       commit((draft) => {
@@ -2299,6 +5945,36 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setThumbnailPresentationState(stateId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const sceneId = backend.getSnapshot().sceneId
+        runCandidateSession((session) => {
+          const current = findCourseSlideScene(session.history.present, sceneId)
+          if (!current?.presentation?.states.some((item) => item.id === stateId)) {
+            return {
+              ok: false,
+              reason: '找不到当前状态',
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            if (scene?.presentation) scene.presentation.thumbnailStateId = stateId
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: '已设为场景缩略图状态' })
+        return
+      }
       const scene = currentScene(get())
       if (!scene || !findPresentationState(scene, stateId)) return
       commit((draft) => {
@@ -2309,6 +5985,59 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updatePresentationState(stateId, patch) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        if (patch.name !== undefined) {
+          persistCandidateResult(backend.renameState(stateId, patch.name, {
+            expectedRevision: backend.getSnapshot().revision,
+          }))
+        }
+        const remaining = patch.description !== undefined
+          || patch.backgroundColor !== undefined
+          || patch.backgroundAssetId !== undefined
+        if (!remaining) return
+        const sceneId = backend.getSnapshot().sceneId
+        runCandidateSession((session) => {
+          const current = findCourseSlideScene(session.history.present, sceneId)
+          if (!current?.presentation?.states.some((item) => item.id === stateId)) {
+            return {
+              ok: false,
+              reason: '找不到当前状态',
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            const state = scene?.presentation?.states.find((item) => item.id === stateId)
+            if (!scene || !state) return
+            if (patch.description !== undefined) {
+              state.description = patch.description.trim() || undefined
+            }
+            if (patch.backgroundColor !== undefined) {
+              state.backgroundColor = patch.backgroundColor === scene.backgroundColor
+                ? undefined
+                : patch.backgroundColor
+            }
+            if (patch.backgroundAssetId !== undefined) {
+              state.backgroundAssetId = patch.backgroundAssetId === scene.backgroundAssetId
+                ? undefined
+                : patch.backgroundAssetId
+            }
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        })
+        return
+      }
       const scene = currentScene(get())
       if (!scene || !findPresentationState(scene, stateId)) return
       commit((draft) => {
@@ -2336,6 +6065,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     clearNodePresentationOverride(nodeId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const stateId = get().activePresentationStateId
+        const scene = currentScene(get())
+        if (!scene || stateId === null || !isNodeOverriddenInState(scene, stateId, nodeId)) return
+        const sceneId = backend.getSnapshot().sceneId
+        runCandidateSession((session) => {
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const target = findCourseSlideScene(draft, sceneId)
+            const state = target?.presentation?.states.find((item) => item.id === stateId)
+            if (state) delete state.layerItemOverrides[nodeId]
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: '已恢复此元素在当前状态中的基础值' })
+        return
+      }
       const state = get()
       const scene = currentScene(state)
       const stateId = state.activePresentationStateId
@@ -2348,6 +6101,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     clearPresentationStateOverrides(stateId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const scene = currentScene(get())
+        if (!scene || !findPresentationState(scene, stateId)) return
+        const sceneId = backend.getSnapshot().sceneId
+        runCandidateSession((session) => {
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const target = findCourseSlideScene(draft, sceneId)
+            const state = target?.presentation?.states.find((item) => item.id === stateId)
+            if (!state) return
+            state.layerItemOverrides = {}
+            state.layerItemOrder = undefined
+            state.backgroundColor = undefined
+            state.backgroundAssetId = undefined
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: '当前状态已恢复为基础场景' })
+        return
+      }
       const scene = currentScene(get())
       if (!scene || !findPresentationState(scene, stateId)) return
       commit((draft) => {
@@ -2363,6 +6143,60 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addTextNode(x, y) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialResult(addSpatialWorldTextLayer(spatial, {
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: spatial.history.present.revision }), {
+          statusMessage: '已添加文本',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const document = flow.history.present
+        const surface = flowSurfaceIn(document, flow.selection.surfaceId)
+        const found = flow.selection.selectedBlockId
+          ? findFlowBlockRecursive(surface.blocks, flow.selection.selectedBlockId)
+          : null
+        persistFlowResult(insertFlowEditorBlock(document, {
+          surfaceId: flow.selection.surfaceId,
+          parentId: found?.parentId ?? null,
+          index: found ? found.index + 1 : surface.blocks.length,
+          block: { type: 'paragraph', text: '' },
+        }, { expectedRevision: document.revision }), {
+          statusMessage: '已插入段落',
+        })
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        if (!canAddNode()) return
+        const state = get()
+        const node = normalizeNewNodeGeometry(
+          offsetDefaultInsertion(
+            createTextNode(x, y),
+            editingNodes(state).length,
+            x !== undefined || y !== undefined,
+          ),
+          state.componentPackages,
+        )
+        if (node.type !== 'text') return
+        if (appendV9GlobalNode(node, { statusMessage: '已添加全局文本' })) return
+        runCandidateSession(
+          (session) => addSlideTextLayer(session, {
+            id: node.id,
+            x: node.x,
+            y: node.y,
+            text: node.text,
+            label: node.name,
+          }, {
+            expectedRevision: session.history.present.revision,
+          }),
+          { statusMessage: '已添加文本' },
+        )
+        return
+      }
       if (!canAddNode()) return
       const state = get()
       const node = normalizeNewNodeGeometry(
@@ -2382,6 +6216,67 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addFormulaNode(x, y) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialResult(addSpatialWorldFormulaLayer(spatial, {
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: spatial.history.present.revision }), {
+          statusMessage: '已添加公式',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const document = flow.history.present
+        const surface = flowSurfaceIn(document, flow.selection.surfaceId)
+        const found = flow.selection.selectedBlockId
+          ? findFlowBlockRecursive(surface.blocks, flow.selection.selectedBlockId)
+          : null
+        persistFlowResult(insertFlowEditorBlock(document, {
+          surfaceId: flow.selection.surfaceId,
+          parentId: found?.parentId ?? null,
+          index: found ? found.index + 1 : surface.blocks.length,
+          block: {
+            type: 'formula',
+            formulaId: `formula-${nanoid(8)}`,
+            accessibleText: 'x',
+            ast: { type: 'token', value: 'x' },
+          },
+        }, { expectedRevision: document.revision }), {
+          statusMessage: '已插入公式',
+        })
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        if (!canAddNode()) return
+        const state = get()
+        const node = normalizeNewNodeGeometry(
+          offsetDefaultInsertion(
+            createFormulaNode(x, y),
+            editingNodes(state).length,
+            x !== undefined || y !== undefined,
+          ),
+          state.componentPackages,
+        )
+        if (appendV9GlobalNode(node, {
+          statusMessage: '已添加全局公式',
+        })) return
+        runCandidateSession(
+          (session) => addSlideFormulaLayer(session, {
+            id: node.id,
+            x: node.x,
+            y: node.y,
+            label: node.name,
+          }, {
+            expectedRevision: session.history.present.revision,
+          }),
+          {
+            statusMessage: get().editingScope === 'global' ? '已添加全局公式' : '已添加公式',
+          },
+        )
+        return
+      }
       if (!canAddNode()) return
       const state = get()
       const node = normalizeNewNodeGeometry(
@@ -2401,25 +6296,62 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addRectangleNode(x, y) {
-      if (!canAddNode()) return
-      const state = get()
-      const node = normalizeNewNodeGeometry(
-        offsetDefaultInsertion(
-          createRectangleNode(x, y),
-          editingNodes(state).length,
-          x !== undefined || y !== undefined,
-        ),
-        state.componentPackages,
-      )
-      appendNodeToEditingScope(node)
-      set({
-        statusMessage: get().editingScope === 'global'
-          ? '已添加全局矩形'
-          : '已添加矩形',
-      })
+      get().addShapeNode('rectangle', x, y)
     },
 
     addShapeNode(shapeType, x, y) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialResult(addSpatialWorldShapeLayer(spatial, {
+          shapeType,
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: spatial.history.present.revision }), {
+          statusMessage: `已添加“${shapeType}”`,
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        persistFlowResult(insertFlowSharedShape(flow.history.present, flow.selection, {
+          shapeType,
+        }, { expectedRevision: flow.history.present.revision }), {
+          statusMessage: `已作为页面浮层添加图形`,
+        })
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        if (!canAddNode()) return
+        const state = get()
+        const node = normalizeNewNodeGeometry(
+          offsetDefaultInsertion(
+            createShapeNode(shapeType, { x, y }),
+            editingNodes(state).length,
+            x !== undefined || y !== undefined,
+          ),
+          state.componentPackages,
+        )
+        if (appendV9GlobalNode(node, {
+          statusMessage: `已添加全局“${node.name}”`,
+        })) return
+        runCandidateSession(
+          (session) => addSlideShapeLayer(session, {
+            shapeType,
+            id: node.id,
+            x: node.x,
+            y: node.y,
+            label: node.name,
+          }, {
+            expectedRevision: session.history.present.revision,
+          }),
+          {
+            statusMessage: get().editingScope === 'global'
+              ? `已添加全局“${node.name}”`
+              : `已添加“${node.name}”`,
+          },
+        )
+        return
+      }
       if (!canAddNode()) return
       const state = get()
       const node = normalizeNewNodeGeometry(
@@ -2439,6 +6371,91 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addImageNode(asset, bytes, x, y) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
+        const files = { ...sidecar.files, [asset.id]: bytes.slice() }
+        const present = spatial.history.present
+        const withAsset = present.assets[asset.id]
+          ? spatial
+          : {
+              ...spatial,
+              history: {
+                ...spatial.history,
+                present: {
+                  ...present,
+                  assets: { ...present.assets, [asset.id]: structuredClone(asset) },
+                },
+              },
+            }
+        persistSpatialResult(addSpatialWorldImageLayer(withAsset, {
+          assetId: asset.id,
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: present.revision }), {
+          sidecar: freezeCourseAssetSidecar(files),
+          statusMessage: '已添加图片',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
+        const files = { ...sidecar.files, [asset.id]: bytes.slice() }
+        const prepared = documentWithFlowAsset(flow.history.present, asset)
+        persistFlowResult(insertFlowSharedMedia(prepared, flow.selection, {
+          assetId: asset.id,
+        }, { expectedRevision: flow.history.present.revision }), {
+          sidecar: freezeCourseAssetSidecar(files),
+          statusMessage: '已插入文中图片',
+        })
+        return
+      }
+      const media = currentMediaSession()
+      if (media) {
+        if (get().editingScope === 'global') {
+          if (!canAddNode()) return
+          const initialState = get()
+          const node = normalizeNewNodeGeometry(
+            offsetDefaultInsertion(
+              createImageNode(asset.id, asset.width, asset.height, x, y),
+              editingNodes(initialState).length,
+              x !== undefined || y !== undefined,
+            ),
+            initialState.componentPackages,
+          )
+          const sidecar = freezeCourseAssetSidecar({
+            ...(get().slideCandidateSidecar?.files ?? {}),
+            [asset.id]: bytes.slice(),
+          })
+          runV9DocumentMutation((draft) => {
+            if (!draft.assets[asset.id]) draft.assets[asset.id] = structuredClone(asset)
+            appendGlobalCourseNode(draft, node)
+          }, {
+            sidecar,
+            statusMessage: '图片已添加到全局层',
+            selectionIds: [node.id],
+            scope: 'global',
+          })
+          return
+        }
+        const present = media.session.history.present
+        if (present.assets[asset.id]) {
+          persistMediaResult(addCourseLibraryMediaToCanvas(media, asset.id, {
+            ...(typeof x === 'number' ? { x } : {}),
+            ...(typeof y === 'number' ? { y } : {}),
+          }, { expectedRevision: present.revision }))
+          return
+        }
+        persistMediaResult(importAndPlaceCourseMedia(media, {
+          items: [{ meta: asset, bytes }],
+          nativeType: 'image',
+          mode: 'add',
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: present.revision }))
+        return
+      }
       if (!canAddNode()) return
       const initialState = get()
       const node = normalizeNewNodeGeometry(
@@ -2471,6 +6488,97 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addVideoNode(asset, bytes, x, y) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
+        const files = { ...sidecar.files, [asset.id]: bytes.slice() }
+        const present = spatial.history.present
+        const withAsset = present.assets[asset.id]
+          ? spatial
+          : {
+              ...spatial,
+              history: {
+                ...spatial.history,
+                present: {
+                  ...present,
+                  assets: { ...present.assets, [asset.id]: structuredClone(asset) },
+                },
+              },
+            }
+        persistSpatialResult(addSpatialWorldVideoLayer(withAsset, {
+          assetId: asset.id,
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: present.revision }), {
+          sidecar: freezeCourseAssetSidecar(files),
+          statusMessage: '已添加视频',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
+        const files = { ...sidecar.files, [asset.id]: bytes.slice() }
+        const prepared = documentWithFlowAsset(flow.history.present, asset)
+        persistFlowResult(insertFlowSharedMedia(prepared, flow.selection, {
+          assetId: asset.id,
+        }, { expectedRevision: flow.history.present.revision }), {
+          sidecar: freezeCourseAssetSidecar(files),
+          statusMessage: '已插入文中视频',
+        })
+        return
+      }
+      const media = currentMediaSession()
+      if (media) {
+        if (get().editingScope === 'global') {
+          if (!canAddNode()) return
+          const initialState = get()
+          const node = normalizeNewNodeGeometry(
+            offsetDefaultInsertion(
+              createVideoNode({
+                assetId: asset.id,
+                width: asset.width ?? 640,
+                height: asset.height ?? 360,
+                x,
+                y,
+              }),
+              editingNodes(initialState).length,
+              x !== undefined || y !== undefined,
+            ),
+            initialState.componentPackages,
+          )
+          const sidecar = freezeCourseAssetSidecar({
+            ...(get().slideCandidateSidecar?.files ?? {}),
+            [asset.id]: bytes.slice(),
+          })
+          runV9DocumentMutation((draft) => {
+            if (!draft.assets[asset.id]) draft.assets[asset.id] = structuredClone(asset)
+            appendGlobalCourseNode(draft, node)
+          }, {
+            sidecar,
+            statusMessage: '视频已添加到全局层',
+            selectionIds: [node.id],
+            scope: 'global',
+          })
+          return
+        }
+        const present = media.session.history.present
+        if (present.assets[asset.id]) {
+          persistMediaResult(addCourseLibraryMediaToCanvas(media, asset.id, {
+            ...(typeof x === 'number' ? { x } : {}),
+            ...(typeof y === 'number' ? { y } : {}),
+          }, { expectedRevision: present.revision }))
+          return
+        }
+        persistMediaResult(importAndPlaceCourseMedia(media, {
+          items: [{ meta: asset, bytes }],
+          nativeType: 'video',
+          mode: 'add',
+          ...(typeof x === 'number' ? { x } : {}),
+          ...(typeof y === 'number' ? { y } : {}),
+        }, { expectedRevision: present.revision }))
+        return
+      }
       if (!canAddNode()) return
       const initialState = get()
       const node = normalizeNewNodeGeometry(
@@ -2509,6 +6617,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addImageNodes(items, position) {
+      if (get().spatialSession || get().flowSession) {
+        for (const item of items) {
+          get().addImageNode(item.meta, item.bytes, position?.x, position?.y)
+        }
+        return items.map((item) => item.meta.id)
+      }
+      const media = currentMediaSession()
+      if (media) {
+        const result = persistMediaResult(importAndPlaceCourseMedia(media, {
+          items: items.map((item) => ({ meta: item.meta, bytes: item.bytes })),
+          nativeType: 'image',
+          mode: 'add',
+          ...(typeof position?.x === 'number' ? { x: position.x } : {}),
+          ...(typeof position?.y === 'number' ? { y: position.y } : {}),
+        }, { expectedRevision: media.session.history.present.revision }))
+        return [...(result.placedLayerItemIds ?? [])]
+      }
       if (items.length === 0 || !canAddNodes(items.length)) return []
       if (items.length > MAX_BATCH_CANVAS_ITEMS) {
         set({
@@ -2551,6 +6676,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addVideoNodes(items, position) {
+      if (get().spatialSession || get().flowSession) {
+        for (const item of items) {
+          get().addVideoNode(item.meta, item.bytes, position?.x, position?.y)
+        }
+        return items.map((item) => item.meta.id)
+      }
+      const media = currentMediaSession()
+      if (media) {
+        const result = persistMediaResult(importAndPlaceCourseMedia(media, {
+          items: items.map((item) => ({ meta: item.meta, bytes: item.bytes })),
+          nativeType: 'video',
+          mode: 'add',
+          ...(typeof position?.x === 'number' ? { x: position.x } : {}),
+          ...(typeof position?.y === 'number' ? { y: position.y } : {}),
+        }, { expectedRevision: media.session.history.present.revision }))
+        return [...(result.placedLayerItemIds ?? [])]
+      }
       if (items.length === 0 || !canAddNodes(items.length)) return []
       if (items.length > MAX_BATCH_CANVAS_ITEMS) {
         set({
@@ -2593,6 +6735,54 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     importAsset(asset, bytes) {
+      const spatial = get().spatialSession
+      const flow = get().flowSession
+      if (spatial || flow) {
+        const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
+        const files = { ...sidecar.files, [asset.id]: bytes.slice() }
+        if (flow) {
+          const present = flow.history.present
+          const nextDocument = present.assets[asset.id]
+            ? present
+            : commitSlideProjectMutation(present, (draft) => {
+                draft.assets[asset.id] = structuredClone(asset)
+              })
+          persistFlowResult({
+            ok: true,
+            nextDocument,
+            historyEntry: nextDocument !== present,
+            selection: flow.selection,
+          }, {
+            sidecar: freezeCourseAssetSidecar(files),
+            statusMessage: `已导入素材“${asset.filename}”`,
+          })
+          return
+        }
+        const present = spatial!.history.present
+        persistSpatialResult(succeedSpatialCommand({
+          ...spatial!,
+          history: present.assets[asset.id]
+            ? spatial!.history
+            : {
+                ...spatial!.history,
+                present: {
+                  ...present,
+                  assets: { ...present.assets, [asset.id]: structuredClone(asset) },
+                },
+              },
+        }, !present.assets[asset.id]), {
+          sidecar: freezeCourseAssetSidecar(files),
+          statusMessage: `已导入素材“${asset.filename}”`,
+        })
+        return
+      }
+      const media = currentMediaSession()
+      if (media) {
+        persistMediaResult(importCourseMediaAssets(media, [{ meta: asset, bytes }], {
+          expectedRevision: media.session.history.present.revision,
+        }))
+        return
+      }
       commitAssetBatch(
         [{ meta: asset, bytes }],
         () => undefined,
@@ -2603,11 +6793,41 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     importAssets(items) {
+      if (get().flowSession || get().spatialSession) {
+        for (const item of items) get().importAsset(item.meta, item.bytes)
+        return
+      }
+      const media = currentMediaSession()
+      if (media) {
+        persistMediaResult(importCourseMediaAssets(media, items.map((item) => ({
+          meta: item.meta,
+          bytes: item.bytes,
+        })), { expectedRevision: media.session.history.present.revision }))
+        return
+      }
       if (items.length === 0) return
       commitAssetBatch(items, () => undefined, [], `已批量导入 ${items.length} 个媒体素材`)
     },
 
     replaceImageAsset(nodeId, asset, bytes) {
+      const media = currentMediaSession()
+      if (media) {
+        const sidecar = freezeCourseAssetSidecar({
+          ...media.sidecar.files,
+          [asset.id]: bytes.slice(),
+        })
+        runV9DocumentMutation((draft) => {
+          draft.assets[asset.id] = structuredClone(asset)
+          const item = findMutableCourseLayerItem(draft, nodeId)
+          if (
+            item?.kind === 'native' &&
+            (item.content.nativeType === 'image' || item.content.nativeType === 'video')
+          ) {
+            item.content.data.assetId = asset.id
+          }
+        }, { sidecar, statusMessage: '图片已替换' })
+        return
+      }
       const state = get()
       const effective = editingNodes(state).find(
         (node) => node.id === nodeId && node.type === 'image',
@@ -2646,6 +6866,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     importSound(asset, bytes, sound = {}) {
+      const media = currentMediaSession()
+      if (media) {
+        const result = persistMediaResult(importCourseSounds(media, [{ meta: asset, bytes }], {
+          expectedRevision: media.session.history.present.revision,
+          sound,
+        }))
+        return result.soundIds?.[0] ?? ''
+      }
       const soundId = `sound_${nanoid()}`
       const definition: SoundDefinition = {
         id: soundId,
@@ -2663,6 +6891,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     importSounds(items) {
+      const media = currentMediaSession()
+      if (media) {
+        const result = persistMediaResult(importCourseSounds(media, items.map((item) => ({
+          meta: item.meta,
+          bytes: item.bytes,
+        })), { expectedRevision: media.session.history.present.revision }))
+        return [...(result.soundIds ?? [])]
+      }
       if (items.length === 0) return []
       const definitions = items.map(({ meta }) => ({
         id: `sound_${nanoid()}`,
@@ -2681,6 +6917,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateAudioSettings(patch) {
+      const media = currentMediaSession()
+      if (media) {
+        persistMediaResult(updateCourseAudioSettings(media, patch, {
+          expectedRevision: media.session.history.present.revision,
+        }))
+        return
+      }
       commit((draft) => {
         const audio = draft.media.audio
         if (patch.defaultMuted !== undefined) {
@@ -2726,6 +6969,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateSound(soundId, patch) {
+      const media = currentMediaSession()
+      if (media) {
+        persistMediaResult(updateCourseSound(media, soundId, patch, {
+          expectedRevision: media.session.history.present.revision,
+        }))
+        return
+      }
       commit((draft) => {
         const sound = draft.media.audio.sounds[soundId]
         if (!sound) return
@@ -2741,6 +6991,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteSound(soundId) {
+      const media = currentMediaSession()
+      if (media) {
+        return persistMediaResult(deleteCourseSound(media, soundId, {
+          expectedRevision: media.session.history.present.revision,
+        })).ok
+      }
       const state = get()
       const referenced = state.project.scenes.some((scene) =>
         scene.interactions.some((rule) =>
@@ -2769,6 +7025,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteAsset(assetId) {
+      const media = currentMediaSession()
+      if (media) {
+        const state = get()
+        const projected = analyzeProjectAssetReferences(state.project, {
+          componentPackages: state.componentPackages,
+        }).graph.get(assetId) ?? []
+        const courseRefs = listCourseAssetReferences(media.session.history.present, assetId)
+        if (projected.length > 0) {
+          const locations = projected
+            .slice(0, 3)
+            .map(describeProjectAssetReference)
+            .join('；')
+          set({
+            errorMessage: `该素材仍被引用，不能删除：${locations}${projected.length > 3 ? `；另有 ${projected.length - 3} 处` : ''}。`,
+            statusMessage: null,
+          })
+          return false
+        }
+        if (courseRefs.length > 0) {
+          return persistMediaResult(deleteCourseAsset(media, assetId, {
+            expectedRevision: media.session.history.present.revision,
+          })).ok
+        }
+        return persistMediaResult(deleteCourseAsset(media, assetId, {
+          expectedRevision: media.session.history.present.revision,
+        })).ok
+      }
       const state = get()
       const references = analyzeProjectAssetReferences(state.project, {
         componentPackages: state.componentPackages,
@@ -2795,6 +7078,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addInteractionRule(sceneId, rule) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        if (backend.getSnapshot().sceneId !== sceneId) {
+          persistCandidateResult(backend.activateScene(sceneId, {
+            expectedRevision: backend.getSnapshot().revision,
+          }))
+        }
+        runCandidateSession(
+          (session) => addSlideSceneInteractionRule(session, rule, {
+            expectedRevision: session.history.present.revision,
+          }),
+          { statusMessage: '交互映射已添加' },
+        )
+        return
+      }
       commit((draft) => {
         const scene = draft.scenes.find((item) => item.id === sceneId)
         if (!scene || scene.interactions.some((item) => item.id === rule.id)) return
@@ -2804,6 +7102,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateInteractionRule(sceneId, ruleId, rule) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        runCandidateSession((session) => {
+          const result = updateSlideSceneInteractionRule(session, ruleId, rule, {
+            expectedRevision: session.history.present.revision,
+          })
+          if (!result.ok || !result.nextSession) return result
+          const project = commitSlideProjectMutation(result.nextSession.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            if (scene) scene.interactions = withoutDanglingAnimationCompletionRules(scene.interactions)
+          })
+          return {
+            ...result,
+            nextSession: {
+              ...result.nextSession,
+              history: {
+                present: project,
+                past: result.nextSession.history.past,
+                future: result.nextSession.history.future,
+              },
+            },
+          }
+        }, { statusMessage: '交互映射已更新' })
+        return
+      }
       commit((draft) => {
         const scene = draft.scenes.find((item) => item.id === sceneId)
         const index = scene?.interactions.findIndex((item) => item.id === ruleId) ?? -1
@@ -2815,6 +7138,38 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteInteractionRule(sceneId, ruleId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        runCandidateSession((session) => {
+          const current = findCourseSlideScene(session.history.present, sceneId)
+          if (!current || !current.interactions.some((item) => item.id === ruleId)) {
+            return {
+              ok: false,
+              reason: '找不到该交互规则',
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            if (!scene) return
+            scene.interactions = withoutDanglingAnimationCompletionRules(
+              scene.interactions.filter((item) => item.id !== ruleId),
+            )
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: '交互映射已删除' })
+        return
+      }
       commit((draft) => {
         const scene = draft.scenes.find((item) => item.id === sceneId)
         if (scene) {
@@ -2827,6 +7182,31 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateInteractionRule(sceneId, ruleId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const source = findCourseSlideScene(backend.getSession().history.present, sceneId)
+          ?.interactions.find((rule) => rule.id === ruleId)
+        if (!source) return null
+        const copy = duplicateInteractionRuleForAuthoring(source)
+        runCandidateSession((session) => {
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            const index = scene?.interactions.findIndex((rule) => rule.id === ruleId) ?? -1
+            if (!scene || index < 0) return
+            scene.interactions.splice(index + 1, 0, structuredClone(copy))
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: '规则副本已创建' })
+        return copy.id
+      }
       const source = get().project.scenes
         .find((scene) => scene.id === sceneId)
         ?.interactions.find((rule) => rule.id === ruleId)
@@ -2843,6 +7223,35 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     moveInteractionRule(sceneId, ruleId, direction) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        runCandidateSession((session) => {
+          const current = findCourseSlideScene(session.history.present, sceneId)
+          if (!current) {
+            return {
+              ok: false,
+              reason: '找不到当前幻灯片',
+              historyEntry: false,
+              nextSession: session,
+              selection: session.selection,
+            }
+          }
+          const project = commitSlideProjectMutation(session.history.present, (draft) => {
+            const scene = findCourseSlideScene(draft, sceneId)
+            if (scene) moveInteractionRuleWithinKind(scene.interactions, ruleId, direction)
+          })
+          return {
+            ok: true,
+            historyEntry: true,
+            nextSession: {
+              ...session,
+              history: commitSlideAuthoringHistory(session.history, project),
+            },
+            selection: session.selection,
+          }
+        }, { statusMessage: direction < 0 ? '规则已上移' : '规则已下移' })
+        return
+      }
       commit((draft) => {
         const rules = draft.scenes.find((scene) => scene.id === sceneId)
           ?.interactions
@@ -2852,6 +7261,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     addGlobalInteractionRule(rule) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          if (draft.globalInteractions.some((item) => item.id === rule.id)) return
+          draft.globalInteractions.push(structuredClone(rule))
+        }, { statusMessage: '全局交互映射已添加' })
+        return
+      }
       commit((draft) => {
         if (draft.globalInteractions.some((item) => item.id === rule.id)) return
         draft.globalInteractions.push(structuredClone(rule))
@@ -2860,6 +7276,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateGlobalInteractionRule(ruleId, rule) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          const index = draft.globalInteractions.findIndex((item) => item.id === ruleId)
+          if (index < 0) return
+          draft.globalInteractions[index] = structuredClone({ ...rule, id: ruleId })
+          draft.globalInteractions = withoutDanglingAnimationCompletionRules(
+            draft.globalInteractions,
+          )
+        }, { statusMessage: '全局交互映射已更新' })
+        return
+      }
       commit((draft) => {
         const index = draft.globalInteractions.findIndex((item) => item.id === ruleId)
         if (index < 0) return
@@ -2872,6 +7299,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteGlobalInteractionRule(ruleId) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          draft.globalInteractions = withoutDanglingAnimationCompletionRules(
+            draft.globalInteractions.filter((item) => item.id !== ruleId),
+          )
+        }, { statusMessage: '全局交互映射已删除' })
+        return
+      }
       commit((draft) => {
         draft.globalInteractions = withoutDanglingAnimationCompletionRules(
           draft.globalInteractions.filter((item) => item.id !== ruleId),
@@ -2886,6 +7321,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
       )
       if (!source) return null
       const copy = duplicateInteractionRuleForAuthoring(source)
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          const index = draft.globalInteractions.findIndex(
+            (rule) => rule.id === ruleId,
+          )
+          if (index >= 0) {
+            draft.globalInteractions.splice(index + 1, 0, structuredClone(copy))
+          }
+        }, { statusMessage: '全局规则副本已创建' })
+        return copy.id
+      }
       commit((draft) => {
         const index = draft.globalInteractions.findIndex(
           (rule) => rule.id === ruleId,
@@ -2899,6 +7345,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     moveGlobalInteractionRule(ruleId, direction) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          moveInteractionRuleWithinKind(
+            draft.globalInteractions,
+            ruleId,
+            direction,
+          )
+        }, { statusMessage: direction < 0 ? '全局规则已上移' : '全局规则已下移' })
+        return
+      }
       commit((draft) => {
         moveInteractionRuleWithinKind(
           draft.globalInteractions,
@@ -2910,6 +7366,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     setSimpleEntranceAnimation(nodeId, config) {
+      if (selectSlideCandidateBackend(get())) {
+        runCandidateSession(
+          (session) => writeSlideSimpleEntranceAnimation(session, nodeId, config, {
+            expectedRevision: session.history.present.revision,
+          }),
+        )
+        return
+      }
       const state = get()
       if (state.editingScope !== 'scene') {
         set({
@@ -3011,6 +7475,30 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     updatePlayback(patch) {
       const requestedControls = patch.controls
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          draft.playback = { ...draft.playback, ...patch }
+          if (requestedControls === 'none') {
+            for (const entry of draft.globalLayerItems) {
+              if (isCourseTeacherControllerLayerItem(entry.item)) {
+                entry.item.playbackInitialVisibility = 'hidden'
+              }
+            }
+          } else if (requestedControls === 'canvas') {
+            const controller = findGlobalTeacherController(draft)
+            if (controller) restoreCourseTeacherControllerLayer(controller)
+            else {
+              appendGlobalCourseNode(draft, createTeacherControllerNode())
+            }
+          }
+          if (requestedControls !== undefined) {
+            synchronizeCourseTeacherControllerControls(draft)
+            if (requestedControls === 'none') draft.playback.controls = 'none'
+            if (requestedControls === 'canvas') draft.playback.controls = 'canvas'
+          }
+        }, { statusMessage: '成品控制设置已更新' })
+        return
+      }
       commit((draft) => {
         draft.playback = { ...draft.playback, ...patch }
         if (requestedControls === 'none') {
@@ -3038,6 +7526,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateDesignTokens(tokens) {
+      if (selectSlideCandidateBackend(get())) {
+        runV9DocumentMutation((draft) => {
+          draft.designTokens = structuredClone(tokens)
+        }, { statusMessage: '项目字体与色板 Token 已更新' })
+        return
+      }
       commit((draft) => {
         draft.designTokens = structuredClone(tokens)
       })
@@ -3045,6 +7539,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     ensureTeacherController() {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialLayerCommand(restoreDefaultTeacherController(
+          spatial.history.present,
+          { expectedRevision: spatial.history.present.revision },
+        ))
+        const restored = findGlobalTeacherController(get().spatialSession?.history.present ?? spatial.history.present)
+        if (restored) get().selectNode(restored.item.layerItemId)
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        runV9DocumentMutation((draft) => {
+          const controller = findGlobalTeacherController(draft)
+          if (controller) restoreCourseTeacherControllerLayer(controller)
+          else appendGlobalCourseNode(draft, createTeacherControllerNode())
+          draft.playback.controls = 'canvas'
+          synchronizeCourseTeacherControllerControls(draft)
+        }, { statusMessage: '已定位画布内教师控制器' })
+        return
+      }
       const existing = get().project.globalLayer.find(
         (item) => item.node.type === 'teacher-controller',
       )
@@ -3112,6 +7627,75 @@ export const useEditorStore = create<EditorState>((set, get) => {
           presetLabel = preset.label
         }
       }
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistSpatialResult(addSpatialWorldComponentLayer(spatial, {
+          packageId,
+          version: data.manifest.version,
+          props: node.props,
+          id: node.id,
+          x: node.x,
+          y: node.y,
+          width: node.width,
+          height: node.height,
+          label: node.name,
+        }, { expectedRevision: spatial.history.present.revision }), {
+          statusMessage: `已添加“${presetLabel ?? data.manifest.name}”`,
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const present = flow.history.present
+        const prepared = present.componentPackages[packageId]
+          ? present
+          : {
+              ...present,
+              componentPackages: {
+                ...present.componentPackages,
+                [packageId]: componentMeta(data),
+              },
+            }
+        persistFlowResult(insertFlowSharedComponent(prepared, flow.selection, {
+          packageId,
+          manifest: data.manifest,
+          props: node.props,
+          id: node.id,
+          label: node.name,
+        }, { expectedRevision: present.revision }), {
+          statusMessage: `已添加“${presetLabel ?? data.manifest.name}”`,
+        })
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        if (appendV9GlobalNode(node, {
+          statusMessage: scope === 'global'
+            ? `已将“${presetLabel ?? data.manifest.name}”添加到全局层`
+            : `已添加“${presetLabel ?? data.manifest.name}”`,
+        })) return
+        runCandidateSession(
+          (session) => addSlideComponentLayer(session, {
+            packageId,
+            manifest: data.manifest,
+            props: node.props,
+            presetId,
+            id: node.id,
+            x: node.x,
+            y: node.y,
+            width: node.width,
+            height: node.height,
+            label: node.name,
+          }, {
+            expectedRevision: session.history.present.revision,
+          }),
+          {
+            statusMessage: scope === 'global'
+              ? `已将“${presetLabel ?? data.manifest.name}”添加到全局层`
+              : `已添加“${presetLabel ?? data.manifest.name}”`,
+          },
+        )
+        return
+      }
       appendNodeToEditingScope(node)
       set({
         statusMessage: scope === 'global'
@@ -3152,6 +7736,87 @@ export const useEditorStore = create<EditorState>((set, get) => {
         )
       }
 
+      const packagesToAdd = Object.fromEntries(
+        packageData.map((data) => [data.manifest.id, data]),
+      )
+      const spatial = get().spatialSession
+      if (spatial) {
+        const project = commitSpatialProjectMutation(spatial.history.present, (draft) => {
+          packageData.forEach((data) => {
+            draft.componentPackages[data.manifest.id] = componentMeta(data)
+          })
+        })
+        persistSpatialResult(succeedSpatialCommand({
+          ...spatial,
+          history: commitSpatialAuthoringHistory(spatial.history, project),
+        }, true), {
+          componentPackages: { ...get().componentPackages, ...packagesToAdd },
+          statusMessage: packageData.length === 1
+            ? `已将组件“${packageData[0]!.manifest.name}”加入工程`
+            : `已将 ${packageData.length} 个组件加入工程`,
+        })
+        set({
+          activeTab: get().editorMode === 'professional' ? 'components' : get().activeTab,
+          errorMessage: null,
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const project = commitSlideProjectMutation(flow.history.present, (draft) => {
+          packageData.forEach((data) => {
+            draft.componentPackages[data.manifest.id] = componentMeta(data)
+          })
+        })
+        persistFlowResult({
+          ok: true,
+          nextDocument: project,
+          historyEntry: true,
+          selection: flow.selection,
+        }, {
+          componentPackages: { ...get().componentPackages, ...packagesToAdd },
+          statusMessage: packageData.length === 1
+            ? `已将组件“${packageData[0]!.manifest.name}”加入工程`
+            : `已将 ${packageData.length} 个组件加入工程`,
+        })
+        set({
+          activeTab: get().editorMode === 'professional' ? 'components' : get().activeTab,
+          errorMessage: null,
+        })
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        runCandidateSession(
+          (session) => {
+            const project = commitSlideProjectMutation(session.history.present, (draft) => {
+              packageData.forEach((data) => {
+                draft.componentPackages[data.manifest.id] = componentMeta(data)
+              })
+            })
+            return {
+              ok: true,
+              historyEntry: true,
+              nextSession: {
+                ...session,
+                history: commitSlideAuthoringHistory(session.history, project),
+              },
+              selection: session.selection,
+            }
+          },
+          {
+            componentPackages: packagesToAdd,
+            statusMessage: packageData.length === 1
+              ? `已将组件“${packageData[0]!.manifest.name}”加入工程`
+              : `已将 ${packageData.length} 个组件加入工程`,
+          },
+        )
+        set({
+          activeTab: get().editorMode === 'professional' ? 'components' : get().activeTab,
+          errorMessage: null,
+        })
+        return
+      }
+
       commit((draft) => {
         packageData.forEach((data) => {
           draft.componentPackages[data.manifest.id] = componentMeta(data)
@@ -3189,6 +7854,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
 
       const packageName = state.componentPackages[packageId]?.manifest.name ?? packageId
+      if (selectSlideCandidateBackend(get())) {
+        const result = runV9DocumentMutation((draft) => {
+          removeCourseComponentPackage(draft, packageId)
+        }, { statusMessage: `未使用组件包“${packageName}”已删除` })
+        if (result.ok) {
+          set({ errorMessage: null })
+        }
+        return result.ok
+      }
       commit((draft) => {
         for (const [key, meta] of Object.entries(draft.componentPackages)) {
           if (meta.packageId === packageId) delete draft.componentPackages[key]
@@ -3256,6 +7930,27 @@ export const useEditorStore = create<EditorState>((set, get) => {
           '当前工程未发生变化，请检查组件 ID 与工程中的组件包记录。',
           { cause: error },
         )
+      }
+
+      if (selectSlideCandidateBackend(get())) {
+        const result = runV9DocumentMutation((draft) => {
+          removeCourseComponentPackage(draft, packageId)
+          draft.componentPackages[packageData.manifest.id] = componentMeta(packageData)
+          retargetCourseComponentInstances(draft, packageId, {
+            packageId,
+            version: plan.replacementVersion,
+          })
+        }, {
+          componentPackages: { [packageId]: packageData },
+          statusMessage: `组件“${packageData.manifest.name}”已替换为 ${plan.replacementVersion}，${plan.affectedInstances.length} 个实例已同步`,
+        })
+        if (result.ok) {
+          set({
+            activeTab: 'components',
+            errorMessage: null,
+          })
+        }
+        return
       }
 
       commit((draft) => {
@@ -3367,12 +8062,34 @@ export const useEditorStore = create<EditorState>((set, get) => {
           meta.packageId === packageId &&
           meta.version === source.manifest.version,
       )
+      const authoring = {
+        editableCopy: true as const,
+        sourcePackageId: sourceMeta?.sourcePackageId ?? packageId,
+      }
+
+      if (selectSlideCandidateBackend(get())) {
+        const result = runV9DocumentMutation((draft) => {
+          draft.componentPackages[nextId] = componentMeta(packageData, authoring)
+          if (!selected || selected.type !== 'external-component') return
+          const layer = findMutableCourseLayerItem(draft, selected.id)
+          if (layer?.kind === 'component') {
+            layer.component = { packageId: nextId, version: nextVersion }
+          }
+        }, {
+          componentPackages: { [nextId]: packageData },
+          selectionIds: selected ? [selected.id] : undefined,
+          statusMessage: `已创建“${manifest.name}”，原组件包保持不变`,
+        })
+        if (!result.ok) return null
+        set({
+          activeTab: 'developer',
+          errorMessage: null,
+        })
+        return nextId
+      }
 
       commit((draft) => {
-        draft.componentPackages[nextId] = componentMeta(packageData, {
-          editableCopy: true,
-          sourcePackageId: sourceMeta?.sourcePackageId ?? packageId,
-        })
+        draft.componentPackages[nextId] = componentMeta(packageData, authoring)
         if (!selected || selected.type !== 'external-component') return
         if (state.editingScope === 'global') {
           const item = draft.globalLayer.find(
@@ -3436,6 +8153,25 @@ export const useEditorStore = create<EditorState>((set, get) => {
         contentSha256: componentContentSha256(authoredFiles),
       }
       validateEditableComponentPackage(nextPackage, state.project)
+      if (selectSlideCandidateBackend(get())) {
+        const result = runV9DocumentMutation((draft) => {
+          removeCourseComponentPackage(draft, packageId)
+          draft.componentPackages[packageId] = componentMeta(nextPackage, {
+            editableCopy: true,
+            sourcePackageId: currentMeta?.sourcePackageId,
+          })
+        }, {
+          componentPackages: { [packageId]: nextPackage },
+          statusMessage: `组件“${nextPackage.manifest.name}”代码已更新`,
+        })
+        if (result.ok) {
+          set({
+            activeTab: 'developer',
+            errorMessage: null,
+          })
+        }
+        return
+      }
       commit((draft) => {
         for (const [key, meta] of Object.entries(draft.componentPackages)) {
           if (meta.packageId === packageId) delete draft.componentPackages[key]
@@ -3453,6 +8189,70 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     deleteNode(nodeId) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        if (get().spatialContentEdit || get().editingTextNodeId) return
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row) return
+        if (row.owner === 'world') {
+          persistSpatialResult(selectSpatialLayers(spatial, { layerItemIds: [nodeId] }, {
+            expectedRevision: spatial.history.present.revision,
+          }))
+          const live = get().spatialSession
+          if (!live) return
+          const deleted = deleteSpatialWorldLayersReportingReferences(live, {
+            expectedRevision: live.history.present.revision,
+          })
+          persistSpatialResult(deleted, {
+            statusMessage: deleted.cleanupSummary || '节点已删除',
+          })
+          return
+        }
+        persistSpatialLayerCommand(deleteEffectiveLayerItem(
+          spatial.history.present,
+          commandTargetForRow(row),
+          { expectedRevision: spatial.history.present.revision },
+        ))
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        if (get().flowTextEdit?.composing || flow.selection.focus === 'text') return
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row) return
+        persistFlowResult(executeFlowSharedDelete(flow.history.present, selectFlowOverlay(
+          flow.history.present,
+          flow.selection.locationId,
+          [nodeId],
+          row.owner === 'global' ? 'global' : 'page',
+        ), { expectedRevision: flow.history.present.revision }))
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        const backend = selectSlideCandidateBackend(get())
+        if (!backend) return
+        if (shouldIgnoreSlideLayerDeleteForFocus({
+          textEditSession: Boolean(get().editingTextNodeId || get().v9ContentEdit?.kind === 'text'),
+          formulaEditSession: get().v9ContentEdit?.kind === 'formula',
+        })) return
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row) return
+        if (get().editingScope === 'scene' && backend.getSession().selection.stateId !== null) {
+          get().updateNode(nodeId, { visible: false })
+          set({
+            selectedNodeId: null,
+            selectedNodeIds: [],
+            statusMessage: '元素已在当前状态中隐藏；基础元素仍保留',
+          })
+          return
+        }
+        persistLayerCommand(deleteEffectiveLayerItem(
+          backend.getSession().history.present,
+          commandTargetForRow(row),
+          { expectedRevision: backend.getSnapshot().revision },
+        ))
+        return
+      }
       const state = get()
       const sceneId = state.activeSceneId
       if (!editingNodes(state).some((node) => node.id === nodeId)) return
@@ -3502,6 +8302,48 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     deleteSelectedNodes() {
       const state = get()
+      if (selectActiveCourseProjectDocument(state)) {
+        get().routeEditorAction('delete')
+        return
+      }
+      const spatial = get().spatialSession
+      if (spatial) {
+        if (get().spatialContentEdit || get().editingTextNodeId) return
+        for (const nodeId of [...get().selectedNodeIds]) {
+          get().deleteNode(nodeId)
+        }
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        if (get().flowTextEdit?.composing) return
+        const intent = classifyFlowDeleteIntent(flow.selection)
+        if (intent.intent === 'text-delete') return
+        persistFlowResult(executeFlowSharedDelete(
+          flow.history.present,
+          flow.selection,
+          { expectedRevision: flow.history.present.revision },
+        ))
+        return
+      }
+      if (selectSlideCandidateBackend(get())) {
+        if (shouldIgnoreSlideLayerDeleteForFocus({
+          textEditSession: Boolean(get().editingTextNodeId || get().v9ContentEdit?.kind === 'text'),
+          formulaEditSession: get().v9ContentEdit?.kind === 'formula',
+        })) return
+        for (const nodeId of [...get().selectedNodeIds]) {
+          const backend = selectSlideCandidateBackend(get())
+          if (!backend) break
+          const row = findCandidateLayerRow(get(), nodeId)
+          if (!row) continue
+          persistLayerCommand(deleteEffectiveLayerItem(
+            backend.getSession().history.present,
+            commandTargetForRow(row),
+            { expectedRevision: backend.getSnapshot().revision },
+          ))
+        }
+        return
+      }
       const ids = new Set(state.selectedNodeIds)
       if (ids.size === 0) return
       const sceneId = state.activeSceneId
@@ -3557,6 +8399,49 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateNode(nodeId) {
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row) return
+        if (row.owner === 'global') {
+          const createdId = `${nodeId}_copy_${nanoid(8)}`
+          runV9DocumentMutation((draft) => {
+            const entry = draft.globalLayerItems.find(
+              (item) => item.item.layerItemId === nodeId,
+            )
+            if (!entry) return
+            const duplicate = structuredClone(entry)
+            duplicate.item.layerItemId = createdId
+            duplicate.item.label = `${entry.item.label} 副本`.slice(0, 200)
+            duplicate.item.frame.x += 20
+            duplicate.item.frame.y += 20
+            duplicate.item.locked = false
+            duplicate.item.order = allocateCourseLayerOrder(draft, entry.item.order + 1)
+            draft.globalLayerItems.push(duplicate)
+            sortScopedLayerList(draft.globalLayerItems)
+            const copies = draft.globalInteractions.flatMap((rule) => {
+              if (rule.trigger.type !== 'node.click' || rule.trigger.nodeId !== nodeId) {
+                return []
+              }
+              const copy = duplicateInteractionRuleForAuthoring(rule)
+              copy.trigger = { type: 'node.click', nodeId: createdId }
+              return [copy]
+            })
+            draft.globalInteractions.push(...copies)
+          }, {
+            selectionIds: [createdId],
+            scope: 'global',
+            statusMessage: '已复制全局元素',
+          })
+          return
+        }
+        persistLayerCommand(duplicateEffectiveLayerItem(
+          backend.getSession().history.present,
+          commandTargetForRow(row),
+          { expectedRevision: backend.getSnapshot().revision },
+        ))
+        return
+      }
       if (!canAddNode()) return
       const state = get()
       const sceneId = state.activeSceneId
@@ -3626,6 +8511,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     duplicateSelectedNodes() {
+      if (selectSlideCandidateBackend(get())) {
+        runCandidateAction('duplicate')
+        return
+      }
       const state = get()
       const selected = editingNodes(state).filter((node) => state.selectedNodeIds.includes(node.id))
       if (selected.length === 0) return
@@ -3715,6 +8604,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     copySelectedNodes() {
+      if (selectSlideCandidateBackend(get()) && get().editingScope !== 'global') {
+        runCandidateAction('copy')
+        return
+      }
       const state = get()
       const selected = editingNodes(state).filter((node) => state.selectedNodeIds.includes(node.id))
       if (selected.length === 0) return
@@ -3747,6 +8640,55 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     pasteNodes() {
+      if (selectSlideCandidateBackend(get()) && get().editingScope !== 'global') {
+        runCandidateAction('paste')
+        return
+      }
+      if (selectSlideCandidateBackend(get()) && get().editingScope === 'global') {
+        const state = get()
+        if (state.clipboardGlobalItems.length === 0) return
+        if (state.project.globalLayer.length + state.clipboardGlobalItems.length > MAX_SCENE_NODES) {
+          set({ errorMessage: `粘贴后将超过全局层 ${MAX_SCENE_NODES} 个元素的上限。` })
+          return
+        }
+        const copies = state.clipboardGlobalItems.map((source) => ({
+          ...structuredClone(source),
+          node: normalizeNewNodeGeometry({
+            ...structuredClone(source.node),
+            id: `${source.node.type}_${nanoid()}`,
+            name: `${source.node.name} 副本`,
+            x: source.node.x + 20,
+            y: source.node.y + 20,
+            locked: false,
+          }, state.componentPackages),
+        }))
+        const nodeIdMap = new Map(
+          state.clipboardGlobalItems.map((source, index) => [
+            source.node.id,
+            copies[index]!.node.id,
+          ]),
+        )
+        const copiedRules = state.clipboardInteractionRules.map((rule) =>
+          rewriteInteractionRuleForNodeCopy(rule, nodeIdMap),
+        )
+        runV9DocumentMutation((draft) => {
+          for (const copy of copies) {
+            appendGlobalCourseNode(draft, copy.node)
+            const entry = draft.globalLayerItems.find(
+              (item) => item.item.layerItemId === copy.node.id,
+            )
+            if (entry) {
+              entry.visibility = locationVisibilityFromScenePatch(draft, copy.visibility)
+            }
+          }
+          draft.globalInteractions.push(...copiedRules)
+        }, {
+          selectionIds: copies.map((instance) => instance.node.id),
+          scope: 'global',
+          statusMessage: `已粘贴 ${copies.length} 个全局元素`,
+        })
+        return
+      }
       const state = get()
       if (state.editingScope === 'global') {
         if (state.clipboardGlobalItems.length === 0) return
@@ -3914,6 +8856,264 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateNodes(patches) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        if (patches.length === 0) return
+        const document = spatial.history.present
+        const revision = document.revision
+        const lockPatches = patches.filter((item) => item.patch.locked !== undefined)
+        const visiblePatches = patches.filter((item) => item.patch.visible !== undefined)
+        for (const item of lockPatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row) continue
+          persistSpatialLayerCommand(patchEffectiveLayerItem(
+            get().spatialSession?.history.present ?? document,
+            commandTargetForRow(row),
+            { locked: Boolean(item.patch.locked) },
+            { expectedRevision: get().spatialSession?.history.present.revision ?? revision },
+          ))
+        }
+        for (const item of visiblePatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row) continue
+          persistSpatialLayerCommand(patchEffectiveLayerItem(
+            get().spatialSession?.history.present ?? document,
+            commandTargetForRow(row),
+            { visible: Boolean(item.patch.visible) },
+            { expectedRevision: get().spatialSession?.history.present.revision ?? revision },
+          ))
+        }
+        const live = get().spatialSession
+        if (!live) return
+        const framePatches = patches.filter((item) => (
+          item.patch.x !== undefined ||
+          item.patch.y !== undefined ||
+          item.patch.width !== undefined ||
+          item.patch.height !== undefined ||
+          item.patch.rotation !== undefined
+        ))
+        if (framePatches.length > 0) {
+          const current = new Map(spatialEditingNodes(live, get().spatialContentEdit).map((node) => [node.id, node]))
+          persistSpatialResult(transformSpatialWorldLayersInSession(live, {
+            layers: framePatches.flatMap((item) => {
+              const node = current.get(item.nodeId)
+              if (!node) return []
+              return [{
+                layerItemId: item.nodeId,
+                x: typeof item.patch.x === 'number' ? item.patch.x : node.x,
+                y: typeof item.patch.y === 'number' ? item.patch.y : node.y,
+                width: typeof item.patch.width === 'number' ? item.patch.width : node.width,
+                height: typeof item.patch.height === 'number' ? item.patch.height : node.height,
+                rotation: typeof item.patch.rotation === 'number' ? item.patch.rotation : node.rotation,
+              }]
+            }),
+          }, { expectedRevision: live.history.present.revision }))
+        }
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        if (patches.length === 0) return
+        const document = flow.history.present
+        const revision = document.revision
+        const lockPatches = patches.filter((item) => item.patch.locked !== undefined)
+        const visiblePatches = patches.filter((item) => item.patch.visible !== undefined)
+        for (const item of lockPatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row) continue
+          persistFlowLayerCommand(patchEffectiveLayerItem(
+            get().flowSession?.history.present ?? document,
+            commandTargetForRow(row),
+            { locked: Boolean(item.patch.locked) },
+            { expectedRevision: get().flowSession?.history.present.revision ?? revision },
+          ))
+        }
+        for (const item of visiblePatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row) continue
+          persistFlowLayerCommand(patchEffectiveLayerItem(
+            get().flowSession?.history.present ?? document,
+            commandTargetForRow(row),
+            { visible: Boolean(item.patch.visible) },
+            { expectedRevision: get().flowSession?.history.present.revision ?? revision },
+          ))
+        }
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        if (patches.length === 0) return
+        const snapshot = backend.getSnapshot()
+        if (get().editingScope === 'scene' && snapshot.stateId !== null) {
+          runV9DocumentMutation((draft) => {
+            for (const item of patches) {
+              applySceneNodePatchToCourseOverride(
+                draft,
+                snapshot.sceneId,
+                snapshot.stateId!,
+                item.nodeId,
+                item.patch,
+                get().componentPackages,
+              )
+            }
+          })
+          return
+        }
+        const document = backend.getSession().history.present
+        const globalIds = new Set(
+          document.globalLayerItems.map((entry) => entry.item.layerItemId),
+        )
+        const roundTripPatches = patches.filter((item) => (
+          globalIds.has(item.nodeId) || v9NodePatchNeedsRoundTrip(item.patch)
+        ))
+        if (roundTripPatches.length > 0) {
+          runV9DocumentMutation((draft) => {
+            for (const item of roundTripPatches) {
+              const layer = findMutableCourseLayerItem(draft, item.nodeId)
+              if (!layer || (layer.locked && item.patch.locked !== false)) continue
+              applySceneNodePatchToLayerItem(layer, item.patch, get().componentPackages)
+            }
+            synchronizeCourseTeacherControllerControls(draft)
+          })
+        }
+        const remaining = patches.filter((item) => (
+          !roundTripPatches.some((candidate) => candidate.nodeId === item.nodeId)
+        ))
+        if (remaining.length === 0) return
+        const revision = backend.getSnapshot().revision
+        const lockPatches = remaining.filter((item) => item.patch.locked !== undefined)
+        const visiblePatches = remaining.filter((item) => item.patch.visible !== undefined)
+        const framePatches = remaining.filter((item) => (
+          item.patch.x !== undefined ||
+          item.patch.y !== undefined ||
+          item.patch.width !== undefined ||
+          item.patch.height !== undefined ||
+          item.patch.rotation !== undefined
+        ))
+        for (const item of lockPatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row) continue
+          persistLayerCommand(patchEffectiveLayerItem(
+            selectSlideCandidateBackend(get())?.getSession().history.present ?? document,
+            commandTargetForRow(row),
+            { locked: Boolean(item.patch.locked) },
+            { expectedRevision: selectSlideCandidateBackend(get())?.getSnapshot().revision ?? revision },
+          ))
+        }
+        const controllerPatches = framePatches.filter((item) => (
+          findCandidateLayerRow(get(), item.nodeId)?.isTeacherController
+        ))
+        const sceneFramePatches = framePatches.filter((item) => (
+          !findCandidateLayerRow(get(), item.nodeId)?.isTeacherController
+        ))
+        const live = selectSlideCandidateBackend(get()) ?? backend
+        for (const item of controllerPatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row || row.item.kind !== 'native') continue
+          persistCandidateResult(commitTeacherControllerAuthoringFrame(live.getSession(), {
+            layerItemId: item.nodeId,
+            frame: {
+              x: typeof item.patch.x === 'number' ? item.patch.x : row.item.frame.x,
+              y: typeof item.patch.y === 'number' ? item.patch.y : row.item.frame.y,
+              width: typeof item.patch.width === 'number' ? item.patch.width : row.item.frame.width,
+              height: typeof item.patch.height === 'number' ? item.patch.height : row.item.frame.height,
+            },
+            rotation: typeof item.patch.rotation === 'number' ? item.patch.rotation : row.item.rotation,
+          }, { expectedRevision: live.getSnapshot().revision }))
+        }
+        const contentPatches = remaining.filter((item) => (
+          ('text' in item.patch && item.patch.text !== undefined) ||
+          ('style' in item.patch && item.patch.style !== undefined) ||
+          item.patch.name !== undefined
+        ))
+        if (sceneFramePatches.length > 0 || contentPatches.length > 0) {
+          const neededIds = [...new Set([
+            ...sceneFramePatches.map((item) => item.nodeId),
+            ...contentPatches.map((item) => item.nodeId),
+          ])]
+          const liveForSelect = selectSlideCandidateBackend(get()) ?? backend
+          const selected = new Set(liveForSelect.getSnapshot().selection.selectionIds)
+          if (neededIds.some((id) => !selected.has(id))) {
+            persistCandidateResult(liveForSelect.selectLayers(neededIds, false, {
+              expectedRevision: liveForSelect.getSnapshot().revision,
+            }))
+          }
+          runCandidateSession((session) => {
+            let next = session
+            if (sceneFramePatches.length > 0) {
+              const current = new Map(
+                projectV9EditingNodes(createSlideCandidateBackend(next)).map((node) => [node.id, node]),
+              )
+              const transformed = transformSlideNativeLayers(next, {
+                nodes: sceneFramePatches.flatMap((item) => {
+                  const node = current.get(item.nodeId)
+                  if (!node) return []
+                  return [{
+                    nodeId: item.nodeId,
+                    x: typeof item.patch.x === 'number' ? item.patch.x : node.x,
+                    y: typeof item.patch.y === 'number' ? item.patch.y : node.y,
+                    width: typeof item.patch.width === 'number' ? item.patch.width : node.width,
+                    height: typeof item.patch.height === 'number' ? item.patch.height : node.height,
+                    rotation: typeof item.patch.rotation === 'number'
+                      ? item.patch.rotation
+                      : node.rotation,
+                  }]
+                }),
+              }, { expectedRevision: next.history.present.revision })
+              if (!transformed.ok) return transformed
+              next = transformed.nextSession ?? next
+            }
+            for (const item of contentPatches) {
+              const nativeData: Record<string, unknown> = {}
+              if ('text' in item.patch && typeof item.patch.text === 'string') {
+                nativeData.text = item.patch.text
+              }
+              if ('style' in item.patch && item.patch.style) {
+                nativeData.style = item.patch.style
+              }
+              const contentResult = updateSlideNativeLayerContent(
+                next,
+                item.nodeId,
+                {
+                  nativeData,
+                  ...(typeof item.patch.name === 'string' ? { label: item.patch.name } : {}),
+                },
+                { expectedRevision: next.history.present.revision },
+              )
+              if (!contentResult.ok) return contentResult
+              next = contentResult.nextSession ?? next
+            }
+            if (next.history.present === session.history.present) {
+              return {
+                ok: true,
+                historyEntry: false,
+                nextSession: next,
+                selection: next.selection,
+              }
+            }
+            return {
+              ok: true,
+              historyEntry: true,
+              nextSession: {
+                ...next,
+                history: commitSlideAuthoringHistory(session.history, next.history.present),
+              },
+              selection: next.selection,
+            }
+          })
+        }
+        for (const item of visiblePatches) {
+          const row = findCandidateLayerRow(get(), item.nodeId)
+          if (!row) continue
+          persistLayerCommand(patchEffectiveLayerItem(
+            selectSlideCandidateBackend(get())?.getSession().history.present ?? document,
+            commandTargetForRow(row),
+            { visible: Boolean(item.patch.visible) },
+            { expectedRevision: selectSlideCandidateBackend(get())?.getSnapshot().revision ?? revision },
+          ))
+        }
+        return
+      }
       if (patches.length === 0) return
       const state = get()
       const sceneId = state.activeSceneId
@@ -3983,6 +9183,67 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     updateGlobalLayerSettings(nodeId, patch) {
+      const persistCandidatePlane = (
+        document: CourseProjectDocument,
+        persist: (result: LayerCommandResult) => unknown,
+        revision: number,
+      ) => {
+        if (patch.layer === undefined) return
+        const row = findCandidateLayerRow(get(), nodeId)
+        if (!row || row.owner !== 'global') return
+        persist(setGlobalLayerScenePlane(
+          document,
+          commandTargetForRow(row),
+          patch.layer,
+          { expectedRevision: revision },
+        ))
+      }
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistCandidatePlane(
+          spatial.history.present,
+          persistSpatialLayerCommand,
+          spatial.history.present.revision,
+        )
+        if (patch.visibility) {
+          get().setCandidateGlobalLayerLocationVisibility(
+            nodeId,
+            locationVisibilityFromScenePatch(spatial.history.present, patch.visibility),
+          )
+        }
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        persistCandidatePlane(
+          flow.history.present,
+          persistFlowLayerCommand,
+          flow.history.present.revision,
+        )
+        if (patch.visibility) {
+          get().setCandidateGlobalLayerLocationVisibility(
+            nodeId,
+            locationVisibilityFromScenePatch(flow.history.present, patch.visibility),
+          )
+        }
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        persistCandidatePlane(
+          backend.getSession().history.present,
+          persistLayerCommand,
+          backend.getSnapshot().revision,
+        )
+        if (patch.visibility) {
+          const document = backend.getSession().history.present
+          get().setCandidateGlobalLayerLocationVisibility(
+            nodeId,
+            locationVisibilityFromScenePatch(document, patch.visibility),
+          )
+        }
+        return
+      }
       commit((draft) => {
         const instance = draft.globalLayer.find(
           (item) => item.node.id === nodeId,
@@ -3999,6 +9260,61 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     reorderNodes(nodeIds) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const projection = buildCandidateEffectiveLayers(get())
+        const first = projection?.unifiedRows.find((row) => row.id === nodeIds[0])
+        if (!first) return
+        persistSpatialLayerCommand(reorderEffectiveLayerItems(
+          spatial.history.present,
+          commandTargetForRow(first),
+          nodeIds,
+          { expectedRevision: spatial.history.present.revision },
+        ))
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const projection = buildCandidateEffectiveLayers(get())
+        const first = projection?.unifiedRows.find((row) => row.id === nodeIds[0])
+        if (!first) return
+        persistFlowLayerCommand(reorderEffectiveLayerItems(
+          flow.history.present,
+          commandTargetForRow(first),
+          nodeIds,
+          { expectedRevision: flow.history.present.revision },
+        ))
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        if (get().editingScope === 'global') {
+          const projection = buildCandidateEffectiveLayers(get())
+          if (!projection) return
+          const first = projection.unifiedRows.find((row) => row.id === nodeIds[0])
+          if (!first) return
+          if (nodeIds.some((id) => {
+            const row = projection.unifiedRows.find((candidate) => candidate.id === id)
+            return !row || row.ownerKey !== first.ownerKey
+          })) {
+            persistLayerCommand({
+              ok: false,
+              reason: CROSS_OWNER_REORDER_REASON,
+              historyEntry: false,
+            })
+            return
+          }
+          persistLayerCommand(reorderEffectiveLayerItems(
+            backend.getSession().history.present,
+            commandTargetForRow(first),
+            nodeIds,
+            { expectedRevision: backend.getSnapshot().revision },
+          ))
+          return
+        }
+        runCandidateAction('reorder', { orderedLayerItemIds: nodeIds })
+        return
+      }
       const state = get()
       const nodes = editingNodes(state)
       if (!sameIds(nodes.map((node) => node.id), nodeIds)) return
@@ -4035,6 +9351,107 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     selectNode(selectedNodeId, additive = false) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistOpenSpatialContentEdit()
+        const live = get().spatialSession ?? spatial
+        const projection = buildCandidateEffectiveLayers(get())
+        const available = new Set(projection?.unifiedRows.map((row) => row.id) ?? [])
+        if (selectedNodeId !== null && !available.has(selectedNodeId)) {
+          return
+        }
+        const previous = get().selectedNodeIds
+        const selectedNodeIds = selectedNodeId === null
+          ? []
+          : additive
+            ? previous.includes(selectedNodeId)
+              ? previous.filter((id) => id !== selectedNodeId)
+              : [...previous, selectedNodeId]
+            : [selectedNodeId]
+        persistSpatialResult(selectSpatialLayers(live, {
+          layerItemIds: selectedNodeIds,
+        }, {
+          expectedRevision: live.history.present.revision,
+        }))
+        set({
+          activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab,
+          spatialGraphSelection: selectedNodeIds.length > 0 ? null : get().spatialGraphSelection,
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const projection = buildCandidateEffectiveLayers(get())
+        const available = new Set(projection?.unifiedRows.map((row) => row.id) ?? [])
+        if (selectedNodeId !== null && !available.has(selectedNodeId)) {
+          return
+        }
+        const previous = get().selectedNodeIds
+        const selectedNodeIds = selectedNodeId === null
+          ? []
+          : additive
+            ? previous.includes(selectedNodeId)
+              ? previous.filter((id) => id !== selectedNodeId)
+              : [...previous, selectedNodeId]
+            : [selectedNodeId]
+        const document = flow.history.present
+        const row = selectedNodeId ? projection?.unifiedRows.find((item) => item.id === selectedNodeId) : null
+        persistFlowResult({
+          ok: true,
+          nextDocument: document,
+          historyEntry: false,
+          selection: selectedNodeIds.length > 0
+            ? selectFlowOverlay(
+                document,
+                flow.selection.locationId,
+                selectedNodeIds,
+                row?.owner === 'global' ? 'global' : 'page',
+              )
+            : selectFlowEditorBlock(
+                document,
+                flow.selection.locationId,
+                flowLocationBlockId(document.locations, flow.selection.locationId)
+                  ?? flow.selection.selectedBlockId
+                  ?? flow.selection.locationId,
+              ),
+        }, { clearTextEdit: true })
+        set({ activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const projection = buildCandidateEffectiveLayers(get())
+        const available = new Set(projection?.unifiedRows.map((row) => row.id) ?? [])
+        if (selectedNodeId !== null && !available.has(selectedNodeId)) {
+          return
+        }
+        const previous = get().selectedNodeIds
+        const selectedNodeIds = selectedNodeId === null
+          ? []
+          : additive
+            ? previous.includes(selectedNodeId)
+              ? previous.filter((id) => id !== selectedNodeId)
+              : [...previous, selectedNodeId]
+            : [selectedNodeId]
+        const row = selectedNodeId ? projection?.unifiedRows.find((item) => item.id === selectedNodeId) : null
+        const desiredScope = row
+          ? (scopeTokenForSelectingRow(projection!.scope, row).owner === 'global' ? 'global' : 'scene')
+          : backend.getSession().scope === 'global' ? 'global' : 'scene'
+        let nextBackend = commitOpenCandidateContentEdit(selectedNodeIds)
+        if (!nextBackend) return
+        if ((nextBackend.getSession().scope === 'global') !== (desiredScope === 'global')) {
+          persistCandidateResult(nextBackend.setScope(desiredScope, {
+            expectedRevision: nextBackend.getSnapshot().revision,
+          }))
+          nextBackend = selectSlideCandidateBackend(get())
+          if (!nextBackend) return
+        }
+        persistCandidateResult(nextBackend.selectLayers(selectedNodeIds, false, {
+          expectedRevision: nextBackend.getSnapshot().revision,
+        }))
+        set({ activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab })
+        return
+      }
       const nodes = editingNodes(get())
       if (
         selectedNodeId !== null &&
@@ -4061,6 +9478,71 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     selectNodes(nodeIds) {
+      const spatial = get().spatialSession
+      if (spatial) {
+        persistOpenSpatialContentEdit()
+        const live = get().spatialSession ?? spatial
+        const available = new Set(
+          (buildCandidateEffectiveLayers(get())?.unifiedRows ?? []).map((row) => row.id),
+        )
+        const selectedNodeIds = [...new Set(nodeIds)].filter((id) => available.has(id))
+        persistSpatialResult(selectSpatialLayers(live, {
+          layerItemIds: selectedNodeIds,
+        }, {
+          expectedRevision: live.history.present.revision,
+        }))
+        set({
+          activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab,
+          spatialGraphSelection: selectedNodeIds.length > 0 ? null : get().spatialGraphSelection,
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const available = new Set(
+          (buildCandidateEffectiveLayers(get())?.unifiedRows ?? []).map((row) => row.id),
+        )
+        const selectedNodeIds = [...new Set(nodeIds)].filter((id) => available.has(id))
+        const document = flow.history.present
+        const row = selectedNodeIds[0]
+          ? buildCandidateEffectiveLayers(get())?.unifiedRows.find((item) => item.id === selectedNodeIds[0])
+          : null
+        persistFlowResult({
+          ok: true,
+          nextDocument: document,
+          historyEntry: false,
+          selection: selectedNodeIds.length > 0
+            ? selectFlowOverlay(
+                document,
+                flow.selection.locationId,
+                selectedNodeIds,
+                row?.owner === 'global' ? 'global' : 'page',
+              )
+            : selectFlowEditorBlock(
+                document,
+                flow.selection.locationId,
+                flowLocationBlockId(document.locations, flow.selection.locationId)
+                  ?? flow.selection.selectedBlockId
+                  ?? flow.selection.locationId,
+              ),
+        }, { clearTextEdit: true })
+        set({ activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const available = new Set(
+          (buildCandidateEffectiveLayers(get())?.unifiedRows ?? []).map((row) => row.id),
+        )
+        const selectedNodeIds = [...new Set(nodeIds)].filter((id) => available.has(id))
+        const nextBackend = commitOpenCandidateContentEdit(selectedNodeIds)
+        if (!nextBackend) return
+        persistCandidateResult(nextBackend.selectLayers(selectedNodeIds, false, {
+          expectedRevision: nextBackend.getSnapshot().revision,
+        }))
+        set({ activeTab: selectedNodeIds.length > 0 ? 'properties' : get().activeTab })
+        return
+      }
       const available = new Set(editingNodes(get()).map((node) => node.id))
       const selectedNodeIds = [...new Set(nodeIds)].filter((id) => available.has(id))
       set((state) => ({
@@ -4074,6 +9556,64 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     undo() {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const before = spatial.history.present
+        const result = undoSpatialAuthoring(spatial)
+        const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
+        persistSpatialResult(result, {
+          clearContentEdit: true,
+          ...(moved ? { sidecarDirection: 'undo' as const } : {}),
+          statusMessage: '已撤销',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        const edit = get().flowTextEdit
+        if (edit?.composing) return
+        if (edit && isFlowTextDraftDirty(edit)) {
+          persistFlowResult({
+            ok: true,
+            nextDocument: flow.history.present,
+            historyEntry: false,
+            selection: flow.selection,
+          }, {
+            clearTextEdit: true,
+            statusMessage: '已取消本次编辑',
+          })
+          return
+        }
+        const nextHistory = undoFlowEditorHistory(flow.history)
+        if (nextHistory === flow.history) {
+          set({ statusMessage: '已撤销' })
+          return
+        }
+        persistFlowResult({
+          ok: true,
+          nextDocument: nextHistory.present,
+          historyEntry: false,
+          selection: flow.selection,
+        }, {
+          replaceHistory: nextHistory,
+          sidecarDirection: 'undo',
+          clearTextEdit: true,
+          statusMessage: '已撤销',
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const before = backend.getSession().history.present
+        const result = backend.undo()
+        const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
+        persistCandidateResult(result, {
+          clearContentEdit: true,
+          ...(moved ? { sidecarDirection: 'undo' as const } : {}),
+        })
+        return
+      }
+      if (rejectV8WriteIfCandidate()) return
       set((state) => {
         const prepared = commitTextEditSessionState(state)
         const previous = prepared.history.past.at(-1)
@@ -4129,6 +9669,51 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
 
     redo() {
+      const spatial = get().spatialSession
+      if (spatial) {
+        const before = spatial.history.present
+        const result = redoSpatialAuthoring(spatial)
+        const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
+        persistSpatialResult(result, {
+          clearContentEdit: true,
+          ...(moved ? { sidecarDirection: 'redo' as const } : {}),
+          statusMessage: '已重做',
+        })
+        return
+      }
+      const flow = get().flowSession
+      if (flow) {
+        if (get().flowTextEdit?.composing) return
+        const nextHistory = redoFlowEditorHistory(flow.history)
+        if (nextHistory === flow.history) {
+          set({ statusMessage: '已重做' })
+          return
+        }
+        persistFlowResult({
+          ok: true,
+          nextDocument: nextHistory.present,
+          historyEntry: false,
+          selection: flow.selection,
+        }, {
+          replaceHistory: nextHistory,
+          sidecarDirection: 'redo',
+          clearTextEdit: true,
+          statusMessage: '已重做',
+        })
+        return
+      }
+      const backend = selectSlideCandidateBackend(get())
+      if (backend) {
+        const before = backend.getSession().history.present
+        const result = backend.redo()
+        const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
+        persistCandidateResult(result, {
+          clearContentEdit: true,
+          ...(moved ? { sidecarDirection: 'redo' as const } : {}),
+        })
+        return
+      }
+      if (rejectV8WriteIfCandidate()) return
       set((state) => {
         const prepared = commitTextEditSessionState(state)
         const next = prepared.history.future[0]
@@ -4182,11 +9767,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
   }
 })
 
-export const selectActiveScene = (state: EditorState) =>
-  state.project.scenes.find((scene) => scene.id === state.activeSceneId) ??
-  state.project.scenes[0]
+export const selectActiveScene = (state: EditorState) => {
+  if (state.slideCandidateUi) return state.slideCandidateUi.activeScene
+  return state.project.scenes.find((scene) => scene.id === state.activeSceneId) ??
+    state.project.scenes[0]
+}
 
-export const selectEditingNodes = (state: EditorState) => editingNodes(state)
+export const selectSlideSceneList = (state: EditorState): SceneDocument[] =>
+  state.slideCandidateUi?.scenes ?? state.project.scenes
+
+export const selectEditingNodes = (state: EditorState) =>
+  state.slideCandidateUi?.nodes ?? editingNodes(state)
 
 export const selectSelectedNode = (state: EditorState) =>
   selectEditingNodes(state).find(
@@ -4197,3 +9788,54 @@ export const selectSelectedNodes = (state: EditorState) => {
   const selected = new Set(state.selectedNodeIds)
   return selectEditingNodes(state).filter((node) => selected.has(node.id))
 }
+
+export const selectSlideBackendKind = (state: EditorState): SlideBackendKind =>
+  getSlideBackendKind(state.slideBackend)
+
+export const selectSlideCandidateBackend = (
+  state: EditorState,
+): SlideCandidateBackend | null =>
+  isV9SlideCandidateBackend(state.slideBackend) ? state.slideBackend : null
+
+export const selectSlideAuthoringSnapshot = (
+  state: EditorState,
+): SlideAuthoringSnapshot | null =>
+  state.slideCandidateSnapshot
+
+export const selectSlideCandidateDocument = (state: EditorState) =>
+  selectSlideCandidateBackend(state)?.getSession().history.present ?? null
+
+export const selectActiveCourseProjectDocument = (state: EditorState) =>
+  state.spatialSession?.history.present
+  ?? state.flowSession?.history.present
+  ?? selectSlideCandidateBackend(state)?.getSession().history.present
+  ?? null
+
+export const selectActiveCourseLocationId = (state: EditorState): string | null => {
+  if (state.spatialSession) return state.spatialSession.selection.locationId
+  if (state.flowSession) return state.flowSession.selection.locationId
+  if (state.slideCandidateSnapshot) return state.slideCandidateSnapshot.locationId
+  return null
+}
+
+export const selectEffectiveLayerProjection = (
+  state: EditorState,
+): EffectiveLayerProjection | null => state.slideCandidateEffectiveLayers
+
+const EMPTY_CANDIDATE_ASSET_FILES: Record<string, Uint8Array> = Object.freeze({})
+
+export const selectMediaAssets = (state: EditorState) =>
+  selectActiveCourseProjectDocument(state)?.assets ?? state.project.assets
+
+export const selectMediaAssetFiles = (state: EditorState): Record<string, Uint8Array> => {
+  if (state.spatialSession || state.flowSession || selectSlideCandidateBackend(state)) {
+    return state.slideCandidateSidecar?.files ?? EMPTY_CANDIDATE_ASSET_FILES
+  }
+  return state.assetFiles
+}
+
+export const selectAudioSettings = (state: EditorState) =>
+  selectActiveCourseProjectDocument(state)?.media.audio ?? state.project.media.audio
+
+export const selectCandidateGlobalLayerItems = (state: EditorState) =>
+  selectActiveCourseProjectDocument(state)?.globalLayerItems ?? null

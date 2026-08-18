@@ -1,7 +1,6 @@
 import { strToU8, unzip, unzipSync, zip, zipSync } from 'fflate'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { migrateProjectV8ToCourseProjectV9 } from '@/shared/courseProjectModel'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { UserFacingError } from '@/shared/errors'
 import type { EmbeddedComponentPackageMeta } from '@/shared/projectTypes'
@@ -12,8 +11,15 @@ import {
   isArchiveDirectory,
 } from './archivePath'
 import {
+  migrateProjectV8DocumentToCourseProjectV9,
+  type CourseProjectV8ImportReport,
+} from './courseProjectMigration'
+import {
   openProjectArchive,
+  openProjectArchiveAsync,
 } from './projectArchive'
+
+export type { CourseProjectV8ImportReport }
 
 const PROJECT_DOCUMENT_PATH = 'project.json'
 const MAX_COURSE_PROJECT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -26,6 +32,30 @@ export interface CourseProjectArchiveData {
   assetFiles: Record<string, Uint8Array>
   /** Component files keyed by `${packageId}@${version}`. */
   componentFiles: Record<string, Record<string, Uint8Array>>
+}
+
+export interface CourseProjectArchiveIdentity {
+  schemaVersion: number | null
+  projectId: string | null
+  revision: number | null
+  updatedAt: string | null
+  title: string | null
+}
+
+export type CourseProjectArchiveFormatKind =
+  | 'v8'
+  | 'v9'
+  | 'corrupted'
+  | 'unsupported'
+
+export interface CourseProjectArchiveFormatProbe {
+  kind: CourseProjectArchiveFormatKind
+  identity: CourseProjectArchiveIdentity
+  reason: string
+}
+
+export interface CourseProjectV8ImportResult extends CourseProjectArchiveData {
+  report: CourseProjectV8ImportReport
 }
 
 export interface CreateCourseProjectArchiveOptions {
@@ -81,22 +111,148 @@ function declaredSchemaVersion(value: unknown): number | null {
   return typeof version === 'number' && Number.isInteger(version) ? version : null
 }
 
+function emptyArchiveIdentity(): CourseProjectArchiveIdentity {
+  return {
+    schemaVersion: null,
+    projectId: null,
+    revision: null,
+    updatedAt: null,
+    title: null,
+  }
+}
+
+function identityFromProjectJson(value: unknown): CourseProjectArchiveIdentity {
+  if (typeof value !== 'object' || value === null) return emptyArchiveIdentity()
+  const record = value as Record<string, unknown>
+  const schemaVersion = declaredSchemaVersion(value)
+  return {
+    schemaVersion,
+    projectId: typeof record.id === 'string' && record.id.length > 0 ? record.id : null,
+    revision: typeof record.revision === 'number' && Number.isInteger(record.revision)
+      ? record.revision
+      : null,
+    updatedAt: typeof record.updatedAt === 'string' && record.updatedAt.length > 0
+      ? record.updatedAt
+      : null,
+    title: typeof record.title === 'string' && record.title.length > 0 ? record.title : null,
+  }
+}
+
+function looksLikeCourseProjectV9(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return Array.isArray(record.locations) && Array.isArray(record.surfaces)
+}
+
+function looksLikeProjectV8(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return Array.isArray(record.scenes) && !looksLikeCourseProjectV9(value)
+}
+
+type ArchiveProjectPeek = {
+  identity: CourseProjectArchiveIdentity
+  value: unknown | null
+  failure: null | 'empty' | 'unzip' | 'missing-json' | 'invalid-json'
+}
+
+function peekArchiveProject(bytes: Uint8Array): ArchiveProjectPeek {
+  if (bytes.byteLength === 0) {
+    return { identity: emptyArchiveIdentity(), value: null, failure: 'empty' }
+  }
+  let files: Record<string, Uint8Array>
+  try {
+    files = unzipSync(bytes, archiveFilter())
+  } catch {
+    return { identity: emptyArchiveIdentity(), value: null, failure: 'unzip' }
+  }
+  const projectBytes = files[PROJECT_DOCUMENT_PATH]
+  if (!projectBytes) {
+    return { identity: emptyArchiveIdentity(), value: null, failure: 'missing-json' }
+  }
+  try {
+    const value = decodeJson(projectBytes)
+    return { identity: identityFromProjectJson(value), value, failure: null }
+  } catch {
+    return { identity: emptyArchiveIdentity(), value: null, failure: 'invalid-json' }
+  }
+}
+
+/** Peeks archive identity without opening V8 as the default backend. */
+export function inspectCourseProjectArchiveIdentity(
+  bytes: Uint8Array,
+): CourseProjectArchiveIdentity {
+  return peekArchiveProject(bytes).identity
+}
+
+/**
+ * Classifies a zip as V8, V9, corrupted, or an unsupported schema version.
+ * This probe never opens the default V8 product path and never migrates.
+ */
+export function detectCourseProjectArchiveFormat(
+  bytes: Uint8Array,
+): CourseProjectArchiveFormatProbe {
+  const peeked = peekArchiveProject(bytes)
+  if (peeked.failure === 'empty') {
+    return { kind: 'corrupted', identity: peeked.identity, reason: '所选课程工程文件为空。' }
+  }
+  if (peeked.failure === 'unzip') {
+    return { kind: 'corrupted', identity: peeked.identity, reason: '无法解压课程工程，文件可能已损坏。' }
+  }
+  if (peeked.failure === 'missing-json') {
+    return { kind: 'corrupted', identity: peeked.identity, reason: '工程包缺少根目录下的 project.json。' }
+  }
+  if (peeked.failure === 'invalid-json') {
+    return { kind: 'corrupted', identity: peeked.identity, reason: 'project.json 不是有效的 UTF-8 JSON 文件。' }
+  }
+
+  const { identity, value } = peeked
+  if (identity.schemaVersion === 9) {
+    return { kind: 'v9', identity, reason: '这是 Course Project V9 工程。' }
+  }
+  if (identity.schemaVersion === 8) {
+    return {
+      kind: 'v8',
+      identity,
+      reason: '这是 Project V8 工程，不会在普通打开时静默改写；请通过显式迁移导入。',
+    }
+  }
+  if (identity.schemaVersion !== null) {
+    return {
+      kind: 'unsupported',
+      identity,
+      reason: `该文件的格式版本为 ${identity.schemaVersion}，当前编辑器无法直接打开。`,
+    }
+  }
+  if (looksLikeCourseProjectV9(value)) {
+    return { kind: 'v9', identity, reason: '未声明版本，结构为 Course Project V9。' }
+  }
+  if (looksLikeProjectV8(value)) {
+    return {
+      kind: 'v8',
+      identity,
+      reason: '未声明版本，结构为 Project V8；请通过显式迁移导入。',
+    }
+  }
+  return { kind: 'corrupted', identity, reason: '无法识别课程工程格式。' }
+}
+
 function readCourseProject(bytes: Uint8Array): CourseProjectDocument {
   const value = decodeJson(bytes)
   const schemaVersion = declaredSchemaVersion(value)
   if (schemaVersion !== 9) {
     const cause = new UnsupportedCourseProjectVersionError(schemaVersion)
-    if (schemaVersion === 8) {
+    if (schemaVersion === 8 || looksLikeProjectV8(value)) {
       throw new UserFacingError(
         '需要显式迁移旧工程',
-        '该文件是 Project V8，不会在打开时静默改写为 Course Project V9；请显式迁移。',
-        '请使用明确的 V8 → V9 迁移命令，并将结果另存为新文件。',
+        '该文件是旧版工程，不会在普通打开时静默改写；请通过“导入旧版工程”显式迁移。',
+        '导入后请另存为新文件，原工程不会被改写。',
         { cause },
       )
     }
     throw new UserFacingError(
       '课程工程版本不支持',
-      `该文件的格式版本为 ${schemaVersion ?? '未声明'}，当前只支持 Course Project V9。`,
+      `该文件的格式版本为 ${schemaVersion ?? '未声明'}，当前编辑器无法直接打开。`,
       '请使用对应版本的编辑器打开，或先执行受支持的显式迁移。',
       { cause },
     )
@@ -463,16 +619,33 @@ export async function openCourseProjectArchiveAsync(
 
 /**
  * Deliberate V8 import boundary. Normal V9 open never calls this function.
- * The returned data can be reviewed before it is saved as a new V9 archive.
+ * V9 zip must not go through V8 `openProjectArchive` (R0-D rejects it).
  */
 export function importProjectV8ArchiveAsCourseProject(
   bytes: Uint8Array,
-): CourseProjectArchiveData {
+): CourseProjectV8ImportResult {
   const legacy = openProjectArchive(bytes)
+  const migrated = migrateProjectV8DocumentToCourseProjectV9(legacy.project)
   return {
-    project: migrateProjectV8ToCourseProjectV9(legacy.project),
+    project: migrated.project,
     assetFiles: legacy.assetFiles,
     componentFiles: legacy.componentFiles,
+    report: migrated.report,
+  }
+}
+
+/** Async deliberate legacy import boundary. Not wired to App/IPC in R1-B. */
+export async function importProjectV8ArchiveAsCourseProjectAsync(
+  bytes: Uint8Array,
+  options: { signal?: AbortSignal } = {},
+): Promise<CourseProjectV8ImportResult> {
+  const legacy = await openProjectArchiveAsync(bytes, options)
+  const migrated = migrateProjectV8DocumentToCourseProjectV9(legacy.project)
+  return {
+    project: migrated.project,
+    assetFiles: legacy.assetFiles,
+    componentFiles: legacy.componentFiles,
+    report: migrated.report,
   }
 }
 

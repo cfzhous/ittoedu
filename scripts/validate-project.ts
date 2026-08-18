@@ -8,59 +8,6 @@ import {
   validateProjectArchiveBytes,
   type ProjectValidationFatalError,
 } from '../src/renderer/project/validateProjectArchive'
-import { openCourseProjectArchive } from '../src/renderer/project/courseProjectArchive'
-
-export interface CourseProjectV9ValidationReport {
-  reportVersion: 2
-  status: 'valid'
-  input: { filename: string }
-  schema: { valid: true; schemaVersion: 9; issues: [] }
-  project: {
-    id: string
-    title: string
-    revision: number
-    surfaceCount: number
-    surfaces: { slide: number; flow: number; 'spatial-2d': number }
-    assetCount: number
-    componentPackageCount: number
-    courseStateCount: number
-    navigationGuardCount: number
-  }
-  summary: { error: 0; warning: 0; total: 0 }
-  fatal: null
-}
-
-export function validateCourseProjectV9ArchiveBytes(
-  bytes: Uint8Array,
-  filename: string,
-): CourseProjectV9ValidationReport | null {
-  try {
-    const { project } = openCourseProjectArchive(bytes)
-    const surfaces = { slide: 0, flow: 0, 'spatial-2d': 0 }
-    project.surfaces.forEach((surface) => { surfaces[surface.type] += 1 })
-    return {
-      reportVersion: 2,
-      status: 'valid',
-      input: { filename },
-      schema: { valid: true, schemaVersion: 9, issues: [] },
-      project: {
-        id: project.id,
-        title: project.title,
-        revision: project.revision,
-        surfaceCount: project.surfaces.length,
-        surfaces,
-        assetCount: Object.keys(project.assets).length,
-        componentPackageCount: Object.keys(project.componentPackages).length,
-        courseStateCount: project.courseState.length,
-        navigationGuardCount: project.navigationGuards.length,
-      },
-      summary: { error: 0, warning: 0, total: 0 },
-      fatal: null,
-    }
-  } catch {
-    return null
-  }
-}
 
 interface ValidationCliIo {
   stdout(value: string): void
@@ -103,7 +50,7 @@ export async function runValidateProjectCli(
     return fatal(filename, {
       code: 'usage-error',
       title: '文件类型不支持',
-      message: '无界面工程校验只接受 Course Project .h5lesson 文件。',
+      message: '无界面工程校验只接受当前 Project V8 .h5lesson 文件。',
     }, io)
   }
 
@@ -118,14 +65,6 @@ export async function runValidateProjectCli(
     }, io)
   }
 
-  const v9Report = validateCourseProjectV9ArchiveBytes(bytes, filename)
-  if (v9Report) {
-    io.stdout(`${JSON.stringify(v9Report, null, 2)}\n`)
-    return 0
-  }
-
-  // V8 remains an explicit compatibility/import boundary. Keeping its richer
-  // compatibility report here does not make it the default authoring format.
   const report = validateProjectArchiveBytes(bytes, filename)
   io.stdout(serializeProjectValidationReport(report))
   if (report.fatal) {

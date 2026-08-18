@@ -30,6 +30,14 @@ export type AudioManagerProjectSettings = ProjectAudioSettings
 export type AudioTarget = AudioActionTarget
 export type { AudioChannel, SoundDefinition }
 
+/**
+ * V8 `ProjectDocument` and V9 `CourseProjectDocument` both carry
+ * `media.audio`. The manager only reads that slice.
+ */
+export type AudioManagerProjectSource = {
+  readonly media?: ProjectDocument['media']
+}
+
 export interface AudioChangeEvent {
   muted: boolean
   masterVolume: number
@@ -151,7 +159,7 @@ function isSoundChannel(value: unknown): value is SoundChannel {
   return value === 'music' || value === 'narration' || value === 'sfx' || value === 'ui'
 }
 
-function normalizedSettings(project: ProjectDocument): AudioManagerProjectSettings {
+function normalizedSettings(project: AudioManagerProjectSource): AudioManagerProjectSettings {
   const raw = project.media?.audio
   const rawChannels = raw?.channelVolumes
   const channelVolumes = Object.fromEntries(
@@ -229,7 +237,6 @@ export class AudioManager implements CourseAudioApi {
   private readonly backgroundDuckTokens = new Set<symbol>()
   private readonly backgroundPauseTokens = new Set<symbol>()
   private readonly backgroundPausedVoices = new Set<ManagedVoice>()
-  private readonly inspectionPausedVoices = new Set<ManagedVoice>()
   private readonly unlockTarget?: EventTarget
   private mutedValue: boolean
   private masterVolumeValue: number
@@ -239,11 +246,10 @@ export class AudioManager implements CourseAudioApi {
   private musicDuckTimer: ReturnType<typeof setTimeout> | null = null
   private playbackSequence = 0
   private destroyed = false
-  private suspended = false
   private unlockListenersInstalled = false
 
   constructor(
-    private readonly project: ProjectDocument,
+    private readonly project: AudioManagerProjectSource,
     private readonly resolveAssetUrl: (assetId: string) => string,
     private readonly events: CourseEventBus,
     options: AudioManagerOptions = {},
@@ -319,7 +325,7 @@ export class AudioManager implements CourseAudioApi {
   }
 
   play(soundId: string, options: AudioPlayOptions = {}): boolean {
-    if (this.destroyed || this.captureMode || this.suspended) return false
+    if (this.destroyed || this.captureMode) return false
     const definition = this.settings.sounds[soundId]
     if (!definition) return false
 
@@ -400,7 +406,7 @@ export class AudioManager implements CourseAudioApi {
   }
 
   resume(target: AudioTarget, fadeInMs = 0): boolean {
-    if (this.destroyed || this.captureMode || this.suspended) return false
+    if (this.destroyed || this.captureMode) return false
     const matched = this.matchingVoices(target)
     matched.forEach((voice) => this.attemptPlay(voice, fadeInMs))
     return matched.length > 0
@@ -441,30 +447,6 @@ export class AudioManager implements CourseAudioApi {
         return this.stop(action.target, action.fadeOutMs)
       case 'audio.toggle-mute':
         return this.toggleMute(action.target)
-    }
-  }
-
-  /** Pause only voices that were actually playing, so inspection can resume faithfully. */
-  suspend(): void {
-    if (this.destroyed || this.captureMode || this.suspended) return
-    this.suspended = true
-    this.inspectionPausedVoices.clear()
-    for (const voice of this.voices) {
-      if (!voice.playing || voice.stopping) continue
-      this.inspectionPausedVoices.add(voice)
-      this.pauseVoice(voice)
-    }
-  }
-
-  resumeSuspended(): void {
-    if (this.destroyed || this.captureMode || !this.suspended) return
-    this.suspended = false
-    const voices = [...this.inspectionPausedVoices]
-    this.inspectionPausedVoices.clear()
-    for (const voice of voices) {
-      if (this.voices.includes(voice) && !voice.stopping) {
-        this.attemptPlay(voice)
-      }
     }
   }
 
@@ -574,7 +556,6 @@ export class AudioManager implements CourseAudioApi {
     this.cancelMusicDuckFade()
     this.stop({ kind: 'all' })
     this.destroyed = true
-    this.inspectionPausedVoices.clear()
     this.cancelMusicDuckFade()
     this.backgroundDuckTokens.clear()
     this.backgroundPauseTokens.clear()

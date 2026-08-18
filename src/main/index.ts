@@ -18,7 +18,6 @@ import {
   shouldShowApplicationWindows,
 } from './windowVisibility'
 import { APP_ID } from '../shared/constants'
-import { clearCurrentCourseSelectionSync } from './courseSelectionBridge'
 
 if (!shouldShowApplicationWindows()) {
   BACKGROUND_E2E_CHROMIUM_SWITCHES.forEach((name) => {
@@ -132,7 +131,6 @@ app
 app.on('before-quit', () => {
   closeAllPreviewWindows()
   clearPreviewDocuments()
-  clearCurrentCourseSelectionSync()
 })
 
 app.on('window-all-closed', () => {

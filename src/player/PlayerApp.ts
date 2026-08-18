@@ -23,7 +23,6 @@ import {
 } from './PlayerScene'
 import type { RuntimeExecutionMode } from '../shared/runtimeTypes'
 import type { RuntimePresentationTransition } from '../shared/runtimeTypes'
-import type { AssetMeta } from '../shared/projectTypes'
 import type { ComponentAuthoringTargetsChangedHandler } from './ComponentAuthoringTargetRegistry'
 import type { RuntimeAuthoringTargetsChangedHandler } from './RuntimeAuthoringTargetRegistry'
 import {
@@ -102,7 +101,6 @@ export class PlayerApp {
   private readonly playerScene: PlayerScene
   private readonly runtimeKernel: CourseRuntimeKernel
   private readonly stage: HTMLElement
-  private readonly inputShield: HTMLDivElement | null
   private readonly presenterStatus: HTMLDivElement
   private readonly runtimeDomLayers: PlayerRuntimeDomLayers
   private readonly scenePicker: ScenePickerOverlay | null
@@ -111,7 +109,6 @@ export class PlayerApp {
   private readonly captureMode: boolean
   private readonly hostMode: PlayerHostMode
   private readonly authoringMode: boolean
-  private inspectionMode = false
   private readonly resizeObserver: ResizeObserver | null
   private alignmentFrame: number | null = null
   private capturePreparation: Promise<void> | null = null
@@ -119,8 +116,6 @@ export class PlayerApp {
   private lastAuthoringRevision = -1
   private presenterStatusTimer: ReturnType<typeof setTimeout> | null = null
   private lastNavigationBlockedReason: string | null = null
-  private inspectionPausedAnimations: Animation[] = []
-  private readonly authoringAssetUrls = new Map<string, string>()
   private destroyed = false
 
   constructor(
@@ -231,12 +226,7 @@ export class PlayerApp {
     })
     stage.append(presenterStatus)
     this.presenterStatus = presenterStatus
-    const editorBridgeEnabled = !this.captureMode && (
-      this.authoringMode ||
-      Boolean(options.onRuntimeAuthoringTargetsChanged) ||
-      Boolean(options.onComponentAuthoringTargetsChanged)
-    )
-    if (editorBridgeEnabled) {
+    if (this.authoringMode) {
       const inputShield = document.createElement('div')
       inputShield.className = 'lesson-authoring-input-shield'
       inputShield.setAttribute('aria-hidden', 'true')
@@ -245,13 +235,9 @@ export class PlayerApp {
         inset: '0',
         zIndex: '5',
         background: 'transparent',
-        pointerEvents: this.authoringMode ? 'auto' : 'none',
+        pointerEvents: 'auto',
       })
-      inputShield.hidden = !this.authoringMode
       stage.append(inputShield)
-      this.inputShield = inputShield
-    } else {
-      this.inputShield = null
     }
     if (!options.transparent) {
       stage.style.backgroundColor = initialScene.backgroundColor
@@ -278,7 +264,7 @@ export class PlayerApp {
       onActionRecorded: (evidence) => {
         this.#hostEvidenceRecorder.recordAction(evidence)
       },
-      ...(!this.captureMode && options.onRuntimeAuthoringTargetsChanged
+      ...(this.authoringMode && options.onRuntimeAuthoringTargetsChanged
         ? {
             authoring: {
               onTargetsChanged: options.onRuntimeAuthoringTargetsChanged,
@@ -370,7 +356,9 @@ export class PlayerApp {
         ...(initialStateId !== undefined ? { stateId: initialStateId } : {}),
       },
       this.authoringMode,
-      this.captureMode ? undefined : options.onComponentAuthoringTargetsChanged,
+      this.authoringMode
+        ? options.onComponentAuthoringTargetsChanged
+        : undefined,
       this.authoringMode ? options.authoringScope ?? 'scene' : 'scene',
     )
 
@@ -502,7 +490,7 @@ export class PlayerApp {
     targetStateId?: string | null,
     bypassNavigationGuards = false,
   ): boolean {
-    if (this.destroyed || (this.inspectionMode && !bypassNavigationGuards)) {
+    if (this.destroyed) {
       return false
     }
     this.scenePicker?.close()
@@ -510,7 +498,7 @@ export class PlayerApp {
       index,
       false,
       targetStateId,
-      this.isAuthoringActive() || bypassNavigationGuards,
+      this.authoringMode || bypassNavigationGuards,
     )
   }
 
@@ -557,13 +545,13 @@ export class PlayerApp {
   }
 
   replayScene(): boolean {
-    if (this.destroyed || this.inspectionMode) return false
+    if (this.destroyed) return false
     this.scenePicker?.close()
     return this.playerScene.replayScene()
   }
 
   restartCourse(): boolean {
-    if (this.destroyed || this.inspectionMode) return false
+    if (this.destroyed) return false
     this.scenePicker?.close()
     return this.playerScene.restartCourse()
   }
@@ -586,7 +574,7 @@ export class PlayerApp {
     transition?: RuntimePresentationTransition,
   ): boolean {
     if (stateId === null) {
-      return this.isAuthoringActive() && this.playerScene.showAuthoringBaseState()
+      return this.authoringMode && this.playerScene.showAuthoringBaseState()
     }
     return this.playerScene.setPresentationState(stateId, transition)
   }
@@ -595,72 +583,11 @@ export class PlayerApp {
     return this.hostMode
   }
 
-  isInspectionMode(): boolean {
-    return this.inspectionMode
-  }
-
-  /** Switches a live editor preview into an inert, authorable last-frame view. */
-  setInspectionMode(enabled: boolean): boolean {
-    if (
-      this.destroyed ||
-      this.captureMode ||
-      this.authoringMode ||
-      !this.inputShield
-    ) {
-      return false
-    }
-    if (this.inspectionMode === enabled) return true
-    this.inspectionMode = enabled
-    this.stage.classList.toggle('lesson-stage--inspection', enabled)
-    this.inputShield.hidden = !enabled
-    this.inputShield.style.pointerEvents = enabled ? 'auto' : 'none'
-    if (enabled) {
-      this.runtimeKernel.setCourseStateFrozen(true)
-      this.inspectionPausedAnimations = this.stage
-        .getAnimations({ subtree: true })
-        .filter((animation) => animation.playState === 'running')
-      this.inspectionPausedAnimations.forEach((animation) => animation.pause())
-      this.audio.suspend()
-      this.playerScene.setInspectionMode(true)
-      this.runtimeKernel.invalidateAuthoringTargets()
-    } else {
-      this.runtimeKernel.setCourseStateFrozen(false)
-      this.playerScene.setInspectionMode(false)
-      this.audio.resumeSuspended()
-      const animations = this.inspectionPausedAnimations
-      this.inspectionPausedAnimations = []
-      animations.forEach((animation) => {
-        if (animation.playState === 'paused') animation.play()
-      })
-    }
-    return true
-  }
-
-  private isAuthoringActive(): boolean {
-    return this.authoringMode || this.inspectionMode
-  }
-
-  installAuthoringAsset(meta: AssetMeta, dataUrl: string): boolean {
-    if (this.destroyed || !this.isAuthoringActive() || meta.kind !== 'image') {
-      return false
-    }
-    const previousUrl = this.authoringAssetUrls.get(meta.id)
-    if (
-      previousUrl &&
-      previousUrl !== dataUrl &&
-      typeof URL.revokeObjectURL === 'function'
-    ) URL.revokeObjectURL(previousUrl)
-    this.authoringAssetUrls.set(meta.id, dataUrl)
-    this.payload.project.assets[meta.id] = structuredClone(meta)
-    this.payload.assets[meta.id] = { mimeType: meta.mimeType, dataUrl }
-    return true
-  }
-
   getAuthoringReadyMessage(
     sessionId: string,
   ): PlayerAuthoringReadyMessage | null {
     const sceneId = this.getCurrentSceneId()
-    if (!this.isAuthoringActive() || this.destroyed || !sceneId) return null
+    if (!this.authoringMode || this.destroyed || !sceneId) return null
     return {
       type: PLAYER_AUTHORING_MESSAGE_TYPES.ready,
       protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
@@ -679,7 +606,7 @@ export class PlayerApp {
   ): Promise<PlayerAuthoringAckMessage | PlayerAuthoringErrorMessage> {
     return new Promise((resolve) => {
       const apply = async (): Promise<void> => {
-        if (!this.isAuthoringActive()) {
+        if (!this.authoringMode) {
           resolve(this.authoringError(
             command,
             'unsupported-host-mode',
@@ -761,11 +688,6 @@ export class PlayerApp {
     }
 
     this.destroyed = true
-    this.inspectionPausedAnimations = []
-    if (typeof URL.revokeObjectURL === 'function') {
-      for (const url of this.authoringAssetUrls.values()) URL.revokeObjectURL(url)
-    }
-    this.authoringAssetUrls.clear()
     this.resizeObserver?.disconnect()
     if (!this.captureMode) {
       window.removeEventListener('resize', this.scheduleRuntimeLayerAlignment)

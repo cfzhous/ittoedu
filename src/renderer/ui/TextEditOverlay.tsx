@@ -1,7 +1,11 @@
 import { Bold, Eraser, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { TextNode, TextRun, TextRunStyle } from '../../shared/projectTypes'
-import { toggleTextRunEmphasis } from '../../shared/textRuns'
+import {
+  applyTextRunStyle,
+  toggleTextRunBoolean,
+  toggleTextRunEmphasis,
+} from '../../shared/textRuns'
 
 interface TextEditOverlayProps {
   node: TextNode
@@ -50,9 +54,10 @@ export function buildInitialRichTextHtml(node: TextNode): string {
       ? node.style.highlightColor
       : style.highlightColor
     const effectiveEmphasis = style.emphasis ?? node.style.emphasis
+    const effectiveBold = style.bold ?? node.style.bold
     const css = [
       style.color !== undefined ? `color:${style.color}` : '',
-      style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
+      `font-weight:${effectiveBold ? '700' : '400'}`,
       style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
       decorationOverride ? 'display:inline-block' : '',
       decorationOverride ? `text-decoration-line:${decorations || 'none'}` : '',
@@ -275,18 +280,23 @@ export function TextEditOverlay({
   const focusTimerRef = useRef<number | null>(null)
   const finishTimerRef = useRef<number | null>(null)
   const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
+  const lastIssuedRunsRef = useRef<TextRun[]>(initialNodeRef.current.runs)
   nodeRef.current = node
 
   const read = () => editorRef.current
     ? extractEditor(editorRef.current, nodeRef.current)
     : { text: nodeRef.current.text, runs: nodeRef.current.runs }
+  const publish = (text: string, runs: TextRun[]) => {
+    lastIssuedRunsRef.current = runs
+    onPreview(text, runs)
+  }
   const finish = (cancel: boolean) => {
     if (finishedRef.current) return
     finishedRef.current = true
     if (cancel) onCancel()
     else {
       const value = read()
-      onCommit(value.text, value.runs)
+      onCommit(value.text, lastIssuedRunsRef.current)
     }
   }
   const scheduleBlurFinish = () => {
@@ -412,15 +422,70 @@ export function TextEditOverlay({
     toolbarSelectionRef.current = null
     return offsets
   }
+  const rewriteSelection = (
+    editor: HTMLElement,
+    offsets: { start: number; end: number },
+    text: string,
+    runs: TextRun[],
+  ) => {
+    editor.innerHTML = buildInitialRichTextHtml({
+      ...nodeRef.current,
+      text,
+      runs,
+    })
+    restoreLogicalSelection(editor, offsets.start, offsets.end)
+    publish(text, runs)
+  }
   const command = (name: string, value?: string) => {
     const editor = editorRef.current
     if (!editor) return
     const offsets = takeToolbarSelection(editor)
     editor.focus({ preventScroll: true })
     if (offsets) restoreLogicalSelection(editor, offsets.start, offsets.end)
+    const booleanKey = name === 'bold'
+      ? 'bold'
+      : name === 'italic'
+        ? 'italic'
+        : name === 'underline'
+          ? 'underline'
+          : name === 'strikeThrough'
+            ? 'strike'
+            : null
+    if (booleanKey) {
+      if (!offsets || offsets.end <= offsets.start) return
+      const current = extractEditor(editor, nodeRef.current)
+      const runs = toggleTextRunBoolean(
+        current.text,
+        current.runs,
+        offsets.start,
+        offsets.end,
+        booleanKey,
+        nodeRef.current.style[booleanKey],
+      )
+      rewriteSelection(editor, offsets, current.text, runs)
+      return
+    }
+    if (name === 'hiliteColor' || name === 'foreColor') {
+      if (!offsets || offsets.end <= offsets.start || value === undefined) return
+      const current = extractEditor(editor, nodeRef.current)
+      const patch = name === 'foreColor'
+        ? { color: value }
+        : {
+            highlightColor: value === 'transparent' || value === '' ? null : value,
+          }
+      const runs = applyTextRunStyle(
+        current.text,
+        current.runs,
+        offsets.start,
+        offsets.end,
+        patch,
+      )
+      rewriteSelection(editor, offsets, current.text, runs)
+      return
+    }
     document.execCommand(name, false, value)
     const result = read()
-    onPreview(result.text, result.runs)
+    publish(result.text, result.runs)
   }
   const toggleSelectionEmphasis = () => {
     const editor = editorRef.current
@@ -435,13 +500,7 @@ export function TextEditOverlay({
       offsets.end,
       nodeRef.current.style.emphasis,
     )
-    editor.innerHTML = buildInitialRichTextHtml({
-      ...nodeRef.current,
-      text: value.text,
-      runs,
-    })
-    restoreLogicalSelection(editor, offsets.start, offsets.end)
-    onPreview(value.text, runs)
+    rewriteSelection(editor, offsets, value.text, runs)
   }
 
   return (
@@ -489,7 +548,7 @@ export function TextEditOverlay({
           padding: node.style.padding * (metrics.width / node.width),
           fontFamily: node.style.fontFamily,
           fontSize: metrics.fontSize,
-          fontWeight: node.style.bold ? 700 : 400,
+          fontWeight: 400,
           fontStyle: node.style.italic ? 'italic' : 'normal',
           textDecoration: `${node.style.underline ? 'underline ' : ''}${node.style.strike ? 'line-through' : ''}`.trim(),
           textEmphasisStyle: node.style.emphasis ? 'filled circle' : 'none',
@@ -511,7 +570,7 @@ export function TextEditOverlay({
         }}
         onInput={() => {
           const value = read()
-          onPreview(value.text, value.runs)
+          publish(value.text, value.runs)
         }}
         onCompositionStart={() => {
           composingRef.current = true
@@ -520,7 +579,7 @@ export function TextEditOverlay({
         onCompositionEnd={() => {
           composingRef.current = false
           const value = read()
-          onPreview(value.text, value.runs)
+          publish(value.text, value.runs)
           if (pendingBlurRef.current) {
             pendingBlurRef.current = false
             scheduleBlurFinish()

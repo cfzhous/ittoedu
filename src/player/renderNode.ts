@@ -172,8 +172,6 @@ export interface RenderedNodeHandle {
   setMotionVisible?(visible: boolean): void
   suspend?(): void
   resume?(): void
-  /** Switches a live component between student preview and frame inspection. */
-  setInspectionMode?(enabled: boolean): void
   prepareCapture?(snapshotSurfaces?: CaptureSurfaceSnapshotter): Promise<void>
   update(node: SceneNode, transition?: RuntimePresentationTransition): void
   destroy(): void
@@ -532,7 +530,6 @@ function renderExternalComponent(
   }
 
   try {
-    let inspectionMode = context.authoring === true
     const props = mergeComponentProps(componentPackage.manifest, node.props)
     const assetUrl = (assetKey: string): string => {
       const asset = componentPackage.assets[assetKey]
@@ -569,7 +566,7 @@ function renderExternalComponent(
     if (renderMode === 'dom' || renderMode === 'hybrid') {
       domMount = createPhaserDomComponentMount(scene, root, {
         className: `lesson-component-mount--${context.scope}`,
-        interactive: context.mode !== 'capture' && !inspectionMode,
+        interactive: context.mode !== 'capture' && context.authoring !== true,
         instanceId: node.id,
         width: node.width,
         height: node.height,
@@ -577,7 +574,7 @@ function renderExternalComponent(
       const forwardActivation = (): void => {
         if (
           context.mode !== 'capture' &&
-          !inspectionMode &&
+          context.authoring !== true &&
           root.active &&
           root.visible
         ) {
@@ -591,7 +588,7 @@ function renderExternalComponent(
     }
 
     if (
-      context.mode !== 'capture' &&
+      context.authoring === true &&
       context.onComponentAuthoringTargetsChanged
     ) {
       componentAuthoringTargets = new ComponentAuthoringTargetRegistry({
@@ -628,7 +625,7 @@ function renderExternalComponent(
     }
 
     const componentMode: ComponentCreateContextV4['mode'] =
-      inspectionMode
+      context.authoring === true
         ? 'edit'
         : context.mode === 'capture'
           ? 'capture'
@@ -761,23 +758,6 @@ function renderExternalComponent(
       },
       resume(): void {
         lifecycle.resume?.()
-      },
-      setInspectionMode(enabled): void {
-        if (inspectionMode === enabled) return
-        inspectionMode = enabled
-        domMount?.setInteractive(context.mode !== 'capture' && !enabled)
-        try {
-          lifecycle.setMode?.(
-            enabled
-              ? 'edit'
-              : context.mode === 'capture'
-                ? 'capture'
-                : 'preview',
-          )
-          componentAuthoringTargets?.invalidate()
-        } catch (error) {
-          showHostFailure('setMode', error)
-        }
       },
       prepareCapture: waitForCaptureTasks,
       update(nextNode, transition): void {

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "caseId": "{{CASE_ID}}",
+  "coursewareContractSha256": "{{COURSEWARE_CONTRACT_SHA256}}",
+  "presentationScriptSha256": "{{PRESENTATION_SHA256}}",
+  "developmentPlanSha256": "{{DEVELOPMENT_PLAN_SHA256}}",
+  "assessments": [],
+  "responseCapacity": {
+    "durationSeconds": 0,
+    "nonResponseSeconds": 0,
+    "items": []
+  },
+  "gateRequirements": {
+    "teacherControl": [],
+    "teacherEscape": [],
+    "requiredActions": [],
+    "assessmentTolerance": [],
+    "authoringOutcome": [],
+    "responseCapacity": []
+  },
+  "tests": []
+}

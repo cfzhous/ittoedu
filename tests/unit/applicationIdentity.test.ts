@@ -2,11 +2,13 @@
 
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { configureApplicationStorage } from '../../src/main/applicationIdentity'
-import { APP_USER_DATA_DIRECTORY_NAME } from '../../src/shared/constants'
+import {
+  configureApplicationStorage,
+  REBUILD_USER_DATA_DIRECTORY_NAME,
+} from '../../src/main/applicationIdentity'
 
 describe('application identity storage', () => {
-  it('uses the ittoedu directory below the platform app-data root', () => {
+  it('uses an isolated rebuild directory below the platform app-data root', () => {
     const setPath = vi.fn()
     const getPath = vi.fn((name: 'appData' | 'userData') =>
       name === 'appData'
@@ -25,7 +27,7 @@ describe('application identity storage', () => {
       'teacher',
       'AppData',
       'Roaming',
-      APP_USER_DATA_DIRECTORY_NAME,
+      REBUILD_USER_DATA_DIRECTORY_NAME,
     )
     expect(result).toBe(expected)
     expect(setPath).toHaveBeenCalledOnce()

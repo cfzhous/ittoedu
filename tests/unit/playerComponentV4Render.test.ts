@@ -335,11 +335,11 @@ describe('Player Component API 4 renderer capabilities', () => {
   })
 
   it.each([
-    ['preview', 'preview', true],
-    ['capture', 'capture', false],
+    ['preview', 'preview'],
+    ['capture', 'capture'],
   ] as const)(
-    '%s Player 按可检查能力决定是否创建组件 editor',
-    async (mode, expectedMode, exposesEditor) => {
+    '%s Player 即使收到回调也不创建组件 editor',
+    async (mode, expectedMode) => {
       let received: ComponentCreateContextV4 | undefined
       const onTargetsChanged = vi.fn()
       const { handle } = renderComponent('phaser', (context) => {
@@ -352,13 +352,8 @@ describe('Player Component API 4 renderer capabilities', () => {
 
       await flushAuthoringTargets()
       expect(received?.mode).toBe(expectedMode)
-      if (exposesEditor) {
-        expect(received?.editor).toBeDefined()
-        expect(onTargetsChanged).toHaveBeenCalled()
-      } else {
-        expect(received?.editor).toBeUndefined()
-        expect(onTargetsChanged).not.toHaveBeenCalled()
-      }
+      expect(received?.editor).toBeUndefined()
+      expect(onTargetsChanged).not.toHaveBeenCalled()
       handle.destroy()
     },
   )

@@ -33,6 +33,14 @@ export interface CourseRuntimeKernelOptions {
   onActionRecorded?: RuntimeActionRecordedHandler
 }
 
+class FrozenCourseStateStore extends CourseStateStore {
+  override set(_key: string, _value: unknown): void {}
+
+  override delete(_key: string): void {}
+
+  override clear(): void {}
+}
+
 export class CourseRuntimeKernel {
   readonly events = new CourseEventBus()
   readonly courseState: CourseStateStore
@@ -59,9 +67,11 @@ export class CourseRuntimeKernel {
     this.mode = options.mode ?? 'preview'
     this.width = payload.project.canvas.width
     this.height = payload.project.canvas.height
-    this.courseState = new CourseStateStore((change) => {
+    this.courseState = options.freezeCourseState
+      ? new FrozenCourseStateStore()
+      : new CourseStateStore((change) => {
           this.events.emit('state:change', { scope: 'course', ...change })
-        }, options.freezeCourseState === true)
+        })
   }
 
   mountGlobal(environment: RuntimeMountEnvironment): void {
@@ -186,18 +196,6 @@ export class CourseRuntimeKernel {
     this.suspended = false
     this.globalHost?.resume()
     this.sceneHost?.resume()
-  }
-
-  /** Keeps the current state readable while rejecting authoring-time writes. */
-  setCourseStateFrozen(frozen: boolean): void {
-    if (this.destroyed) return
-    this.courseState.setFrozen(frozen)
-  }
-
-  invalidateAuthoringTargets(): void {
-    if (this.destroyed) return
-    this.globalHost?.invalidateAuthoringTargets()
-    this.sceneHost?.invalidateAuthoringTargets()
   }
 
   destroy(): void {

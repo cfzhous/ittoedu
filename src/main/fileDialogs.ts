@@ -23,7 +23,6 @@ import {
 } from './projectPersistence'
 
 const MAX_PROJECT_BYTES = 256 * 1024 * 1024
-const MAX_AUTHORING_PATCH_BYTES = 1024 * 1024
 const MAX_IMAGE_BYTES = 100 * 1024 * 1024
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024
@@ -361,40 +360,6 @@ export async function openProjectFile(
   }
 
   await rememberOpenedProject(filePath)
-  return { path: filePath, name: path.basename(filePath), bytes }
-}
-
-export async function selectCourseAuthoringPatchFile(
-  window: BrowserWindow,
-): Promise<OpenBinaryFileResult | null> {
-  const result = await dialog.showOpenDialog(window, {
-    title: '应用 AI 精确 Patch',
-    filters: [{ name: 'Course Authoring Patch', extensions: ['json'] }],
-    properties: ['openFile', 'dontAddToRecent'],
-  })
-  if (result.canceled || result.filePaths.length === 0) return null
-
-  const filePath = result.filePaths[0]
-  const bytes = await readFileWithLimit(
-    filePath,
-    MAX_AUTHORING_PATCH_BYTES,
-    'AI Patch 读取失败',
-    'AUTHORING_PATCH_READ_FAILED',
-  )
-  try {
-    const parsed = JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new TypeError('Patch 顶层必须是对象')
-    }
-  } catch (error) {
-    throw new DesktopOperationError(
-      'AUTHORING_PATCH_INVALID',
-      'AI Patch 读取失败',
-      '所选文件不是有效的 JSON Patch。',
-      '请让 AI 重新输出单个 Course Authoring Patch JSON 文件。',
-      { cause: error },
-    )
-  }
   return { path: filePath, name: path.basename(filePath), bytes }
 }
 
@@ -767,10 +732,32 @@ export async function writeWebPackageFile(
   }
 }
 
+export async function peekProjectArchiveFile(
+  filePath: string,
+): Promise<OpenBinaryFileResult | null> {
+  const resolved = path.resolve(filePath)
+  if (
+    !path.isAbsolute(resolved) ||
+    path.extname(resolved).toLocaleLowerCase('en-US') !== '.h5lesson'
+  ) return null
+  try {
+    const bytes = await readFileWithLimit(
+      resolved,
+      MAX_PROJECT_BYTES,
+      '工程预检失败',
+      'PROJECT_PEEK_FAILED',
+    )
+    if (!hasZipSignature(bytes)) return null
+    return { path: resolved, name: path.basename(resolved), bytes }
+  } catch {
+    return null
+  }
+}
+
 export async function writeBinaryExportFile(
   window: BrowserWindow,
   suggestedName: string,
-  extension: 'pptx' | 'docx' | 'pdf' | 'json',
+  extension: 'pptx' | 'pdf' | 'json' | 'docx',
   bytes: Uint8Array,
 ): Promise<{ path: string } | null> {
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_EXPORT_BYTES) {
@@ -783,9 +770,9 @@ export async function writeBinaryExportFile(
   }
   const labels = {
     pptx: 'PowerPoint 演示文稿',
-    docx: 'Word 文档',
     pdf: 'PDF 文档',
     json: 'JSON 报告',
+    docx: 'Word 讲义',
   } as const
   const result = await dialog.showSaveDialog(window, {
     title: `导出${labels[extension]}`,

@@ -3,10 +3,12 @@ import type {
   InteractionRule,
 } from './interactionTypes'
 import type {
+  EmbeddedComponentPackageMeta,
   GlobalLayerVisibility,
   ProjectDocument,
   SceneNode,
   SceneNodeOverride,
+  TextRun,
 } from './projectTypes'
 import { compareStableStrings } from './stableOrder'
 import { makeAuthoringAddress } from './authoringAddress'
@@ -17,6 +19,7 @@ import {
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
+  type FlowTableCell,
   type LayerItem,
   type LayerItemBase,
   type LayerItemOverride,
@@ -423,6 +426,47 @@ export function collectCourseProjectReferences(
   return references
 }
 
+/**
+ * Same-version Flow rich-text fallback.
+ * V8 `TextRun` is a style range over `text`, not a glyph carrier, so missing
+ * `text` cannot be recovered from runs and becomes `''`. Missing `runs` become
+ * one empty-style span covering the whole plain string (or `[]` if empty).
+ */
+export function normalizeFlowRichText(input: {
+  text?: string
+  runs?: ReadonlyArray<TextRun>
+}): { text: string; runs: TextRun[] } {
+  const text = input.text ?? ''
+  if (!input.runs) {
+    const characterCount = Array.from(text).length
+    return {
+      text,
+      runs: characterCount === 0 ? [] : [{ start: 0, end: characterCount, style: {} }],
+    }
+  }
+  return { text, runs: structuredClone(input.runs) as TextRun[] }
+}
+
+export function decodeFlowTableCell(cell: FlowTableCell): { text: string; runs: TextRun[] } {
+  return typeof cell === 'string'
+    ? normalizeFlowRichText({ text: cell })
+    : normalizeFlowRichText(cell)
+}
+
+export function flowPlainTextFallback(content: {
+  text?: string
+  runs?: ReadonlyArray<TextRun>
+}): string {
+  return normalizeFlowRichText(content).text
+}
+
+export function flowRunsFallback(content: {
+  text?: string
+  runs?: ReadonlyArray<TextRun>
+}): TextRun[] {
+  return normalizeFlowRichText(content).runs
+}
+
 const baseNodeKeys = new Set([
   'id',
   'name',
@@ -469,7 +513,15 @@ function nodeData(node: Exclude<SceneNode, { type: 'external-component' }>): Nat
   } as NativeElementContent
 }
 
-function migrateNode(node: SceneNode, order: number): LayerItem {
+/**
+ * Converts one editor-native node into the canonical Course Project layer
+ * representation. This is a neutral shape conversion: callers do not need to
+ * construct a legacy project merely to create a V9 layer item.
+ */
+export function sceneNodeToCourseLayerItem(
+  node: SceneNode,
+  order = 0,
+): LayerItem {
   const base = nodeBase(node, order)
   if (node.type === 'external-component') {
     return {
@@ -485,6 +537,8 @@ function migrateNode(node: SceneNode, order: number): LayerItem {
     content: nodeData(node),
   }
 }
+
+const migrateNode = sceneNodeToCourseLayerItem
 
 function migrateRuntime(
   runtime: NonNullable<ProjectDocument['globalRuntime']>,
@@ -920,14 +974,71 @@ export class ProjectV8MigrationCompatibilityError extends Error {
 
   constructor(scope: 'scene' | 'global', runtimeId: string) {
     super(
-      `Project V8 ${scope === 'global' ? '全局' : '场景'} Runtime“${runtimeId}”同时使用 underlay 与 overlay；` +
-      'V9 统一图层无法在不改变旧语义的情况下把一个实例拆到原生节点上下。' +
-      '请使用旧版 V8 编辑器保持原样运行，或先将 Runtime 收敛为单平面后再显式迁移。',
+      `旧版工程中的${scope === 'global' ? '全局' : '场景'}动态内容同时位于其他内容的下方和上方；` +
+      '当前编辑器无法在不改变显示层级的情况下自动迁移。' +
+      '请先在原编辑器中将该动态内容统一到一个层级，再重新导入。',
     )
     this.name = 'ProjectV8MigrationCompatibilityError'
     this.scope = scope
     this.runtimeId = runtimeId
   }
+}
+
+export class LegacyComponentPackageMigrationConflictError extends Error {
+  readonly packageId: string
+  readonly versions: readonly string[]
+
+  constructor(
+    packageId: string,
+    versions: readonly string[],
+    reason: 'multiple-versions' | 'conflicting-metadata' = 'multiple-versions',
+  ) {
+    const sortedVersions = [...versions].sort(compareStableStrings)
+    const detail = reason === 'multiple-versions'
+      ? `同时包含多个版本（${sortedVersions.join('、')}）`
+      : `包含多份内容不一致的 ${sortedVersions[0] ?? '未知'} 版本记录`
+    super(
+      `旧工程中的同一个组件${detail}，无法确定应保留哪一份。` +
+      '请先在原编辑器中只保留一份组件，再重新导入。',
+    )
+    this.name = 'LegacyComponentPackageMigrationConflictError'
+    this.packageId = packageId
+    this.versions = sortedVersions
+  }
+}
+
+function migrateComponentPackages(
+  packages: Readonly<Record<string, EmbeddedComponentPackageMeta>>,
+): CourseProjectDocument['componentPackages'] {
+  const grouped = new Map<string, EmbeddedComponentPackageMeta[]>()
+  for (const metadata of Object.values(packages)) {
+    const entries = grouped.get(metadata.packageId) ?? []
+    entries.push(metadata)
+    grouped.set(metadata.packageId, entries)
+  }
+
+  return Object.fromEntries(
+    [...grouped.entries()]
+      .sort(([left], [right]) => compareStableStrings(left, right))
+      .map(([packageId, entries]) => {
+        const versions = [...new Set(entries.map((entry) => entry.version))]
+          .sort(compareStableStrings)
+        if (versions.length > 1) {
+          throw new LegacyComponentPackageMigrationConflictError(packageId, versions)
+        }
+        const [first, ...duplicates] = entries
+        if (!first) throw new Error('Unexpected empty component package group')
+        const canonicalMetadata = JSON.stringify(first)
+        if (duplicates.some((entry) => JSON.stringify(entry) !== canonicalMetadata)) {
+          throw new LegacyComponentPackageMigrationConflictError(
+            packageId,
+            versions,
+            'conflicting-metadata',
+          )
+        }
+        return [packageId, structuredClone(first)]
+      }),
+  )
 }
 
 function legacyRuntimePlane(
@@ -1076,7 +1187,7 @@ export function migrateProjectV8ToCourseProjectV9(
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     assets: structuredClone(project.assets),
-    componentPackages: structuredClone(project.componentPackages),
+    componentPackages: migrateComponentPackages(project.componentPackages),
     designTokens: structuredClone(project.designTokens),
     media: structuredClone(project.media),
     playback: structuredClone(project.playback),

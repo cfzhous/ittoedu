@@ -10,6 +10,8 @@ import type {
   NativeElementContent,
   SpatialCameraFrame,
   SpatialCameraPose,
+  SpatialPathDocument,
+  SpatialRelationDocument,
   SpatialSemanticZoomRule,
 } from './courseProjectTypes'
 import type { InteractionRule } from './interactionTypes'
@@ -154,6 +156,8 @@ export interface PublishedSpatialSurface extends PublishedSurfaceBase {
       | { mode: 'infinite' }
       | { mode: 'finite'; x: number; y: number; width: number; height: number }
     layerItems: PublishedLayerItem[]
+    paths?: SpatialPathDocument[]
+    relations?: SpatialRelationDocument[]
   }
   camera: { home: SpatialCameraPose; frames: SpatialCameraFrame[] }
   semanticZoom: SpatialSemanticZoomRule[]

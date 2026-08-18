@@ -1,12 +1,14 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
+import { unzipSync } from 'fflate'
 import { app } from 'electron'
 import type {
   RecentProjectEntry,
   RecoveryProjectInput,
   RecoveryProjectResult,
 } from '../shared/ipcTypes'
+import { COURSE_PROJECT_SCHEMA_VERSION } from '../shared/courseProjectTypes'
 import { DesktopOperationError } from './errors'
 
 export const MAX_RECOVERY_PROJECT_BYTES = 256 * 1024 * 1024
@@ -15,6 +17,7 @@ const MAX_RECENT_PROJECTS = 12
 const MAX_RECENT_FILE_BYTES = 128 * 1024
 const RECENT_FILE_VERSION = 1
 const RECOVERY_METADATA_VERSION = 1
+const PROJECT_DOCUMENT_PATH = 'project.json'
 
 interface RecentProjectsFile {
   version: typeof RECENT_FILE_VERSION
@@ -74,6 +77,80 @@ function hasZipSignature(bytes: Uint8Array): boolean {
       (bytes[2] === 0x05 && bytes[3] === 0x06) ||
       (bytes[2] === 0x07 && bytes[3] === 0x08))
   )
+}
+
+function declaredSchemaVersion(value: unknown): number | null {
+  if (typeof value !== 'object' || value === null) return null
+  const version = Reflect.get(value, 'schemaVersion')
+  return typeof version === 'number' && Number.isInteger(version) ? version : null
+}
+
+function looksLikeCourseProjectV9(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return Array.isArray(record.locations) && Array.isArray(record.surfaces)
+}
+
+function looksLikeProjectV8(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return Array.isArray(record.scenes) && !looksLikeCourseProjectV9(value)
+}
+
+type RecoveryArchiveKind = 'v9' | 'legacy' | 'unsupported' | 'corrupted'
+
+/** Shallow zip probe for recovery isolation; main must not import renderer archive code. */
+function classifyRecoveryArchive(bytes: Uint8Array): RecoveryArchiveKind {
+  try {
+    const files = unzipSync(bytes)
+    const projectBytes = files[PROJECT_DOCUMENT_PATH]
+    if (!projectBytes) return 'corrupted'
+    const value = JSON.parse(new TextDecoder().decode(projectBytes)) as unknown
+    const schemaVersion = declaredSchemaVersion(value)
+    if (schemaVersion === COURSE_PROJECT_SCHEMA_VERSION) return 'v9'
+    if (schemaVersion === 8 || looksLikeProjectV8(value)) return 'legacy'
+    if (schemaVersion !== null) return 'unsupported'
+    if (looksLikeCourseProjectV9(value)) return 'v9'
+    if (looksLikeProjectV8(value)) return 'legacy'
+    return 'corrupted'
+  } catch {
+    return 'corrupted'
+  }
+}
+
+function isRecoverableCourseProjectArchive(bytes: Uint8Array): boolean {
+  return classifyRecoveryArchive(bytes) === 'v9'
+}
+
+function recoveryArchiveRejectionError(kind: Exclude<RecoveryArchiveKind, 'v9'>): DesktopOperationError {
+  if (kind === 'legacy') {
+    return new DesktopOperationError(
+      'RECOVERY_LEGACY_FORMAT',
+      '自动恢复保存失败',
+      '恢复数据来自旧版工程格式，当前编辑器不会将其当作可恢复课程。',
+      '请通过“导入旧版工程”显式迁移后手动保存。',
+    )
+  }
+  if (kind === 'unsupported') {
+    return new DesktopOperationError(
+      'RECOVERY_UNSUPPORTED_VERSION',
+      '自动恢复保存失败',
+      '恢复数据的格式版本不受当前编辑器支持。',
+      '请使用能打开该文件的编辑器版本，或从备份恢复。',
+    )
+  }
+  return new DesktopOperationError(
+    'RECOVERY_ARCHIVE_INVALID',
+    '自动恢复保存失败',
+    '恢复数据不是有效的 Course Project V9 工程包。',
+    '请立即手动保存工程；若问题持续出现，请重新启动编辑器。',
+  )
+}
+
+function assertRecoverableCourseProjectArchive(bytes: Uint8Array): void {
+  const kind = classifyRecoveryArchive(bytes)
+  if (kind === 'v9') return
+  throw recoveryArchiveRejectionError(kind)
 }
 
 function isFiniteTimestamp(value: unknown): value is number {
@@ -286,6 +363,7 @@ export function writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
         '请立即手动保存工程；若问题持续出现，请重新启动编辑器。',
       )
     }
+    assertRecoverableCourseProjectArchive(input.bytes)
 
     const savedAt = Date.now()
     const digest = crypto.createHash('sha256').update(input.bytes).digest('hex')
@@ -341,6 +419,10 @@ export function readRecoveryProject(): Promise<RecoveryProjectResult | null> {
       return null
     }
     if (!hasZipSignature(bytes)) {
+      await clearRecoveryProjectUnsafe()
+      return null
+    }
+    if (!isRecoverableCourseProjectArchive(bytes)) {
       await clearRecoveryProjectUnsafe()
       return null
     }

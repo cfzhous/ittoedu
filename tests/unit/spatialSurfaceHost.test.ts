@@ -1,0 +1,257 @@
+import { describe, expect, it } from 'vitest'
+import {
+  PUBLISHED_COURSE_FORMAT,
+  PUBLISHED_COURSE_VERSION,
+  type PublishedCourseV2Payload,
+  type PublishedNativeLayerItem,
+} from '@/shared/publishedCourseTypes'
+import {
+  SpatialSurfaceHost,
+  type SpatialSurfaceHostOptions,
+} from '@/player/surfaces/spatial/SpatialSurfaceHost'
+
+const VIEWPORT = { width: 400, height: 240 }
+
+function textStyle() {
+  return {
+    fontFamily: 'sans-serif',
+    fontSize: 18,
+    color: '#172033',
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    emphasis: false,
+    highlightColor: null,
+    align: 'left' as const,
+    verticalAlign: 'top' as const,
+    writingMode: 'horizontal' as const,
+    lineSpacing: 1.2,
+    letterSpacing: 0,
+    padding: 0,
+    overflow: 'fixed' as const,
+    backgroundColor: '#ffffff',
+    backgroundOpacity: 0,
+    cornerRadius: 0,
+  }
+}
+
+function publishedText(
+  layerItemId: string,
+  text: string,
+  frame: { x: number; y: number; width: number; height: number },
+  order: number,
+): PublishedNativeLayerItem {
+  return {
+    layerItemId,
+    frame: { mode: 'absolute', ...frame },
+    order,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'text',
+      data: { text, runs: [], style: textStyle() },
+    },
+  }
+}
+
+function publishedCourse(): PublishedCourseV2Payload {
+  const worldA = publishedText('world-a', '世界甲', { x: -80, y: -40, width: 120, height: 36 }, 0)
+  const worldB = publishedText('world-b', '世界乙', { x: 240, y: 80, width: 120, height: 36 }, 1)
+  return {
+    format: PUBLISHED_COURSE_FORMAT,
+    formatVersion: PUBLISHED_COURSE_VERSION,
+    sourceSchemaVersion: 9,
+    courseId: 'course-spatial',
+    title: '空间课',
+    assets: {},
+    components: {},
+    designTokens: {
+      fonts: [{ id: 'body', label: '正文', fontFamily: 'sans-serif' }],
+      colors: [{ id: 'text', label: '正文', color: '#172033' }],
+    },
+    media: {
+      audio: {
+        defaultMuted: false,
+        masterVolume: 1,
+        channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+        sounds: {},
+        narrationDucking: { enabled: false, musicVolume: 0.3, fadeMs: 0 },
+      },
+    },
+    playback: {
+      controls: 'canvas',
+      keyboardNavigation: true,
+      presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+    },
+    courseState: [],
+    navigationGuards: [],
+    locations: [
+      {
+        id: 'loc-home',
+        label: '全景',
+        kind: 'spatial-camera',
+        surfaceId: 'surface-spatial',
+        cameraFrameId: 'frame-home',
+      },
+      {
+        id: 'loc-detail',
+        label: '细节',
+        kind: 'spatial-camera',
+        surfaceId: 'surface-spatial',
+        cameraFrameId: 'frame-detail',
+      },
+    ],
+    startLocationId: 'loc-home',
+    globalLayerItems: [
+      {
+        item: publishedText('global-hud', '全课 HUD', { x: 8, y: 8, width: 120, height: 28 }, 8),
+        visibility: { mode: 'include', locationIds: ['loc-home'] },
+      },
+    ],
+    globalInteractions: [],
+    surfaces: [{
+      id: 'surface-spatial',
+      title: '知识地图',
+      type: 'spatial-2d',
+      surfaceLayerItems: [
+        {
+          item: publishedText('surface-note', '页面注记', { x: 16, y: 200, width: 80, height: 24 }, 2),
+          visibility: { mode: 'exclude', locationIds: ['loc-detail'] },
+        },
+      ],
+      world: {
+        bounds: { mode: 'infinite' },
+        layerItems: [worldA, worldB],
+        paths: [{
+          id: 'path-1',
+          name: '探索路线',
+          layerItemIds: ['world-a', 'world-b'],
+          style: { color: '#112233', width: 3, dash: 'dashed' },
+        }],
+        relations: [{
+          id: 'relation-1',
+          sourceLayerItemId: 'world-a',
+          targetLayerItemId: 'world-b',
+          label: '从甲到乙',
+          kind: 'arrow',
+        }],
+      },
+      camera: {
+        home: { x: 0, y: 0, zoom: 1 },
+        frames: [
+          { id: 'frame-home', name: '全景', x: 0, y: 0, zoom: 1 },
+          { id: 'frame-detail', name: '细节', x: 300, y: 90, zoom: 2 },
+        ],
+      },
+      semanticZoom: [],
+    }],
+  }
+}
+
+describe('SpatialSurfaceHost published V2 runtime', () => {
+  it('reads world/camera/path/relation from Published Course V2 and does not fake a 1280×720 page', async () => {
+    const course = publishedCourse()
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const root = container.querySelector<HTMLElement>('.spatial-surface')!
+    const world = root.querySelector<SVGGElement>('[data-spatial-world]')!
+    expect(root.style.width).toBe('400px')
+    expect(root.style.height).toBe('240px')
+    expect(root.dataset.worldBoundsMode).toBe('infinite')
+    expect(root.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 400 240')
+    expect(root.querySelector('[data-slide-page]')).toBeNull()
+    expect(world.querySelector('[data-layer-item-id="world-a"]')).not.toBeNull()
+    expect(world.querySelector('[data-spatial-path-id="path-1"]')).not.toBeNull()
+    expect(world.querySelector('[data-spatial-relation-id="relation-1"]')).not.toBeNull()
+    expect(host.publishedPaths().map((path) => path.id)).toEqual(['path-1'])
+    expect(host.publishedRelations().map((relation) => relation.id)).toEqual(['relation-1'])
+    expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1, viewportWidth: 400, viewportHeight: 240 })
+
+    await host.destroy()
+  })
+
+  it('starts at the published home camera, walks frames or the selected path, and never writes back', async () => {
+    const course = publishedCourse()
+    const cameraBefore = structuredClone(course.surfaces[0]!.type === 'spatial-2d'
+      ? course.surfaces[0].camera
+      : { home: { x: 0, y: 0, zoom: 1 }, frames: [] })
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT, {
+      sessionCamera: { x: 999, y: 888, zoom: 8 },
+    } as SpatialSurfaceHostOptions)
+    await host.mount(container)
+    await host.activate()
+
+    expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1 })
+    const next = await host.goNext()
+    expect(next.atBoundary).toBe(false)
+    expect(host.camera).toMatchObject({ x: 300, y: 90, zoom: 2 })
+    expect(host.locationId).toBe('loc-detail')
+
+    const previous = await host.goPrevious()
+    expect(previous.atBoundary).toBe(false)
+    expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1 })
+
+    await host.setPlaybackPath('path-1')
+    const alongPath = await host.goNext()
+    expect(alongPath.atBoundary).toBe(false)
+    expect(host.camera?.x).toBe(-80 + 60)
+    expect(host.camera?.y).toBe(-40 + 18)
+    expect(host.camera?.zoom).toBe(1)
+
+    const spatial = course.surfaces[0]
+    if (spatial?.type !== 'spatial-2d') throw new Error('expected spatial')
+    expect(spatial.camera).toEqual(cameraBefore)
+    expect(host.publishedCameraSnapshot()).toEqual(cameraBefore)
+    expect(spatial.world.paths?.map((path) => path.layerItemIds)).toEqual([['world-a', 'world-b']])
+    expect(spatial.world.relations?.[0]?.id).toBe('relation-1')
+
+    await host.destroy()
+  })
+
+  it('applies location visibility.mode + locationIds and resets the runtime camera on leave/re-enter', async () => {
+    const course = publishedCourse()
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const root = container.querySelector<HTMLElement>('.spatial-surface')!
+    expect(root.querySelector('[data-layer-item-id="global-hud"]')).not.toBeNull()
+    expect(root.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+
+    await host.setLocationId('loc-detail')
+    expect(root.querySelector('[data-layer-item-id="global-hud"]')).toBeNull()
+    expect(root.querySelector('[data-layer-item-id="surface-note"]')).toBeNull()
+    expect(host.camera).toMatchObject({ x: 300, y: 90, zoom: 2 })
+
+    await host.setLocationId('loc-home')
+    expect(root.querySelector('[data-layer-item-id="global-hud"]')).not.toBeNull()
+    expect(root.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+
+    await host.setRuntimeCamera({
+      x: 180,
+      y: -70,
+      zoom: 3,
+      viewportWidth: 400,
+      viewportHeight: 240,
+    })
+    expect(host.camera).toMatchObject({ x: 180, y: -70, zoom: 3 })
+
+    await host.suspend()
+    expect(host.camera).toBeNull()
+    await host.resume()
+    expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1 })
+    expect(host.publishedCameraSnapshot().home).toEqual({ x: 0, y: 0, zoom: 1 })
+
+    await host.destroy()
+  })
+})

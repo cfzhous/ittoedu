@@ -9,7 +9,6 @@ interface PrintableDocumentState {
   imageCount: number
   loadedImageCount: number
   pageCount: number
-  printDocumentMode: string | null
 }
 
 async function waitForPrintableDocument(
@@ -37,15 +36,14 @@ async function waitForPrintableDocument(
         imageCount: images.length,
         loadedImageCount: images.filter((image) => image.naturalWidth > 0).length,
         pageCount: document.querySelectorAll('.page').length,
-        printDocumentMode: document.documentElement.dataset.coursewarePrintDocument || null,
       };
     })()
   `, true) as PrintableDocumentState
-  const imagesReady = state.loadedImageCount === state.imageCount
-  const legacySnapshotReady = state.pageCount >= 1 && state.imageCount === state.pageCount
-  const semanticPrintReady = state.printDocumentMode === 'semantic' ||
-    state.printDocumentMode === 'paged'
-  if (!imagesReady || (!legacySnapshotReady && !semanticPrintReady)) {
+  if (
+    state.pageCount < 1 ||
+    state.imageCount !== state.pageCount ||
+    state.loadedImageCount !== state.imageCount
+  ) {
     throw new Error(
       `PDF 打印页面未就绪：${state.loadedImageCount}/${state.imageCount} 张图片，${state.pageCount} 页`,
     )

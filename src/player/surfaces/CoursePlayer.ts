@@ -115,7 +115,9 @@ export class CoursePlayer {
 
     const previousId = this.#activeSurfaceId
     if (previousId && previousId !== surfaceId) {
-      await this.suspendSurface(previousId)
+      // Leaving a Mixed surface must release that host's playback session
+      // (events, scene media, camera gestures) without destroying the host.
+      await this.releaseSurfaceSession(previousId)
     }
     const phase = target.status === 'suspended' ? 'resume' : 'activate'
     const result = await this.#enqueue(target, phase, async () => {
@@ -127,6 +129,34 @@ export class CoursePlayer {
       this.#activeSurfaceId = surfaceId
     })
     return result
+  }
+
+  /**
+   * Ends the active playback session on a surface so Mixed navigation cannot
+   * leak events, scene audio or camera input into the next host. The host
+   * instance stays mounted so returning can resume without losing Runtime state.
+   */
+  async releaseSurfaceSession(surfaceId: string): Promise<SurfaceOperationResult> {
+    const entry = this.#requireUsableEntry(surfaceId)
+    if (entry.status === 'suspended') return { ok: true }
+    if (entry.status === 'idle') return { ok: true }
+    return this.suspendSurface(surfaceId)
+  }
+
+  async setSurfaceLocation(
+    surfaceId: string,
+    locationId: string,
+  ): Promise<SurfaceOperationResult> {
+    const entry = this.#requireUsableEntry(surfaceId)
+    if (typeof entry.host.setLocationId !== 'function') return { ok: true }
+    if (!['mounted', 'active', 'suspended'].includes(entry.status)) {
+      return this.#failureResult(entry, 'execute', new Error(
+        `Surface ${surfaceId} cannot set location from ${entry.status}`,
+      ))
+    }
+    return this.#enqueue(entry, 'execute', async () => {
+      await entry.host.setLocationId?.(locationId)
+    })
   }
 
   async suspendSurface(surfaceId: string): Promise<SurfaceOperationResult> {

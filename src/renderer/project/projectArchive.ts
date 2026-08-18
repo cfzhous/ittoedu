@@ -72,6 +72,12 @@ export interface CreateProjectArchiveOptions {
   signal?: AbortSignal
 }
 
+const COURSE_PROJECT_V9_UNSUPPORTED_TITLE = '这是 V9 工程，当前无法打开'
+const COURSE_PROJECT_V9_UNSUPPORTED_MESSAGE =
+  '该文件是 Course Project V9 工程。当前产品主干仍是成熟 V8，不会按 V8 结构打开、恢复或覆盖。'
+const COURSE_PROJECT_V9_UNSUPPORTED_SUGGESTION =
+  '请等待显式迁移入口后再导入。现在请用对应的 V9 编辑器打开该文件，或继续使用 V8 工程。'
+
 function projectOpenError(message: string, cause?: unknown): UserFacingError {
   return new UserFacingError(
     '工程文件损坏',
@@ -79,6 +85,53 @@ function projectOpenError(message: string, cause?: unknown): UserFacingError {
     '请重新选择有效的 .h5lesson 文件，或从备份恢复工程。',
     { cause },
   )
+}
+
+export function courseProjectV9UnsupportedError(cause?: unknown): UserFacingError {
+  return new UserFacingError(
+    COURSE_PROJECT_V9_UNSUPPORTED_TITLE,
+    COURSE_PROJECT_V9_UNSUPPORTED_MESSAGE,
+    COURSE_PROJECT_V9_UNSUPPORTED_SUGGESTION,
+    { cause: cause ?? new UnsupportedProjectVersionError(9) },
+  )
+}
+
+export function isCourseProjectV9Document(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  if (record.schemaVersion === 9) return true
+  const hasLocations = Array.isArray(record.locations)
+  const hasSurfaces = Array.isArray(record.surfaces)
+  const hasGlobalLayerItems = Array.isArray(record.globalLayerItems)
+  const hasStartLocation = typeof record.startLocationId === 'string'
+  return (
+    (hasLocations && hasSurfaces) ||
+    hasGlobalLayerItems ||
+    (hasStartLocation && (hasLocations || hasSurfaces))
+  )
+}
+
+export function peekProjectDocumentFromArchive(bytes: Uint8Array): unknown | null {
+  if (bytes.byteLength === 0) return null
+  try {
+    const files = unzipSync(bytes, {
+      filter(file) {
+        return file.name === PROJECT_DOCUMENT_PATH
+      },
+    })
+    const raw = files[PROJECT_DOCUMENT_PATH]
+    if (raw === undefined) return null
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw)) as unknown
+  } catch {
+    return null
+  }
+}
+
+export function assertOpenableAsV8ProjectArchive(bytes: Uint8Array): void {
+  const value = peekProjectDocumentFromArchive(bytes)
+  if (value !== null && isCourseProjectV9Document(value)) {
+    throw courseProjectV9UnsupportedError()
+  }
 }
 
 function projectSaveError(message: string, cause?: unknown): UserFacingError {
@@ -96,6 +149,10 @@ function readProjectDocument(bytes: Uint8Array): ProjectDocument {
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown
   } catch (error) {
     throw projectOpenError('project.json 不是有效的 UTF-8 JSON 文件。', error)
+  }
+
+  if (isCourseProjectV9Document(value)) {
+    throw courseProjectV9UnsupportedError()
   }
 
   const rawSchemaVersion = typeof value === 'object' && value !== null

@@ -38,6 +38,28 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * Applies a sparse Native content override without replacing nested records.
+ * Authoring views and schema validation must share this exact merge contract.
+ */
+export function mergeCourseNativeData(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  depth = 0,
+): Record<string, unknown> {
+  const result = structuredClone(base)
+  for (const [key, value] of Object.entries(patch)) {
+    const previous = result[key]
+    // Formula AST nodes are discriminated recursive values. Replacing a row
+    // with a root/token must not retain fields from the former node shape.
+    result[key] = !(depth === 0 && key === 'ast') &&
+      isPlainRecord(value) && isPlainRecord(previous)
+      ? mergeCourseNativeData(previous, value, depth + 1)
+      : structuredClone(value)
+  }
+  return result
+}
+
 /** Finds fields silently stripped by an older permissive schema. */
 function findUnknownInputPath(
   input: unknown,
@@ -332,7 +354,9 @@ export const layerItemSchema: z.ZodType<LayerItem> = z.discriminatedUnion('kind'
   }
 })
 
-function materializeNativeLayerItem(item: Extract<LayerItem, { kind: 'native' }>): SceneNode {
+export function materializeNativeLayerItem(
+  item: Extract<LayerItem, { kind: 'native' }>,
+): SceneNode {
   return {
     ...item.content.data,
     id: item.layerItemId,
@@ -516,15 +540,18 @@ export const slideSceneSchema = z.object({
           })
         } else {
           const baseNode = materializeNativeLayerItem(item)
-          const candidate = { ...baseNode, ...override.nativeData }
+          const candidate = mergeCourseNativeData(
+            baseNode as unknown as Record<string, unknown>,
+            override.nativeData,
+          )
           const parsed = sceneNodeSchema.safeParse(candidate)
           const unknownPath = parsed.success
             ? findUnknownInputPath(candidate, parsed.data)
             : undefined
           if (
             !parsed.success ||
-            unsupportedNativeTypes.has(candidate.type) ||
-            candidate.type !== baseNode.type ||
+            unsupportedNativeTypes.has(parsed.data.type) ||
+            parsed.data.type !== baseNode.type ||
             unknownPath
           ) {
             context.addIssue({
@@ -556,39 +583,102 @@ export const slideSceneSchema = z.object({
 
 const flowBlockBaseFields = { id: stableIdSchema } as const
 
+/** Same fields as V8 `TextRun` / `TextRunStyle`; types stay in projectTypes. */
+const flowTextRunStyleSchema = z.object({
+  color: colorSchema.optional(),
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  strike: z.boolean().optional(),
+  emphasis: z.boolean().optional(),
+  highlightColor: colorSchema.nullable().optional(),
+})
+
+const flowTextRunSchema = z.object({
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+  style: flowTextRunStyleSchema,
+}).strict()
+
+const flowTextRunListSchema = z.array(flowTextRunSchema).max(10_000)
+
+function addFlowRunRangeIssues(
+  text: string,
+  runs: Array<{ start: number; end: number }> | undefined,
+  context: z.RefinementCtx,
+  path: Array<string | number>,
+): void {
+  if (!runs) return
+  const characterCount = Array.from(text).length
+  runs.forEach((run, index) => {
+    if (run.end <= run.start || run.end > characterCount) {
+      context.addIssue({
+        code: 'custom',
+        path: [...path, index],
+        message: '富文本范围必须位于文字内容内且结束位置大于开始位置',
+      })
+    }
+  })
+}
+
+const flowRichTextFields = {
+  text: z.string(),
+  runs: flowTextRunListSchema.optional(),
+} as const
+
+const flowTableCellObjectSchema = z.object({
+  text: z.string(),
+  runs: flowTextRunListSchema.optional(),
+}).strict()
+
+const flowTableCellSchema = z.union([z.string(), flowTableCellObjectSchema])
+
 const flowHeadingBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('heading'),
   level: z.union([
     z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6),
   ]),
-  text: z.string(),
-}).strict()
+  ...flowRichTextFields,
+}).strict().superRefine((block, context) => {
+  addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
+})
 
 const flowParagraphBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('paragraph'),
-  text: z.string(),
-}).strict()
+  ...flowRichTextFields,
+}).strict().superRefine((block, context) => {
+  addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
+})
 
 const flowListBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('list'),
   ordered: z.boolean(),
-  items: z.array(z.object({ id: stableIdSchema, text: z.string() }).strict()).min(1).max(10_000),
+  items: z.array(z.object({
+    id: stableIdSchema,
+    text: z.string(),
+    runs: flowTextRunListSchema.optional(),
+  }).strict()).min(1).max(10_000),
 }).strict().superRefine((block, context) => {
   const ids = block.items.map((item) => item.id)
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: 'custom', path: ['items'], message: 'List item ids must be unique' })
   }
+  block.items.forEach((item, itemIndex) => {
+    addFlowRunRangeIssues(item.text, item.runs, context, ['items', itemIndex, 'runs'])
+  })
 })
 
 const flowQuoteBlockSchema = z.object({
   ...flowBlockBaseFields,
   type: z.literal('quote'),
-  text: z.string(),
+  ...flowRichTextFields,
   citation: z.string().max(1_000).optional(),
-}).strict()
+}).strict().superRefine((block, context) => {
+  addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
+})
 
 const flowDividerBlockSchema = z.object({
   ...flowBlockBaseFields,
@@ -615,7 +705,7 @@ const flowTableBlockSchema = z.object({
   }).strict()).min(1).max(256),
   rows: z.array(z.object({
     id: stableIdSchema,
-    cells: z.record(z.string(), z.string()),
+    cells: z.record(z.string(), flowTableCellSchema),
   }).strict()).max(100_000),
 }).strict().superRefine((block, context) => {
   const columnIds = block.columns.map((column) => column.id)
@@ -635,6 +725,15 @@ const flowTableBlockSchema = z.object({
         path: ['rows', rowIndex, 'cells'],
         message: 'Every table row must contain exactly one cell for every column',
       })
+    }
+    for (const [columnId, cell] of Object.entries(row.cells)) {
+      if (typeof cell === 'string') continue
+      addFlowRunRangeIssues(
+        cell.text,
+        cell.runs,
+        context,
+        ['rows', rowIndex, 'cells', columnId, 'runs'],
+      )
     }
   })
 })
@@ -707,6 +806,27 @@ export const spatialCameraFrameSchema = z.object({
   zoom: finiteNumber.positive().max(1_000),
 }).strict()
 
+const spatialPathStyleSchema = z.object({
+  color: colorSchema.optional(),
+  width: finiteNumber.positive().max(10_000).optional(),
+  dash: z.enum(['solid', 'dashed', 'dotted']).optional(),
+}).strict()
+
+export const spatialPathDocumentSchema = z.object({
+  id: stableIdSchema,
+  name: z.string().trim().min(1).max(200),
+  layerItemIds: z.array(stableIdSchema).min(1).max(20_000),
+  style: spatialPathStyleSchema.optional(),
+}).strict()
+
+export const spatialRelationDocumentSchema = z.object({
+  id: stableIdSchema,
+  sourceLayerItemId: stableIdSchema,
+  targetLayerItemId: stableIdSchema,
+  label: z.string().trim().min(1).max(500).optional(),
+  kind: z.enum(['line', 'arrow', 'bidirectional']),
+}).strict()
+
 const surfaceBaseFields = {
   id: stableIdSchema,
   title: z.string().trim().min(1).max(500),
@@ -773,6 +893,8 @@ const spatialSurfaceSchema = z.object({
       }).strict(),
     ]),
     layerItems: layerItemListSchema,
+    paths: z.array(spatialPathDocumentSchema).max(10_000).default([]),
+    relations: z.array(spatialRelationDocumentSchema).max(10_000).default([]),
   }).strict(),
   camera: z.object({
     home: spatialCameraPoseSchema,
@@ -812,6 +934,65 @@ const spatialSurfaceSchema = z.object({
         })
       }
     })
+  })
+  const pathIds = new Set<string>()
+  surface.world.paths.forEach((path, index) => {
+    if (pathIds.has(path.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'paths', index, 'id'],
+        message: `Spatial path ids must be unique: ${path.id}`,
+      })
+    }
+    pathIds.add(path.id)
+    if (new Set(path.layerItemIds).size !== path.layerItemIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'paths', index, 'layerItemIds'],
+        message: 'Spatial path item ids must be unique',
+      })
+    }
+    path.layerItemIds.forEach((itemId) => {
+      if (!itemIds.has(itemId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['world', 'paths', index, 'layerItemIds'],
+          message: `Spatial path references missing world item: ${itemId}`,
+        })
+      }
+    })
+  })
+  const relationIds = new Set<string>()
+  surface.world.relations.forEach((relation, index) => {
+    if (relationIds.has(relation.id)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'id'],
+        message: `Spatial relation ids must be unique: ${relation.id}`,
+      })
+    }
+    relationIds.add(relation.id)
+    if (!itemIds.has(relation.sourceLayerItemId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'sourceLayerItemId'],
+        message: `Spatial relation references missing world item: ${relation.sourceLayerItemId}`,
+      })
+    }
+    if (!itemIds.has(relation.targetLayerItemId)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index, 'targetLayerItemId'],
+        message: `Spatial relation references missing world item: ${relation.targetLayerItemId}`,
+      })
+    }
+    if (relation.sourceLayerItemId === relation.targetLayerItemId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['world', 'relations', index],
+        message: 'Spatial relation source and target must be different world items',
+      })
+    }
   })
 })
 

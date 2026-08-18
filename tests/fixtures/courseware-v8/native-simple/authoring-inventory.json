@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "caseId": "native-formula-forward",
+  "projectPath": "project/native-formula-forward.h5lesson",
+  "generatedFrom": {
+    "coursewareContractSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "presentationScriptSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "capabilityIndexSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "developmentPlanSha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "globalEntities": [],
+  "scenes": [
+    {
+      "sceneId": "scene_native_discriminant",
+      "ownership": "native-owned",
+      "entities": [
+        {
+          "id": "native-title",
+          "label": "题目标题",
+          "kind": "text",
+          "sourceRef": "CNT-001",
+          "intent": "修改学生看到的题目标题",
+          "authoringEntry": "在画布选中题目标题文本节点并直接编辑",
+          "expectedOutcome": "重开后保留新标题，Player 与导出显示同一文本",
+          "authoringOutcomeId": "AUTH-001",
+          "binding": "native:scene:scene_native_discriminant:node_native_title:text",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "native-formula",
+          "label": "判别式公式",
+          "kind": "formula",
+          "sourceRef": "CNT-001",
+          "intent": "维护判别式的专业数学表示",
+          "authoringEntry": "在画布选中判别式公式节点并编辑公式",
+          "expectedOutcome": "重开后公式 AST 与无障碍文本均保留，Player 与导出显示一致",
+          "authoringOutcomeId": "AUTH-002",
+          "binding": "native:scene:scene_native_discriminant:node_native_formula:ast",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "native-hint",
+          "label": "计算提示",
+          "kind": "text",
+          "sourceRef": "CNT-001",
+          "intent": "修改计算提示以支持课堂引导",
+          "authoringEntry": "在画布选中计算提示文本节点并直接编辑",
+          "expectedOutcome": "重开、Player 与导出都显示修改后的计算提示",
+          "authoringOutcomeId": "AUTH-003",
+          "binding": "native:scene:scene_native_discriminant:node_native_hint:text",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        },
+        {
+          "id": "native-feedback",
+          "label": "稳定反馈",
+          "kind": "text",
+          "sourceRef": "CNT-001",
+          "intent": "修改学生完成后的稳定反馈",
+          "authoringEntry": "在画布选中稳定反馈文本节点并直接编辑",
+          "expectedOutcome": "重开后保留新反馈，成功状态与静态导出显示同一结果",
+          "authoringOutcomeId": "AUTH-004",
+          "binding": "native:scene:scene_native_discriminant:node_native_feedback:text",
+          "editability": "canvas-distinct",
+          "requiredForAcceptance": true
+        }
+      ]
+    }
+  ]
+}
