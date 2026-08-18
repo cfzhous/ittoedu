@@ -864,10 +864,7 @@
                     "properties": {
                       "mode": {
                         "type": "string",
-                        "enum": [
-                          "absolute",
-                          "legacy-whole-canvas"
-                        ]
+                        "const": "absolute"
                       },
                       "x": {
                         "type": "number"
@@ -1062,10 +1059,7 @@
                     "properties": {
                       "mode": {
                         "type": "string",
-                        "enum": [
-                          "absolute",
-                          "legacy-whole-canvas"
-                        ]
+                        "const": "absolute"
                       },
                       "x": {
                         "type": "number"
@@ -1199,10 +1193,7 @@
                     "properties": {
                       "mode": {
                         "type": "string",
-                        "enum": [
-                          "absolute",
-                          "legacy-whole-canvas"
-                        ]
+                        "const": "absolute"
                       },
                       "x": {
                         "type": "number"
@@ -1274,8 +1265,6 @@
                       "protocol": {
                         "type": "string",
                         "enum": [
-                          "surface-v1",
-                          "legacy-runtime-v2",
                           "canvas-runtime",
                           "surface-runtime"
                         ]
@@ -1518,10 +1507,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -1716,10 +1702,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -1853,10 +1836,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -1928,8 +1908,6 @@
                                 "protocol": {
                                   "type": "string",
                                   "enum": [
-                                    "surface-v1",
-                                    "legacy-runtime-v2",
                                     "canvas-runtime",
                                     "surface-runtime"
                                   ]
@@ -2204,10 +2182,7 @@
                                 "properties": {
                                   "mode": {
                                     "type": "string",
-                                    "enum": [
-                                      "absolute",
-                                      "legacy-whole-canvas"
-                                    ]
+                                    "const": "absolute"
                                   },
                                   "x": {
                                     "type": "number"
@@ -2402,10 +2377,7 @@
                                 "properties": {
                                   "mode": {
                                     "type": "string",
-                                    "enum": [
-                                      "absolute",
-                                      "legacy-whole-canvas"
-                                    ]
+                                    "const": "absolute"
                                   },
                                   "x": {
                                     "type": "number"
@@ -2539,10 +2511,7 @@
                                 "properties": {
                                   "mode": {
                                     "type": "string",
-                                    "enum": [
-                                      "absolute",
-                                      "legacy-whole-canvas"
-                                    ]
+                                    "const": "absolute"
                                   },
                                   "x": {
                                     "type": "number"
@@ -2614,8 +2583,6 @@
                                   "protocol": {
                                     "type": "string",
                                     "enum": [
-                                      "surface-v1",
-                                      "legacy-runtime-v2",
                                       "canvas-runtime",
                                       "surface-runtime"
                                     ]
@@ -2846,10 +2813,7 @@
                                       "properties": {
                                         "mode": {
                                           "type": "string",
-                                          "enum": [
-                                            "absolute",
-                                            "legacy-whole-canvas"
-                                          ]
+                                          "const": "absolute"
                                         },
                                         "x": {
                                           "type": "number"
@@ -3009,10 +2973,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -3207,10 +3168,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -3344,10 +3302,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -3419,8 +3374,6 @@
                                 "protocol": {
                                   "type": "string",
                                   "enum": [
-                                    "surface-v1",
-                                    "legacy-runtime-v2",
                                     "canvas-runtime",
                                     "surface-runtime"
                                   ]
@@ -3702,10 +3655,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -3900,10 +3850,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -4037,10 +3984,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -4112,8 +4056,6 @@
                                 "protocol": {
                                   "type": "string",
                                   "enum": [
-                                    "surface-v1",
-                                    "legacy-runtime-v2",
                                     "canvas-runtime",
                                     "surface-runtime"
                                   ]
@@ -4392,10 +4334,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -4590,10 +4529,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -4727,10 +4663,7 @@
                               "properties": {
                                 "mode": {
                                   "type": "string",
-                                  "enum": [
-                                    "absolute",
-                                    "legacy-whole-canvas"
-                                  ]
+                                  "const": "absolute"
                                 },
                                 "x": {
                                   "type": "number"
@@ -4802,8 +4735,6 @@
                                 "protocol": {
                                   "type": "string",
                                   "enum": [
-                                    "surface-v1",
-                                    "legacy-runtime-v2",
                                     "canvas-runtime",
                                     "surface-runtime"
                                   ]

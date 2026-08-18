@@ -320,7 +320,8 @@ function collectMigrationMarkerIssues(
 ): CourseProjectValidationFinding[] {
   const issues: CourseProjectValidationFinding[] = []
   visitLayerItems(project, (item, path) => {
-    if (item.frame.mode === 'legacy-whole-canvas') {
+    const frameMode = item.frame.mode as string
+    if (frameMode === 'legacy-whole-canvas') {
       issues.push({
         severity: 'error',
         code: 'migration-marker',
@@ -329,7 +330,7 @@ function collectMigrationMarkerIssues(
         layerItemId: item.layerItemId,
       })
     }
-    if (item.kind === 'runtime' && item.runtime.protocol === 'legacy-runtime-v2') {
+    if (item.kind === 'runtime' && (item.runtime.protocol as string) === 'legacy-runtime-v2') {
       issues.push({
         severity: 'error',
         code: 'migration-marker',
@@ -364,13 +365,13 @@ function collectProtocolIssues(
   const issues: CourseProjectValidationFinding[] = []
   visitLayerItems(project, (item, path) => {
     if (item.kind !== 'runtime') return
-    const current =
-      item.runtime.protocol === 'surface-v1' &&
+    const currentSurface =
+      item.runtime.protocol === 'surface-runtime' &&
       item.runtime.runtimeApiVersion === SURFACE_RUNTIME_API_VERSION
-    const migrated =
-      item.runtime.protocol === 'legacy-runtime-v2' &&
+    const currentCanvas =
+      item.runtime.protocol === 'canvas-runtime' &&
       item.runtime.runtimeApiVersion === RUNTIME_API_VERSION
-    if (!current && !migrated) {
+    if (!currentSurface && !currentCanvas) {
       issues.push({
         severity: 'error',
         code: 'runtime-protocol',

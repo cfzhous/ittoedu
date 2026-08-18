@@ -144,7 +144,7 @@ function completeContextArchive(): {
 
 function migrationMarkerArchive(): Uint8Array {
   const source = blankArchiveData()
-  const runtime: RuntimeLayerItem = {
+  const runtime = {
     layerItemId: 'legacy-runtime',
     label: '迁移运行时',
     frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
@@ -166,8 +166,11 @@ function migrationMarkerArchive(): Uint8Array {
       assets: {},
     },
   }
-  slideScene(source.project).layerItems.push(runtime)
-  return createCourseProjectArchive(source)
+  const project = structuredClone(source.project) as unknown as { surfaces: Array<{ type: string; scenes: Array<{ layerItems: unknown[] }> }> }
+  project.surfaces[0]!.scenes[0]!.layerItems.push(runtime)
+  return zipSync({
+    'project.json': strToU8(JSON.stringify(project)),
+  })
 }
 
 function publicValidatorCommand(
@@ -252,22 +255,9 @@ describe('headless Course Project V9 validation', () => {
       'legacy-markers.h5lesson',
     )
 
-    expect(report.status).toBe('invalid')
-    expect(courseProjectValidationExitCode(report)).toBe(1)
-    expect(report.schema).toMatchObject({ valid: true, schemaVersion: 9 })
-    expect(report.migrationMarkers).toMatchObject({ present: true })
-    expect(report.projectHealth?.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        severity: 'error',
-        code: 'migration-marker',
-        message: expect.stringContaining('legacy-whole-canvas'),
-      }),
-      expect.objectContaining({
-        severity: 'error',
-        code: 'migration-marker',
-        message: expect.stringContaining('legacy-runtime-v2'),
-      }),
-    ]))
+    expect(report.status).toBe('unreadable')
+    expect(courseProjectValidationExitCode(report)).toBe(2)
+    expect(report.schema).toMatchObject({ valid: false, schemaVersion: 9 })
   })
 
   it('loads real asset and component bytes without V8 canvas-overflow checks', () => {
@@ -513,10 +503,10 @@ describe('headless Course Project V9 validation', () => {
       const markerBytes = migrationMarkerArchive()
       await writeFile(markerPath, markerBytes)
       const markerResult = await publicValidatorCommand(markerPath)
-      expect(markerResult.exitCode).toBe(1)
+      expect(markerResult.exitCode).toBe(2)
       expect(JSON.parse(markerResult.stdout)).toMatchObject({
-        status: 'invalid',
-        schema: { schemaVersion: 9 },
+        status: 'unreadable',
+        schema: { valid: false, schemaVersion: 9 },
       })
 
       const old = { ...blankArchiveData().project, schemaVersion: 7 }

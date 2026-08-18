@@ -284,7 +284,7 @@ function mixedSources(): CoursePublishSources {
             {
               layerItemId: 'slide-runtime',
               label: 'Runtime',
-              frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+              frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
               order: 4,
               visible: true,
               locked: false,
@@ -294,7 +294,7 @@ function mixedSources(): CoursePublishSources {
               playbackInitialVisibility: 'inherit',
               kind: 'runtime',
               runtime: {
-                protocol: 'legacy-runtime-v2',
+                protocol: 'canvas-runtime',
                 runtimeApiVersion: 2,
                 enabled: true,
                 renderMode: 'dom',

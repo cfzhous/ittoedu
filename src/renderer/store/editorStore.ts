@@ -477,7 +477,7 @@ function courseRuntimeToDocument(runtime: CourseRuntimeDefinition): RuntimeDocum
 
 function runtimeDocumentToCourseRuntime(runtime: RuntimeDocument): CourseRuntimeDefinition {
   return {
-    protocol: 'legacy-runtime-v2',
+    protocol: 'canvas-runtime',
     runtimeApiVersion: 2,
     enabled: runtime.enabled,
     renderMode: runtime.renderMode,
@@ -506,7 +506,7 @@ function makeRuntimeLayerItem(
     layerItemId: preferredId,
     label,
     kind: 'runtime',
-    frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
     order: allocateCourseLayerOrder(draft, 0),
     visible: runtime.enabled,
     locked: false,

@@ -196,11 +196,11 @@ function runtimeItem(): RuntimeLayerItem {
     ...layerBase('world-runtime', 8, { mode: 'absolute', x: 400, y: 400, width: 280, height: 180 }),
     kind: 'runtime',
     runtime: {
-      protocol: 'surface-v1',
+      protocol: 'surface-runtime',
       runtimeApiVersion: 3,
       enabled: true,
       renderMode: 'dom',
-      source: 'CoursewareRuntime.define({runtimeApiVersion:3,create(){return {destroy(){}}}})',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return {destroy(){}}}})',
       content: { values: { label: 'Runtime' } },
       assets: {},
     },

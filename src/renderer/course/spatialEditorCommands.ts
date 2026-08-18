@@ -535,11 +535,11 @@ export interface AddSpatialWorldRuntimeLayerInput extends AddSpatialWorldLayerIn
 
 function defaultSurfaceRuntime(): CourseRuntimeDefinition {
   return {
-    protocol: 'surface-v1',
+    protocol: 'surface-runtime',
     runtimeApiVersion: 3,
     enabled: true,
     renderMode: 'dom',
-    source: 'CoursewareRuntime.define({ runtimeApiVersion: 3, protocol: "surface-v1" })',
+    source: 'CoursewareRuntime.define({ runtimeApiVersion: 3, protocol: "surface-runtime" })',
     content: { values: {} },
     assets: {},
   }

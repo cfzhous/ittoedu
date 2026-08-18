@@ -113,22 +113,12 @@ export const strictCourseInteractionsSchema = strictExistingSchema(
 )
 
 export const layerFrameSchema = z.object({
-  mode: z.enum(['absolute', 'legacy-whole-canvas']),
+  mode: z.literal('absolute'),
   x: finiteNumber,
   y: finiteNumber,
   width: finiteNumber.positive(),
   height: finiteNumber.positive(),
-}).strict().superRefine((frame, context) => {
-  if (
-    frame.mode === 'legacy-whole-canvas' &&
-    (frame.x !== 0 || frame.y !== 0 || frame.width !== 1280 || frame.height !== 720)
-  ) {
-    context.addIssue({
-      code: 'custom',
-      message: 'A legacy whole-canvas frame must be exactly 0,0,1280,720',
-    })
-  }
-})
+}).strict()
 
 const layerItemBaseFields = {
   layerItemId: stableIdSchema,
@@ -263,7 +253,7 @@ export const runtimeContentSchema = z.object({
 }).strict()
 
 export const courseRuntimeDefinitionSchema = z.object({
-  protocol: z.enum(['surface-v1', 'legacy-runtime-v2', 'canvas-runtime', 'surface-runtime']),
+  protocol: z.enum(['canvas-runtime', 'surface-runtime']),
   runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
   enabled: z.boolean(),
   renderMode: z.enum(['phaser', 'dom', 'hybrid']),
@@ -280,9 +270,7 @@ export const courseRuntimeDefinitionSchema = z.object({
   }).strict().optional(),
 }).strict().superRefine((runtime, context) => {
   const validPair =
-    (runtime.protocol === 'legacy-runtime-v2' && runtime.runtimeApiVersion === 2) ||
     (runtime.protocol === 'canvas-runtime' && runtime.runtimeApiVersion === 2) ||
-    (runtime.protocol === 'surface-v1' && runtime.runtimeApiVersion === 3) ||
     (runtime.protocol === 'surface-runtime' && runtime.runtimeApiVersion === 3)
   if (!validPair) {
     context.addIssue({
@@ -291,7 +279,7 @@ export const courseRuntimeDefinitionSchema = z.object({
       message: 'Runtime protocol and API version do not match',
     })
   }
-  if ((runtime.protocol === 'surface-v1' || runtime.protocol === 'surface-runtime') && runtime.renderMode !== 'dom') {
+  if (runtime.protocol === 'surface-runtime' && runtime.renderMode !== 'dom') {
     context.addIssue({
       code: 'custom',
       path: ['renderMode'],
@@ -333,28 +321,7 @@ export const layerItemSchema: z.ZodType<LayerItem> = z.discriminatedUnion('kind'
   nativeLayerItemSchema,
   componentLayerItemSchema,
   runtimeLayerItemSchema,
-]).superRefine((item, context) => {
-  if (item.frame.mode === 'legacy-whole-canvas' && (
-    item.kind !== 'runtime' || item.runtime.protocol !== 'legacy-runtime-v2'
-  )) {
-    context.addIssue({
-      code: 'custom',
-      path: ['frame', 'mode'],
-      message: 'Only a migrated legacy Runtime may use a legacy whole-canvas frame',
-    })
-  }
-  if (
-    item.kind === 'runtime' &&
-    item.runtime.protocol === 'legacy-runtime-v2' &&
-    item.frame.mode !== 'legacy-whole-canvas'
-  ) {
-    context.addIssue({
-      code: 'custom',
-      path: ['frame', 'mode'],
-      message: 'A legacy Runtime must retain its explicit whole-canvas frame marker',
-    })
-  }
-})
+])
 
 export function materializeNativeLayerItem(
   item: Extract<LayerItem, { kind: 'native' }>,
@@ -438,7 +405,7 @@ export const scopedLayerItemListSchema = z.array(scopedLayerItemSchema).max(20_0
 export const layerItemOverrideSchema = z.object({
   label: z.string().trim().min(1).max(200).optional(),
   frame: z.object({
-    mode: z.enum(['absolute', 'legacy-whole-canvas']).optional(),
+    mode: z.literal('absolute').optional(),
     x: finiteNumber.optional(),
     y: finiteNumber.optional(),
     width: finiteNumber.positive().optional(),

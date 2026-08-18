@@ -569,7 +569,7 @@ function globalLayerTeacherController(): CourseProjectArchiveData {
 function canvasRuntime(): CourseProjectArchiveData {
   const runtime: RuntimeLayerItem = {
     ...layerBase('slide-canvas-runtime', 0, {
-      mode: 'legacy-whole-canvas',
+      mode: 'absolute',
       x: 0,
       y: 0,
       width: 1280,
@@ -578,7 +578,7 @@ function canvasRuntime(): CourseProjectArchiveData {
     hitPolicy: 'surface',
     kind: 'runtime',
     runtime: {
-      protocol: 'legacy-runtime-v2',
+      protocol: 'canvas-runtime',
       runtimeApiVersion: 2,
       enabled: true,
       renderMode: 'phaser',
@@ -643,11 +643,11 @@ function surfaceRuntime(): CourseProjectArchiveData {
     }),
     kind: 'runtime',
     runtime: {
-      protocol: 'surface-v1',
+      protocol: 'surface-runtime',
       runtimeApiVersion: 3,
       enabled: true,
       renderMode: 'dom',
-      source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-v1",create(){return {destroy(){}}}})',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return {destroy(){}}}})',
       content: {
         values: { title: '动态标题' },
         metadata: { title: { label: '标题', multiline: false } },

@@ -155,7 +155,7 @@ function makeLegacyDomRuntimeLayer(input: {
     layerItemId: input.layerItemId,
     label: input.label,
     kind: 'runtime',
-    frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
     order: input.order,
     visible: true,
     locked: false,
@@ -164,7 +164,7 @@ function makeLegacyDomRuntimeLayer(input: {
     hitPolicy: 'surface',
     playbackInitialVisibility: 'inherit',
     runtime: {
-      protocol: 'legacy-runtime-v2',
+      protocol: 'canvas-runtime',
       runtimeApiVersion: 2,
       enabled: true,
       renderMode: 'dom',
