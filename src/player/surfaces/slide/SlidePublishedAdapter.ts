@@ -30,6 +30,7 @@ import {
   mountPublishedComponent,
   type PublishedComponentMountHandle,
 } from '../publishedComponentMount'
+import { paintPublishedNativeText } from '../publishedNativeText'
 
 function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
   return structuredClone(payload)
@@ -132,25 +133,7 @@ function applyNativeTextStyle(
   wrap: HTMLElement,
   data: Extract<NativeElementContent, { nativeType: 'text' }>['data'],
 ): void {
-  const style = data.style
-  const decorations: string[] = []
-  if (style.underline) decorations.push('underline')
-  if (style.strike) decorations.push('line-through')
-  wrap.style.boxSizing = 'border-box'
-  wrap.style.overflow = 'hidden'
-  wrap.style.whiteSpace = 'pre-wrap'
-  wrap.style.fontFamily = style.fontFamily || '"Microsoft YaHei", sans-serif'
-  wrap.style.fontSize = `${Math.max(1, style.fontSize)}px`
-  wrap.style.fontWeight = style.bold ? '700' : '400'
-  wrap.style.fontStyle = style.italic ? 'italic' : 'normal'
-  wrap.style.color = style.color || '#1f2937'
-  wrap.style.textAlign = style.align
-  wrap.style.lineHeight = `${Math.max(1, style.fontSize + style.lineSpacing)}px`
-  wrap.style.letterSpacing = `${style.letterSpacing}px`
-  wrap.style.padding = `${Math.max(0, style.padding)}px`
-  wrap.style.textDecoration = decorations.join(' ') || 'none'
-  wrap.style.writingMode = style.writingMode === 'horizontal' ? 'horizontal-tb' : style.writingMode
-  wrap.textContent = data.text
+  paintPublishedNativeText(wrap, data)
 }
 
 function applyVisibleTextFallback(wrap: HTMLElement, text: string): void {
