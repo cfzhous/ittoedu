@@ -3356,7 +3356,7 @@ function SlideLocationWorkspace({
           event.button !== 0
         ) return
         if (
-          event.target instanceof HTMLElement &&
+          event.target instanceof Element &&
           event.target.closest(
             '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls',
           )
@@ -3517,7 +3517,7 @@ function SlideLocationWorkspace({
       onDoubleClickCapture={(event) => {
         if (
           !authoringCanvasInteractive ||
-          (event.target instanceof HTMLElement &&
+          (event.target instanceof Element &&
             event.target.closest(
               '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog',
             ))

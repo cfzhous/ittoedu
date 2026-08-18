@@ -1,6 +1,6 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**工程门禁在 Linux Cloud Agent 上已绿到 `build:desktop`。`test:e2e` 不能当作 Windows 产品证据。** 不要重跑已绿命令。Vite 500kB chunk 警告不当缺陷。
+> 状态：**Windows 本机已跑 `test:e2e`。editor.spec / render-host / catalog HTML 已绿。剩 catalog 矩阵编辑器打开仍是 V8 `.h5lesson`（T2 残留）。** 不要重跑已绿命令。Vite 500kB chunk 警告不当缺陷。
 >
 > 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  

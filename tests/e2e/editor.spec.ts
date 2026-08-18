@@ -13,6 +13,8 @@ import { pathToFileURL } from 'node:url'
 import type { ElectronApplication, Page } from 'playwright'
 import sharp from 'sharp'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
+import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -130,6 +132,8 @@ function makeLegacyDomRuntimeLayer(input: {
   order: number
   source: string
   values: Record<string, string>
+  metadata?: Record<string, { label?: string }>
+  assets?: Record<string, { assetId: string }>
 }): LayerItem {
   return {
     layerItemId: input.layerItemId,
@@ -149,8 +153,11 @@ function makeLegacyDomRuntimeLayer(input: {
       enabled: true,
       renderMode: 'dom',
       source: input.source,
-      content: { values: input.values },
-      assets: {},
+      content: {
+        values: input.values,
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      },
+      assets: input.assets ?? {},
     },
   }
 }
@@ -724,62 +731,63 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         'runtime.js': strToU8(globalRuntime),
       }, { level: 9 })),
     )
-    const authoringArchive = unzipSync(readFileSync(join(
-      root,
-      'examples',
-      'sample-project.h5lesson',
-    )))
-    const authoringProjectEntry = authoringArchive['project.json']
-    if (!authoringProjectEntry) {
-      throw new Error('示例工程缺少 project.json')
-    }
-    const authoringProject = JSON.parse(strFromU8(authoringProjectEntry))
     const originalRuntimeAssetId = 'asset_runtime_authoring_original'
-    const originalRuntimeAssetPath = 'assets/runtime-authoring-original.png'
-    const originalRuntimeAssetBytes = readFileSync(firstImagePath)
+    const originalRuntimeAssetBytes = Uint8Array.from(readFileSync(firstImagePath))
+    const authoringProject = createBlankCourseProject({
+      id: 'project_runtime_authoring',
+      title: '欢迎',
+      now: '2026-08-18T12:00:00.000Z',
+    })
+    const slideSurface = authoringProject.surfaces.find((surface) => surface.type === 'slide')
+    if (!slideSurface || slideSurface.type !== 'slide' || !slideSurface.scenes[0]) {
+      throw new Error('空白 V9 工程缺少 Slide 场景')
+    }
+    const authoringScene = slideSurface.scenes[0]
+    authoringScene.name = '欢迎'
+    const authoringLocation = authoringProject.locations.find((location) => (
+      location.kind === 'slide-scene' && location.sceneId === authoringScene.id
+    ))
+    if (authoringLocation) authoringLocation.label = '欢迎'
     authoringProject.assets[originalRuntimeAssetId] = {
       id: originalRuntimeAssetId,
       filename: 'runtime-authoring-original.png',
       mimeType: 'image/png',
       kind: 'image',
-      path: originalRuntimeAssetPath,
+      path: 'assets/runtime-authoring-original.png',
       byteLength: originalRuntimeAssetBytes.byteLength,
       width: 1024,
       height: 1024,
     }
-    authoringArchive[originalRuntimeAssetPath] = Uint8Array.from(
-      originalRuntimeAssetBytes,
-    )
-    authoringProject.scenes[0].runtime = {
-      enabled: true,
-      runtimeApiVersion: 2,
-      renderMode: 'dom',
-      source: `CoursewareRuntime.define({runtimeApiVersion:2,authoringApiVersion:1,create:function(ctx){var probe={mode:ctx.mode,authoring:Boolean(ctx.authoring)};if(ctx.authoring){probe.replayAccepted=ctx.actions.replayScene();ctx.courseState.set('e2e-authoring-write','changed');probe.stateAfterWrite=ctx.courseState.get('e2e-authoring-write');}window.__e2eSceneAuthoringProbe=probe;var label=document.createElement('div');label.dataset.coursewareEditKey='title';label.dataset.coursewareEditLabel='场景标题';label.textContent=ctx.content.get('title');Object.assign(label.style,{position:'absolute',left:'240px',top:'48px',width:'360px',height:'64px',boxSizing:'border-box',padding:'12px 20px',border:'1px solid #a78bfa',borderRadius:'12px',color:'#f5f3ff',background:'#4c1d95',font:'600 26px Microsoft YaHei'});var image=document.createElement('img');image.dataset.coursewareAssetKey='hero';image.dataset.coursewareEditLabel='场景主视觉';image.src=ctx.assets.url('hero');image.alt='场景主视觉';Object.assign(image.style,{position:'absolute',left:'920px',top:'480px',width:'150px',height:'150px',border:'2px solid #c4b5fd',borderRadius:'18px',objectFit:'cover'});ctx.dom.overlay.append(label,image);return{destroy:function(){label.remove();image.remove();}};}});`,
-      content: {
-        values: { title: '场景画布初始标题' },
-        metadata: { title: { label: '场景标题' } },
-      },
-      assets: {
-        hero: { assetId: originalRuntimeAssetId },
-      },
-    }
-    authoringProject.globalRuntime = {
-      enabled: true,
-      runtimeApiVersion: 2,
-      renderMode: 'dom',
-      source: `CoursewareRuntime.define({runtimeApiVersion:2,authoringApiVersion:1,create:function(ctx){var label=document.createElement('div');label.dataset.coursewareEditKey='title';label.dataset.coursewareEditLabel='全局标题';label.textContent=ctx.content.get('title');Object.assign(label.style,{position:'absolute',left:'240px',top:'160px',width:'360px',height:'72px',boxSizing:'border-box',padding:'16px 22px',border:'1px solid #60a5fa',borderRadius:'12px',color:'#eff6ff',background:'#172554',font:'600 28px Microsoft YaHei'});ctx.dom.overlay.append(label);return{destroy:function(){label.remove();}};}});`,
-      content: {
+    let nextOrder = nextUnifiedLayerOrder(authoringProject)
+    authoringProject.globalLayerItems.push({
+      item: makeLegacyDomRuntimeLayer({
+        layerItemId: `runtime-global-${authoringProject.id}`,
+        label: '全局运行时',
+        order: nextOrder,
+        source: `CoursewareRuntime.define({runtimeApiVersion:2,authoringApiVersion:1,create:function(ctx){var label=document.createElement('div');label.dataset.coursewareEditKey='title';label.dataset.coursewareEditLabel='全局标题';label.textContent=ctx.content.get('title');Object.assign(label.style,{position:'absolute',left:'240px',top:'160px',width:'360px',height:'72px',boxSizing:'border-box',padding:'16px 22px',border:'1px solid #60a5fa',borderRadius:'12px',color:'#eff6ff',background:'#172554',font:'600 28px Microsoft YaHei'});ctx.dom.overlay.append(label);return{destroy:function(){label.remove();}};}});`,
         values: { title: '全局画布初始标题' },
         metadata: { title: { label: '全局标题' } },
-      },
-      assets: {},
-    }
-    authoringArchive['project.json'] = strToU8(
-      `${JSON.stringify(authoringProject, null, 2)}\n`,
-    )
+      }),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    nextOrder += 1
+    authoringScene.layerItems.push(makeLegacyDomRuntimeLayer({
+      layerItemId: `runtime-${authoringScene.id}`,
+      label: '场景运行时',
+      order: nextOrder,
+      source: `CoursewareRuntime.define({runtimeApiVersion:2,authoringApiVersion:1,create:function(ctx){var probe={mode:ctx.mode,authoring:Boolean(ctx.authoring)};if(ctx.authoring){probe.replayAccepted=ctx.actions.replayScene();ctx.courseState.set('e2e-authoring-write','changed');probe.stateAfterWrite=ctx.courseState.get('e2e-authoring-write');}window.__e2eSceneAuthoringProbe=probe;var label=document.createElement('div');label.dataset.coursewareEditKey='title';label.dataset.coursewareEditLabel='场景标题';label.textContent=ctx.content.get('title');Object.assign(label.style,{position:'absolute',left:'240px',top:'48px',width:'360px',height:'64px',boxSizing:'border-box',padding:'12px 20px',border:'1px solid #a78bfa',borderRadius:'12px',color:'#f5f3ff',background:'#4c1d95',font:'600 26px Microsoft YaHei'});var image=document.createElement('img');image.dataset.coursewareAssetKey='hero';image.dataset.coursewareEditLabel='场景主视觉';image.src=ctx.assets.url('hero');image.alt='场景主视觉';Object.assign(image.style,{position:'absolute',left:'920px',top:'480px',width:'150px',height:'150px',border:'2px solid #c4b5fd',borderRadius:'18px',objectFit:'cover'});ctx.dom.overlay.append(label,image);return{destroy:function(){label.remove();image.remove();}};}});`,
+      values: { title: '场景画布初始标题' },
+      metadata: { title: { label: '场景标题' } },
+      assets: { hero: { assetId: originalRuntimeAssetId } },
+    }))
+    const persistedAuthoring = courseProjectDocumentSchema.parse(authoringProject)
     writeFileSync(
       globalRuntimeAuthoringProjectPath,
-      Buffer.from(zipSync(authoringArchive, { level: 9 })),
+      createCourseProjectArchive({
+        project: persistedAuthoring,
+        assetFiles: { [originalRuntimeAssetId]: originalRuntimeAssetBytes },
+        componentFiles: {},
+      }, { mtime: '2026-08-18T12:00:00.000Z' }),
     )
     rmSync(webPackageDirectory, { recursive: true, force: true })
   })
@@ -1241,7 +1249,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         '已替换运行时图片',
       )
 
-      await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
+      await page.getByRole('button', { name: '另存为' }).click()
       await expect.poll(() => {
         const saved = readSavedCourseProjectArchive(globalRuntimeAuthoringImportedPath)
         if (!saved) return null

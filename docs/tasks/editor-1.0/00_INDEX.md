@@ -54,7 +54,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [T6](T6_FREEZE.md) 重开 | `cursor/t6-freeze-resume-de5c` | `npm test` 与 `build:desktop` 已绿；从 `test:e2e` 开始；已绿命令不重跑 |
+| [T6](T6_FREEZE.md) 重开 | `cursor/t6-freeze-resume-de5c` | Windows e2e 26/27；剩 catalog V8 矩阵夹具；已绿命令不重跑 |
 
 **必须等待**
 

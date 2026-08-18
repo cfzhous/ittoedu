@@ -110,3 +110,19 @@ Windows 上仍需要的证据（本环境做不到）：
 - `COURSEWARE_E2E_BACKGROUND=1 npm run test:e2e`
 - 如需可移植性：`npm run verify:w3-portability`（不能替代另一台干净 Windows 的人工冒烟）
 
+## 9. Windows 本机续跑（2026-08-19）
+
+- 工作分支：`cursor/t6-freeze-resume-de5c`（从 `origin/cursor/cloud-agent-1787062947578-owgrj` `a6ab2f0`）
+- `COURSEWARE_E2E_BACKGROUND=1 npm run test:e2e` 的 Windows 证据如下。未重跑已绿的 `check:contracts` / `typecheck` / `npm test` / `build:desktop`。未跑整轮五条（catalog 仍红）。
+- 允许列表外（父代理接手，否则 e2e 无法在 Windows 上继续）：
+  - `src/renderer/ui/Workspace.tsx`：画布 chrome 的 `pointerdown`/`dblclick` 排除从 `HTMLElement` 改为 `Element`。Lucide SVG 图标不是 `HTMLElement`，捕获阶段会把缩放按钮和「局部删除线」当成画布手势（Linux 上曾误判为 Xvfb）。
+  - `tests/e2e/editor.spec.ts`：统一画布夹具改为 `createBlankCourseProject` + `createCourseProjectArchive`（T2 后打开 V8 `sample-project.h5lesson` 会静默留在空白工程）；另存为到 roundtrip 路径。
+- Windows 结果（分批跑，避免 serial 一红跳过后续）：
+  - **通过**：`editor.spec.ts` 全部 24 条；`render-host-benchmark.spec.ts`；catalog「单 HTML / 网页包压力翻页」
+  - **失败**：`componentCatalogMatrix.spec.ts`「目录 UI … 真实导出」在打开 `component-catalog-v8-matrix.h5lesson` 时期望 4 个 `scene-item`，实际 1（T2 拒绝 V8，当前工程仍是刚加过组件的空白课）
+- 未把 Electron e2e 加进 `ubuntu-latest` CI。
+- 未宣称发布 / 未打 tag / 未 accepted / 未 art candidate
+- 未跑视觉课例复核与 17 项真人清单
+- 下游：把 catalog 矩阵 `.h5lesson`（及 `project.json` 读取）迁到 Course Project V9 后，再跑一次完整 `npm run test:e2e` 作为 T6 证明轮。不要为了绿而删这条矩阵测试。
+
+
