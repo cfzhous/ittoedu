@@ -85,7 +85,7 @@ describe('projectFormatIsolation', () => {
 
   it('读层拒绝 V8 recovery 并清除本地副本', async () => {
     const v8Bytes = makeV8ArchiveBytes()
-    expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('v8')
+    expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
 
     const storagePath = path.join(testRoot, 'project-data')
     await fs.mkdir(storagePath, { recursive: true })
@@ -138,7 +138,7 @@ describe('projectFormatIsolation', () => {
         projectName: '旧版.h5lesson',
         bytes: v8Bytes,
       }),
-    ).rejects.toMatchObject({ code: 'RECOVERY_LEGACY_FORMAT' })
+    ).rejects.toMatchObject({ code: 'RECOVERY_UNSUPPORTED_VERSION' })
 
     const futureBytes = makeFutureVersionArchiveBytes()
     await expect(
