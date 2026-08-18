@@ -1,6 +1,7 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { FlowSurfaceHost } from '../../player/surfaces/flow/FlowSurfaceHost'
+import { publishedControllerNavigationTarget } from '../../player/surfaces/publishedDynamicHosts'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 
 /**
@@ -19,9 +20,32 @@ export async function mountFlowLocationTryRun(input: {
     assetFiles: input.assetFiles ?? {},
     components: input.components ?? {},
   })
-  const host = new FlowSurfaceHost(published, {
+  let host!: FlowSurfaceHost
+  host = new FlowSurfaceHost(published, {
     locationId: input.locationId,
     initialTocOpen: false,
+    courseProgressSource: {
+      getLocations: () => published.locations.map((location) => ({
+        id: location.id,
+        name: location.label,
+      })),
+      getCurrentLocationId: () => host.locationId,
+      getStateLabel: () => null,
+    },
+    executeTeacherControllerAction: async (action) => {
+      const target = publishedControllerNavigationTarget(action, {
+        locations: published.locations,
+        currentLocationId: host.locationId,
+        startLocationId: published.startLocationId,
+      })
+      if (!target || target.kind !== 'flow-block') return false
+      try {
+        await host.setLocationId(target.id)
+        return true
+      } catch {
+        return false
+      }
+    },
   })
   await host.mount(input.container)
   await host.activate()

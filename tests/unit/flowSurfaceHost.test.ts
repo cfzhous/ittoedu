@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
+import type { TeacherControllerAction } from '@/shared/projectTypes'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import type { PublishedFlowSurface, PublishedNativeLayerItem } from '@/shared/publishedCourseTypes'
-import { FlowSurfaceHost } from '@/player/surfaces/flow/FlowSurfaceHost'
+import { FlowSurfaceHost, type FlowSurfaceHostOptions } from '@/player/surfaces/flow/FlowSurfaceHost'
 import { isPublishedFlowSurface } from '@/player/surfaces/flow/flowModel'
 import {
   FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL,
@@ -10,12 +11,48 @@ import {
   FLOW_RUNTIME_TOC_OPEN_ARIA_LABEL,
   flowRuntimeTocAnchorId,
 } from '@/player/surfaces/flow/flowRuntimeToc'
+import {
+  createPublishedCourseSession,
+  publishedControllerNavigationTarget,
+} from '@/player/surfaces/publishedDynamicHosts'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
 import {
   buildFlowPrintPlan,
   flowPrintPlanHasRuntimeToc,
   renderFlowPrintHtml,
 } from '@/renderer/export/course/flowPrintPlan'
+
+function overlayVideo(): PublishedNativeLayerItem {
+  return {
+    layerItemId: 'flow-overlay-video',
+    kind: 'native',
+    frame: { mode: 'absolute', x: 80, y: 80, width: 320, height: 180 },
+    order: 12,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    content: {
+      nativeType: 'video',
+      data: {
+        assetId: 'clip',
+        fit: 'contain',
+        autoplay: false,
+        loop: false,
+        muted: false,
+        volume: 1,
+        playbackRate: 1,
+        showControls: true,
+        clickToToggle: true,
+        startTime: 0,
+        endTime: null,
+        poster: { mode: 'video-frame', time: 0 },
+        backgroundAudioMode: 'duck',
+      },
+    },
+  }
+}
 
 function teacherController(): PublishedNativeLayerItem {
   return {
@@ -105,7 +142,9 @@ function publishedCourse(): PublishedCourseV2Payload {
     sourceSchemaVersion: 9,
     courseId: 'published-flow',
     title: '运行讲义课',
-    assets: {},
+    assets: {
+      clip: { mimeType: 'video/mp4', url: 'https://example.test/clip.mp4' },
+    },
     components: {},
     designTokens: {
       fonts: [{
@@ -144,16 +183,20 @@ function publishedCourse(): PublishedCourseV2Payload {
         item: teacherController(),
         visibility: { mode: 'all', locationIds: [] },
       },
+      {
+        item: overlayVideo(),
+        visibility: { mode: 'all', locationIds: [] },
+      },
     ],
     globalInteractions: [],
     surfaces: [surface],
   }
 }
 
-async function mountHost(course = publishedCourse()) {
+async function mountHost(course = publishedCourse(), options: FlowSurfaceHostOptions = {}) {
   const container = document.createElement('div')
   document.body.appendChild(container)
-  const host = new FlowSurfaceHost(course)
+  const host = new FlowSurfaceHost(course, options)
   await host.mount(container)
   await host.activate()
   return { host, container, course }
@@ -276,5 +319,104 @@ describe('Flow print and DOCX helpers', () => {
     expect(documentXml).not.toContain('打开目录')
     expect(documentXml).not.toContain('收起目录')
     await host.destroy()
+  })
+})
+
+describe('FlowSurfaceHost playback controller and video', () => {
+  it('positions the runtime overlay on the host, not as a window-covering fixed layer', async () => {
+    const { host, container } = await mountHost()
+    const overlay = container.querySelector<HTMLElement>('[data-testid="flow-runtime-overlay"]')!
+    expect(overlay.style.position).toBe('absolute')
+    expect(overlay.style.position).not.toBe('fixed')
+    expect(overlay.style.top).toBe('0px')
+    expect(overlay.style.right).toBe('0px')
+    expect(overlay.style.bottom).toBe('0px')
+    await host.destroy()
+  })
+
+  it('writes the teacher-controller session offset back to the overlay frame', async () => {
+    const { host, container } = await mountHost()
+    const frame = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
+    const nav = frame.querySelector<HTMLElement>('.slide-native-teacher-controller')!
+    expect(frame.style.left).toBe('24px')
+    expect(frame.style.top).toBe('640px')
+    nav.focus()
+    nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    expect(frame.style.left).toBe('32px')
+    expect(frame.style.top).toBe('640px')
+    await host.destroy()
+  })
+
+  it('renders a playable overlay video from the published asset URL', async () => {
+    const { host, container } = await mountHost()
+    const video = container.querySelector<HTMLVideoElement>('[data-flow-overlay-item="flow-overlay-video"] video')
+    expect(video).not.toBeNull()
+    expect(video?.controls).toBe(true)
+    expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
+    await host.destroy()
+  })
+
+  it('skips the teacher controller when playback.controls is none', async () => {
+    const course = publishedCourse()
+    course.playback.controls = 'none'
+    const { host, container } = await mountHost(course)
+    expect(container.querySelector('[data-testid="flow-runtime-teacher-controller"]')).toBeNull()
+    expect(container.querySelector('.slide-native-teacher-controller')).toBeNull()
+    expect(container.querySelector('video')).not.toBeNull()
+    await host.destroy()
+  })
+
+  it('forwards scene.next through executeTeacherControllerAction', async () => {
+    const actions: TeacherControllerAction[] = []
+    const { host, container } = await mountHost(publishedCourse(), {
+      executeTeacherControllerAction: (action) => {
+        actions.push(action)
+        return true
+      },
+    })
+    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    next.click()
+    await vi.waitFor(() => {
+      expect(actions).toEqual([{ type: 'scene.next' }])
+    })
+    expect(host.locationId).toBe('loc-h1')
+    await host.destroy()
+  })
+
+  it('navigates Mixed locations from the Flow controller in a published session', async () => {
+    if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
+      HTMLElement.prototype.scrollIntoView = function scrollIntoView() {}
+    }
+    const session = createPublishedCourseSession(publishedCourse())
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+    expect(session.navigator.current?.locationId).toBe('loc-h1')
+    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    next.click()
+    await vi.waitFor(() => {
+      expect(session.navigator.current?.locationId).toBe('loc-h2')
+    })
+    await session.destroy()
+  })
+
+  it('maps scene.go onto a published location id', () => {
+    const course = publishedCourse()
+    expect(publishedControllerNavigationTarget(
+      { type: 'scene.go', sceneId: 'loc-h2' },
+      {
+        locations: course.locations,
+        currentLocationId: 'loc-h1',
+        startLocationId: course.startLocationId,
+      },
+    )?.id).toBe('loc-h2')
+    expect(publishedControllerNavigationTarget(
+      { type: 'audio.toggle-mute' },
+      {
+        locations: course.locations,
+        currentLocationId: 'loc-h1',
+        startLocationId: course.startLocationId,
+      },
+    )).toBeNull()
   })
 })

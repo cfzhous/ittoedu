@@ -43,8 +43,12 @@ export interface TeacherControllerDomOptions {
    * CSS size of the 1280×720 stage (not the controller frame). Pointer deltas
    * map through this the same way `clientDeltaToWorld` maps through
    * `stageViewportTransform`.
+   *
+   * Optional `left`/`top` are the stage's viewport origin. Playback hosts pass
+   * them so button hit-testing uses the logical canvas instead of a CSS-scaled
+   * controller client box, which misses buttons after `transform: scale()`.
    */
-  getRenderedStageBounds(): { width: number; height: number }
+  getRenderedStageBounds(): { width: number; height: number; left?: number; top?: number }
   scenes: readonly TeacherControllerSceneInfo[]
   getCurrentSceneId(): string | null
   getStateLabel(): string | null
@@ -65,7 +69,7 @@ export interface TeacherControllerDomOptions {
  */
 export interface TeacherControllerDomContext {
   canvas: { width: number; height: number }
-  getRenderedStageBounds(): { width: number; height: number }
+  getRenderedStageBounds(): { width: number; height: number; left?: number; top?: number }
   scenes: readonly TeacherControllerSceneInfo[]
   getCurrentSceneId(): string | null
   getStateLabel(): string | null
@@ -470,9 +474,37 @@ export class TeacherControllerDom {
   }
 
   #localPoint(event: PointerEvent): { x: number; y: number } {
+    const client = { x: event.clientX, y: event.clientY }
+    const stage = this.#options.getRenderedStageBounds()
+    const canvas = this.#options.canvas
+    if (
+      typeof stage.left === 'number'
+      && typeof stage.top === 'number'
+      && stage.width > 1
+      && stage.height > 1
+      && canvas.width > 0
+      && canvas.height > 0
+    ) {
+      const scaleX = stage.width / canvas.width
+      const scaleY = stage.height / canvas.height
+      const offset = this.#session.offset
+      return teacherControllerLocalPointFromClient(
+        client,
+        {
+          left: stage.left + (this.#node.x + offset.dx) * scaleX,
+          top: stage.top + (this.#node.y + offset.dy) * scaleY,
+          width: Math.max(1, this.#node.width * scaleX),
+          height: Math.max(1, this.#node.height * scaleY),
+        },
+        this.#node,
+      )
+    }
+    const rect = this.#root.getBoundingClientRect()
+    const width = rect.width > 1 ? rect.width : this.#node.width
+    const height = rect.height > 1 ? rect.height : this.#node.height
     return teacherControllerLocalPointFromClient(
-      { x: event.clientX, y: event.clientY },
-      this.#root.getBoundingClientRect(),
+      client,
+      { left: rect.left, top: rect.top, width, height },
       this.#node,
     )
   }

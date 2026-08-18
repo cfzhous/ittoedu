@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { TeacherControllerAction } from '@/shared/projectTypes'
 import {
   PUBLISHED_COURSE_FORMAT,
   PUBLISHED_COURSE_VERSION,
@@ -33,6 +34,119 @@ function textStyle() {
     backgroundColor: '#ffffff',
     backgroundOpacity: 0,
     cornerRadius: 0,
+  }
+}
+
+function publishedImage(
+  layerItemId: string,
+  assetId: string,
+  frame: { x: number; y: number; width: number; height: number },
+  order: number,
+): PublishedNativeLayerItem {
+  return {
+    layerItemId,
+    frame: { mode: 'absolute', ...frame },
+    order,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'image',
+      data: {
+        assetId,
+        preserveAspectRatio: true,
+        fit: 'contain',
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        cropX: 0.5,
+        cropY: 0.5,
+        flipX: false,
+        flipY: false,
+        cornerRadius: 0,
+        feather: { amount: 0, mode: 'rectangle' },
+        safeAreas: [],
+      },
+    },
+  }
+}
+
+function publishedVideo(
+  layerItemId: string,
+  assetId: string,
+  frame: { x: number; y: number; width: number; height: number },
+  order: number,
+): PublishedNativeLayerItem {
+  return {
+    layerItemId,
+    frame: { mode: 'absolute', ...frame },
+    order,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'video',
+      data: {
+        assetId,
+        fit: 'contain',
+        autoplay: false,
+        loop: false,
+        muted: false,
+        volume: 1,
+        playbackRate: 1,
+        showControls: true,
+        clickToToggle: true,
+        startTime: 0,
+        endTime: null,
+        poster: { mode: 'video-frame', time: 0 },
+        backgroundAudioMode: 'duck',
+      },
+    },
+  }
+}
+
+function teacherController(
+  layerItemId: string,
+  frame: { x: number; y: number; width: number; height: number },
+  order: number,
+): PublishedNativeLayerItem {
+  return {
+    layerItemId,
+    frame: { mode: 'absolute', ...frame },
+    order,
+    visible: true,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'native',
+    content: {
+      nativeType: 'teacher-controller',
+      data: {
+        title: '课堂导航',
+        compact: false,
+        showSceneProgress: true,
+        collapsible: true,
+        defaultCollapsed: false,
+        buttons: [
+          { id: 'prev', action: { type: 'scene.previous' }, label: '上一', visible: true },
+          { id: 'next', action: { type: 'scene.next' }, label: '下一', visible: true },
+          { id: 'go', action: { type: 'scene.go', sceneId: 'loc-detail' }, label: '跳转', visible: true },
+        ],
+        style: {
+          backgroundColor: '#0b1720',
+          backgroundOpacity: 0.9,
+          accentColor: '#d9bf73',
+          textColor: '#f3eee0',
+          cornerRadius: 8,
+        },
+        includeInStaticExports: false,
+      },
+    },
   }
 }
 
@@ -251,6 +365,84 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
     await host.resume()
     expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1 })
     expect(host.publishedCameraSnapshot().home).toEqual({ x: 0, y: 0, zoom: 1 })
+
+    await host.destroy()
+  })
+})
+
+describe('SpatialSurfaceHost playback video and controller actions', () => {
+  function playbackCourse(): PublishedCourseV2Payload {
+    const course = publishedCourse()
+    const spatial = course.surfaces[0]
+    if (spatial?.type !== 'spatial-2d') throw new Error('expected spatial')
+    spatial.world.layerItems.push(
+      publishedImage('world-missing-image', 'missing', { x: 40, y: 40, width: 80, height: 60 }, 4),
+      publishedVideo('world-video', 'clip', { x: 120, y: 40, width: 160, height: 90 }, 5),
+    )
+    course.globalLayerItems.push({
+      item: teacherController('global-controller', { x: 24, y: 180, width: 220, height: 48 }, 9),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    course.assets = {
+      clip: { mimeType: 'video/mp4', url: 'https://example.test/clip.mp4' },
+    }
+    return course
+  }
+
+  it('renders world video and does not append an empty SVG image href', async () => {
+    const course = playbackCourse()
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT, {
+      resolveAsset: (assetId) => course.assets[assetId]?.url,
+    })
+    await host.mount(container)
+    await host.activate()
+
+    const world = container.querySelector<SVGGElement>('[data-spatial-world]')!
+    const video = world.querySelector('video')
+    expect(video).not.toBeNull()
+    expect(video?.controls).toBe(true)
+    expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
+    expect(world.querySelector('image[href=""]')).toBeNull()
+    expect(world.querySelector('[data-layer-item-id="world-missing-image"] image')).toBeNull()
+
+    await host.destroy()
+  })
+
+  it('forwards scene.next through executeTeacherControllerAction without local tour walk', async () => {
+    const actions: TeacherControllerAction[] = []
+    const course = playbackCourse()
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT, {
+      executeTeacherControllerAction: (action) => {
+        actions.push(action)
+        return true
+      },
+    })
+    await host.mount(container)
+    await host.activate()
+
+    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    next.click()
+    await vi.waitFor(() => {
+      expect(actions).toEqual([{ type: 'scene.next' }])
+    })
+    expect(host.locationId).toBe('loc-home')
+
+    await host.destroy()
+  })
+
+  it('hides the teacher controller when playbackControls is none', async () => {
+    const course = playbackCourse()
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT, {
+      playbackControls: 'none',
+    })
+    await host.mount(container)
+    await host.activate()
+
+    const controller = container.querySelector<HTMLElement>('[data-layer-item-id="global-controller"]')!
+    expect(controller.hidden).toBe(true)
 
     await host.destroy()
   })

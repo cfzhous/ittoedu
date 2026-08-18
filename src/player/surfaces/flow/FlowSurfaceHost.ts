@@ -152,7 +152,7 @@ export class FlowSurfaceHost {
       const overlay = dom.createElement('div')
       overlay.className = 'flow-runtime-overlay'
       overlay.dataset.testid = 'flow-runtime-overlay'
-      overlay.style.position = 'fixed'
+      overlay.style.position = 'absolute'
       overlay.style.top = '0'
       overlay.style.right = '0'
       overlay.style.bottom = '0'
@@ -285,6 +285,7 @@ export class FlowSurfaceHost {
   #mountTeacherController(item: PublishedNativeLayerItem): void {
     const overlay = this.#overlay
     if (!overlay || item.content.nativeType !== 'teacher-controller') return
+    if (this.#playback.playback?.controls === 'none') return
     const data = item.content.data
     const frame = item.frame
     const dom = overlay.ownerDocument
@@ -293,20 +294,20 @@ export class FlowSurfaceHost {
     frameEl.dataset.testid = 'flow-runtime-teacher-controller'
     frameEl.dataset.layerItemId = item.layerItemId
     frameEl.style.position = 'absolute'
-    frameEl.style.left = `${frame.x}px`
-    frameEl.style.top = `${frame.y}px`
+    const session = this.#controllerSessions.get(item.layerItemId) ?? {
+      offset: { dx: 0, dy: 0 },
+      collapsed: data.defaultCollapsed === true,
+    }
+    if (!this.#controllerSessions.has(item.layerItemId)) {
+      this.#controllerSessions.set(item.layerItemId, session)
+    }
+    frameEl.style.left = `${frame.x + session.offset.dx}px`
+    frameEl.style.top = `${frame.y + session.offset.dy}px`
     frameEl.style.width = `${frame.width}px`
     frameEl.style.height = `${frame.height}px`
     frameEl.style.pointerEvents = 'auto'
     frameEl.style.zIndex = String(item.order)
     overlay.appendChild(frameEl)
-
-    if (!this.#controllerSessions.has(item.layerItemId)) {
-      this.#controllerSessions.set(item.layerItemId, {
-        offset: { dx: 0, dy: 0 },
-        collapsed: data.defaultCollapsed === true,
-      })
-    }
 
     const node = teacherControllerDomNode(
       { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
@@ -333,7 +334,8 @@ export class FlowSurfaceHost {
         }
       },
       scenes,
-      getCurrentSceneId: () => this.#surfaceId,
+      getCurrentSceneId: () => this.#options.courseProgressSource?.getCurrentLocationId()
+        ?? this.#surfaceId,
       getStateLabel: () => this.#options.courseProgressSource?.getStateLabel() ?? null,
       getStatus: () => ({
         muted: this.#audio.muted(),
@@ -345,6 +347,8 @@ export class FlowSurfaceHost {
       },
       onSessionChange: (next) => {
         this.#controllerSessions.set(item.layerItemId, next)
+        frameEl.style.left = `${frame.x + next.offset.dx}px`
+        frameEl.style.top = `${frame.y + next.offset.dy}px`
       },
       onAction: (action) => {
         void this.#handleControllerAction(action)
@@ -370,9 +374,11 @@ export class FlowSurfaceHost {
 
   async #handleControllerAction(action: TeacherControllerAction): Promise<void> {
     if (this.#options.executeTeacherControllerAction) {
-      await this.#options.executeTeacherControllerAction(action)
-      this.#controller?.refreshStatus()
-      return
+      const handled = await this.#options.executeTeacherControllerAction(action)
+      if (handled !== false) {
+        this.#controller?.refreshStatus()
+        return
+      }
     }
     if (action.type === 'audio.toggle-mute') {
       this.#audio.toggleMuted()
@@ -395,6 +401,20 @@ export class FlowSurfaceHost {
     }
     if (action.type === 'scene.previous' && index > 0) {
       await this.#goToSurface(order[index - 1]!)
+      return
+    }
+    if (action.type === 'scene.go') {
+      try {
+        const location = resolveFlowLocation(this.#playback, action.sceneId)
+        this.#options.onNavigateLocation?.(location.id)
+        await this.setLocationId(location.id)
+      } catch {
+        const match = this.#playback.locations.find((location) => location.id === action.sceneId)
+        if (match) {
+          this.#options.onNavigateLocation?.(match.id)
+          await this.setLocationId(match.id)
+        }
+      }
       return
     }
     if (action.type === 'course.restart' || action.type === 'scene.replay') {
@@ -502,7 +522,9 @@ function renderStaticOverlayItem(
   wrap.style.width = `${entry.item.frame.width}px`
   wrap.style.height = `${entry.item.frame.height}px`
   wrap.style.opacity = String(entry.item.opacity)
-  wrap.style.pointerEvents = 'none'
+  wrap.style.pointerEvents = entry.item.kind === 'native' && entry.item.content.nativeType === 'video'
+    ? 'auto'
+    : 'none'
   wrap.style.zIndex = String(entry.item.order)
   if (entry.item.kind === 'native' && entry.item.content.nativeType === 'image') {
     const url = resolveAsset(entry.item.content.data.assetId)
@@ -516,6 +538,20 @@ function renderStaticOverlayItem(
       wrap.appendChild(image)
       return wrap
     }
+  }
+  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'video') {
+    const url = resolveAsset(entry.item.content.data.assetId)
+    if (url) {
+      const video = dom.createElement('video')
+      video.controls = true
+      video.src = url
+      video.style.width = '100%'
+      video.style.height = '100%'
+      video.style.objectFit = 'contain'
+      video.style.pointerEvents = 'auto'
+      wrap.appendChild(video)
+    }
+    return wrap
   }
   if (entry.item.kind === 'native' && entry.item.content.nativeType === 'text') {
     wrap.textContent = entry.item.content.data.text

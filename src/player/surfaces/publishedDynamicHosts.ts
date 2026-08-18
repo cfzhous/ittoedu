@@ -1,8 +1,11 @@
+import type { CourseLocation } from '../../shared/courseProjectTypes'
+import type { TeacherControllerAction } from '../../shared/projectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import { CoursePlayer, type CoursePlayerOptions } from './CoursePlayer'
 import { FlowSurfaceHost } from './flow/FlowSurfaceHost'
 import {
   MixedCourseNavigator,
+  buildMixedDeepLink,
   mixedCourseDefinitionFromPublished,
   type MixedCatalogEntry,
   type MixedCourseProgress,
@@ -194,11 +197,50 @@ export function createPublishedCourseSession(
   return new PublishedCourseSession(player, navigator, hosts)
 }
 
+/**
+ * Maps teacher-controller navigation actions onto Published V2 location order.
+ * Mute/fullscreen and unknown actions return null so the surface host can handle them.
+ */
+export function publishedControllerNavigationTarget(
+  action: TeacherControllerAction,
+  input: {
+    locations: readonly CourseLocation[]
+    currentLocationId: string
+    startLocationId: string
+  },
+): CourseLocation | null {
+  const { locations, currentLocationId, startLocationId } = input
+  const index = locations.findIndex((location) => location.id === currentLocationId)
+  if (action.type === 'scene.next') {
+    return index >= 0 && index < locations.length - 1 ? locations[index + 1]! : null
+  }
+  if (action.type === 'scene.previous') {
+    return index > 0 ? locations[index - 1]! : null
+  }
+  if (action.type === 'course.restart') {
+    return locations.find((location) => location.id === startLocationId) ?? locations[0] ?? null
+  }
+  if (action.type === 'scene.replay') {
+    return locations[index] ?? locations.find((location) => location.id === currentLocationId) ?? null
+  }
+  if (action.type === 'scene.go') {
+    return locations.find((location) => (
+      location.id === action.sceneId
+      || (location.kind === 'slide-scene' && location.sceneId === action.sceneId)
+      || (location.kind === 'flow-block' && location.blockId === action.sceneId)
+      || (location.kind === 'spatial-camera' && location.cameraFrameId === action.sceneId)
+    )) ?? null
+  }
+  return null
+}
+
 class FlowPublishedAdapter implements SurfaceHost {
   readonly kind = 'flow' as const
   readonly id: string
   readonly #host: FlowSurfaceHost
+  readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
+  #services: SurfacePlayerServices | null = null
 
   constructor(
     payload: PublishedCourseV2Payload,
@@ -207,15 +249,26 @@ class FlowPublishedAdapter implements SurfaceHost {
     resolveAsset: (assetId: string) => string | undefined,
   ) {
     this.id = surfaceId
+    this.#payload = payload
     this.#startLocationId = startLocationId
     this.#host = new FlowSurfaceHost(payload, {
       surfaceId,
       locationId: startLocationId,
       resolveAsset,
+      courseProgressSource: {
+        getLocations: () => this.#payload.locations.map((location) => ({
+          id: location.id,
+          name: location.label,
+        })),
+        getCurrentLocationId: () => this.#host.locationId,
+        getStateLabel: () => null,
+      },
+      executeTeacherControllerAction: (action) => this.#executeControllerAction(action),
     })
   }
 
   async mount(context: SurfaceMountContext): Promise<void> {
+    this.#services = context.services
     await this.#host.mount(context.container)
   }
 
@@ -255,6 +308,21 @@ class FlowPublishedAdapter implements SurfaceHost {
 
   async destroy(): Promise<void> {
     await this.#host.destroy()
+    this.#services = null
+  }
+
+  async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+    const target = publishedControllerNavigationTarget(action, {
+      locations: this.#payload.locations,
+      currentLocationId: this.#host.locationId,
+      startLocationId: this.#payload.startLocationId,
+    })
+    if (!target) return false
+    await this.#services?.navigate(buildMixedDeepLink({
+      locationId: target.id,
+      surfaceId: target.surfaceId,
+    }))
+    return true
   }
 }
 
@@ -262,7 +330,9 @@ class SpatialPublishedAdapter implements SurfaceHost {
   readonly kind = 'spatial-2d' as const
   readonly id: string
   readonly #host: SpatialSurfaceHost
+  readonly #payload: PublishedCourseV2Payload
   readonly #startLocationId: string
+  #services: SurfacePlayerServices | null = null
 
   constructor(
     payload: PublishedCourseV2Payload,
@@ -272,15 +342,27 @@ class SpatialPublishedAdapter implements SurfaceHost {
     resolveAsset: (assetId: string) => string | undefined,
   ) {
     this.id = surfaceId
+    this.#payload = payload
     this.#startLocationId = startLocationId
     this.#host = SpatialSurfaceHost.fromPublishedCourse(payload, viewport, {
       surfaceId,
       locationId: startLocationId,
       resolveAsset,
+      playbackControls: payload.playback.controls === 'none' ? 'none' : 'canvas',
+      courseProgressSource: {
+        getLocations: () => this.#payload.locations.map((location) => ({
+          id: location.id,
+          name: location.label,
+        })),
+        getCurrentLocationId: () => this.#host.locationId,
+        getStateLabel: () => null,
+      },
+      executeTeacherControllerAction: (action) => this.#executeControllerAction(action),
     })
   }
 
   async mount(context: SurfaceMountContext): Promise<void> {
+    this.#services = context.services
     await this.#host.mount(context.container)
     const root = this.#host.rootElement
     if (root) root.hidden = true
@@ -322,6 +404,21 @@ class SpatialPublishedAdapter implements SurfaceHost {
 
   async destroy(): Promise<void> {
     await this.#host.destroy()
+    this.#services = null
+  }
+
+  async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+    const target = publishedControllerNavigationTarget(action, {
+      locations: this.#payload.locations,
+      currentLocationId: this.#host.locationId,
+      startLocationId: this.#payload.startLocationId,
+    })
+    if (!target) return false
+    await this.#services?.navigate(buildMixedDeepLink({
+      locationId: target.id,
+      surfaceId: target.surfaceId,
+    }))
+    return true
   }
 }
 

@@ -122,14 +122,42 @@ function createWorldItem(dom: Document, item: PublishedLayerItem, resolveAsset: 
   const group = dom.createElementNS(SVG_NS, 'g')
   const { frame } = item
   if (item.kind === 'native' && item.content.nativeType === 'image') {
-    const image = dom.createElementNS(SVG_NS, 'image')
-    image.setAttribute('href', resolveAsset(item.content.data.assetId) ?? '')
-    image.setAttribute('x', String(frame.x))
-    image.setAttribute('y', String(frame.y))
-    image.setAttribute('width', String(frame.width))
-    image.setAttribute('height', String(frame.height))
-    image.setAttribute('preserveAspectRatio', 'xMidYMid meet')
-    group.appendChild(image)
+    const url = resolveAsset(item.content.data.assetId)
+    if (url) {
+      const image = dom.createElementNS(SVG_NS, 'image')
+      image.setAttribute('href', url)
+      image.setAttribute('x', String(frame.x))
+      image.setAttribute('y', String(frame.y))
+      image.setAttribute('width', String(frame.width))
+      image.setAttribute('height', String(frame.height))
+      image.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+      group.appendChild(image)
+    }
+  } else if (item.kind === 'native' && item.content.nativeType === 'video') {
+    const url = resolveAsset(item.content.data.assetId)
+    if (url) {
+      const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
+      foreign.setAttribute('x', String(frame.x))
+      foreign.setAttribute('y', String(frame.y))
+      foreign.setAttribute('width', String(frame.width))
+      foreign.setAttribute('height', String(frame.height))
+      const holder = dom.createElement('div')
+      holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+      holder.style.width = '100%'
+      holder.style.height = '100%'
+      holder.style.pointerEvents = 'auto'
+      const video = dom.createElement('video')
+      video.controls = true
+      video.src = url
+      video.style.width = '100%'
+      video.style.height = '100%'
+      video.style.objectFit = 'contain'
+      video.style.display = 'block'
+      video.style.pointerEvents = 'auto'
+      holder.appendChild(video)
+      foreign.appendChild(holder)
+      group.appendChild(foreign)
+    }
   } else if (item.kind === 'native' && item.content.nativeType === 'text') {
     const text = dom.createElementNS(SVG_NS, 'text')
     text.textContent = item.content.data.text
@@ -699,8 +727,18 @@ export class SpatialSurfaceHost {
     item: PublishedNativeLayerItem,
   ): Promise<void> {
     if (this.#options.executeTeacherControllerAction) {
-      await this.#options.executeTeacherControllerAction(action, item)
-    } else if (action.type === 'scene.next') {
+      const handled = await this.#options.executeTeacherControllerAction(action, item)
+      if (handled !== false) {
+        const CustomEventConstructor = this.#root?.ownerDocument.defaultView?.CustomEvent
+        if (CustomEventConstructor && this.#root) {
+          this.#root.dispatchEvent(new CustomEventConstructor('courseware:teacher-controller-action', {
+            detail: action,
+          }))
+        }
+        return
+      }
+    }
+    if (action.type === 'scene.next') {
       await this.goNext()
     } else if (action.type === 'scene.previous') {
       await this.goPrevious()
