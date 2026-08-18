@@ -48,18 +48,18 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T1](T1_B_SWITCH.md) **B** | 生产写入与夹具改为 `canvas-runtime` / `surface-runtime`；旧判别器已删 |
 | [T1](T1_C_AUDIT.md) **C** | 顶层 `.strict()`；未知键测试；`PROJECT_SCHEMA_VERSION` 仍为 8 |
 | [T6-tc-tests](T6_TC_TESTS.md) | 测试与 `validate-project.ts` 对齐 V9 archive / slide-authoring |
+| [T1](T1_A_MOVE.md) **A** | 合同源文件在 `src/shared/contracts/**`；旧路径 re-export；Published Flow/Spatial `backgroundColor?` |
 
 **可领取（互斥见表）**
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [T1-A](T1_A_MOVE.md) | `cursor/t1-a-move-de5c` | 合同源文件迁入 `contracts/`；含 Published 画布色对齐 |
+| [T6](T6_FREEZE.md) 重开 | `cursor/t6-freeze-resume-de5c` | 从 `npm test` 开始；已绿 `check:contracts` / `typecheck` 不重跑；整轮五条只一次 |
 
 **必须等待**
 
 | 任务 | 等什么 |
 |---|---|
-| [T6](T6_FREEZE.md) 重开 | T1-C、T6-tc-tests 已合入。等 T1-A 合入后只追仍红的 `typecheck`；已绿不重跑；整轮五条只在红项清完后一次 |
 | 发布 tag / `accepted` | 教师明确验收 |
 
 ## 卫生清理（12.1 已完成，不要重做）
@@ -79,10 +79,10 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
          P1 P2 P3 P4 P5-CSS P5-persist P6 P7 P8
 
 现在可并行（分 worktree）：
-  T1-A
+  T6 freeze 重开（红项优先）
 
 然后：
-  T1-A 合入 → 重开 T6（只追红项；整轮五条只一次）
+  教师视觉复核与 accepted；不要由自动化打发布 tag
   教师视觉复核与 accepted；不要由自动化打发布 tag
 ```
 

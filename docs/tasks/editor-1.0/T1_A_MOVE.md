@@ -1,6 +1,6 @@
 # T1-A 合同源文件迁入 `src/shared/contracts/`
 
-> 状态：**可领取**（本轮冻结收口；必须在重开 T6 全量之前）  
+> 状态：**已合入，禁止重做**  
 > 并行：可与 [T1-C](T1_C_AUDIT.md)、[T6-tc-tests](T6_TC_TESTS.md) 分树。**不要**再领 [T6-tc-published](T6_TC_PUBLISHED.md)，那张卡并进本任务。  
 > 合同变化：允许 Published Flow/Spatial **additive** `backgroundColor?`；不改 Runtime 判别器  
 > 工人先读：[02_WORKER.md](02_WORKER.md)

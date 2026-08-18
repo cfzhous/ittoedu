@@ -1,9 +1,9 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**全量未通过**。T1-C 与 T6-tc-tests 已合入。重开前先合 [T1-A](T1_A_MOVE.md)。  
+> 状态：**typecheck 已绿**。T1-A / T1-C / T6-tc-tests 已合入。下一条未跑命令是 `npm test`。不要重跑已绿的 `check:contracts` / `typecheck`。  
 > 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
-> **本包唯一允许跑 `npm test` / e2e / `build:desktop` 的任务。** 修红过程中不要把五条命令当循环。T1-A / T6-tc-tests 可跑当前红命令 `typecheck`。
+> **本包唯一允许跑 `npm test` / e2e / `build:desktop` 的任务。** 修红过程中不要把五条命令当循环。`typecheck` 已在合入 T1-A 后由父代理跑绿，不要重跑。
 
 预备切片已合入：[T6-docs](T6_DOCS.md)、[T6-scan](T6_SCAN.md)、[T1-D](T1_D_CONTRACTS_GEN.md)、[T6-CI](T6_CI.md)、[T6-nav](T6_NAV.md)。  
 T1-A / T1-C 已纳入本轮冻结，必须在重开 T6 全量之前合入。扫描仍可白名单 `migrateProjectV8ToCourseProjectV9`。`legacy-runtime-v2` / `legacy-whole-canvas` 的 src 白名单必须保持 `[]`。不要在 T6 偷偷改判别器。
@@ -15,25 +15,24 @@ T1-A / T1-C 已纳入本轮冻结，必须在重开 T6 全量之前合入。扫�
 
 从**当前第一条红命令**继续，不要把已绿步骤重跑一遍。修红时只跑失败的命令或失败的测试文件。整轮五条只在红项清完后跑 **一次**。不要打发布 tag，不要宣称 Editor 1.0 已发布。
 
-## 已绿 / 当前红（以已合入的 T6_FREEZE_HANDOFF 为准）
+## 已绿 / 当前红（以本表为准；旧 HANDOFF 只记录第一次 fail-stop）
 
 | 命令 | 状态 | 重开时 |
 |---|---|---|
-| `npm run check:contracts` | 已绿 | 除非本轮改了 `artifacts/contracts/**`，否则 **不要重跑** |
-| `npm run typecheck` | **红** | 只追这一条，直到绿 |
-| `npm test` | 未跑 | typecheck 绿之前 **不要跑** |
-| `npm run build:desktop` | 未跑 | 前序红时 **不要跑** |
+| `npm run check:contracts` | 已绿 | **不要重跑**（除非又改了 `artifacts/contracts/**`） |
+| `npm run typecheck` | 已绿（合入 T1-A 后；并去掉 e2e 重复 `closeCoursePreviewOverlay`） | **不要重跑** |
+| `npm test` | 未跑 | **从这里开始** |
+| `npm run build:desktop` | 未跑 | `npm test` 绿之前 **不要跑** |
 | `npm run test:e2e` | 未跑 | 前序红时 **不要跑** |
 
 ## 逐步算法
 
-1. 读最新 `T6_FREEZE_HANDOFF.md`，从第一条仍红的命令接着做，不要从 `check:contracts` 重来。
-2. 修 typecheck：只跑 `npm run typecheck`（或 `npx tsc --noEmit` 看同一套错误）。不要顺带 `npm test`。
-3. typecheck 变绿后，才跑 `npm test`。若 `npm test` 红：记下失败文件，**只** `npx vitest run <失败文件>` 直到那些文件绿，不要每改一次就 `npm test` 整包。那一批文件都绿之后，再 `npm test` **一次**确认没有新红。
-4. `npm test` 绿后才 `npm run build:desktop`，再 `npm run test:e2e`。中途失败同样只追红，不回头重跑已绿命令。
-5. 上述都绿之后，整轮五条只再跑 **一次** 写入最终 HANDOFF。这是本冻结允许的唯一完整全量。
-6. 若五条一次通过：再扩展 CI（保留 `check:contracts`，加 typecheck 与 `npm test`）。Electron 在 `ubuntu-latest` 不稳就不要加假绿 job。
-7. 写 HANDOFF：每条命令何时绿过、本轮重跑了几次、最后一次整轮结果。明确未视觉复核、未 accepted、未打 tag。
+1. 读本卡状态表，从第一条仍红/未跑的命令接着做。当前从 `npm test` 开始，不要从 `check:contracts` 或 `typecheck` 重来。
+2. 跑 `npm test`。若红：记下失败文件，**只** `npx vitest run <失败文件>` 直到那些文件绿，不要每改一次就 `npm test` 整包。那一批文件都绿之后，再 `npm test` **一次**确认没有新红。
+3. `npm test` 绿后才 `npm run build:desktop`，再 `npm run test:e2e`。中途失败同样只追红，不回头重跑已绿命令。
+4. 上述都绿之后，整轮五条只再跑 **一次** 写入最终 HANDOFF。这是本冻结允许的唯一完整全量。不要为了写 HANDOFF 在修红循环里反复全量。
+5. 若五条一次通过：再扩展 CI（保留 `check:contracts`，加 typecheck 与 `npm test`）。Electron 在 `ubuntu-latest` 不稳就不要加假绿 job。
+6. 写 HANDOFF：每条命令何时绿过、本轮各条重跑了几次、最后一次整轮结果。明确未视觉复核、未 accepted、未打 tag。
 
 
 ## 允许修改
@@ -54,7 +53,7 @@ docs/tasks/editor-1.0/T6_FREEZE_HANDOFF.md
 - 为了绿而删测试、放宽 schema、把失败命令从 CI 拿掉。
 - 运行完整 `npm run verify:full`，除非 HANDOFF 说明教师清单要求。
 - 把 Vite `chunks larger than 500 kB` 当缺陷修。
-- **修红过程中**把五条命令从头再跑一遍。已绿的 `check:contracts` 不要重跑。`npm test` / desktop / e2e 在 typecheck 仍红时不要开跑。
+- **修红过程中**把五条命令从头再跑一遍。已绿的 `check:contracts` / `typecheck` 不要重跑。`build:desktop` / e2e 在 `npm test` 仍红时不要开跑。
 
 ## 分支与收口
 

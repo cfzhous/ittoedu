@@ -6,10 +6,10 @@
 
 | 切片 | 卡 | 分支 |
 |---|---|---|
-| 合同真迁移 + Published 类型对齐 | [T1-A](T1_A_MOVE.md) | `cursor/t1-a-move-de5c` |
+| 合同真迁移 + Published 类型对齐 | [T1-A](T1_A_MOVE.md) | **已合入** |
 | 顶层字段审计 | [T1-C](T1_C_AUDIT.md) | **已合入** |
 | 测试与 validate-project | [T6-tc-tests](T6_TC_TESTS.md) | **已合入** |
 
 禁止改 Runtime 判别器、打 tag、宣称 Editor 1.0 已发布。
 
-三张卡都不要跑 `npm test` / e2e / desktop。绿过的 `check:contracts` 不要重跑（T1-A commit 2 除外，因为它改 `generate-contracts.ts`）。T1-A 与 T6-tc-tests 允许只跑当前红命令 `npm run typecheck`；T1-C 只跑自己的新测文件。不要宣称 freeze 完成。
+三张定向修复卡均已合入。不要再领取。T6 freeze 按红项优先重开。
