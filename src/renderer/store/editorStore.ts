@@ -2826,6 +2826,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       statusMessage?: string | null
       componentPackages?: Record<string, ComponentPackageData>
       clearClipboard?: boolean
+      canvasMode?: CanvasMode
     } = {},
   ) => {
     const snapshot = backend.getSnapshot()
@@ -2856,7 +2857,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selectedNodeId: snapshot.selection.selectionIds.at(-1) ?? null,
       editingTextNodeId: null,
       textEditSession: null,
-      canvasMode: 'edit',
+      canvasMode: extra.canvasMode ?? 'edit',
       errorMessage: null,
       history: v9HistoryToStoreHistory(backend.getSession().history),
       dirty: extra.dirty ?? false,
@@ -3134,6 +3135,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       dirty?: boolean
       statusMessage?: string | null
       componentPackages?: Record<string, ComponentPackageData>
+      canvasMode?: CanvasMode
     } = {},
   ) => {
     const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
@@ -3159,7 +3161,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selectedNodeId: session.selection.selectionIds.at(-1) ?? null,
       editingTextNodeId: null,
       textEditSession: null,
-      canvasMode: 'edit',
+      canvasMode: extra.canvasMode ?? 'edit',
       errorMessage: null,
       history: spatialHistoryToStoreHistory(session.history),
       dirty: extra.dirty ?? false,
@@ -3342,6 +3344,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       dirty?: boolean
       statusMessage?: string | null
       componentPackages?: Record<string, ComponentPackageData>
+      canvasMode?: CanvasMode
     } = {},
   ) => {
     const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
@@ -3366,7 +3369,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       selectedNodeId: session.selection.selectedOverlayIds.at(-1) ?? null,
       editingTextNodeId: null,
       textEditSession: null,
-      canvasMode: 'edit',
+      canvasMode: extra.canvasMode ?? 'edit',
       errorMessage: null,
       history: v9HistoryToStoreHistory(session.history),
       dirty: extra.dirty ?? false,
@@ -5091,6 +5094,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         dirty: state.dirty,
         componentPackages: state.componentPackages,
         statusMessage: null as string | null,
+        ...(state.canvasMode === 'run' ? { canvasMode: 'run' as const } : {}),
       }
 
       if (location.kind === 'flow-block') {
@@ -5743,7 +5747,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ...commitTextEditSessionState(state),
         activePresentationStateId,
         editingScope: 'scene',
-        canvasMode: activePresentationStateId === null ? 'edit' : state.canvasMode,
+        canvasMode: state.canvasMode,
         selectedNodeId: null,
         selectedNodeIds: [],
         editingTextNodeId: null,
