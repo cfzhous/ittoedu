@@ -69,11 +69,10 @@ import {
   planMediaBatchImport,
   type MediaBatchLibraryFallback,
 } from './project/mediaBatch'
-import { openDefaultCourseProjectAsync, formatCourseProjectV8ImportReport, saveCourseProjectDocumentAsync } from './project/courseProjectIo'
+import { openDefaultCourseProjectAsync, saveCourseProjectDocumentAsync } from './project/courseProjectIo'
 import {
   inspectCourseProjectArchiveIdentity,
   type CourseProjectArchiveData,
-  type CourseProjectV8ImportResult,
 } from './project/courseProjectArchive'
 import { shouldOfferCourseProjectRecovery } from './project/courseProjectLifecycle'
 import {
@@ -405,11 +404,6 @@ export default function App() {
     title: string
     message: string
   } | null>(null)
-  const [v8ImportPending, setV8ImportPending] = useState<{
-    result: CourseProjectV8ImportResult
-    afterLoad?: { dirty: boolean; statusMessage: string }
-  } | null>(null)
-  const [v8ImportReport, setV8ImportReport] = useState<string | null>(null)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [exportPreflightReport, setExportPreflightReport] =
@@ -555,26 +549,9 @@ export default function App() {
     bytes: Uint8Array,
     path: string | null,
     extra?: { dirty?: boolean; statusMessage?: string },
-  ): Promise<'loaded' | 'pending-import'> => {
-    const opened = await openDefaultCourseProjectAsync(bytes)
-    if (opened.kind === 'v9') {
-      applyCourseArchive(opened.archive, path, extra)
-      return 'loaded'
-    }
-    setV8ImportPending({
-      result: opened.pending,
-      afterLoad: extra?.dirty || extra?.statusMessage
-        ? {
-            dirty: Boolean(extra.dirty),
-            statusMessage: extra.statusMessage
-              ?? '已导入旧版工程。原文件未改写，请另存为当前课程工程。',
-          }
-        : {
-            dirty: true,
-            statusMessage: '已导入旧版工程。原文件未改写，请另存为当前课程工程。',
-          },
-    })
-    return 'pending-import'
+  ): Promise<void> => {
+    const archive = await openDefaultCourseProjectAsync(bytes)
+    applyCourseArchive(archive, path, extra)
   }, [applyCourseArchive])
 
   const handleNew = useCallback(() => {
@@ -612,8 +589,7 @@ export default function App() {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openProject()
       if (!file) return
-      const outcome = await ingestOpenedCourseBytes(file.bytes, file.path)
-      if (outcome === 'pending-import') return
+      await ingestOpenedCourseBytes(file.bytes, file.path)
       await desktopApi().clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
@@ -625,8 +601,7 @@ export default function App() {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openRecentProject({ path })
-      const outcome = await ingestOpenedCourseBytes(file.bytes, file.path)
-      if (outcome === 'pending-import') return
+      await ingestOpenedCourseBytes(file.bytes, file.path)
       await desktopApi().clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
@@ -1827,7 +1802,7 @@ export default function App() {
         onConfirm={() => {
           if (!recoveryProject) return
           void run(async () => {
-            const outcome = await ingestOpenedCourseBytes(
+            await ingestOpenedCourseBytes(
               recoveryProject.bytes,
               null,
               {
@@ -1838,36 +1813,8 @@ export default function App() {
             await desktopApi().clearRecoveryProject()
             setRecoveryProject(null)
             setRecoveryDecisionComplete(true)
-            if (outcome === 'pending-import') return
           }, '恢复课件失败。恢复副本可能已经损坏。')
         }}
-      />
-      <ConfirmDialog
-        open={v8ImportPending !== null}
-        title="需要显式导入旧版工程"
-        message={v8ImportPending
-          ? `${formatCourseProjectV8ImportReport(v8ImportPending.result.report)}\n\n不会静默转换成当前课程工程。确认导入后请另存为新文件，原文件保持不变。`
-          : ''}
-        confirmLabel="导入为当前课程工程"
-        cancelLabel="取消"
-        onCancel={() => setV8ImportPending(null)}
-        onConfirm={() => {
-          const pending = v8ImportPending
-          if (!pending) return
-          applyCourseArchive(pending.result, null, pending.afterLoad)
-          setV8ImportReport(formatCourseProjectV8ImportReport(pending.result.report))
-          setV8ImportPending(null)
-          void desktopApi().clearRecoveryProject().catch((error) => {
-            console.error('清理恢复数据失败', error)
-          })
-          void refreshRecentProjects()
-        }}
-      />
-      <CopyableSummaryDialog
-        open={v8ImportReport !== null}
-        title="旧版工程导入报告"
-        summary={v8ImportReport ?? ''}
-        onClose={() => setV8ImportReport(null)}
       />
       {coursePreviewOpen ? (
         <div

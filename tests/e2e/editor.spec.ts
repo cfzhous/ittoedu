@@ -220,14 +220,10 @@ async function closeCoursePreviewOverlay(page: Page) {
   await expect(overlay).toHaveCount(0)
 }
 
-async function confirmLegacyCourseImport(page: Page): Promise<void> {
-  const importDialog = page.getByRole('alertdialog', { name: '需要显式导入旧版工程' })
-  await expect(importDialog).toBeVisible()
-  await importDialog.getByRole('button', { name: '导入为当前课程工程' }).click()
-  const report = page.getByRole('dialog', { name: '旧版工程导入报告' })
-  await expect(report).toBeVisible()
-  await report.getByRole('button', { name: '完成' }).click()
-  await expect(report).toHaveCount(0)
+async function closeCoursePreviewOverlay(page: Page) {
+  const overlay = page.getByTestId('course-preview-overlay')
+  await overlay.getByRole('button', { name: '关闭预览' }).click()
+  await expect(overlay).toHaveCount(0)
 }
 
 function readSavedCourseProjectArchive(filePath: string): {
@@ -1123,7 +1119,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         imageOpen: replacementImagePath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await confirmLegacyCourseImport(page)
+      await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
+        .toHaveCount(0)
       await page.getByTestId('global-layer-entry').click()
 
       const target = page.getByRole('button', {

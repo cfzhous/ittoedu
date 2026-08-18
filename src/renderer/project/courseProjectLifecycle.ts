@@ -70,7 +70,6 @@ export function shouldOfferCourseProjectRecovery(input: {
   recovery: CourseProjectArchiveIdentity
   official: CourseProjectArchiveIdentity | null
 }): CourseProjectRecoveryOffer {
-  if (input.recovery.schemaVersion === 8) return 'ignore-legacy-default'
   if (input.recovery.schemaVersion !== 9) return 'ignore-legacy-default'
   if (!input.official || input.official.schemaVersion !== 9) return 'offer'
   if (

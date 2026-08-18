@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 9,
+  "id": "v9-slide-native",
+  "revision": 0,
+  "title": "V9 原生幻灯",
+  "createdAt": "2026-08-17T12:00:00.000Z",
+  "updatedAt": "2026-08-17T12:00:00.000Z",
+  "assets": {
+    "diagram": {
+      "id": "diagram",
+      "filename": "diagram.png",
+      "mimeType": "image/png",
+      "kind": "image",
+      "path": "assets/diagram.bin",
+      "byteLength": 7,
+      "width": 2,
+      "height": 2
+    }
+  },
+  "componentPackages": {},
+  "designTokens": {
+    "fonts": [
+      {
+        "id": "body",
+        "label": "正文",
+        "fontFamily": "\"Microsoft YaHei\", \"PingFang SC\", sans-serif"
+      }
+    ],
+    "colors": [
+      { "id": "background", "label": "背景", "color": "#ffffff" },
+      { "id": "text", "label": "正文", "color": "#1f2937" },
+      { "id": "accent", "label": "强调", "color": "#2563eb" }
+    ]
+  },
+  "media": {
+    "audio": {
+      "defaultMuted": false,
+      "masterVolume": 1,
+      "channelVolumes": { "music": 1, "narration": 1, "sfx": 1, "ui": 1, "video": 1 },
+      "sounds": {},
+      "narrationDucking": { "enabled": true, "musicVolume": 0.3, "fadeMs": 250 }
+    }
+  },
+  "playback": {
+    "controls": "none",
+    "keyboardNavigation": true,
+    "presenter": { "enabled": true, "strategy": "scene-navigation", "additionalBindings": [] }
+  },
+  "courseState": [],
+  "navigationGuards": [],
+  "globalLayerItems": [],
+  "globalInteractions": [],
+  "locations": [
+    {
+      "id": "scene_home",
+      "label": "场景 1",
+      "kind": "slide-scene",
+      "surfaceId": "slide:v9-slide-native",
+      "sceneId": "scene_home"
+    }
+  ],
+  "startLocationId": "scene_home",
+  "surfaces": [
+    {
+      "id": "slide:v9-slide-native",
+      "title": "V9 原生幻灯",
+      "type": "slide",
+      "canvas": { "width": 1280, "height": 720 },
+      "surfaceLayerItems": [],
+      "scenes": [
+        {
+          "id": "scene_home",
+          "name": "场景 1",
+          "backgroundColor": "#ffffff",
+          "backgroundAssetId": null,
+          "layerItems": [
+            {
+              "layerItemId": "image_node",
+              "label": "图片",
+              "frame": { "mode": "absolute", "x": 540, "y": 260, "width": 200, "height": 200 },
+              "order": 0,
+              "visible": true,
+              "locked": false,
+              "rotation": 0,
+              "opacity": 1,
+              "hitPolicy": "auto",
+              "playbackInitialVisibility": "inherit",
+              "kind": "native",
+              "content": {
+                "nativeType": "image",
+                "data": {
+                  "assetId": "diagram",
+                  "preserveAspectRatio": true,
+                  "fit": "contain",
+                  "crop": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+                  "cropX": 0.5,
+                  "cropY": 0.5,
+                  "flipX": false,
+                  "flipY": false,
+                  "cornerRadius": 0,
+                  "feather": { "amount": 0, "mode": "rectangle" },
+                  "safeAreas": []
+                }
+              }
+            }
+          ],
+          "presentation": {
+            "initialStateId": "state_initial",
+            "thumbnailStateId": "state_initial",
+            "states": [{ "id": "state_initial", "name": "初始", "layerItemOverrides": {} }]
+          },
+          "interactions": []
+        }
+      ]
+    }
+  ]
+}

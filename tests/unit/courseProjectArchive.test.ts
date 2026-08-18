@@ -1,27 +1,32 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import {
-  createImageNode,
-  createProject,
-} from '@/renderer/project/createProject'
+import { createImageNode, createProject } from '@/renderer/project/createProject'
+import { createBlankCourseProject, createCourseProject } from '@/renderer/project/createCourseProject'
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
-  importProjectV8ArchiveAsCourseProject,
   inspectCourseProjectArchiveIdentity,
   openCourseProjectArchive,
+  type CourseProjectArchiveData,
 } from '@/renderer/project/courseProjectArchive'
 import {
   shouldMarkCourseProjectDirty,
   shouldOfferCourseProjectRecovery,
 } from '@/renderer/project/courseProjectLifecycle'
 import { createProjectArchive, openProjectArchive } from '@/renderer/project/projectArchive'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { ComponentManifest } from '@/shared/componentTypes'
 import { UserFacingError } from '@/shared/errors'
 
 const NOW = '2026-08-17T12:00:00.000Z'
+const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/course-project-v9')
+const DIAGRAM_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
 
 function makeComponentFiles(): Record<string, Uint8Array> {
   const manifest: ComponentManifest = {
@@ -57,52 +62,80 @@ function makeV8ArchiveBytes() {
     includeDefaultController: false,
     controls: 'none',
   })
-  const imageBytes = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
+  return createProjectArchive({
+    project,
+    assetFiles: {},
+    componentFiles: {},
+  }, { mtime: NOW })
+}
+
+function attachComponent(data: CourseProjectArchiveData): CourseProjectArchiveData {
+  const packageFiles = makeComponentFiles()
+  const component = parseComponentPackageFiles(packageFiles)
+  const project = structuredClone(data.project)
+  project.componentPackages[component.metadata.packageId] = component.metadata
+  return {
+    project: courseProjectDocumentSchema.parse(project),
+    assetFiles: data.assetFiles,
+    componentFiles: { [component.key]: packageFiles },
+  }
+}
+
+function loadSlideNativeFixture(): CourseProjectArchiveData {
+  const project = courseProjectDocumentSchema.parse(
+    JSON.parse(readFileSync(join(FIXTURE_DIR, 'slide-native.json'), 'utf8')),
+  ) as CourseProjectDocument
+  return attachComponent({
+    project,
+    assetFiles: { diagram: DIAGRAM_BYTES },
+    componentFiles: {},
+  })
+}
+
+function makeBlankV9ArchiveData(): CourseProjectArchiveData {
+  const project = createBlankCourseProject({
+    id: 'v9-blank-archive',
+    title: '空白 V9 归档',
+    now: NOW,
+    includeDefaultController: false,
+    controls: 'none',
+  })
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') throw new Error('expected slide surface')
+  const scene = surface.scenes[0]!
+  scene.layerItems.push(sceneNodeToCourseLayerItem(createImageNode({
+    id: 'image_node',
+    assetId: 'diagram',
+    width: 200,
+    height: 200,
+  }), 0))
   project.assets.diagram = {
     id: 'diagram',
     filename: 'diagram.png',
     mimeType: 'image/png',
     kind: 'image',
     path: 'assets/diagram.bin',
-    byteLength: imageBytes.byteLength,
+    byteLength: DIAGRAM_BYTES.byteLength,
     width: 2,
     height: 2,
   }
-  project.scenes[0]!.nodes.push(createImageNode({
-    id: 'image_node',
-    assetId: 'diagram',
-    width: 200,
-    height: 200,
-  }))
-  const packageFiles = makeComponentFiles()
-  const component = parseComponentPackageFiles(packageFiles)
-  project.componentPackages[component.key] = component.metadata
-  return {
-    bytes: createProjectArchive({
-      project,
-      assetFiles: { diagram: imageBytes },
-      componentFiles: { [component.key]: packageFiles },
-    }, { mtime: NOW }),
-    imageBytes,
-    component,
-    packageFiles,
-  }
-}
-
-function makeV9ArchiveData() {
-  const imported = importProjectV8ArchiveAsCourseProject(makeV8ArchiveBytes().bytes)
-  return imported
+  return attachComponent({
+    project: courseProjectDocumentSchema.parse(project),
+    assetFiles: { diagram: DIAGRAM_BYTES },
+    componentFiles: {},
+  })
 }
 
 describe('Course Project V9 archive', () => {
-  it('round-trips schema, asset bytes and embedded component files', () => {
-    const data = makeV9ArchiveData()
+  it('round-trips schema, asset bytes and embedded component files from a V9 fixture', () => {
+    const data = loadSlideNativeFixture()
     const bytes = createCourseProjectArchive(data, { mtime: NOW })
     const reopened = openCourseProjectArchive(bytes)
 
     expect(courseProjectDocumentSchema.parse(reopened.project)).toEqual(data.project)
     expect(reopened.project.schemaVersion).toBe(9)
-    expect([...reopened.assetFiles.diagram!]).toEqual([...data.assetFiles.diagram!])
+    expect('scenes' in reopened.project).toBe(false)
+    expect([...reopened.assetFiles.diagram!]).toEqual([...DIAGRAM_BYTES])
     const componentKey = Object.keys(data.componentFiles)[0]!
     expect(Object.keys(reopened.componentFiles[componentKey]!).sort()).toEqual(
       Object.keys(data.componentFiles[componentKey]!).sort(),
@@ -113,22 +146,32 @@ describe('Course Project V9 archive', () => {
     expect(createCourseProjectArchive(reopened, { mtime: NOW })).toEqual(bytes)
     expect(inspectCourseProjectArchiveIdentity(bytes)).toMatchObject({
       schemaVersion: 9,
-      projectId: 'legacy-archive',
-      title: '旧版归档',
+      projectId: 'v9-slide-native',
+      title: 'V9 原生幻灯',
     })
   })
 
-  it('detects V8, V9, corrupted and unsupported archives; V9 zip must not use V8 open', () => {
-    const v8 = makeV8ArchiveBytes()
-    const v9Bytes = createCourseProjectArchive(makeV9ArchiveData(), { mtime: NOW })
+  it('round-trips a blank V9 factory document with save/reopen', () => {
+    const data = makeBlankV9ArchiveData()
+    const bytes = createCourseProjectArchive(data, { mtime: NOW })
+    const reopened = openCourseProjectArchive(bytes)
+    expect(reopened.project.schemaVersion).toBe(9)
+    expect(reopened.project.id).toBe('v9-blank-archive')
+    expect([...reopened.assetFiles.diagram!]).toEqual([...DIAGRAM_BYTES])
+    expect(createCourseProjectArchive(reopened, { mtime: NOW })).toEqual(bytes)
+  })
 
-    expect(detectCourseProjectArchiveFormat(v8.bytes)).toMatchObject({
-      kind: 'v8',
+  it('opens schemaVersion 9, rejects other integer versions, and treats missing versions as corrupted', () => {
+    const v8Bytes = makeV8ArchiveBytes()
+    const v9Bytes = createCourseProjectArchive(loadSlideNativeFixture(), { mtime: NOW })
+
+    expect(detectCourseProjectArchiveFormat(v8Bytes)).toMatchObject({
+      kind: 'unsupported',
       identity: { schemaVersion: 8, projectId: 'legacy-archive' },
     })
     expect(detectCourseProjectArchiveFormat(v9Bytes)).toMatchObject({
       kind: 'v9',
-      identity: { schemaVersion: 9, projectId: 'legacy-archive' },
+      identity: { schemaVersion: 9, projectId: 'v9-slide-native' },
     })
     expect(detectCourseProjectArchiveFormat(new Uint8Array([1, 2, 3, 4]))).toMatchObject({
       kind: 'corrupted',
@@ -151,8 +194,17 @@ describe('Course Project V9 archive', () => {
     })
     expect(() => openCourseProjectArchive(unsupported)).toThrow(/版本不支持|格式版本为 10/)
 
-    expect(() => openCourseProjectArchive(v8.bytes)).toThrow(/显式迁移/)
-    expect(() => openCourseProjectArchive(v8.bytes)).toThrow(UserFacingError)
+    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/版本不支持|格式版本为 8/)
+    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(UserFacingError)
+    expect(() => {
+      try {
+        openCourseProjectArchive(v8Bytes)
+      } catch (error) {
+        expect(error).toBeInstanceOf(UserFacingError)
+        expect(String(error)).not.toMatch(/导入旧版工程|显式迁移/)
+        throw error
+      }
+    }).toThrow(UserFacingError)
 
     expect(() => openProjectArchive(v9Bytes)).toThrow(/V9/)
     expect(() => openCourseProjectArchive(v9Bytes)).not.toThrow()
@@ -160,6 +212,32 @@ describe('Course Project V9 archive', () => {
     const missingAsset = unzipSync(v9Bytes)
     delete missingAsset['assets/diagram.bin']
     expect(() => openCourseProjectArchive(zipSync(missingAsset))).toThrow(/缺少素材/)
+
+    const unversionedV9Shape = zipSync({
+      'project.json': strToU8(JSON.stringify({
+        id: 'unversioned-v9',
+        title: '缺版本',
+        locations: [],
+        surfaces: [],
+      })),
+    })
+    expect(detectCourseProjectArchiveFormat(unversionedV9Shape)).toMatchObject({
+      kind: 'corrupted',
+      identity: { schemaVersion: null },
+    })
+    expect(() => openCourseProjectArchive(unversionedV9Shape)).toThrow(/损坏|schemaVersion/)
+
+    const unversionedV8Shape = zipSync({
+      'project.json': strToU8(JSON.stringify({
+        id: 'unversioned-v8',
+        title: '缺版本',
+        scenes: [],
+      })),
+    })
+    expect(detectCourseProjectArchiveFormat(unversionedV8Shape)).toMatchObject({
+      kind: 'corrupted',
+      identity: { schemaVersion: null },
+    })
 
     expect(shouldMarkCourseProjectDirty('document')).toBe(true)
     expect(shouldMarkCourseProjectDirty('selection')).toBe(false)
@@ -177,5 +255,36 @@ describe('Course Project V9 archive', () => {
       recovery: inspectCourseProjectArchiveIdentity(v9Bytes),
       official: null,
     })).toBe('offer')
+  })
+})
+
+describe('createBlankCourseProject', () => {
+  it('constructs Course Project V9 directly without V8 document fields', () => {
+    const project = createBlankCourseProject({
+      id: 'blank-direct',
+      title: '直接空白',
+      now: NOW,
+    })
+    const aliased = createCourseProject({
+      id: 'blank-alias',
+      title: '别名空白',
+      now: NOW,
+    })
+    expect(project.schemaVersion).toBe(9)
+    expect(aliased.schemaVersion).toBe(9)
+    expect('scenes' in project).toBe(false)
+    expect('globalLayer' in project).toBe(false)
+    expect('canvas' in project).toBe(false)
+    expect(project.revision).toBe(0)
+    expect(project.surfaces[0]).toMatchObject({ type: 'slide', title: '直接空白' })
+    expect(project.locations[0]).toMatchObject({
+      kind: 'slide-scene',
+      sceneId: project.startLocationId,
+    })
+    expect(project.globalLayerItems.some((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))).toBe(true)
+    expect(courseProjectDocumentSchema.parse(structuredClone(project))).toEqual(project)
+    expect(courseProjectDocumentSchema.parse(structuredClone(aliased))).toEqual(aliased)
   })
 })

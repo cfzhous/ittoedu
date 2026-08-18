@@ -603,29 +603,10 @@ async function clickBaseState(page: Page): Promise<void> {
   if (await base.count()) await base.click()
 }
 
-async function confirmV8ImportIfPrompted(page: Page): Promise<void> {
-  const importDialog = page.getByRole('alertdialog', { name: '需要显式导入旧版工程' })
-  const namedProject = page.getByText('工程已命名', { exact: true })
-  const alreadyNamed = await namedProject.isVisible()
-  if (alreadyNamed) {
-    await importDialog.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => undefined)
-  } else {
-    await importDialog.or(namedProject).waitFor({ state: 'visible', timeout: 30_000 })
-  }
-  if (!(await importDialog.isVisible())) return
-  await importDialog.getByRole('button', { name: '导入为当前课程工程' }).click()
-  await importDialog.waitFor({ state: 'hidden' })
-  const reportDialog = page.getByRole('dialog', { name: '旧版工程导入报告' })
-  await reportDialog.waitFor({ state: 'visible' })
-  await reportDialog.getByRole('button', { name: '完成' }).click()
-  await reportDialog.waitFor({ state: 'hidden' })
-}
-
 async function openProject(page: Page, app: ElectronApplication, projectPath: string, htmlPath: string): Promise<void> {
   await page.getByText('正在处理…', { exact: true }).waitFor({ state: 'hidden' })
   await patchDialogs(app, { projectOpen: projectPath, htmlSave: htmlPath })
   await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-  await confirmV8ImportIfPrompted(page)
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
 }
 
