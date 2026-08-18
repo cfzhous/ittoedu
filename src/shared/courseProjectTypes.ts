@@ -28,13 +28,8 @@ export type LayerItemKind = typeof LAYER_ITEM_KINDS[number]
 
 export type LayerHitPolicy = 'auto' | 'surface' | 'pass-through'
 
-/**
- * `legacy-whole-canvas` is an explicit migration marker, not a new layout mode.
- * New authoring writes `absolute`; a host may use the legacy marker only while
- * adapting a Project V8 runtime that originally owned the complete 1280x720 canvas.
- */
 export interface LayerFrame {
-  mode: 'absolute' | 'legacy-whole-canvas'
+  mode: 'absolute'
   x: number
   y: number
   width: number
@@ -99,8 +94,7 @@ export interface CourseRuntimeContent {
 }
 
 export interface CourseRuntimeDefinition {
-  /** New runtimes use `surface-v1`; migrated V8 runtimes remain explicit. */
-  protocol: 'surface-v1' | 'legacy-runtime-v2' | 'canvas-runtime' | 'surface-runtime'
+  protocol: 'canvas-runtime' | 'surface-runtime'
   runtimeApiVersion: 2 | 3
   enabled: boolean
   renderMode: RuntimeRenderMode

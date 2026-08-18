@@ -11,8 +11,8 @@
 | `slide-native.h5lesson` | Slide Native（文字、公式、图片、图形） |
 | `slide-presentation-state.h5lesson` | Slide Presentation State |
 | `global-layer-teacher-controller.h5lesson` | Global Layer，含 `teacher-controller` |
-| `canvas-runtime.h5lesson` | Canvas Runtime（当前持久化：`legacy-runtime-v2` / API 2） |
-| `surface-runtime.h5lesson` | Surface Runtime（当前持久化：`surface-v1` / API 3） |
+| `canvas-runtime.h5lesson` | Canvas Runtime（当前持久化：`canvas-runtime` / API 2） |
+| `surface-runtime.h5lesson` | Surface Runtime（当前持久化：`surface-runtime` / API 3） |
 | `component.h5lesson` | Component API 4 嵌入包 |
 | `flow.h5lesson` | Flow |
 | `spatial.h5lesson` | Spatial |

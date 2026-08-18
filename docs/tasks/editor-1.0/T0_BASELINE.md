@@ -1,6 +1,6 @@
 # T0 冻结基线
 
-> 状态：**已合入，禁止重做**。夹具 `canvas-runtime.h5lesson` 仍含 `legacy-runtime-v2`，T1-B 未改夹具前不得删该判别器。
+> 状态：**已合入，禁止重做**。夹具 `canvas-runtime.h5lesson` 持久化已切换为 `canvas-runtime`（T1-B）。
 
 > 依赖：无  
 > 并行：否  

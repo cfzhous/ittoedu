@@ -83,11 +83,11 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 
 ---
 
-## 5. 迁移过渡字段说明
+## 5. 运行时协议与布局模式
 
-- **`legacy-whole-canvas`**：`LayerFrame.mode` 当前支持 `'absolute' | 'legacy-whole-canvas'`。新创作统一写入 `'absolute'`。
-- **`legacy-runtime-v2`**：`CourseRuntimeDefinition.protocol` 当前支持 `'surface-v1' | 'legacy-runtime-v2'`。
-- **夹具状态**：T0 夹具 `canvas-runtime.h5lesson` 在当前版本中仍持久化 `legacy-runtime-v2` 与 `legacy-whole-canvas`，保留至 T1-B 任务处理，当前 Schema 与运行时保持兼容。
+- **`LayerFrame.mode`**：当前持久化仅支持 `'absolute'`。
+- **`CourseRuntimeDefinition.protocol`**：当前持久化支持 `'canvas-runtime'`（API 2）与 `'surface-runtime'`（API 3）。
+- **夹具状态**：T0 夹具 `canvas-runtime.h5lesson` 持久化为 `canvas-runtime`（API 2），`surface-runtime.h5lesson` 持久化为 `surface-runtime`（API 3）。历史过渡判别器 `legacy-runtime-v2`、`legacy-whole-canvas` 与 `surface-v1` 已从 Schema 和类型中移除。
 
 ---
 
