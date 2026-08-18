@@ -125,6 +125,9 @@ import { FormulaAuthoringEditor } from './FormulaAuthoringEditor'
 import { SpatialCameraPanel } from './SpatialCameraPanel'
 import { SpatialPathEditor } from './SpatialPathEditor'
 import type { SpatialAuthoringSession } from '../course/spatialEditorCommands'
+import { updateSpatialSurfaceBackgroundColor } from '../course/spatialEditorCommands'
+import { updateFlowSurfaceBackgroundColor } from '../course/flowEditorCommands'
+import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
 import { buildSpatialEditorView } from '../course/spatialEditorView'
 import {
   addSpatialCameraFrameFromSession,
@@ -2011,6 +2014,16 @@ function SpatialPageProperties({ session }: { session: SpatialAuthoringSession }
   if (!surface || surface.type !== 'spatial-2d') return null
   return (
     <>
+      <section className="property-section" data-testid="spatial-page-properties">
+        <h3 className="property-title"><Palette size={14} />空间画布</h3>
+        <ColorInput
+          id="spatial-canvas-background"
+          data-testid="spatial-canvas-background"
+          label="画布背景色"
+          value={resolveCourseSurfaceBackgroundColor(surface.backgroundColor)}
+          onChange={(backgroundColor) => runSpatialCommand((current) => updateSpatialSurfaceBackgroundColor(current, backgroundColor))}
+        />
+      </section>
       <SpatialCameraPanel
         surfaceTitle={view.surfaceTitle}
         frames={[...view.camera.frames]}
@@ -2064,6 +2077,7 @@ function selectedFlowBlock(session: FlowAuthoringSession): FlowBlock | null {
 
 function FlowPageProperties({ session }: { session: FlowAuthoringSession }) {
   const renameFlowPage = useEditorStore((state) => state.renameFlowPage)
+  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const surface = session.history.present.surfaces.find(
     (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'flow',
   )
@@ -2076,8 +2090,23 @@ function FlowPageProperties({ session }: { session: FlowAuthoringSession }) {
         value={surface.title}
         onCommit={(title) => renameFlowPage(surface.id, title)}
       />
+      <ColorInput
+        id="flow-paper-background"
+        data-testid="flow-paper-background"
+        label="稿纸背景色"
+        value={resolveCourseSurfaceBackgroundColor(surface.backgroundColor)}
+        onChange={(backgroundColor) => {
+          const result = updateFlowSurfaceBackgroundColor(
+            session.history.present,
+            surface.id,
+            backgroundColor,
+            { expectedRevision: session.history.present.revision },
+          )
+          applyFlowCommand(result, { statusMessage: '已修改稿纸背景色' })
+        }}
+      />
       <p className="property-hint">
-        标题和段落在稿纸里编辑。这里只改页面名称，不会出现 1280×720 场景背景。
+        标题和段落在稿纸里编辑。这里只改页面名称与稿纸底色，不会出现 1280×720 场景背景。
       </p>
     </section>
   )

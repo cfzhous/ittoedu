@@ -131,6 +131,7 @@ import {
 import { buildFlowEditorView } from '../course/flowEditorView'
 import { courseLayerItemToSceneNode } from '../store/slideEditorProjection'
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../phaser/v9SpatialHitAdapter'
+import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
 import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
@@ -893,6 +894,9 @@ function SpatialLocationWorkspace({
         ref={viewportRef}
         className="canvas-viewport"
         data-testid="spatial-world-stage"
+        style={{
+          backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
+        }}
         onWheel={(event) => {
           if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
           event.preventDefault()

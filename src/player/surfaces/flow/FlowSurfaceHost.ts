@@ -1,4 +1,5 @@
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
+import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
@@ -656,7 +657,7 @@ function renderFlowArticle(
   article.style.boxSizing = 'border-box'
   article.style.height = '100%'
   article.style.overflow = 'auto'
-  article.style.background = '#f8fafc'
+  article.style.background = resolveCourseSurfaceBackgroundColor(surface.backgroundColor)
   article.style.color = '#172033'
 
   const reading = dom.createElement('div')

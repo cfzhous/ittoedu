@@ -1133,6 +1133,34 @@ type DeepNativeText = NativeLayerItem & {
   content: Extract<NativeLayerItem['content'], { nativeType: 'text' }>
 }
 
+export function updateSpatialSurfaceBackgroundColor(
+  session: SpatialAuthoringSession,
+  backgroundColor: string,
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  const stale = rejectSpatialIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  if (typeof backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(backgroundColor.trim())) {
+    return rejectSpatialCommand(session, 'invalid-color')
+  }
+  const color = backgroundColor.trim().toLowerCase()
+  try {
+    const currentSurface = spatialSurfaceIn(session.history.present, session.selection.surfaceId)
+    if (currentSurface.backgroundColor === color) {
+      return succeedSpatialCommand(session, false)
+    }
+    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
+      const surface = spatialSurfaceIn(draft, session.selection.surfaceId)
+      surface.backgroundColor = color
+    }, options.now)
+    return succeedSpatialCommand(replaceSpatialSession(session, {
+      history: commitSpatialAuthoringHistory(session.history, project),
+    }), true)
+  } catch (error) {
+    return catchSpatialCommand(session, error)
+  }
+}
+
 export function worldLayerItem(
   project: CourseProjectDocument,
   surfaceId: string,

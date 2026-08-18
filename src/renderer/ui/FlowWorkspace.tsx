@@ -15,6 +15,7 @@ import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constan
 import { serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode } from '../../shared/projectTypes'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../shared/courseProjectTypes'
+import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
 import type { FlowCommandResult } from '../course/flowEditorCommands'
 import {
   executeFlowDelete,
@@ -1555,7 +1556,9 @@ export function FlowWorkspace({
             minHeight: '100%',
             margin: '0 auto',
             padding: '28px 36px 64px',
-            background: '#fff',
+            background: resolveCourseSurfaceBackgroundColor(
+              project.surfaces.find((candidate) => candidate.id === view.surfaceId && candidate.type === 'flow')?.backgroundColor,
+            ),
             color: FLOW_PAPER_TEXT_COLOR,
             boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
           }}

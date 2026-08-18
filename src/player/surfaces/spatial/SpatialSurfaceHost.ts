@@ -1,4 +1,5 @@
 import type { SpatialPathDash } from '../../../shared/courseProjectTypes'
+import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import type { TeacherControllerAction } from '../../../shared/projectTypes'
 import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
 import type {
@@ -419,12 +420,14 @@ export class SpatialSurfaceHost {
     root.tabIndex = 0
     root.setAttribute('role', 'region')
     root.setAttribute('aria-label', `${this.#session.input.surface.title} 空间探索`)
+    const bg = resolveCourseSurfaceBackgroundColor(this.#session.input.surface.backgroundColor)
     Object.assign(root.style, {
       position: 'relative',
       width: `${camera.viewportWidth}px`,
       height: `${camera.viewportHeight}px`,
       overflow: 'hidden',
       isolation: 'isolate',
+      backgroundColor: bg,
     })
     const svg = dom.createElementNS(SVG_NS, 'svg')
     svg.setAttribute('width', String(camera.viewportWidth))
@@ -432,6 +435,7 @@ export class SpatialSurfaceHost {
     svg.setAttribute('viewBox', `0 0 ${camera.viewportWidth} ${camera.viewportHeight}`)
     svg.setAttribute('aria-label', this.#session.input.surface.title)
     svg.dataset.spatialWorldCanvas = 'true'
+    svg.style.backgroundColor = bg
     const world = dom.createElementNS(SVG_NS, 'g')
     world.dataset.spatialWorld = 'true'
     world.dataset.coordinateSpace = 'world'
