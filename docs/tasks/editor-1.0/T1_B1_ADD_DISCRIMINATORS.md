@@ -1,7 +1,8 @@
 # T1-B1 增加新 Runtime 判别器（不删旧的）
 
-> 状态：**可领取**  
-> 并行：可与 T3-aliases、T6-CI、T6-nav 分树（**不要**改 `editorStore.ts`）  
+> 状态：**已合入，禁止重做**  
+> 并行：已结束。下游 [T1-B](T1_B_SWITCH.md)  
+
 > 合同变化：是（只 **additive**）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)
 
