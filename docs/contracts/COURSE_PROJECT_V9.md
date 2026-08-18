@@ -1,0 +1,97 @@
+# Course Project V9 工程合同说明
+
+> 本文档描述当前源码已经成立的 Course Project V9 核心数据结构与语义约束。
+> 权威类型定义以 `src/shared/courseProjectTypes.ts` 与 `src/shared/courseProjectSchema.ts` 为准。
+
+---
+
+## 1. 唯一工程真相
+
+- **版本标识**：`schemaVersion: 9`（即 `COURSE_PROJECT_SCHEMA_VERSION = 9`）。
+- **唯一可打开工程**：Course Project V9 是当前编辑器与播放器唯一支持打开的工程格式。
+- **校验规则**：`schemaVersion` 缺少或非数字判定为 corrupted；非 `9` 的其他整数判定为 unsupported。不打开、不导入 V8 工程。
+- **空白工程**：直接构造符合 `CourseProjectDocument` 结构的 V9 数据，不再走 V8 迁移链路。
+
+---
+
+## 2. 表面模型（Surfaces）
+
+`surfaces` 数组承载课程的所有表面内容，受 `COURSE_SURFACE_TYPES` 约束，支持三种正交表面类型：
+
+### 2.1 演示页面（`SlideSurfaceDocument`）
+- `type: 'slide'`
+- 画布固定尺寸为 `1280 x 720`（`canvas: { width: 1280, height: 720 }`）。
+- 包含场景列表 `scenes: SlideSceneDocument[]`。
+- 每个场景具备独立的必填 `backgroundColor` 与可选 `backgroundAssetId`。
+- 场景可包含 `presentation: SlidePresentation`，通过 `states: SlidePresentationState[]` 实现基于 `layerItemOverrides` 的状态切换。
+
+### 2.2 流式讲义（`FlowSurfaceDocument`）
+- `type: 'flow'`
+- 包含版心布局配置 `layout: { readingWidth: number, wideContentWidth: number }`。
+- 正文由结构化块构成：`blocks: FlowBlock[]`（支持 heading, paragraph, list, quote, divider, media, table, formula, code, callout, section, component）。
+- 可选画布/稿纸背景色 `backgroundColor?: string`，缺省时视为白底（`#ffffff`）。
+
+### 2.3 无限画布（`SpatialSurfaceDocument`）
+- `type: 'spatial-2d'`
+- 包含二维世界定义 `world`，支持 infinite 或 finite 边界模式，包含世界图层元素 `world.layerItems`、路径 `paths?: SpatialPathDocument[]` 与关系连线 `relations?: SpatialRelationDocument[]`。
+- 包含相机配置 `camera: { home: SpatialCameraPose, frames: SpatialCameraFrame[] }`。
+- 包含语义缩放规则 `semanticZoom: SpatialSemanticZoomRule[]`。
+- 可选无限画布底色 `backgroundColor?: string`，缺省时视为白底（`#ffffff`）。
+
+---
+
+## 3. 模式推导与课程结构
+
+- **无持久化 projectMode**：工程中不存在持久化的 `projectMode` 或“四模式”字段。
+- **推导规则**：
+  - 纯 Slide、纯 Flow、纯 Spatial 与 Mixed 页面类型由工程内的 `locations` 与 `surfaces` 组合关系动态推导。
+- **位置索引（`CourseLocation`）**：
+  - `slide-scene`：指向特定 slide surface 与 scene（及可选 state）。
+  - `flow-block`：指向 flow surface 与 block。
+  - `spatial-camera`：指向 spatial surface 与 cameraFrame。
+- **跨表面打印计划（`MixedPrintPlan`）**：当工程包含多个 surface 时提供 `mixedPrintPlan` 统一导出编排。
+
+---
+
+## 4. 统一图层系统（Unified Layer Items）
+
+所有视觉元素均遵循统一图层项结构 `LayerItem`：
+
+```typescript
+export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
+```
+
+### 4.1 图层作用域与排序
+- **全局图层（`globalLayerItems: ScopedLayerItem[]`）**：跨表面全局共享，通过 `LocationVisibility` 控制逐 location 可见性。
+- **表面共享图层（`surfaceLayerItems: ScopedLayerItem[]`）**：在单个 surface 内共享。
+- **场景/世界图层（`layerItems: LayerItem[]`）**：属于特定 Slide 场景或 Spatial 世界。
+- **图层排序**：`order` 属性为全局统一的从后向前（back-to-front）稀疏排序键，各作用域数组为存储范围而非独立视觉平面。
+
+### 4.2 元素类型
+- **Native（`NativeLayerItem`）**：包含 `text`、`formula`、`image`、`video`、`shape`、`teacher-controller`。
+- **Component（`ComponentLayerItem`）**：基于 Component API 4 规范（`packageId`、`version`、`props`、可选 `staticFallbackAssetId`）。
+- **Runtime（`RuntimeLayerItem`）**：包含独立代码、配置与动态能力。
+
+### 4.3 教师控制器（Teacher Controller）
+- 教师控制器作为一份全局图层元素存在于 `globalLayerItems` 中（`nativeType: 'teacher-controller'`）。
+- 禁止为每个场景复制一份控制器副本，禁止将控制器写入场景 `layerItems`。
+- 编辑态控制器保持 inert（静态预览），试运行与播放态响应拖拽与点击交互。
+
+### 4.4 稳定标识
+- 每个图层项具备跨保存生命周期稳定的 `layerItemId`（authoringAddress）。
+- 临时运行时 `hitId` 不得替代持久化 `layerItemId`。
+
+---
+
+## 5. 迁移过渡字段说明
+
+- **`legacy-whole-canvas`**：`LayerFrame.mode` 当前支持 `'absolute' | 'legacy-whole-canvas'`。新创作统一写入 `'absolute'`。
+- **`legacy-runtime-v2`**：`CourseRuntimeDefinition.protocol` 当前支持 `'surface-v1' | 'legacy-runtime-v2'`。
+- **夹具状态**：T0 夹具 `canvas-runtime.h5lesson` 在当前版本中仍持久化 `legacy-runtime-v2` 与 `legacy-whole-canvas`，保留至 T1-B 任务处理，当前 Schema 与运行时保持兼容。
+
+---
+
+## 6. 课程状态与导航守卫
+
+- **课程状态声明（`courseState: CourseStateDeclaration[]`）**：声明式标量状态（`boolean`、`number`、`string`、`null`）。
+- **导航守卫（`navigationGuards: CourseNavigationGuard[]`）**：声明式条件拦截规则（`effect: 'block'`），仅允许根据状态条件进行导航拦截，禁止执行任意重定向或执行代码。
