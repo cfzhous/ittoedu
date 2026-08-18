@@ -229,7 +229,10 @@ export interface StageSelectionOverlayItem {
 
 export interface StageSelectionOverlayGeometry {
   readonly objects: readonly StageRect[]
+  /** Unrotated client-space box. Overlay chrome must CSS-rotate this around its center. */
   readonly selectionBox: StageRect
+  /** Degrees; non-zero only for a single selected item. Multi-select stays axis-aligned. */
+  readonly rotation: number
   readonly handles: Readonly<Record<StageResizeHandleDirection, StagePoint>>
   readonly rotationHandle: StagePoint
 }
@@ -345,7 +348,9 @@ export function stageRotateHandleWorldPoint(
 
 /**
  * Maps authored objects, the selection box, rotation handle and eight resize
- * handles through the same viewport transform.
+ * handles through the same viewport transform. The returned `selectionBox` keeps
+ * the item's unrotated origin and size so a CSS `rotate()` around the box
+ * center can follow a single item's rotation; handles are already rotated.
  */
 export function stageSelectionOverlayGeometry(
   transform: StageViewportTransform,
@@ -374,6 +379,7 @@ export function stageSelectionOverlayGeometry(
   return {
     objects: items.map((item) => worldRectToClient(transform, item)),
     selectionBox: worldRectToClient(transform, worldBox),
+    rotation,
     handles,
     rotationHandle: worldToClient(
       transform,
