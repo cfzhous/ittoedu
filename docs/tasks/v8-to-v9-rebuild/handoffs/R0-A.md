@@ -1,0 +1,26 @@
+HANDOFF
+- task: R0-A
+- planning pack path: `C:\Users\74755\Documents\HTML课件编辑器\docs\tasks\v8-to-v9-rebuild`
+- product worktree / branch / baseline SHA: `C:\Users\74755\Documents\HTML课件编辑器-v8-to-v9-rebuild` / `codex/v8-to-v9-rebuild` / `f27275658c6dfaa12f2ce35cd9368dcdebe99451`
+- outcome: 已从精确候选 SHA 新建独立产品 worktree 与分支；`npm ci` 使用既有 lockfile；`npm run dev` 一次启动成功；`main.tsx` 直接渲染成熟 V8 `App`，无 CourseStudio / ProductApp / controlled editor 默认路由。Electron 进程从该 worktree 启动，userData 当前仍为共享 `AppData\Roaming\ittoedu-courseware-editor`（交 R0-D 隔离）。
+- owned files changed: 无产品源码改动。计划侧新增 `artifacts/PRODUCT_WORKTREE.md`、本 HANDOFF，并更新任务索引状态。
+- donor files/functions consulted: 无 V9 移植。只读确认 `src/renderer/main.tsx`、`App.tsx`、`ui/MediaTab.tsx`、`ui/SimpleEntranceAnimationEditor.tsx`、`tests/e2e/editor.spec.ts`。
+- focused validation command: `git diff --check`（产品 worktree）；一次真实 `npm run dev`
+- validation result: diff check 无输出、exit 0。`predev` 成功构建 `dist-player/player.iife.js` 与 Electron main；Vite ready `http://127.0.0.1:5173/`；多个 `electron.exe` 进程的 `--app-path` 指向产品 worktree。
+- validation entry / fixture / backend: 产品 worktree 默认 V8 `App` / V8 `ProjectDocument`
+- validation proves / does not prove: 证明唯一产品入口可启动且是成熟 V8 壳（顶栏、场景/全局层、元素/图层/属性、媒体在元素页内）。不证明保存重开、画布 Phaser 全链路、格式隔离或第 6 节能力清单。
+- narrow UI smoke, if authorized: 开发渲染地址标题为「未命名课件 - 互动课件编辑器」。可见「简洁/专业」、新建/打开/保存、全局层、场景 1、1280×720 白画布、底部教师控制台（上一/下一场景、场景目录、重播、声音、全屏）、元素/图层/属性、文本/公式/图片/视频/声音、图形库。Electron 窗口已从产品 worktree 启动。完整能力操作交 R0-B。
+- INTEGRATION_REQUESTS: 无
+- DECISION_REQUESTS: 无
+- remaining risks / untested full checks: 未跑 typecheck / 全量 test / build / E2E / 视觉回归。共享 AppData 与 V9 recovery 隔离未做。未确认 `79c821f..f272756` 有无回归。
+- rollback point: 删除 worktree `C:\Users\74755\Documents\HTML课件编辑器-v8-to-v9-rebuild` 并删除分支 `codex/v8-to-v9-rebuild`；计划目录保持 `codex/v9-editor-v8-base`。
+- execution state: lane_candidate
+- integration state: n/a
+- quality state: unverified
+- canonical product worktree: `C:\Users\74755\Documents\HTML课件编辑器-v8-to-v9-rebuild`
+- exact baseline SHA: `f27275658c6dfaa12f2ce35cd9368dcdebe99451`
+- launch command/result: `npm run dev` 成功；Vite `127.0.0.1:5173`；Electron 已从产品 worktree 拉起
+- V8 capability inventory summary: 未做，交 R0-B
+- baseline screenshots/video locations: R0-A 仅确认主壳可达；截图/录像交 R0-B 写入 `output/r0-baseline-evidence/`（产品 worktree，不提交任务包）
+- format/recovery isolation result: 未做，交 R0-D。已知风险：Electron `--user-data-dir` 仍指向共享 `ittoedu-courseware-editor`
+- teacher decision: 待 R0-G

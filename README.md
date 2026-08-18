@@ -1,18 +1,18 @@
 # 互动课件编辑器
 
-这是一个面向教师的可编辑互动课件桌面编辑器。当前主线以 Course Project V9 为工程真相，在同一项目中支持 Slide、Flow、Spatial 2D 与 Mixed 课程；网页发布使用 Published Course V2。V8 只从「导入旧版工程」进入，并产出带报告的 V9 工程，不再是新建或日常打开的默认格式。
+这是一个面向教师的可编辑互动课件桌面编辑器。当前 checkout 包含此前 T12 合回的 V9 集成实现，但真实体验复核已确认该路线大量降级 V8 能力；它现在只作 V9 供体与失败取证，不再是正确产品主线。新的产品路线从 `f272756` 成熟 V8 候选基线重新开始，最终仍以 Course Project V9、Published Course V2 为协议目标。
 
-正式入口是 `ProductApp` → `App`。纯 Slide / 纯 Flow / 纯 Spatial / Mixed 由现有 `locations` / `surfaces` 推导，不保存 `projectMode`。四态左栏固定提供「共享内容 → 全局层（全课）」；`globalLayerItems` 与 `surfaceLayerItems` 仍是引擎和作者能力。
+当前 V9 供体 checkout 的入口是 `ProductApp` → `App`；`f272756` 候选基线则由 `main.tsx` 直接进入 `App`。新路线始终只保留这一套成熟 App 表面。最终纯 Slide / 纯 Flow / 纯 Spatial / Mixed 仍由 `locations` / `surfaces` 推导，不保存 `projectMode`；`globalLayerItems` 与 `surfaceLayerItems` 继续是引擎和作者能力。
 
-长期开发范围和完成定义只看 [根目录唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)。新 Agent 可从 [项目认知索引](PROJECT_COGNITION_INDEX.md) 进入真实代码；当前可用能力以源码、Schema 与 [Agent Kit 能力卡](agent-kit/capabilities/index.json) 为准。
+长期开发范围和完成定义只看 [根目录唯一计划](COURSEWARE_DEVELOPMENT_PLAN.md)。AI 执行入口是 [V8→V9 重建任务索引](docs/tasks/v8-to-v9-rebuild/00_INDEX.md)，新 Agent 可从 [项目认知索引](PROJECT_COGNITION_INDEX.md) 区分新产品 worktree 与当前 V9 供体；当前可用能力仍须以对应 worktree 的源码、Schema 与真实 UI 为准。
 
-当前仓库状态是 T12 `engineering candidate`。T01–T12 已在 `codex/v9-parity-reconstruction` 完成并合回本仓库根目录；根目录 `npm run dev` / `npm run start` 打开的就是这一版。自动化已通过 `verify:full`、V9 Playwright 与课例校验。`art candidate` 只适用于已经过真实画面与关键交互复核的具体课例；`accepted` 必须由教师明确确认。体验步骤与已知缺口见 [最终体验清单](docs/tasks/v9-editor/artifacts/FINAL_EXPERIENCE_CHECKLIST.md) 与 [T12 Gate 报告](docs/tasks/v9-editor/13_FINAL_FULL_GATE.md)。
+新任务包当前只有 `R0-A READY`，尚未创建/确认新的唯一产品 worktree，也没有任何新路线阶段达到 `engineering candidate`。旧 T01–T12 的机器绿灯和报告只作历史取证；它们不能证明当前用户反馈中的新增、声音媒体、全局控制器、Flow、Spatial、文字或动画问题已经解决。
 
 当前编辑器内没有可见 AI：正式表面不提供复制引用、应用 Patch、聊天、模型、Provider 或网络调用。`courseAiHandoff` / `courseAiPatch` 是 internal/reserved、未挂载。Focusky 级镜头化演示和自动结构编辑是远期方向，不是现有能力。
 
 ## 快速开始
 
-要求 Windows、Node.js 与 npm。在**仓库根目录**执行（不要在 `output/worktrees/` 里启动，除非你明确要打开旧检出）：
+要求 Windows、Node.js 与 npm。注意：在当前仓库根目录执行下面命令会打开旧 V9 供体实现。执行新重建路线时，必须先按 R0-A 建立并登记唯一 `f272756` 产品 worktree，再从那个 worktree 根目录运行：
 
 ```powershell
 npm install
@@ -33,7 +33,7 @@ npm run install:courseware-skills
 
 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project` 两个明确目录，并清理同一安装根下的旧 `build-project-v8-courseware` / `build-project-v7-courseware` 目录；不会扫描或删除其它 Skill，也不维护 Hash 或安装状态机。
 
-## 当前产品模型
+## 当前 V9 供体实现模型（不是新路线完成状态）
 
 - `CourseProjectDocument` / Schema V9：可编辑项目、素材、组件包、课程状态、导航和多个 surface 的唯一事实源。
 - 新建菜单提供空白演示、空白流式、空白无限画布；左栏「新增内容」同样可加三类页面。
@@ -109,6 +109,6 @@ node agent-kit/bin/courseware-agent-kit.mjs capabilities --index agent-kit/capab
 - [Component API 4 作者边界](docs/COMPONENT_AUTHORING.md)
 - [文档导航](docs/README.md)
 
-旧计划、评估稿和里程碑验证记录只由 Git 历史保存，不再作为当前操作入口。
+旧 `docs/tasks/v9-editor/`、评估稿和里程碑记录只作历史取证，不再作为当前操作入口；当前执行只看 `docs/tasks/v8-to-v9-rebuild/`。
 
 `.github/workflows/clean-windows.yml` 会在 GitHub 的全新 `windows-latest` checkout 上执行 `npm ci`、默认验证与 clean-Windows 门禁；本地隔离通过不冒充另一台机器的人工作业。
