@@ -14,9 +14,9 @@ const DROPDOWN_LABELS: Record<CourseEditorDropdownAction, string> = {
 
 const PRIMARY_LABELS: Record<CourseEditorPrimaryAction, string> = {
   scene: '新建场景',
-  'slide-page': '新增页面',
-  'flow-page': '新增页面',
-  'spatial-page': '新增页面',
+  'slide-page': '新增演示页面',
+  'flow-page': '新增流式讲义',
+  'spatial-page': '新增无限画布',
 }
 
 export interface AddCourseContentMenuProps {
