@@ -64,7 +64,7 @@ import {
 import {
   openSlideAuthoringSession,
   type SlideAuthoringSession,
-} from './v9SlideVerticalSlice'
+} from './slideAuthoringBackend'
 
 /**
  * V9 MediaTab / sound-library commands. Not wired to the real MediaTab;

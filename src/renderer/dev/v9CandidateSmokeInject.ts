@@ -8,9 +8,9 @@ import {
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import { createTeacherControllerNode } from '../project/createProject'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '../course/v9SlideVerticalSlice'
+} from '../course/slideAuthoringBackend'
 import { useEditorStore } from '../store/editorStore'
 
 /**
@@ -180,7 +180,7 @@ function r3CandidateSmokeFixture(): CourseProjectDocument {
 
 export function injectV9CandidateSmoke(): void {
   if (import.meta.env.VITE_V9_CANDIDATE_SMOKE !== '1') return
-  const backend = createSlideCandidateBackend(
+  const backend = createSlideAuthoringBackend(
     openSlideAuthoringSession(r3CandidateSmokeFixture()),
   )
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)

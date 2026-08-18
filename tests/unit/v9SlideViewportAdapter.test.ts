@@ -17,9 +17,9 @@ import {
   worldToClient,
 } from '@/renderer/authoring/stageViewportTransform'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   EditorPhaserBridge,
   adaptV9SlideLayerItemHit,
@@ -298,7 +298,7 @@ function v9ViewportFixture(): CourseProjectDocument {
 }
 
 function injectCandidate() {
-  const backend = createSlideCandidateBackend(openSlideAuthoringSession(v9ViewportFixture()))
+  const backend = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
   return backend
 }
@@ -324,19 +324,19 @@ afterEach(() => {
 describe('V9 Slide viewport adapter', () => {
   it('defaults the Workspace authoring path to the V9 slide candidate', () => {
     const controller = createSlideWorkspaceAuthoringController()
-    expect(resolveSlideWorkspaceAuthoringKind()).toBe('v9-slide-candidate')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('v9-slide-candidate')
+    expect(resolveSlideWorkspaceAuthoringKind()).toBe('slide-authoring')
+    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
     const down = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const move = controller.pointerMove({ x: 220, y: 160 }, VIEW)
     const up = controller.pointerUp({ x: 220, y: 160 }, VIEW)
-    expect(down.kind).toBe('v9-slide-candidate')
-    expect(move.kind).toBe('v9-slide-candidate')
-    expect(up.kind).toBe('v9-slide-candidate')
+    expect(down.kind).toBe('slide-authoring')
+    expect(move.kind).toBe('slide-authoring')
+    expect(up.kind).toBe('slide-authoring')
     expect(down).not.toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
   })
 
-  it('returns the V8 Workspace path when the V8 backend is explicitly selected', () => {
-    useEditorStore.getState().clearV9SlideCandidateBackend()
+  it('returns the V8 Workspace path when no slide backend is available', () => {
+    useEditorStore.setState({ slideBackend: undefined as any })
     const controller = createSlideWorkspaceAuthoringController()
     expect(resolveSlideWorkspaceAuthoringKind()).toBe('v8')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()
@@ -346,7 +346,7 @@ describe('V9 Slide viewport adapter', () => {
     expect(down).toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
     expect(move).toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
     expect(up).toEqual({ kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE })
-    expect(down).not.toMatchObject({ kind: 'v9-slide-candidate' })
+    expect(down).not.toMatchObject({ kind: 'slide-authoring' })
     expect('command' in down ? down.command?.ok : false).toBe(false)
   })
 
@@ -354,7 +354,7 @@ describe('V9 Slide viewport adapter', () => {
     injectCandidate()
     const controller = createSlideWorkspaceAuthoringController()
     const canvas = controller.pointerDown({ x: 200, y: 150 }, VIEW)
-    if (canvas.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (canvas.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(canvas.command?.ok).toBe(true)
     expect(canvas.hit?.layerItemId).toBe('slide-title')
     const canvasTarget = canvas.targets?.[0]
@@ -372,7 +372,7 @@ describe('V9 Slide viewport adapter', () => {
 
     controller.pointerUp({ x: 200, y: 150 }, VIEW)
     const additive = controller.pointerDown({ x: 200, y: 250, additive: true }, VIEW)
-    if (additive.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (additive.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(additive.command?.ok).toBe(true)
     expect(additive.targets?.map((target) => target.layerItemId).sort()).toEqual([
       'slide-locked',
@@ -382,10 +382,10 @@ describe('V9 Slide viewport adapter', () => {
 
     controller.pointerUp({ x: 200, y: 250, additive: true }, VIEW)
     const marqueeStart = controller.pointerDown({ x: 100, y: 90 }, VIEW)
-    expect(marqueeStart.kind).toBe('v9-slide-candidate')
+    expect(marqueeStart.kind).toBe('slide-authoring')
     controller.pointerMove({ x: 700, y: 210 }, VIEW)
     const marqueeEnd = controller.pointerUp({ x: 700, y: 210 }, VIEW)
-    if (marqueeEnd.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (marqueeEnd.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(marqueeEnd.command?.ok).toBe(true)
     expect(marqueeEnd.targets?.map((target) => target.layerItemId).sort()).toEqual([
       'slide-image',
@@ -393,7 +393,7 @@ describe('V9 Slide viewport adapter', () => {
     ])
 
     const fromLayer = controller.selectFromLayerIds(['slide-title'], VIEW)
-    if (fromLayer.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (fromLayer.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(fromLayer.targets?.[0]?.authoringAddress).toBe(canvasTarget?.authoringAddress)
     expect(fromLayer.targets?.[0]?.layerItemId).toBe('slide-title')
   })
@@ -437,17 +437,17 @@ describe('V9 Slide viewport adapter', () => {
       'w',
     )
     const down = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
-    expect(down.kind).toBe('v9-slide-candidate')
+    expect(down.kind).toBe('slide-authoring')
     const revisionAfterDown = selectSlideCandidateBackend(useEditorStore.getState())?.getSnapshot().revision
     const moved = controller.pointerMove({ x: west.x - 40, y: west.y }, VIEW)
-    if (moved.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (moved.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(moved.preview?.[0]).toMatchObject({ x: 80, y: 120, width: 440, height: 80 })
     expect(selectSlideCandidateBackend(useEditorStore.getState())?.getSnapshot().revision)
       .toBe(revisionAfterDown)
     expect(nativeFrame('slide-title')).toMatchObject({ x: 120, y: 120, width: 400, height: 80 })
 
     const up = controller.pointerUp({ x: west.x - 40, y: west.y }, VIEW)
-    if (up.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (up.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(up.command?.ok).toBe(true)
     expect(up.command?.historyEntry).toBe(true)
     expect(nativeFrame('slide-title')).toEqual({
@@ -471,10 +471,10 @@ describe('V9 Slide viewport adapter', () => {
     )
     controller.pointerDown({ x: north.x, y: north.y }, VIEW)
     const northMove = controller.pointerMove({ x: north.x, y: north.y - 30 }, VIEW)
-    if (northMove.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (northMove.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(northMove.preview?.[0]).toMatchObject({ x: 80, y: 90, width: 440, height: 110 })
     const northUp = controller.pointerUp({ x: north.x, y: north.y - 30 }, VIEW)
-    if (northUp.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (northUp.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(northUp.command?.historyEntry).toBe(true)
     expect(nativeFrame('slide-title')).toMatchObject({ x: 80, y: 90, width: 440, height: 110 })
 
@@ -490,7 +490,7 @@ describe('V9 Slide viewport adapter', () => {
       x: imageWestClient.x - 40,
       y: imageWestClient.y,
     }, zoomed)
-    if (imageMove.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (imageMove.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(imageMove.preview?.[0]?.x).toBeCloseTo(540)
     expect(imageMove.preview?.[0]?.y).toBeCloseTo(94)
     expect(imageMove.preview?.[0]?.width).toBeCloseTo(220)
@@ -499,7 +499,7 @@ describe('V9 Slide viewport adapter', () => {
       x: imageWestClient.x - 40,
       y: imageWestClient.y,
     }, zoomed)
-    if (imageUp.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (imageUp.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(imageUp.command?.ok).toBe(true)
     expect(nativeFrame('slide-image')?.x).toBeCloseTo(540)
     expect(nativeFrame('slide-image')?.y).toBeCloseTo(94)
@@ -534,22 +534,22 @@ describe('V9 Slide viewport adapter', () => {
 
     const controller = createSlideWorkspaceAuthoringController()
     expect(controller.pointerDown({ x: 640, y: 140 }, VIEW)).toMatchObject({
-      kind: 'v9-slide-candidate',
+      kind: 'slide-authoring',
       hit: { layerItemId: 'slide-image', nativeType: 'image' },
     })
     controller.pointerUp({ x: 640, y: 140 }, VIEW)
     expect(controller.pointerDown({ x: 640, y: 320 }, VIEW)).toMatchObject({
-      kind: 'v9-slide-candidate',
+      kind: 'slide-authoring',
       hit: { layerItemId: 'slide-video' },
     })
     controller.pointerUp({ x: 640, y: 320 }, VIEW)
     expect(controller.pointerDown({ x: 120, y: 460 }, VIEW)).toMatchObject({
-      kind: 'v9-slide-candidate',
+      kind: 'slide-authoring',
       hit: { layerItemId: 'slide-component', kind: 'component' },
     })
     controller.pointerUp({ x: 120, y: 460 }, VIEW)
     expect(controller.pointerDown({ x: 1000, y: 480 }, VIEW)).toMatchObject({
-      kind: 'v9-slide-candidate',
+      kind: 'slide-authoring',
       hit: { layerItemId: 'slide-runtime', kind: 'runtime' },
     })
 
@@ -562,7 +562,7 @@ describe('V9 Slide viewport adapter', () => {
     injectCandidate()
     const controller = createSlideWorkspaceAuthoringController()
     const selected = controller.pointerDown({ x: 200, y: 250 }, VIEW)
-    if (selected.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (selected.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(selected.command?.ok).toBe(true)
     expect(selected.targets?.[0]?.layerItemId).toBe('slide-locked')
     expect(selected.hit?.locked).toBe(true)
@@ -577,7 +577,7 @@ describe('V9 Slide viewport adapter', () => {
       height: 80,
       rotation: 0,
     }], VIEW)
-    if (written.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (written.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(written.command?.ok).toBe(false)
     expect(written.command?.reason).toBe(SLIDE_REJECT_LOCKED)
     expect(written.command?.historyEntry).toBe(false)
@@ -589,7 +589,7 @@ describe('V9 Slide viewport adapter', () => {
     const controller = createSlideWorkspaceAuthoringController()
     controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const moved = controller.pointerMove({ x: 260, y: 190 }, VIEW)
-    if (moved.kind !== 'v9-slide-candidate') throw new Error('expected V9')
+    if (moved.kind !== 'slide-authoring') throw new Error('expected V9')
     expect(moved.preview?.[0]).toMatchObject({
       nodeId: 'slide-title',
       x: 180,

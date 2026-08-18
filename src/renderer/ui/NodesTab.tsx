@@ -37,7 +37,7 @@ import {
   Sigma,
 } from 'lucide-react'
 import type { SceneNode } from '../../shared/projectTypes'
-import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
+import { courseLayerItemToSceneNode } from '../store/slideEditorProjection'
 import {
   describeLayerImpact,
   visualFrontToBackRows,
@@ -359,7 +359,7 @@ export function NodesTab() {
   const backendKind = useEditorStore(selectSlideBackendKind)
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
-  const candidate = (backendKind === 'v9-slide-candidate' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
+  const candidate = (backendKind === 'slide-authoring' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
   const unifiedRows = candidate ? projection.unifiedRows : null
   const visualRows = unifiedRows ? visualFrontToBackRows(unifiedRows) : null
   const layerGroups = visualRows ? groupedVisualRows(visualRows) : null

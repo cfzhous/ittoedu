@@ -30,9 +30,9 @@ import {
   resolveTeacherControllerAuthoringKind,
 } from '@/renderer/authoring/v9TeacherControllerAuthoring'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   selectSlideCandidateBackend,
   useEditorStore,
@@ -316,7 +316,7 @@ function v9ControllerFixture(): CourseProjectDocument {
 
 function injectCandidate(project = v9ControllerFixture()) {
   const session = openSlideAuthoringSession(project)
-  const backend = createSlideCandidateBackend(session)
+  const backend = createSlideAuthoringBackend(session)
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
   return backend
 }
@@ -341,6 +341,7 @@ describe('v9 teacher controller authoring bridge', () => {
   })
 
   it('leaves the default V8 path when no candidate is injected', () => {
+    useEditorStore.setState({ slideBackend: undefined as any })
     const controller = createV9TeacherControllerAuthoringController()
     expect(resolveTeacherControllerAuthoringKind()).toBe('v8')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()

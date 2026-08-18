@@ -18,7 +18,7 @@ import {
   selectSlideLayers,
   setSlideEditingScope,
   type SlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   SLIDE_DELETE_FOCUS_GUARD_REASON,
   SLIDE_SCENE_ACTION_COMMAND_MAP,

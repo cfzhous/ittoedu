@@ -28,12 +28,12 @@ import {
 import {
   type SlideAuthoringSession,
   type SlideAuthoringTarget,
-  type SlideCandidateBackend,
+  type SlideAuthoringBackend,
   type SlideCommandResult,
   buildSlideEditorView,
   makeSlideAuthoringTarget,
   slideAuthoringGeneration,
-} from '../course/v9SlideVerticalSlice'
+} from '../course/slideAuthoringBackend'
 
 export const V9_SLIDE_CONTENT_REJECT_NOT_CANDIDATE = SLIDE_BACKEND_NOT_CANDIDATE
 export const V9_SLIDE_CONTENT_REJECT_COMPOSING = 'composing'
@@ -336,7 +336,7 @@ function locateEditableNative(
 }
 
 export function beginV9SlideContentEdit(input: {
-  readonly backend?: SlideCandidateBackend | null
+  readonly backend?: SlideAuthoringBackend | null
   readonly session?: SlideAuthoringSession
   readonly layerItemId: string
   readonly source?: V9SlideContentEditSource

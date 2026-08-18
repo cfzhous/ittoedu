@@ -100,9 +100,9 @@ beforeEach(() => {
 })
 
 describe('default Course Project V9 persistence', () => {
-  it('creates a schemaVersion 9 document on the V9 candidate backend', () => {
+  it('creates a schemaVersion 9 document on the V9 authoring backend', () => {
     const state = useEditorStore.getState()
-    expect(selectSlideBackendKind(state)).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(state)).toBe('slide-authoring')
     expect(selectSlideCandidateDocument(state)?.schemaVersion).toBe(
       COURSE_PROJECT_SCHEMA_VERSION,
     )
@@ -135,7 +135,7 @@ describe('default Course Project V9 persistence', () => {
     if (opened.kind !== 'v8') return
     expect(opened.pending.report.sourceFormat).toBe('legacy-course')
     expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
   })
 })
 
@@ -1493,7 +1493,7 @@ describe('multi-selection operations', () => {
 
 describe('history semantics', () => {
   it('records V9 history as capped snapshot steps instead of V8 immer patches', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     const store = useEditorStore.getState()
     const sceneId = store.project.scenes[0]!.id
     const originalName = store.project.scenes[0]!.name

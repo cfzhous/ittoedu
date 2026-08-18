@@ -7,9 +7,9 @@ import {
   createMediaAssetImport,
 } from '@/renderer/project/assetManager'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import { dedupeCourseMediaImports } from '@/renderer/project/v9AssetAdapter'
 import {
   selectAudioSettings,
@@ -92,7 +92,7 @@ function v9EmptySlideFixture() {
 }
 
 function injectCandidate() {
-  const backend = createSlideCandidateBackend(
+  const backend = createSlideAuthoringBackend(
     openSlideAuthoringSession(v9EmptySlideFixture()),
   )
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
@@ -110,8 +110,8 @@ afterEach(() => {
 })
 
 describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
-  it('defaults MediaTab to the V9 slide candidate backend', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+  it('defaults MediaTab to the V9 slide authoring backend', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     const imported = createImageAssetImport(
       { name: 'v9-photo.png', mimeType: 'image/png', bytes: Uint8Array.from([1, 2, 3, 4]) },
       { dimensions: { width: 8, height: 8 } },

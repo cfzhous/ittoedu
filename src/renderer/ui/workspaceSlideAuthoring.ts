@@ -21,15 +21,15 @@ import {
   SLIDE_BACKEND_NOT_CANDIDATE,
 } from '../store/slideBackendPort'
 import {
-  selectSlideCandidateBackend,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '../store/editorStore'
 import {
   buildSlideEditorView,
   type SlideAuthoringTarget,
-  type SlideCandidateBackend,
+  type SlideAuthoringBackend,
   type SlideCommandResult,
-} from '../course/v9SlideVerticalSlice'
+} from '../course/slideAuthoringBackend'
 import type { SlideEditorNodeTransform } from '../course/slideEditorCommands'
 import {
   adaptV9SlideLayerItemHit,
@@ -41,7 +41,7 @@ import {
 const MARQUEE_MIN_SIZE = 3
 const HANDLE_HIT_RADIUS = 10
 
-export type SlideWorkspaceBackendKind = 'v8' | 'v9-slide-candidate'
+export type SlideWorkspaceBackendKind = 'v8' | 'slide-authoring'
 
 export interface SlideAuthoringPointer {
   readonly x: number
@@ -57,7 +57,7 @@ export type SlideWorkspaceAuthoringResult =
       readonly reason: typeof SLIDE_BACKEND_NOT_CANDIDATE
     }
   | {
-      readonly kind: 'v9-slide-candidate'
+      readonly kind: 'slide-authoring'
       readonly command?: SlideCommandResult
       readonly preview?: readonly SlideEditorNodeTransform[]
       readonly overlay?: StageSelectionOverlayGeometry | null
@@ -98,12 +98,12 @@ function v8Fallback(): SlideWorkspaceAuthoringResult {
   return { kind: 'v8', reason: SLIDE_BACKEND_NOT_CANDIDATE }
 }
 
-function readCandidate(): SlideCandidateBackend | null {
-  return selectSlideCandidateBackend(useEditorStore.getState())
+function readCandidate(): SlideAuthoringBackend | null {
+  return selectSlideAuthoringBackend(useEditorStore.getState())
 }
 
 function runCandidate(
-  run: (backend: SlideCandidateBackend) => SlideCommandResult,
+  run: (backend: SlideAuthoringBackend) => SlideCommandResult,
 ): SlideCommandResult {
   return useEditorStore.getState().runSlideCandidateCommand(run)
 }
@@ -130,7 +130,7 @@ function pointerToWorld(
   return clientToWorld(viewportTransform(options), { x: pointer.x, y: pointer.y })
 }
 
-function layerTargets(backend: SlideCandidateBackend): V9SlideHitTarget[] {
+function layerTargets(backend: SlideAuthoringBackend): V9SlideHitTarget[] {
   const session = backend.getSession()
   const view = buildSlideEditorView({
     project: session.history.present,
@@ -147,7 +147,7 @@ function layerTargets(backend: SlideCandidateBackend): V9SlideHitTarget[] {
   })
 }
 
-function nativeFrames(backend: SlideCandidateBackend): Map<string, SlideEditorNodeTransform> {
+function nativeFrames(backend: SlideAuthoringBackend): Map<string, SlideEditorNodeTransform> {
   const session = backend.getSession()
   const view = buildSlideEditorView({
     project: session.history.present,
@@ -175,7 +175,7 @@ function nativeFrames(backend: SlideCandidateBackend): Map<string, SlideEditorNo
 }
 
 function writableNativeTransforms(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
 ): SlideEditorNodeTransform[] {
   const session = backend.getSession()
   const frames = nativeFrames(backend)
@@ -188,14 +188,14 @@ function writableNativeTransforms(
   })
 }
 
-function makeTargets(backend: SlideCandidateBackend): SlideAuthoringTarget[] {
+function makeTargets(backend: SlideAuthoringBackend): SlideAuthoringTarget[] {
   return backend.getSnapshot().selection.selectionIds.map((layerItemId) =>
     backend.makeTarget(layerItemId),
   )
 }
 
 function overlayForSelection(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   options: StageViewportTransformOptions,
   preview?: readonly SlideEditorNodeTransform[],
 ): StageSelectionOverlayGeometry | null {
@@ -227,12 +227,12 @@ function overlayForSelection(
 }
 
 function v9Result(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   options: StageViewportTransformOptions,
-  extra: Omit<Extract<SlideWorkspaceAuthoringResult, { kind: 'v9-slide-candidate' }>, 'kind' | 'overlay' | 'targets'> = {},
+  extra: Omit<Extract<SlideWorkspaceAuthoringResult, { kind: 'slide-authoring' }>, 'kind' | 'overlay' | 'targets'> = {},
 ): SlideWorkspaceAuthoringResult {
   return {
-    kind: 'v9-slide-candidate',
+    kind: 'slide-authoring',
     overlay: overlayForSelection(backend, options, extra.preview),
     targets: makeTargets(backend),
     ...extra,
@@ -257,7 +257,7 @@ function previewMove(
 }
 
 function nativeLayerLocksAspect(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   nodeId: string,
 ): boolean {
   const session = backend.getSession()
@@ -277,7 +277,7 @@ function nativeLayerLocksAspect(
 function previewResize(
   gesture: ResizeGesture,
   world: StagePoint,
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
 ): SlideEditorNodeTransform[] {
   if (gesture.nodes.length === 1) {
     const start = gesture.nodes[0]!
@@ -335,7 +335,7 @@ function previewRotate(
 }
 
 function hitHandle(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   world: StagePoint,
 ): { kind: 'resize'; direction: StageResizeHandleDirection } | { kind: 'rotate' } | null {
   const session = backend.getSession()
@@ -387,7 +387,7 @@ function marqueeRect(start: StagePoint, world: StagePoint): StageRect {
 
 /**
  * Slide canvas hit / selection / transform kernel for the V9 candidate.
- * Default V8 (`selectSlideCandidateBackend === null`) returns `{ kind: 'v8' }`
+ * Default V8 (`selectSlideAuthoringBackend === null`) returns `{ kind: 'v8' }`
  * and never reports a successful command — Workspace must keep its existing path.
  */
 export function createSlideWorkspaceAuthoringController() {
@@ -395,7 +395,7 @@ export function createSlideWorkspaceAuthoringController() {
   let preview: SlideEditorNodeTransform[] | null = null
 
   const resolveKind = (): SlideWorkspaceBackendKind =>
-    readCandidate() ? 'v9-slide-candidate' : 'v8'
+    readCandidate() ? 'slide-authoring' : 'v8'
 
   const currentTargets = (): SlideAuthoringTarget[] => {
     const backend = readCandidate()
@@ -605,7 +605,7 @@ export function createSlideWorkspaceAuthoringController() {
 }
 
 export function resolveSlideWorkspaceAuthoringKind(): SlideWorkspaceBackendKind {
-  return readCandidate() ? 'v9-slide-candidate' : 'v8'
+  return readCandidate() ? 'slide-authoring' : 'v8'
 }
 
 export function listSlideWorkspaceHitTargets(): V9SlideHitTarget[] {

@@ -3,10 +3,11 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { COURSE_PROJECT_SCHEMA_VERSION } from '@/shared/courseProjectTypes'
 import type { NativeLayerItem, ScopedLayerItem } from '@/shared/courseProjectTypes'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
+  selectActiveCourseProjectDocument,
   selectSlideAuthoringSnapshot,
   selectSlideBackendKind,
   selectSlideCandidateBackend,
@@ -14,15 +15,13 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import {
-  SLIDE_BACKEND_NOT_CANDIDATE,
-  V8_SLIDE_BACKEND,
-  executeSlideCandidateCommand,
+  executeSlideAuthoringCommand,
   getSlideBackendKind,
-  isV9SlideCandidateBackend,
+  isSlideAuthoringBackend,
 } from '@/renderer/store/slideBackendPort'
 
 /**
- * Proves store backend exclusivity and the R3-CUT default V9 candidate.
+ * Proves store backend exclusivity and single V9 document transaction.
  * Does not prove Workspace, ScenePanel, Player, or any V9 UI capability.
  */
 const NOW = '2026-08-17T14:00:00.000Z'
@@ -143,7 +142,7 @@ function v9CandidateFixture() {
 }
 
 function makeCandidateBackend() {
-  return createSlideCandidateBackend(openSlideAuthoringSession(v9CandidateFixture()))
+  return createSlideAuthoringBackend(openSlideAuthoringSession(v9CandidateFixture()))
 }
 
 beforeEach(() => {
@@ -155,12 +154,12 @@ afterEach(() => {
   useEditorStore.getState().clearV9SlideCandidateBackend()
 })
 
-describe('V9 slide backend selection seam', () => {
-  it('defaults to the V9 slide candidate backend', () => {
+describe('V9 slide authoring backend single document transaction', () => {
+  it('defaults to the V9 slide authoring backend', () => {
     const state = useEditorStore.getState()
-    expect(selectSlideBackendKind(state)).toBe('v9-slide-candidate')
-    expect(getSlideBackendKind(state.slideBackend)).toBe('v9-slide-candidate')
-    expect(isV9SlideCandidateBackend(state.slideBackend)).toBe(true)
+    expect(selectSlideBackendKind(state)).toBe('slide-authoring')
+    expect(getSlideBackendKind(state.slideBackend)).toBe('slide-authoring')
+    expect(isSlideAuthoringBackend(state.slideBackend)).toBe(true)
     expect(selectSlideCandidateBackend(state)).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(state)).not.toBeNull()
     expect(selectSlideCandidateDocument(state)?.schemaVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
@@ -187,14 +186,14 @@ describe('V9 slide backend selection seam', () => {
     ))).toHaveLength(scenesBefore + 1)
   })
 
-  it('injects one V9 candidate and writes only the candidate document', () => {
+  it('injects one V9 authoring backend and executes single document transactions', () => {
     const source = v9CandidateFixture()
-    const backend = createSlideCandidateBackend(openSlideAuthoringSession(source))
+    const backend = createSlideAuthoringBackend(openSlideAuthoringSession(source))
 
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
 
     const injected = useEditorStore.getState()
-    expect(selectSlideBackendKind(injected)).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(injected)).toBe('slide-authoring')
     expect(selectSlideCandidateBackend(injected)).toBe(backend)
     expect(selectSlideAuthoringSnapshot(injected)).toEqual(backend.getSnapshot())
     expect(selectSlideCandidateDocument(injected)?.schemaVersion).toBe(9)
@@ -210,12 +209,12 @@ describe('V9 slide backend selection seam', () => {
     expect(added.ok).toBe(true)
     expect(added.historyEntry).toBe(true)
 
-    const afterCandidateWrite = useEditorStore.getState()
-    expect(selectSlideBackendKind(afterCandidateWrite)).toBe('v9-slide-candidate')
-    expect(selectSlideAuthoringSnapshot(afterCandidateWrite)?.revision).toBe(2)
-    expect(selectSlideCandidateDocument(afterCandidateWrite)?.schemaVersion).toBe(9)
-    expect(selectSlideCandidateDocument(afterCandidateWrite)?.revision).toBe(2)
-    const writtenSurface = selectSlideCandidateDocument(afterCandidateWrite)?.surfaces[0]
+    const afterWrite = useEditorStore.getState()
+    expect(selectSlideBackendKind(afterWrite)).toBe('slide-authoring')
+    expect(selectSlideAuthoringSnapshot(afterWrite)?.revision).toBe(2)
+    expect(selectSlideCandidateDocument(afterWrite)?.schemaVersion).toBe(9)
+    expect(selectSlideCandidateDocument(afterWrite)?.revision).toBe(2)
+    const writtenSurface = selectSlideCandidateDocument(afterWrite)?.surfaces[0]
     expect(
       writtenSurface && writtenSurface.type === 'slide' ? writtenSurface.scenes : [],
     ).toHaveLength(2)
@@ -225,31 +224,30 @@ describe('V9 slide backend selection seam', () => {
       : []).toHaveLength(1)
   })
 
-  it('clears onto an explicit V8 backend, then createNewProject restores V9 writes', () => {
+  it('maintains single V9 document state across createNewProject and reset', () => {
     const backend = makeCandidateBackend()
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
 
     useEditorStore.getState().clearV9SlideCandidateBackend()
 
     const cleared = useEditorStore.getState()
-    expect(selectSlideBackendKind(cleared)).toBe('v8')
-    expect(selectSlideCandidateBackend(cleared)).toBeNull()
-    expect(selectSlideAuthoringSnapshot(cleared)).toBeNull()
-    expect(selectSlideCandidateDocument(cleared)).toBeNull()
-    expect(cleared.slideBackend).toBe(V8_SLIDE_BACKEND)
+    expect(selectSlideBackendKind(cleared)).toBe('slide-authoring')
+    expect(selectSlideCandidateBackend(cleared)).not.toBeNull()
+    expect(selectSlideAuthoringSnapshot(cleared)).not.toBeNull()
+    expect(selectSlideCandidateDocument(cleared)?.schemaVersion).toBe(9)
     expect(
-      executeSlideCandidateCommand(cleared.slideBackend, (candidate) => candidate.addScene()),
+      executeSlideAuthoringCommand(cleared.slideBackend, (candidate) => candidate.addScene()),
     ).toMatchObject({
-      ok: false,
-      reason: SLIDE_BACKEND_NOT_CANDIDATE,
-      historyEntry: false,
+      ok: true,
+      historyEntry: true,
     })
 
     cleared.createNewProject()
     const restored = useEditorStore.getState()
-    expect(selectSlideBackendKind(restored)).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(restored)).toBe('slide-authoring')
     expect(selectSlideCandidateDocument(restored)?.schemaVersion).toBe(9)
+    expect(selectActiveCourseProjectDocument(restored)?.schemaVersion).toBe(9)
     expect(restored.errorMessage).toBeNull()
 
     const revisionBefore = selectSlideAuthoringSnapshot(restored)?.revision ?? 0

@@ -10,9 +10,9 @@ import {
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { createTeacherControllerNode } from '@/renderer/project/createProject'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   CONTROLLER_MOVE_REASON,
 } from '@/renderer/course/effectiveLayerCommands'
@@ -213,7 +213,7 @@ function v9ThreeLocationFixture(): CourseProjectDocument {
 }
 
 function injectCandidate(project = v9ThreeLocationFixture()) {
-  const backend = createSlideCandidateBackend(openSlideAuthoringSession(project))
+  const backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
   return backend
 }
@@ -293,7 +293,7 @@ afterEach(() => {
 
 describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   it('defaults the store backend to V9 and paints candidate source labels', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
     render(<NodesTab />)
     expect(screen.getByTestId('nodes-tab')).toBeTruthy()

@@ -8,9 +8,9 @@ import {
   addSlideRuntimeLayer,
 } from '@/renderer/course/v9SlideContentCommands'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import { onElementAnimationPreviewRequested } from '@/renderer/phaser/elementAnimationPreviewBus'
 import {
   selectEditingNodes,
@@ -117,7 +117,7 @@ function v9EmptySlideFixture() {
 }
 
 function injectCandidate() {
-  const backend = createSlideCandidateBackend(
+  const backend = createSlideAuthoringBackend(
     openSlideAuthoringSession(v9EmptySlideFixture()),
   )
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
@@ -151,8 +151,8 @@ function slideSceneLayerItems() {
 }
 
 describe('V9 slide product integration on the real V8 UI', () => {
-  it('defaults to the V9 slide candidate backend and writes inserted text into the candidate document', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+  it('defaults to the V9 slide authoring backend and writes inserted text into the candidate document', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())).not.toBeNull()
     expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(

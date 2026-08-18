@@ -50,7 +50,7 @@ import {
   type SlideCommandOptions,
   type SlideCommandResult,
 } from '../course/slideEditorCommands'
-import type { SlideAuthoringSession } from '../course/v9SlideVerticalSlice'
+import type { SlideAuthoringSession } from '../course/slideAuthoringBackend'
 
 const HANDLE_HIT_RADIUS = 10
 

@@ -31,11 +31,11 @@ import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
   setSlideEditingScope,
   type SlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   selectEditingNodes,
   selectSelectedNode,
@@ -259,16 +259,14 @@ describe('V9 Slide text/formula transactions', () => {
     useEditorStore.getState().clearV9SlideCandidateBackend()
   })
 
-  it('defaults to the V9 slide candidate backend', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('v9-slide-candidate')
+  it('defaults to the V9 slide authoring backend', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
+    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
   })
 
-  it('does not hijack the V8 text path when the V8 backend is explicitly selected', () => {
-    useEditorStore.getState().clearV9SlideCandidateBackend()
-    expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()
+  it('rejects text edit when no authoring backend is available', () => {
     expect(beginV9SlideContentEdit({
-      backend: selectSlideCandidateBackend(useEditorStore.getState()),
+      backend: null,
       layerItemId: 'slide-title',
     })).toEqual({
       ok: false,
@@ -278,7 +276,7 @@ describe('V9 Slide text/formula transactions', () => {
 
   it('opens a canvas text/formula session with authoringAddress, revision and generation', () => {
     const session = openSlideAuthoringSession(v9SlideFixture())
-    const backend = createSlideCandidateBackend(session)
+    const backend = createSlideAuthoringBackend(session)
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
     const candidate = selectSlideCandidateBackend(useEditorStore.getState())
 
@@ -552,7 +550,7 @@ describe('V9 Slide text/formula transactions', () => {
     const session = openSlideAuthoringSession(v9SlideFixture())
     expect(session.selection.selectionIds).toEqual([])
     useEditorStore.getState().injectV9SlideCandidateBackend(
-      createSlideCandidateBackend(session),
+      createSlideAuthoringBackend(session),
     )
     const store = useEditorStore.getState()
     expect(store.selectedNodeIds).toEqual([])

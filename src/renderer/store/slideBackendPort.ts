@@ -1,50 +1,44 @@
 import type {
-  SlideCandidateBackend,
+  SlideAuthoringBackend,
   SlideCommandResult,
-} from '../course/v9SlideVerticalSlice'
+} from '../course/slideAuthoringBackend'
 
 /**
- * Minimal Slide backend port for R2-SEAM.
+ * Slide authoring backend port.
  *
- * Read snapshot: `backend.getSnapshot()` after `selectSlideCandidateBackend`.
- * Execute command: call methods on `SlideCandidateBackend` (or `executeSlideCandidateCommand`).
- * Hold candidate: `injectV9SlideCandidateBackend` (test/dev only; not App/URL/menu).
- * Discard candidate: `clearV9SlideCandidateBackend`.
- * Save candidate: read `backend.getSession().history.present`; do not write V8 `project` / `saveProject`.
+ * Store holds exactly one V9 Course Project document and one Slide authoring backend.
  */
-export type V8SlideBackend = { readonly kind: 'v8' }
-export type SlideBackend = V8SlideBackend | SlideCandidateBackend
+export type SlideBackend = SlideAuthoringBackend
 export type SlideBackendKind = SlideBackend['kind']
 
-export const V8_SLIDE_BACKEND: V8SlideBackend = Object.freeze({ kind: 'v8' })
-
-export const SLIDE_BACKEND_DUAL_WRITE_REFUSED =
-  '当前会话已持有 V9 Slide candidate，不能同时写入 V8 工程。'
-
-export const SLIDE_BACKEND_NOT_CANDIDATE = 'not-v9-slide-candidate'
-
-export function isV9SlideCandidateBackend(
+export function isSlideAuthoringBackend(
   backend: SlideBackend | null | undefined,
-): backend is SlideCandidateBackend {
-  return backend?.kind === 'v9-slide-candidate'
+): backend is SlideAuthoringBackend {
+  return backend?.kind === 'slide-authoring'
 }
+
+export const isV9SlideCandidateBackend = isSlideAuthoringBackend
+export const isSlideCandidateBackend = isSlideAuthoringBackend
 
 export function getSlideBackendKind(
   backend: SlideBackend | null | undefined,
 ): SlideBackendKind {
-  return isV9SlideCandidateBackend(backend) ? 'v9-slide-candidate' : 'v8'
+  return 'slide-authoring'
 }
 
-export function executeSlideCandidateCommand(
+export function executeSlideAuthoringCommand(
   backend: SlideBackend | null | undefined,
-  run: (candidate: SlideCandidateBackend) => SlideCommandResult,
+  run: (authoring: SlideAuthoringBackend) => SlideCommandResult,
 ): SlideCommandResult {
-  if (!isV9SlideCandidateBackend(backend)) {
+  if (!isSlideAuthoringBackend(backend)) {
     return {
       ok: false,
-      reason: SLIDE_BACKEND_NOT_CANDIDATE,
+      reason: 'not-slide-authoring-backend',
       historyEntry: false,
     }
   }
   return run(backend)
 }
+
+export const executeSlideCandidateCommand = executeSlideAuthoringCommand
+export const SLIDE_BACKEND_NOT_CANDIDATE = 'not-slide-authoring-backend'
