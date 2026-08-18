@@ -3,7 +3,7 @@
 > CURRENT_PRODUCT: 仓库根目录 / `main`（V9 重建已合入；已提交 HEAD 见 `git rev-parse HEAD`）
 > HISTORICAL_V8_BASELINE: `f27275658c6dfaa12f2ce35cd9368dcdebe99451`（只作历史对照，禁止再从此重建）
 > HISTORICAL_V9_DONOR: `475503498323`（只作供体与失败取证）
-> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.1
+> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.2
 > TASK_PACK: [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)
 > UPDATED: 2026-08-18
 > PURPOSE: 帮助新 Agent 用最少上下文进入真实代码
@@ -15,7 +15,7 @@
 ## 1. 新 Agent 的最短启动顺序
 
 1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.1。
+2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.2。
 3. 领取任务只看 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)。旧 `v8-to-v9-rebuild` 任务包已删除。
 4. 当前产品就是仓库根目录。历史 worktree 与 `codex/v9-editor-v8-base` 只作供体，不得再当第二套当前版。
 5. `docs/reviews/**`、`docs/INTERNAL_1_0_MILESTONE_0.md` 与旧评估稿只作历史取证，不是当前执行入口。
@@ -82,8 +82,8 @@ V9 Course session
 ```text
 CourseProjectArchiveData
   → buildPublishedCourseV2Payload
-  → 产品：当前位置试运行已走 FlowSurfaceHost / SpatialSurfaceHost
-  → CoursePlayer + MixedCourseNavigator + 已有 host
+  → 产品：当前位置试运行与整课预览走 CoursePlayer + FlowSurfaceHost / SpatialSurfaceHost / SlidePublishedAdapter
+  → Phaser PlayerApp 不是 V9 Mixed 试运行主路径（P1 按此修视频/控制器）
 
 同一 producer
   → 优先接现有 buildWebPackage / buildStandaloneHtml / buildPptx
@@ -117,22 +117,25 @@ CourseProjectArchiveData
 | 画布选择/拖动/缩放 | `Workspace.tsx`, `workspaceSlideAuthoring.ts` | Phaser bridge、stage viewport transform | 新建 Slide Workspace |
 | 图层/属性/元素 UI | 对应原 `*Tab.tsx` | App documentControl、Store target token | 受控路径读取 hidden V8 project |
 | 教师控制器作者态 | V9 slice、Workspace、Nodes/Properties | teacher controller layout、preview projection | 编辑态执行导航 |
-| 教师控制器播放态 | 现有 Player 会话 + SurfaceHost | runtime session、picker、course state | SurfaceHost 和 App 双执行动作 |
+| 教师控制器播放态 | Published 宿主 + `TeacherControllerDom` | `SlidePublishedAdapter`、Flow/Spatial host、`publishedDynamicHosts.ts` | 编辑态执行导航；每表面复制控制器 |
+| 试运行跨表面跳转 | `editorStore.activateCourseLocation`、`apply*Backend` | `Workspace` course-try-run `goToLocation` | 跨表面时写死 `canvasMode: 'edit'`（P2 修） |
+| 画布底色 | Spatial CSS、`SpatialSurfaceDocument`、Slide 场景字段 | `derivedV8ProjectFromSpatial`、Properties | 只改假 V8 投影；写死 `#111318` |
 | Slide 互动 | producer、`InteractionEngine.ts`, Published App/Slide Host | event bus、状态与 destroy | 用 Runtime 热点永久绕行 |
 | Runtime/Component | shared contracts、player hosts、Developer/Components/Properties | asset/package sidecar、authoringAddress | 复制 CourseStudio 动态编辑器 |
 | Flow | V9 model/view、原壳适配、`FlowSurfaceHost.ts` | PDF/DOCX、统一课程状态 | 复制 FlowBlockEditor UI |
-| Spatial | viewport/relations model、原壳适配、`SpatialSurfaceHost.ts` | world/viewport 坐标分离 | inverse-scale 补偿控制器 |
+| Spatial | viewport/relations model、原壳适配、`SpatialSurfaceHost.ts` | world/viewport 坐标分离、选中框旋转（P4） | inverse-scale 补偿控制器 |
+| 课程树删除/跨组 | `ScenePanel.tsx`、`courseLocationCommands.ts` | `planCourseTreeReorder`、`deleteCourseSurface` | 用删 Flow 标题块冒充删整页（P6） |
 | HTML/网页包 | `buildPublishedCourse.ts`, `buildCoursePackages.ts` | Player bundle、资源清单 | 恢复 `.course-nav` |
 | PPTX/PDF/DOCX | 对应 `buildCourse*.ts` | print plan、fallback、真实打开 | 只断言文件存在 |
 | 能力说明 | docs、Skill、Agent Kit capability index | 当前正式 UI 和 tests | 声明尚不可达能力 |
 
 ## 6. 当前阶段与首要风险
 
-当前阶段是 **Editor 1.0 收尾**，执行 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)。不是 `accepted`。
+当前阶段是 **Editor 1.0 收尾**，执行 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)：车道 C 为 T0–T6，车道 P 为 12.2 的 P1–P7。不是 `accepted`。
 
 - 产品：仓库根目录 / `main`
 - V8 导入将删除（T2），不是长期兼容面
-- 首要风险：按已删除的 R0–R8 或过时「当前格式是 Project V8」文档施工；以及在未提交的控制台/图层补丁上直接改 Schema
+- 首要风险：按已删除的 R0–R8 或过时「当前格式是 Project V8」文档施工；在未提交的控制台/图层补丁上直接改 Schema；把 P1–P7 塞进 T1 合同提交；把 Phaser 接回 V9 试运行主路径
 
 ## 7. 关键不变量
 

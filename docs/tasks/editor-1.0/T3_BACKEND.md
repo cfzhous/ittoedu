@@ -38,6 +38,7 @@ v9-slide-candidate          → slide-authoring（或等价正式名）
 3. 删除仅用于防双写的错误与测试，换成「唯一文档事务」测试。
 4. Flow / Spatial session 已直接持有 V9，不要再绕回 V8 backend。
 5. 不要重写 Workspace 手势。
+6. 不要在本任务改 `activateCourseLocation` 的 `canvasMode` 策略（那是 P2）。若必须动激活函数，只改 backend kind 符号。
 
 ## 最小验证
 
@@ -63,4 +64,4 @@ npx vitest run tests/unit/v9SlideViewportAdapter.test.ts
 
 ## 下游
 
-T5 在正式后端名上建 Read Model。T6 扫描 `V8SlideBackend`、`v9-slide-candidate`。
+T5 在正式后端名上建 Read Model。P2 若尚未做，接在本任务之后改 `canvasMode` 保留逻辑。T6 扫描 `V8SlideBackend`、`v9-slide-candidate`。

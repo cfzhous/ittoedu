@@ -19,7 +19,7 @@ tests/unit/v9GlobalLayerUiAdapter.test.tsx
 新建一个窄架构测试（可选，计入本任务最小验证）
 ```
 
-不要重写 `Workspace.tsx`、不要拆 `editorStore.ts`、不要改 Schema。
+不要重写 `Workspace.tsx`、不要拆 `editorStore.ts`、不要改 Schema。不要回退 P7 的图层分组（控制器不得出现在「场景 / 本页 / 世界」）。与 P7 禁止同时改 `NodesTab.tsx`。
 
 ## 工作项
 
@@ -63,4 +63,4 @@ npx vitest run tests/unit/v9GlobalLayerUiAdapter.test.tsx
 
 ## 下游
 
-T6。1.0 之后的渐进解耦不在本任务。
+T6。1.0 之后的渐进解耦不在本任务。若 P7 未做，T6 前必须先做 P7 或在本任务 HANDOFF 声明图层分组仍待 P7。

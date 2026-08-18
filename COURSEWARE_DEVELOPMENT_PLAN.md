@@ -1,9 +1,10 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.1  
+> 计划版本：12.2  
 > 更新日期：2026-08-18  
+> 12.2 变更：把 2026-08-18 定位的教师可见缺陷（试运行/预览控制器与视频、Flow/Spatial 媒体编辑、画布底色、课程树删除与跨组、图层中的全局控制器）收进车道 P；合同冻结仍走车道 C（T0–T6）。两条车道可分 worktree 并行，同一提交不得混改 Schema 判别器和教师手感。  
 > 12.1 变更：教师确认没有要再打开的 V8 `.h5lesson`，删除导入、不保留密封导入器；删除已失效的重建任务包与 V8 Builder Skill；执行拆到 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)，每环最小验证，全量只在最后。  
-> 取代：计划 11.0–12.0。已删除 `docs/tasks/v8-to-v9-rebuild/**`，不得再领取 R0–R8。  
+> 取代：计划 11.0–12.1。已删除 `docs/tasks/v8-to-v9-rebuild/**`，不得再领取 R0–R8。  
 > 当前工程格式：Course Project `schemaVersion: 9`  
 > 发布格式：Published Course V2  
 > 运行时：Runtime API 2 / Surface Runtime API 3  
@@ -30,15 +31,23 @@
 
 仍待收口（源码，不是再迁一次 V9）：
 
-| 缺口 | 任务 |
-|---|---|
-| V9 Native 合同仍依赖 `projectTypes.ts` / `projectSchema.ts` | T1 |
-| 持久化仍含 `legacy-runtime-v2`、`legacy-whole-canvas` | T1 |
-| 打开 V8 仍走「导入旧版工程」；空白工程仍 `create V8 then migrate` | T2 |
-| 双后端 + `v9-slide-candidate` | T3 |
-| `artifacts/ai-capabilities` 仍声明 `project: 8`；`validate:project` 文案仍写 V8 | T4 |
-| UI 仍消费 V8-shaped `SceneNode` 投影 | T5（隔离，不删光） |
-| 无合同哈希、无教师 `accepted` | T6 |
+| 缺口 | 车道 | 任务 |
+|---|---|---|
+| V9 Native 合同仍依赖 `projectTypes.ts` / `projectSchema.ts` | C | T1 |
+| 持久化仍含 `legacy-runtime-v2`、`legacy-whole-canvas` | C | T1 |
+| Spatial（及可选 Flow 页铬）缺少可持久化画布底色；缺省应白 | C+P | T1 加可选字段，P5 接线 |
+| 打开 V8 仍走「导入旧版工程」；空白工程仍 `create V8 then migrate` | C | T2 |
+| 双后端 + `v9-slide-candidate` | C | T3 |
+| `artifacts/ai-capabilities` 仍声明 `project: 8`；`validate:project` 文案仍写 V8 | C | T4 |
+| UI 仍消费 V8-shaped `SceneNode` 投影 | C | T5（隔离，不删光） |
+| 试运行/整课预览：控制器拖不动、按钮失效；视频几乎不能播 | P | P1 |
+| Mixed 跳转位置时试运行被打回编辑 | P | P2 |
+| Flow 编辑看不到、编不了图片/视频 | P | P3 |
+| Spatial 编辑：旋转框不跟、无视频；试运行图/视频缺失 | P | P4 |
+| 无限画布黑底；画布底色不统一、不可改 | P | P5 |
+| Flow 删不了页；Mixed 删不了整组、不能跨组挪页；主按钮文案都是「新增页面」 | P | P6 |
+| 图层树仍列出全局控制器，和场景物件混在一起 | P | P7 |
+| 无合同哈希、无教师 `accepted` | C | T6；**P1–P7 未做视觉复核不得 `accepted`** |
 
 不要从 `f272756` 再开重建分支。不要把 donor HEAD 当产品主干。
 
@@ -53,6 +62,9 @@
 5. 1.0 之后的 Store / Workspace / Player / UI 重构不得改 V9 Schema。
 6. Editor 2.0 的 AI 走独立 Authoring Protocol，不修改 V9；当前 `courseAiHandoff` / `courseAiPatch` 仍是未挂载 reserved 接口。
 7. 破坏性工程模型才进 V10。
+8. **教师可见播放/编辑缺陷走车道 P，不塞进合同提交。** 控制器仍是一份全局图层，不每表面复制。编辑态 inert，运行态可拖、可点、只改会话。
+9. **所有画布默认白色、可改颜色。** Slide 已有场景 `backgroundColor`。Spatial 在冻结前增加可选 `backgroundColor`（缺省 `#ffffff`）；Flow 稿纸保持白，若要改页铬颜色用同一可选字段，不新造第四类 surface。
+10. 课程结构必须能删除整组（演示 / 流式讲义 / 无限画布），且同类型位置可跨组调整；不得只靠「组内排序」。
 
 目标架构：
 
@@ -73,6 +85,8 @@ Course Project V9  ─────────────── 唯一作者工
                              Player / HTML / Web / PDF / PPTX
 ```
 
+V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Published V2 宿主（SlidePublishedAdapter / FlowSurfaceHost / SpatialSurfaceHost），**不要再把 Phaser `PlayerApp` 当成 V9 试运行主路径。** Phaser 仍负责 Slide **编辑** 命中与几何。
+
 ---
 
 ## 3. 车道与执行包
@@ -82,26 +96,42 @@ Course Project V9  ─────────────── 唯一作者工
 车道 C  合同冻结与协议去 V8         可改 Schema，不改教师手感
 ```
 
-同一提交不得同时改 Schema 判别器和教师可感知交互。
+同一提交不得同时改 Schema 判别器和教师可感知交互。P 与 C 分 worktree；抢同一热点时停下来，不要互相 rebase 进对方的合同/手感提交。
 
 执行拆分、并行边界、最小验证命令见：
 
 - [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)
 - [docs/tasks/editor-1.0/01_SHARED.md](docs/tasks/editor-1.0/01_SHARED.md)
 
+### 3.1 车道 C：合同冻结
+
 | ID | 内容 | 验证 |
 |---|---|---|
-| T0 | tag、V9 夹具、工作区产品补丁收口 | 1 个 round-trip 测试 |
-| T1 | 共享合同、去掉 legacy Runtime 判别器 | 1–2 个合同测试 |
+| T0 | tag、V9 夹具、工作区已有产品补丁收口 | 1 个 round-trip 测试 |
+| T1 | 共享合同、去掉 legacy Runtime 判别器、**Spatial/Flow 可选画布底色字段** | 1–2 个合同测试 |
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3。T5 在 T3 后。T6 在全部完成后。
+T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3。T5 在 T3 后。T6 在 **T2–T5 与 P1–P7** 全部完成后。
 
-中间任务禁止 `npm test`、`typecheck`、e2e、`build:desktop`、`verify`。
+### 3.2 车道 P：教师可见缺陷（12.2）
+
+按教师感知排序，不是按文件名排序。稳定性「时好时坏」不单开任务：P1–P4 先去掉双渲染器和跨表面重挂造成的明显竞态；Store/Workspace 大拆仍属 1.0 之后。
+
+| ID | 内容 | 为何这个顺序 |
+|---|---|---|
+| P1 | 运行态视频 + 控制器可拖可点 + Mixed 导航接到宿主 | 试运行/整课预览现在是空壳；不先修，后面的跳转和媒体都无法验收 |
+| P2 | Mixed 跨位置保留 `canvasMode === 'run'` | 依赖 P1 的宿主还在；改 `editorStore` 激活路径 |
+| P3 | Flow 编辑态图片/视频真正显示可编 | 与 P1 文件不重叠，可并行；验收时编辑/运行对照 |
+| P4 | Spatial 选中框跟旋转；编辑与试运行显示图/视频 | 与 P1 分担 `SpatialSurfaceHost` 时串行该文件 |
+| P5 | 画布默认白、可改色 | CSS 可先做；持久化等 T1 可选字段 |
+| P6 | 课程树：删除整组/流式页、跨组挪页、主按钮文案 | 不挡播放；可与 P1 并行 |
+| P7 | 图层树不再把全局控制器当成场景物件 | 不挡播放；与 T5 抢 `NodesTab` |
+
+中间任务禁止 `npm test`、`typecheck`、e2e、`build:desktop`、`verify`。P 车道最小验证仍是 1–2 个 Vitest 文件；**艺术验收只在 T6 前的课例复核，不在中间宣称 `art candidate`。**
 
 ---
 
@@ -109,7 +139,7 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 
 | 对象 | 1.0 冻结结果 | 后续 |
 |---|---|---|
-| Editor | 发布 `1.0.0`（缺的是冻结 Gate） | SemVer |
+| Editor | 发布 `1.0.0`（缺的是冻结 Gate 与教师可见缺陷收口） | SemVer |
 | Course Project | `schemaVersion: 9` | 破坏性变化进 V10 |
 | Published Course | V2 | 独立升级 |
 | Runtime | canvas-runtime API 2；surface-runtime API 3 | 新能力走独立 API 版本 |
@@ -121,6 +151,8 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 
 必须进 V10 的变化：新 Surface 无法由现有三类表达；改变 Location / Layer owner / 统一图层顺序 / Presentation 合并 / 稳定 ID；必须写入工程的完整时间轴或协作模型；删除或重解释现有必填字段。
 
+冻结前允许的 **additive** 字段（T1，非判别器）：`SpatialSurfaceDocument.backgroundColor?`，缺省视为 `#ffffff`；可选同样加在 `FlowSurfaceDocument` 作为页铬/稿纸底，缺省白。Slide 场景 `backgroundColor` 语义不变。
+
 ---
 
 ## 5. 非目标
@@ -131,6 +163,9 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 - 不新增尚无产品需求的 Surface 或 Native 类型。
 - 不为数字整齐重置 Runtime / Component / Published 版本号。
 - 不把教师可感知交互缺陷塞进合同提交。
+- 不把 Phaser `PlayerApp` 重新接成 V9 Mixed 试运行主路径来「顺便」修视频。
+- 不每表面复制一份教师控制器。
+- 不为「时好时坏」单开稳定性史诗；1.0 之后再拆 Store / Workspace。
 
 1.0 之后再做：统一 Command 层、拆 Store、V9-native Read Model 替换投影、拆 Workspace、Player Authoring 语义 Patch。
 
@@ -144,6 +179,7 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 - V9 合同有机器快照与哈希。
 - 真实 V9 夹具可打开、保存、重开、播放、导出。
 - 文档与能力索引不再把 Project V8 写成当前格式。
+- **P1–P7 在真实课例上通过视觉/互动复核**（试运行与整课预览：控制器可拖可点；三种表面视频能播；Flow/Spatial 编辑能看见图/视频；画布默认白可改色；课程树能删组、能跨组挪同类型页；图层不把全局控制器显示成场景物件）。
 - 自动化、视觉、真人验收通过。
 - **教师明确 `accepted`。**
 - 内部投影适配器可以存在，不得形成第二份工程真相。
@@ -159,11 +195,74 @@ T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3
 - 不维护两套可见编辑器。
 - 不以 hidden/no-op 冒充完成。
 - 自动化不能代替教师 `accepted`。
+- 编辑态控制器 inert；运行态控制器可执行但只改会话偏移/折叠，不写回工程 frame，除非教师明确「保存位置」。
+- Spatial 世界与视口 HUD 使用不同坐标空间；选中框必须跟物件旋转。
 
 ---
 
-## 8. 最终判断
+## 8. 教师可见缺陷：定位与修复方案（12.2）
 
-当前缺口不是「V9 领域模型要推倒」，而是过渡命名、合同归属、机器产物仍说 V8、以及教师尚未 `accepted`。
+定位日期：2026-08-18。只修这里列出的因果，不借机重写编辑器。
 
-> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。按 editor-1.0 任务包收口合同、删除导入、统一能力链，教师验收后发布 Editor 1.0。此后 V9 合同不变，内部实现再逐步解耦。**
+### 8.1 共同因果
+
+V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser。两套渲染器对视频、控制器、资源 URL 的实现不一致。跨表面 `activateCourseLocation` 会 `apply*Backend` 并写死 `canvasMode: 'edit'`。
+
+### 8.2 逐项
+
+**P1 运行态控制器与视频**
+
+- 现象：试运行与整课预览中全局控制器拖不动、按钮失效；除 Flow 稿纸视频块外，运行态视频不能播。
+- 原因：`TeacherControllerDom` 只更新 session `offset`，Slide/Flow 宿主不写回 `left/top`（Spatial 会）。Flow 运行浮层 `position: fixed; inset: 0`。Slide 舞台 CSS `scale` 后命中易偏。Flow/Spatial 当前位置试运行未接 `executeTeacherControllerAction` / Mixed 导航。`SlidePublishedAdapter.appendLayerNode` 无 `video`；Flow 浮层与 Spatial `createWorldItem` 无 `<video>`。V9 不再把 Phaser `renderVideoNode` 当试运行主路径。
+- 修：三宿主都把 offset 写回 DOM；Flow 浮层相对舞台而不是窗口；Slide 命中用逻辑画布而不是被 scale 打偏的盒；`createPublishedCourseSession` 与当前位置 try-run 都接到 `MixedCourseNavigator`；Slide/Flow 浮层/Spatial 世界挂可播 `<video>`（controls、现有 asset URL）。不要为了视频把试运行打回 Phaser。
+
+**P2 Mixed 跳转打回编辑**
+
+- 现象：混合课跳转位置/表面时，试运行变回编辑。
+- 原因：`applyV9Backend` / `applyFlowBackend` / `applySpatialBackend` 无条件 `canvasMode: 'edit'`。跨表面必走这些函数。`Workspace` 虽有 `goToLocation` 订阅，session 已随 edit 卸载。
+- 修：激活位置时若当前已是 `run`，保留 mode，只切换 Published session 的 location/surface；不要为跳转整棵重挂编辑后端。同一表面内切场景本就不改 mode，保持。切到「场景基础」（`stateId === null`）的旧路径不要误伤试运行。
+
+**P3 Flow 编辑媒体**
+
+- 现象：编辑态图片、视频不显示、不能当媒体编。
+- 原因：稿纸 `<img>` 只有 `data-flow-asset-id` 无 `src`；视频是「视频占位符」。浮层只渲染 `label || '浮层'`。默认插入已是 `document-block`，问题在绘制，不在插到错误 owner。
+- 修：编辑态用 sidecar blob URL 画 `<img>` / `<video>`；浮层同样画出 image/video；视频在编辑态至少显示封面并可选择，播放仍以试运行为准。
+
+**P4 Spatial 编辑几何与媒体**
+
+- 现象：旋转时边框不动；编辑不显示视频；试运行不显示图/视频。
+- 原因：物件 div 有 `rotate`，`SpatialSelectionOverlay` 的 `selectionBox` 是轴对齐矩形；`stageSelectionOverlayGeometry` 只用旋转算手柄。世界层只渲染 image。试运行 SVG 无 video；image 依赖 `resolveAsset`。
+- 修：选中框（或盒本身）跟 `rotation`；编辑世界/HUD 画视频封面或 `<video>`；试运行 `createWorldItem` 画 image（保证 asset URL）和 video。P1 若已改 `SpatialSurfaceHost` 视频，本任务只补编辑态与选中框。
+
+**P5 画布默认白、可改色**
+
+- 现象：无限画布黑底 `#111318`；不能改；三种画布不统一。
+- 原因：`.workspace--spatial .canvas-viewport` 与 `derivedV8ProjectFromSpatial` 写死暗色。`SpatialSurfaceDocument` 无 `backgroundColor`。属性「场景背景」只在 Slide 会话出现。
+- 修：T1 增加可选字段，缺省白。P5：CSS 默认白；属性可改并写入 V9；编辑视口、试运行宿主、Published 读取同一字段。Slide 继续用场景色。Flow 稿纸白；若加页铬字段则属性可改。禁止把 Spatial 底色写进假 V8 场景却不写回 V9。
+
+**P6 课程树删除、跨组、文案**
+
+- 现象：Flow 删不了页面；Mixed 删不了整组；不能把第二组演示页挪到第一组；流式/无限画布主按钮都叫「新增页面」。
+- 原因：`deleteCourseSurface` / `deleteCourseLocation` 已有，Store/ScenePanel 未接。`flow-block` 走 `deleteCourseLocation` 会抛「请通过 Flow 编辑器删除标题块」。`planCourseTreeReorder` 要求同一 `parentKey`，没有「迁到另一同类型 surface」的命令。`PRIMARY_LABELS` 把 `flow-page` / `spatial-page` 写成「新增页面」；下拉文案已正确。
+- 修：UI 接上删整组（最后一处位置仍拒绝）。Flow 页删除走 `deleteCourseSurface`，不要拿标题块命令冒充。新增「同类型 location 迁到目标 surface」命令（演示场景迁到另一 Slide 组；不要把 Flow 块迁进 Slide）。主按钮：当前主操作是流式时「新增流式讲义」，无限画布时「新增无限画布」，演示页「新增演示页面」或「新建场景」保持现有 scene 主操作。
+
+**P7 图层中的全局控制器**
+
+- 现象：打开图层仍看到全局控制器，像场景物件。
+- 原因：`NodesTab` 统一有效图层按 owner 分组；控制器在「全局」，标签「全课、不可下沉」，仍在同一棵树。
+- 修：图层树默认不把教师控制器列在「场景 / 本页 / 世界」里。允许只在「全局」保留一条，或收到「全课控件」入口（已有 `global-layer-entry`）。禁止再复制一份进场景。不启动 V10 owner 迁移。
+
+**稳定性**
+
+双后端、切位置整棵重挂、编辑 blob vs 运行 data URL、Flow `fixed` 浮层、Slide CSS scale，造成时好时坏。P1–P4 降低这些竞态。不在 1.0 收尾里拆 `editorStore` / `Workspace`。
+
+---
+
+## 9. 最终判断
+
+当前缺口是两类，必须分开收口，不能互相等待到无法验收：
+
+1. **车道 C**：过渡命名、合同归属、机器产物仍说 V8。
+2. **车道 P**：Published 试运行/预览与编辑画布尚未成为教师可用的同一课。
+
+> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。合同按 T0–T6 冻结；教师看得见的播放、媒体、课程树、画布底色按 P1–P7 修。两边都完成后才能教师 `accepted` 并发布 Editor 1.0。此后 V9 合同不变，内部实现再逐步解耦。**

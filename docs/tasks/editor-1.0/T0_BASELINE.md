@@ -15,7 +15,7 @@
 - 仅当用户明确要求提交时：工作区已有的控制台/图层/流式补丁（`Workspace.tsx`、`FlowWorkspace.tsx`、`NodesTab.tsx`、`spatialWorldAuthoring.ts` 等）
 - 本任务 HANDOFF
 
-不要在本任务改 `courseProjectSchema.ts`、删除导入 UI、或重命名 backend。
+不要在本任务改 `courseProjectSchema.ts`、删除导入 UI、或重命名 backend。不要开始 P1–P7（那些是 12.2 车道 P）；若工作区补丁正好覆盖 P 的文件，先提交补丁，在 HANDOFF 写明 P 任务应接在哪次提交之后。
 
 ## 工作项
 
@@ -57,4 +57,4 @@ npx vitest run tests/unit/courseProjectRoundTrip.test.ts
 
 ## 下游
 
-完成后才能开始 T1。T2–T4 等 T1。
+完成后才能开始 T1。T2–T4 等 T1。车道 P 可在本任务把已有补丁分离之后领取；不要等 T6。

@@ -32,7 +32,7 @@ tests/unit/courseProjectCoreContract.test.ts
 tests/unit/courseProjectRoundTrip.test.ts
 ```
 
-不要改 `App.tsx`、导入 UI、`editorStore` 后端命名、能力索引文案。
+不要改 `App.tsx`、导入 UI、`editorStore` 后端命名、能力索引文案。不要在本任务接线画布颜色 UI（那是 P5）。
 
 ## 工作项
 
@@ -94,6 +94,16 @@ Frame 只保留绝对几何。全画布 Runtime 写 `x=0, y=0, width=1280, heigh
 
 新增 `artifacts/contracts/*.schema.json` 与 `contract-manifest.json`，以及 `generate:contracts` / `check:contracts`。本任务生成即可；**把哈希门禁接到每个 PR 留给 T6。**
 
+### E. 冻结前最后一次 additive 画布底色
+
+教师要求所有画布默认白、可改色。这不是新判别器、不是 V10。
+
+- `SpatialSurfaceDocument` 增加可选 `backgroundColor?: string`。缺省与读取旧工程视为 `#ffffff`。
+- 可选同样加在 `FlowSurfaceDocument` 作为稿纸/页铬底，缺省白。不要因此改 Flow block 模型。
+- Slide 场景已有 `backgroundColor`，**不要改名、不要改默认语义**。
+- 单独提交，与 A–D 分开。本任务只改类型/Schema/夹具缺省，不改 `globals.css` 或属性栏（P5）。
+- 禁止加入 `projectMode` 或其他预埋 JSON。
+
 ## 最小验证
 
 只跑：
@@ -114,8 +124,8 @@ npx vitest run tests/unit/courseProjectRoundTrip.test.ts
 
 - V9 不再把 `projectSchema.ts` 当工程权威。
 - 无 `legacy-*` 持久化判别器。
-- 无教师可感知 UI 变化。
+- 无教师可感知 UI 变化（可选 `backgroundColor` 缺省白，旧工程打开仍白）。
 
 ## 下游
 
-T2、T3、T4 可分树并行。
+T2、T3、T4 可分树并行。P5 的持久化接线等本任务 E 合入。
