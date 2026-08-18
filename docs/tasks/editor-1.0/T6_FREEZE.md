@@ -57,8 +57,8 @@ docs/tasks/editor-1.0/T6_FREEZE_HANDOFF.md
 
 ## 分支与收口
 
-1. 从 `origin/cursor/cloud-agent-1787062947578-owgrj` 建 `cursor/t6-freeze-de5c`。
-2. 按上面的「逐步算法」只追当前红项。不要从 `check:contracts` 重来。
+1. 从 `origin/cursor/cloud-agent-1787062947578-owgrj` 建 `cursor/t6-freeze-resume-de5c`。不要复用旧的 `cursor/t6-freeze-de5c`（那是第一次 fail-stop）。
+2. 按上面的「逐步算法」只追当前红项。不要从 `check:contracts` 或 `typecheck` 重来。
 3. `git diff --check`。
 4. 当前红项与后续命令都绿之后，才扩展 GitHub Actions（可同一 workflow 加 job，或新 yml）：
    - 保留现有 `check:contracts` job
@@ -76,7 +76,7 @@ docs/tasks/editor-1.0/T6_FREEZE_HANDOFF.md
 
 - [ ] 五条命令的结果写进 HANDOFF（通过或失败即停）
 - [ ] 未宣称发布 / 未打 tag
-- [ ] 已 push `cursor/t6-freeze-de5c`
+- [ ] 已 push `cursor/t6-freeze-resume-de5c`
 - [ ] 有 `T6_FREEZE_HANDOFF.md`
 
 ## 目标
