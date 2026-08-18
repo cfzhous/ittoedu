@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { createBlankCourseProject } from './createCourseProject'
@@ -47,6 +48,7 @@ export function createBlankSpatialCourseProject(
       id: surfaceId,
       title: '无限画布',
       type: 'spatial-2d',
+      backgroundColor: DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR,
       surfaceLayerItems: [],
       world: {
         bounds: { mode: 'infinite' },

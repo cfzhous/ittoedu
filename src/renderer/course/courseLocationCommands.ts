@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '../../shared/courseProjectModel'
 import type {
   CourseLocation,
   CourseProjectDocument,
@@ -321,6 +322,7 @@ function createAppendSpatialSurface(input: {
     id: input.id,
     title: input.title,
     type: 'spatial-2d',
+    backgroundColor: DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR,
     surfaceLayerItems: [],
     world: {
       bounds: { mode: 'infinite' },

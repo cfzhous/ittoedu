@@ -300,6 +300,11 @@ export type FlowBlock =
 
 export interface FlowSurfaceDocument extends SurfaceBase {
   type: 'flow'
+  /**
+   * Paper / page-chrome color. Omitted documents read as `#ffffff`.
+   * This is not a Flow block field and does not rename Slide scene `backgroundColor`.
+   */
+  backgroundColor?: string
   layout: {
     readingWidth: number
     wideContentWidth: number
@@ -353,6 +358,11 @@ export interface SpatialRelationDocument {
 
 export interface SpatialSurfaceDocument extends SurfaceBase {
   type: 'spatial-2d'
+  /**
+   * Infinite-canvas chrome color. Omitted documents read as `#ffffff`.
+   * Slide scenes keep their own required `backgroundColor`; do not rename that field.
+   */
+  backgroundColor?: string
   world: {
     bounds:
       | { mode: 'infinite' }

@@ -848,6 +848,7 @@ const slideSurfaceSchema = z.object({
 const flowSurfaceSchema = z.object({
   ...surfaceBaseFields,
   type: z.literal('flow'),
+  backgroundColor: colorSchema.optional(),
   layout: z.object({
     readingWidth: finiteNumber.min(320).max(2_400),
     wideContentWidth: finiteNumber.min(320).max(4_000),
@@ -881,6 +882,7 @@ const flowSurfaceSchema = z.object({
 const spatialSurfaceSchema = z.object({
   ...surfaceBaseFields,
   type: z.literal('spatial-2d'),
+  backgroundColor: colorSchema.optional(),
   world: z.object({
     bounds: z.discriminatedUnion('mode', [
       z.object({ mode: z.literal('infinite') }).strict(),
