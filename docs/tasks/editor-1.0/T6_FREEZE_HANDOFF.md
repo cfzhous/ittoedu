@@ -69,4 +69,20 @@
 
 ## 6. 下游与修复建议
 
-需要先合入 T1-A / T1-C / T6-tc-tests 的定向修复。重开 T6 时 **不要**把五条命令从头再跑一遍：`check:contracts` 已绿则跳过；只追仍红的 `typecheck`；`npm test` / desktop / e2e 在 typecheck 绿之前不要开跑。红项清完后整轮五条只跑一次，再扩展 CI。
+需要先合入 T1-A / T1-C / T6-tc-tests 的定向修复。重开 T6 时 **不要**把五条命令从头再跑一遍。
+
+## 7. Resume 2026-08-18（红项优先；父代理接手）
+
+- 工作分支：`cursor/t6-freeze-resume-de5c`
+- 第三方 T6 工人只读/空转，未跑完 `npm test`。父代理接手。
+- `npm run check:contracts`：未重跑（已绿）
+- `npm run typecheck`：未重跑（已绿）
+- `npm test`：先修 6 个红文件，再整包一次。
+  - 第一次：6 failed / 1168 passed
+  - 红文件单独转绿后第二次：191 files passed / 2 skipped；1173 tests passed / 18 skipped
+- 允许列表外（HANDOFF 记录）：
+  - `src/renderer/project/assetManager.ts`：拷贝字节再 SHA-256（jsdom/Node Buffer view）
+  - `scripts/windowsPortabilityEvidence.ts`：保留未 resolve 的 Windows 路径形式
+- `npm run build:desktop` / `npm run test:e2e`：未跑
+- 未宣称发布 / 未打 tag / 未 accepted / 未 art candidate
+

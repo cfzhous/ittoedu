@@ -1,6 +1,6 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**typecheck 已绿**。T1-A / T1-C / T6-tc-tests 已合入。下一条未跑命令是 `npm test`。不要重跑已绿的 `check:contracts` / `typecheck`。  
+> 状态：**npm test 已绿**。下一条未跑命令是 `build:desktop`。不要重跑已绿的 `check:contracts` / `typecheck` / `npm test`。  
 > 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
 > **本包唯一允许跑 `npm test` / e2e / `build:desktop` 的任务。** 修红过程中不要把五条命令当循环。`typecheck` 已在合入 T1-A 后由父代理跑绿，不要重跑。
@@ -21,13 +21,13 @@ T1-A / T1-C 已纳入本轮冻结，必须在重开 T6 全量之前合入。扫�
 |---|---|---|
 | `npm run check:contracts` | 已绿 | **不要重跑**（除非又改了 `artifacts/contracts/**`） |
 | `npm run typecheck` | 已绿（合入 T1-A 后；并去掉 e2e 重复 `closeCoursePreviewOverlay`） | **不要重跑** |
-| `npm test` | 未跑 | **从这里开始** |
-| `npm run build:desktop` | 未跑 | `npm test` 绿之前 **不要跑** |
-| `npm run test:e2e` | 未跑 | 前序红时 **不要跑** |
+| `npm test` | 已绿（1173 passed / 18 skipped；authoring round-trip 在无 `dist-renderer` 时 skip） | **不要重跑** |
+| `npm run build:desktop` | 未跑 | **从这里开始** |
+| `npm run test:e2e` | 未跑 | `build:desktop` 绿之前 **不要跑** |
 
 ## 逐步算法
 
-1. 读本卡状态表，从第一条仍红/未跑的命令接着做。当前从 `npm test` 开始，不要从 `check:contracts` 或 `typecheck` 重来。
+1. 读本卡状态表，从第一条仍红/未跑的命令接着做。当前从 `npm run build:desktop` 开始，不要从 `check:contracts`、`typecheck` 或 `npm test` 重来。
 2. 跑 `npm test`。若红：记下失败文件，**只** `npx vitest run <失败文件>` 直到那些文件绿，不要每改一次就 `npm test` 整包。那一批文件都绿之后，再 `npm test` **一次**确认没有新红。
 3. `npm test` 绿后才 `npm run build:desktop`，再 `npm run test:e2e`。中途失败同样只追红，不回头重跑已绿命令。
 4. 上述都绿之后，整轮五条只再跑 **一次** 写入最终 HANDOFF。这是本冻结允许的唯一完整全量。不要为了写 HANDOFF 在修红循环里反复全量。
