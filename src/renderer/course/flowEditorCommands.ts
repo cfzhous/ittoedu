@@ -236,6 +236,35 @@ export function updateFlowEditorBlock(
   }, '已更新内容块', options)
 }
 
+export function replaceFlowMediaBlockAsset(
+  document: CourseProjectDocument,
+  target: FlowEditorBlockTarget,
+  assetId: string,
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
+  const blocked = staleOrGlobal(document, options)
+  if (blocked) return blocked
+  try {
+    const found = resolveFlowBlock(document, target)
+    if (found.block.type !== 'media') {
+      return failCommand('当前块不是媒体块')
+    }
+    const asset = document.assets[assetId]
+    if (!asset) return failCommand('找不到素材')
+    if (asset.kind !== found.block.mediaKind) {
+      return failCommand('素材类型与当前块不符')
+    }
+  } catch (error) {
+    return failCommand(error instanceof Error ? error.message : '无法替换素材')
+  }
+  return runMutation(document, (draft) => {
+    const found = resolveFlowBlock(draft, target)
+    if (found.block.type !== 'media') throw new Error('当前块不是媒体块')
+    found.block.assetId = assetId
+    syncFlowCourseLocations(draft, target.surfaceId)
+  }, '已替换素材', options)
+}
+
 export function applyFlowCommittedText(
   document: CourseProjectDocument,
   target: FlowEditorBlockTarget,
