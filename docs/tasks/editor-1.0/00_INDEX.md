@@ -1,10 +1,11 @@
 # Editor 1.0 收尾任务包
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.4  
+> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.5  
 > 共享约束：[01_SHARED.md](01_SHARED.md)  
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
+> 12.5：T6 全量验证仍等 P5-persist；合同说明 / 禁止项扫描 / 合同快照 / 合同桶可与 P5-persist 并行。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -40,15 +41,20 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [P5](P5_CANVAS_BACKGROUND.md) **persist** | `cursor/p5-canvas-persist-de5c` | 只改背景色；禁止回退 P8 组件挂载。`editorStore` 只许改 `derivedV8ProjectFromSpatial` 的颜色来源 |
+| [P5](P5_CANVAS_BACKGROUND.md) **persist** | `cursor/p5-canvas-persist-de5c` | 只改背景色；禁止回退 P8 组件挂载。`editorStore` 只许改 `derivedV8ProjectFromSpatial` 的颜色来源。已有工人在写，不要再开第二个 persist |
+| [T6-docs](T6_DOCS.md) | `cursor/t6-docs-de5c` | 只写 `docs/contracts/**` |
+| [T6-scan](T6_SCAN.md) | `cursor/t6-scan-de5c` | 只新建禁止项测试；禁止改 `src/` |
+| [T1-D](T1_D_CONTRACTS_GEN.md) | `cursor/t1-contracts-gen-de5c` | 只新增 generate/check 脚本与 `artifacts/contracts/**`；`package.json` 只加两条 script |
+| [T1-A0](T1_A0_CONTRACTS_BARRELS.md) | `cursor/t1-contracts-barrels-de5c` | 只新建 `src/shared/contracts/**` re-export |
 
 **必须等待**
 
 | 任务 | 等什么 |
 |---|---|
-| [T6](T6_FREEZE.md) | P5-persist |
-| [T1](T1_SCHEMA.md) A/C/D | 父代理改看板为可领取 |
-| [T1](T1_SCHEMA.md) B | 先改 T0 `canvas-runtime` 夹具，再删 `legacy-*` |
+| [T6](T6_FREEZE.md) 全量验证 / CI / tag | P5-persist 合入；T6-docs、T6-scan、T1-D 合入更稳 |
+| [T3-aliases](T3_ALIASES.md) | P5-persist（抢 `editorStore.ts`） |
+| [T1](T1_SCHEMA.md) A（真迁移）/ C | T1-A0 合入后由父代理改看板 |
+| [T1](T1_SCHEMA.md) B | 先改 T0 `canvas-runtime` 夹具 + 生产写入，再删 `legacy-*`；生产写入抢 `editorStore`，等 P5-persist |
 
 ## 卫生清理（12.1 已完成，不要重做）
 
@@ -66,11 +72,13 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 已合入：T0 → T1-E → T2 → T3 → T4 → T5
          P1 P2 P3 P4 P5-CSS P6 P7 P8
 
-现在可领取：
+现在可并行（分 worktree）：
   P5-persist 画布色接线
+  T6-docs / T6-scan / T1-D / T1-A0
 
 然后：
-  P5-persist 合入 → T6（唯一全量）
+  P5-persist 合入 → T3-aliases、T1-B
+  预备切片合入 → T6 全量验证（唯一全量）
 ```
 
 P5-persist 禁止回退 P8 的组件挂载；只改背景色相关行。

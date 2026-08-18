@@ -7,15 +7,16 @@
 | 分段 | 状态 | 说明 |
 |---|---|---|
 | **E** 可选 `backgroundColor?` | **已合入，禁止重做** | Spatial/Flow 可选字段；`resolveCourseSurfaceBackgroundColor`；夹具 round-trip 已覆盖 omitted/explicit |
-| **A** 抽离 `src/shared/contracts/**` | **暂缓** | 不阻塞 T3/T4/P8。需要大范围移动类型。未领取前不要做。 |
-| **B** 删除 `legacy-runtime-v2` / `legacy-whole-canvas` | **阻塞** | T0 夹具 `tests/fixtures/course-project-v9/canvas-runtime.h5lesson` **仍持久化** `legacy-runtime-v2` + `legacy-whole-canvas`。未先改夹具 + round-trip 测试前，禁止删判别器。 |
+| **A0** 合同桶 re-export | **可领取** [T1-A0](T1_A0_CONTRACTS_BARRELS.md) | 只新建 `src/shared/contracts/**`，不改现有 import |
+| **A** 抽离并改 import | **暂缓** | 等 A0。大范围移动类型。 |
+| **B** 删除 `legacy-runtime-v2` / `legacy-whole-canvas` | **阻塞** | T0 夹具仍持久化旧判别器；生产写入在 `editorStore.ts`，等 P5-persist。未先改夹具 + 写入 + round-trip 前，禁止删判别器。 |
 | **C** 审计顶层字段 | **暂缓** | 与 A 一起。禁止把 `PROJECT_SCHEMA_VERSION` 改成 9。 |
-| **D** 合同产物脚本 | **暂缓** | 生成入口可与 A 一起；哈希门禁仍是 T6。 |
+| **D** 合同产物脚本 | **可领取** [T1-D](T1_D_CONTRACTS_GEN.md) | 生成快照；哈希门禁仍是 T6 冻结切片。 |
 
-当前不要领取 A–D，除非父代理在看板把状态改成「可领取」。
+当前不要领取 A（真迁移）/ B / C，除非看板把状态改成「可领取」。A0 与 D 可领。
 
 > 依赖：T0（已合入）  
-> 并行：E 已完成；A–D 独占合同文件  
+> 并行：E 已完成；A0 与 D 可并行（文件不重叠）；A 真迁移与 B/C 仍独占合同文件  
 > 合同变化：是  
 > 教师手感：必须不变
 
@@ -142,4 +143,4 @@ npx vitest run tests/unit/courseProjectRoundTrip.test.ts
 
 ## 下游
 
-T2 已合入。T3 / T4 / P8 可分树。P5-persist 等 P8。T1-B 必须先改 T0 canvas-runtime 夹具。
+T2 已合入。T1-A0 / T1-D 可与 P5-persist 分树。T1-B 必须先改 T0 canvas-runtime 夹具与生产写入，且等 P5-persist 放开 `editorStore`。
