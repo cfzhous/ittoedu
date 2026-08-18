@@ -2,7 +2,7 @@
 
 面向教师的可编辑互动课件桌面编辑器。**当前产品就是本仓库根目录 / `main`**：成熟 V8 `App` 表面，默认工程真相为 Course Project V9、Published Course V2、Runtime API 2/3、Component API 4。
 
-V9 重建已合入 `main`。日常启动、构建和验证都在根目录进行，不要再把独立 worktree 或 `codex/v9-editor-v8-base` 当成当前版。长期计划看 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)（12.4：车道 C 合同冻结 + 车道 P 教师可见缺陷）；可执行任务看 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)；第三方工人先读 [docs/tasks/editor-1.0/02_WORKER.md](docs/tasks/editor-1.0/02_WORKER.md)。
+V9 重建已合入 `main`。日常启动、构建和验证都在根目录进行，不要再把独立 worktree 或 `codex/v9-editor-v8-base` 当成当前版。长期计划看 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)（12.5：车道 C 合同冻结 + 车道 P 教师可见缺陷）；可执行任务看 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)；第三方工人先读 [docs/tasks/editor-1.0/02_WORKER.md](docs/tasks/editor-1.0/02_WORKER.md)。
 
 当前编辑器内没有可见 AI。自动化最多证明 `engineering candidate`；`accepted` 必须来自教师明确验收。
 
@@ -301,7 +301,9 @@ PPTX 映射规则：
 | `npm run build:desktop` | 只构建可由根目录入口直接启动的三个生产目录 |
 | `npm run generate:ai-capabilities` | 从权威 Schema、协议常量、诊断注册表和受校验组件目录生成分层 AI 能力契约 |
 | `npm run check:ai-capabilities` | 只读检查能力内容、来源证据和 16 KiB 索引门禁；内容或证据任一过期都会失败，不自动写文件 |
-| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取课件工程，向 stdout 输出 Schema、工程健康与四格式预检 JSON；退出码 0/1/2。当前实现文案可能仍写 Project V8，T4 会切到 Course Project V9 |
+| `npm run --silent validate:project -- <file.h5lesson>` | 无界面读取课件工程，向 stdout 输出 Schema、工程健康与四格式预检 JSON；退出码 0/1/2。当前入口即 Course Project V9 |
+| `npm run generate:contracts` | 从 Zod 生成 `artifacts/contracts/` |
+| `npm run check:contracts` | 检查合同快照与源码一致 |
 | `npm run build` | 先检查 AI 能力契约，再执行类型检查、测试并构建全部生产产物 |
 | `npm run build:examples` | 重新生成示例工程和示例组件包 |
 | `npm run build:lesson-demo` | 生成三页光合作用最小回归课例 |
@@ -310,7 +312,7 @@ PPTX 映射规则：
 | `npm run verify` | 依次执行能力检查、三配置类型检查、Vitest、隐藏 E2E 和桌面构建，不重复调用 `build` |
 | `npm run verify:w3-portability` | 构建 Player，并在 Windows 系统临时隔离树中验证目录版/Portable 复制启动、工程断源重开重存及单 HTML/网页包离线移动；不替代另一台干净 Windows 的人工验收 |
 
-机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它提供当前工程协议、Runtime API 2、Component API 4、互动、诊断和导出面的低成本索引；`build-courseware-project` 先核对该索引及生成证据，需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。索引本身不是编辑器内 AI、自动课件生成器或工作流。当前快照里 `protocolVersions.project` 仍可能显示 `8`，这是待 T4 收口的机器产物，不是产品仍在写 V8。外部组件 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可生成，但组件能力必须明确标记为 `unavailable`/降级；当前快照中的四个包仍全部是 `experimental`，许可和维护人阻断没有被能力索引解除。
+机器发现入口是 [`artifacts/ai-capabilities/index.json`](artifacts/ai-capabilities/index.json)。它提供当前工程协议、Runtime API 2、Component API 4、互动、诊断和导出面的低成本索引；`build-courseware-project` 先核对该索引及生成证据，需要细节时再读取 `schemas/`、`diagnostics.json`、`limits.json` 或组件快照。索引本身不是编辑器内 AI、自动课件生成器或工作流。能力索引 `protocols.project` 为 9。外部组件 catalog 缺失、不受信任或包哈希不匹配时，核心契约仍可生成，但组件能力必须明确标记为 `unavailable`/降级；当前快照中的四个包仍全部是 `experimental`，许可和维护人阻断没有被能力索引解除。
 
 外部 Builder 的最低闭环是“读取已确认教学文件与 Capability → 使用仓库真实 TypeScript API 生成 Course Project V9 → 校验 → 按稳定绑定局部修正 → 重开、Player、四格式与视觉证据 → 人工验收”。`validate:project` 命令本身不启动 Electron、不执行真实导出、不改写工程；Node 下文字/公式布局使用公开标注的确定性近似测量，近似溢出只给 warning，最终像素裁切仍必须以真实编辑器或导出为准。自动闭环最多给出 `engineering candidate`，不得用 Headless 通过代替像素、互动或人类验收。
 
