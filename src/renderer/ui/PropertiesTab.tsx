@@ -91,6 +91,8 @@ import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
 import type {
   CourseLocation,
   CourseProjectDocument,
+  FlowBlock,
+  FlowMediaBlock,
   LocationVisibility,
 } from '../../shared/courseProjectTypes'
 import {
@@ -126,7 +128,13 @@ import { SpatialCameraPanel } from './SpatialCameraPanel'
 import { SpatialPathEditor } from './SpatialPathEditor'
 import type { SpatialAuthoringSession } from '../course/spatialEditorCommands'
 import { updateSpatialSurfaceBackgroundColor } from '../course/spatialEditorCommands'
-import { updateFlowSurfaceBackgroundColor } from '../course/flowEditorCommands'
+import {
+  executeFlowEditorCommand,
+  replaceFlowMediaBlockAsset,
+  updateFlowEditorBlock,
+  updateFlowSurfaceBackgroundColor,
+} from '../course/flowEditorCommands'
+import { flowBlockTargetFromSelection } from '../course/flowEditorSlice'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
 import { buildSpatialEditorView } from '../course/spatialEditorView'
 import {
@@ -158,7 +166,6 @@ import {
 import type { SpatialGraphSelection } from '../store/editorStore'
 import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
-import type { FlowBlock } from '../../shared/courseProjectTypes'
 
 interface BufferedInputProps {
   label: string
@@ -2112,6 +2119,90 @@ function FlowPageProperties({ session }: { session: FlowAuthoringSession }) {
   )
 }
 
+const FLOW_MEDIA_KIND_LABEL: Record<FlowMediaBlock['mediaKind'], string> = {
+  image: '图片',
+  video: '视频',
+  audio: '音频',
+}
+
+function FlowMediaBlockProperties({
+  session,
+  block,
+}: {
+  session: FlowAuthoringSession
+  block: FlowMediaBlock
+}) {
+  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
+  const document = session.history.present
+  const asset = document.assets[block.assetId]
+  const sameKindAssets = Object.values(document.assets).filter((candidate) => candidate.kind === block.mediaKind)
+  const patchMedia = (patch: Partial<Pick<FlowMediaBlock, 'altText' | 'caption' | 'layout'>>) => {
+    const target = flowBlockTargetFromSelection(document, session.selection)
+    applyFlowCommand(updateFlowEditorBlock(document, target, patch, {
+      expectedRevision: document.revision,
+    }))
+  }
+  return (
+    <section className="property-section" data-testid="flow-media-properties">
+      <h3 className="property-title"><ImageIcon size={14} />媒体块</h3>
+      <p className="property-hint">
+        {FLOW_MEDIA_KIND_LABEL[block.mediaKind]}
+        {asset?.filename ? ` · ${asset.filename}` : ''}
+      </p>
+      {block.mediaKind === 'image' ? (
+        <BufferedInput
+          label="替代文本"
+          value={block.altText ?? ''}
+          onCommit={(altText) => patchMedia({ altText })}
+        />
+      ) : null}
+      <BufferedInput
+        label="题注"
+        value={block.caption ?? ''}
+        onCommit={(caption) => patchMedia({ caption })}
+      />
+      <SelectField<FlowMediaBlock['layout']>
+        label="版式"
+        value={block.layout}
+        options={[
+          { value: 'content-width', label: '正文宽' },
+          { value: 'wide', label: '较宽' },
+          { value: 'full-width', label: '全宽' },
+        ]}
+        onChange={(layout) => patchMedia({ layout })}
+      />
+      <div data-testid="flow-replace-media">
+        <SelectField
+          label="替换素材"
+          value={block.assetId}
+          options={sameKindAssets.map((candidate) => ({
+            value: candidate.id,
+            label: candidate.filename || candidate.id,
+          }))}
+          onChange={(assetId) => {
+            const target = flowBlockTargetFromSelection(document, session.selection)
+            applyFlowCommand(replaceFlowMediaBlockAsset(document, target, assetId, {
+              expectedRevision: document.revision,
+            }))
+          }}
+        />
+      </div>
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-delete-media-block"
+        onClick={() => applyFlowCommand(
+          executeFlowEditorCommand(document, session.selection, { name: 'delete' }, {
+            expectedRevision: document.revision,
+          }),
+        )}
+      >
+        <Trash2 size={14} />删除此块
+      </button>
+    </section>
+  )
+}
+
 function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
   const block = selectedFlowBlock(session)
   const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
@@ -2152,8 +2243,13 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
             onChange={(ordered) => formatFlowBlock({ kind: 'list-ordered', ordered })}
           />
         ) : null}
-        <p className="property-hint">改正文请在稿纸里双击就地编辑，不要在这里整段替换。</p>
+        {block.type === 'media' ? null : (
+          <p className="property-hint">改正文请在稿纸里双击就地编辑，不要在这里整段替换。</p>
+        )}
       </section>
+      {block.type === 'media' ? (
+        <FlowMediaBlockProperties session={session} block={block} />
+      ) : null}
       {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
         <section className="property-section">
           <h3 className="property-title"><Type size={14} />选区格式</h3>
