@@ -3,9 +3,9 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { componentManifestSchema } from '../src/shared/componentSchema'
-import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
-import { publishedCourseV2Schema } from '../src/shared/publishedCourseSchema'
+import { componentManifestSchema } from '../src/shared/contracts/component-v4/schema'
+import { courseProjectDocumentSchema } from '../src/shared/contracts/course-project-v9/schema'
+import { publishedCourseV2Schema } from '../src/shared/contracts/published-course-v2/schema'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const defaultProjectRoot = path.resolve(scriptDirectory, '..')
@@ -54,19 +54,19 @@ export function generateContractArtifacts(
       {
         name: 'courseProjectDocumentSchema',
         file: 'course-project-v9.schema.json',
-        sourceOfTruth: 'src/shared/courseProjectSchema.ts',
+        sourceOfTruth: 'src/shared/contracts/course-project-v9/schema.ts',
         sha256: sha256(courseProjectFormatted),
       },
       {
         name: 'publishedCourseV2Schema',
         file: 'published-course-v2.schema.json',
-        sourceOfTruth: 'src/shared/publishedCourseSchema.ts',
+        sourceOfTruth: 'src/shared/contracts/published-course-v2/schema.ts',
         sha256: sha256(publishedCourseFormatted),
       },
       {
         name: 'componentManifestSchema',
         file: 'component-manifest.schema.json',
-        sourceOfTruth: 'src/shared/componentSchema.ts',
+        sourceOfTruth: 'src/shared/contracts/component-v4/schema.ts',
         sha256: sha256(componentManifestFormatted),
       },
     ],

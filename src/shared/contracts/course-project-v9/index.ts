@@ -1,2 +1,2 @@
-export * from '../../courseProjectTypes'
-export * from '../../courseProjectSchema'
+export * from './types'
+export * from './schema'

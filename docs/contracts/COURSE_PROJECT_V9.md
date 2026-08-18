@@ -1,7 +1,7 @@
 # Course Project V9 工程合同说明
 
 > 本文档描述当前源码已经成立的 Course Project V9 核心数据结构与语义约束。
-> 权威类型定义以 `src/shared/courseProjectTypes.ts` 与 `src/shared/courseProjectSchema.ts` 为准。
+> 权威类型定义以 `src/shared/contracts/course-project-v9/`（`src/shared/courseProjectTypes.ts` 与 `src/shared/courseProjectSchema.ts` 为 re-export 桩）为准。
 
 ---
 

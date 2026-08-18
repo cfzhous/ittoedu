@@ -1,2 +1,2 @@
-export * from '../../componentTypes'
-export * from '../../componentSchema'
+export * from './types'
+export * from './schema'

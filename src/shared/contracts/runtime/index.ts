@@ -1,3 +1,3 @@
-export * from '../../runtimeTypes'
-export * from '../../runtimeSchema'
-export * from '../../surfaceRuntimeTypes'
+export * from './types'
+export * from './schema'
+export * from './surface'
