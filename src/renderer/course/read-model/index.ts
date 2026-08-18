@@ -1,0 +1,45 @@
+export {
+  courseLayerItemToSceneNode,
+  projectV9ActiveScene,
+  projectV9EditingNodes,
+  projectV9SceneDocument,
+  projectV9SlideScenes,
+} from '../../store/slideEditorProjection'
+
+export {
+  EFFECTIVE_LAYER_LOCKED_WRITE_REASON,
+  EFFECTIVE_LAYER_SOURCE_LABELS,
+  authoringAddressScopeForOwner,
+  carrierForLayerKind,
+  commandTargetFromRow,
+  courseAuthoringScopeFromLocation,
+  createCourseAuthoringScope,
+  createEffectiveLayerItemActionInput,
+  createEffectiveLayerReorderInput,
+  defaultOwnerForSurface,
+  describeLayerImpact,
+  isFlowDocumentBlockId,
+  isTeacherControllerLayerItem,
+  makeLayerItemAuthoringAddress,
+  ownerKeyFor,
+  projectEffectiveLayers,
+  rowsForListKind,
+  scopeTokenForSelectingRow,
+  visualFrontToBackRows,
+} from '../effectiveLayerProjection'
+
+export type {
+  CourseAuthoringAddressScope,
+  CourseAuthoringOwner,
+  CourseAuthoringScopeToken,
+  EffectiveLayerCommandTargetInput,
+  EffectiveLayerImpact,
+  EffectiveLayerItemAction,
+  EffectiveLayerItemActionInput,
+  EffectiveLayerListKind,
+  EffectiveLayerProjection,
+  EffectiveLayerProjectionRow,
+  EffectiveLayerReorderInput,
+  EffectiveLayerSource,
+  ProjectEffectiveLayersInput,
+} from '../effectiveLayerProjection'

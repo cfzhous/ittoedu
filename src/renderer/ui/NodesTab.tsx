@@ -37,12 +37,12 @@ import {
   Sigma,
 } from 'lucide-react'
 import type { SceneNode } from '../../shared/projectTypes'
-import { courseLayerItemToSceneNode } from '../store/slideEditorProjection'
 import {
+  courseLayerItemToSceneNode,
   describeLayerImpact,
   visualFrontToBackRows,
   type EffectiveLayerProjectionRow,
-} from '../course/effectiveLayerProjection'
+} from '../course/read-model'
 import {
   selectActiveScene,
   selectEditingNodes,
