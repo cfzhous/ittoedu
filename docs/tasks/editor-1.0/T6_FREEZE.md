@@ -1,6 +1,7 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**build:desktop 已绿**。下一条未跑命令是 `test:e2e`。不要重跑已绿命令。Vite 500kB chunk 警告不当缺陷。  
+> 状态：**工程门禁在 Linux Cloud Agent 上已绿到 `build:desktop`。`test:e2e` 不能当作 Windows 产品证据。** 不要重跑已绿命令。Vite 500kB chunk 警告不当缺陷。
+>
 > 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
 > **本包唯一允许跑 `npm test` / e2e / `build:desktop` 的任务。** 修红过程中不要把五条命令当循环。`typecheck` 已在合入 T1-A 后由父代理跑绿，不要重跑。
@@ -23,7 +24,7 @@ T1-A / T1-C 已纳入本轮冻结，必须在重开 T6 全量之前合入。扫�
 | `npm run typecheck` | 已绿（合入 T1-A 后；并去掉 e2e 重复 `closeCoursePreviewOverlay`） | **不要重跑** |
 | `npm test` | 已绿（1173 passed / 18 skipped；authoring round-trip 在无 `dist-renderer` 时 skip） | **不要重跑** |
 | `npm run build:desktop` | 已绿（player/renderer/electron；500kB chunk 警告忽略） | **不要重跑** |
-| `npm run test:e2e` | 未跑 | **从这里开始** |
+| `npm run test:e2e` | Linux 上不能作为 Windows 证据（见 HANDOFF §8） | **不要在 Linux 上为绿而改产品窗口/缩放**；Windows 本机才算 e2e |
 
 ## 逐步算法
 

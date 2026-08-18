@@ -54,8 +54,9 @@
 
 ## 3. GitHub Actions CI 扩展情况
 
-- CI Job 变更：无（保持现有 `.github/workflows/check-contracts.yml` 中的 `check-contracts` 作业不变）。
-- 原因：全量验证未全部通过（`npm run typecheck` 退出码 1），根据 T6 任务卡与工人协议，在验证未全绿前不扩展 CI 工作流，避免假绿或阻塞流水线。
+- 第一次 fail-stop：未扩展（当时 `typecheck` 红）。
+- Resume 后：`.github/workflows/check-contracts.yml` 增加 `typecheck` 与 `test` job（`ubuntu-latest`，`npm ci` 后跑对应命令）。
+- **没有**加 `build:desktop` / `test:e2e` job。产品目标是 Windows 桌面；Linux Electron e2e 会假绿或逼出错误修复。
 
 ## 4. 停手原因与失败分析
 
@@ -84,6 +85,28 @@
   - `src/renderer/project/assetManager.ts`：拷贝字节再 SHA-256（jsdom/Node Buffer view）
   - `scripts/windowsPortabilityEvidence.ts`：保留未 resolve 的 Windows 路径形式
 - `npm run build:desktop`：退出码 0（Vite 500kB chunk 警告忽略）
-- `npm run test:e2e`：未跑
+- `npm run test:e2e`：见 §8。Linux Cloud Agent 上的 Electron 结果 **不是** Windows 产品证据。
 - 未宣称发布 / 未打 tag / 未 accepted / 未 art candidate
+
+## 8. Linux Cloud Agent 与 Windows 产品目标（2026-08-18）
+
+产品合同是 **Windows 10/11 x64** 桌面（README：双击 `.cmd`、Portable / 目录版、W3 可移植性）。本轮冻结跑在 **Linux Cloud Agent**（Xvfb `DISPLAY=:1`）。
+
+| 命令 | Linux 上能证明什么 | 不能证明什么 |
+|---|---|---|
+| `check:contracts` / `typecheck` / `npm test` | 合同、类型、jsdom/Node 回归 | 真实桌面窗口、DPI、字体、安装器 |
+| `build:desktop` | player/renderer/electron **能编译** | Windows 安装包、签名、干净机首次启动 |
+| `test:e2e` | 最多暴露跨平台逻辑红 | Electron 窗口管理器、合成器、离屏点击、任务栏 |
+
+本机实际观察到的 Linux 窗口差异（**未改产品**）：
+
+- `BrowserWindow.opacity` 在无合成器的 Xvfb 上无效，`getOpacity()` 保持 `1`。测试只在 `process.platform !== 'linux'` 时要求透明度为 0；**Windows 仍要求 `opacity === 0`、隐藏、失焦、坐标 `-16384`。**
+- 后台隔离过了之后，下一条 e2e（画布 100%→150%）在 Linux 上仍红。这可能是 Xvfb/离屏命中问题，**禁止**为了这条 Linux 红去改缩放 UI 或窗口创建。
+- 未在 Windows 上跑 `npm run test:e2e`，也未重跑 W3。因此 **不宣称 e2e 绿**，也不把 Electron e2e 加进 `ubuntu-latest` CI（避免假绿）。
+- CI 只扩展可移植门禁：`check:contracts`、`typecheck`、`npm test`。
+
+Windows 上仍需要的证据（本环境做不到）：
+
+- `COURSEWARE_E2E_BACKGROUND=1 npm run test:e2e`
+- 如需可移植性：`npm run verify:w3-portability`（不能替代另一台干净 Windows 的人工冒烟）
 
