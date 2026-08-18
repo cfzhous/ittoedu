@@ -31,13 +31,13 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [P5](P5_CANVAS_BACKGROUND.md) **CSS** | 无限画布默认白 |
 | [P6](P6_COURSE_TREE.md) | 删组、演示页跨组、主按钮文案 |
 | [P7](P7_LAYER_CONTROLLER.md) | 控制器只在「全局」 |
+| [T4](T4_CAPABILITIES.md) | 能力索引 `project: 9`；`validate:course-project` |
 
 **可领取（互斥见表）**
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
 | [T3](T3_BACKEND.md) | `cursor/t3-single-backend-de5c` | 独占 `editorStore` backend 命名；必须保留 P2 |
-| [T4](T4_CAPABILITIES.md) | `cursor/t4-capabilities-v9-de5c` | 只动 scripts / artifacts / 能力文档 |
 | [P8](P8_FLOW_SPATIAL_COMPONENTS.md) | `cursor/p8-flow-spatial-components-de5c` | 独占 Flow/Spatial/Slide Published 宿主组件分支 |
 
 **必须等待**
@@ -67,7 +67,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
          P1 P2 P3 P4 P5-CSS P6 P7
 
 现在可并行（分 worktree）：
-  T3 单后端     T4 能力/CLI     P8 组件挂载
+  T3 单后端     P8 组件挂载
 
 然后：
   T3 合入 → T5

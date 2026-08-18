@@ -1,6 +1,7 @@
 # T4 能力链与校验 CLI 统一到 V9
 
-> 状态：**未合入**（可领取；T1 E / T2 已合入）  
+> 状态：**已合入，禁止重做**  
+> HANDOFF：[T4_HANDOFF.md](T4_HANDOFF.md)  
 > 并行：可与 T3、P8 分树（文件不重叠）  
 > 合同变化：机器产物与 CLI 文案  
 > 工人先读：[02_WORKER.md](02_WORKER.md)
