@@ -77,7 +77,7 @@ const publishedLayerBaseFields = {
 } as const
 
 const publishedRuntimeSchema = z.object({
-  protocol: z.enum(['surface-v1', 'legacy-runtime-v2']),
+  protocol: z.enum(['surface-v1', 'legacy-runtime-v2', 'canvas-runtime', 'surface-runtime']),
   runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
   enabled: z.boolean(),
   renderMode: z.enum(['phaser', 'dom', 'hybrid']),
@@ -92,7 +92,9 @@ const publishedRuntimeSchema = z.object({
 }).strict().superRefine((runtime, context) => {
   const validPair =
     (runtime.protocol === 'legacy-runtime-v2' && runtime.runtimeApiVersion === 2) ||
-    (runtime.protocol === 'surface-v1' && runtime.runtimeApiVersion === 3)
+    (runtime.protocol === 'canvas-runtime' && runtime.runtimeApiVersion === 2) ||
+    (runtime.protocol === 'surface-v1' && runtime.runtimeApiVersion === 3) ||
+    (runtime.protocol === 'surface-runtime' && runtime.runtimeApiVersion === 3)
   if (!validPair) {
     context.addIssue({
       code: 'custom',
@@ -100,7 +102,7 @@ const publishedRuntimeSchema = z.object({
       message: 'Runtime protocol and API version do not match',
     })
   }
-  if (runtime.protocol === 'surface-v1' && runtime.renderMode !== 'dom') {
+  if ((runtime.protocol === 'surface-v1' || runtime.protocol === 'surface-runtime') && runtime.renderMode !== 'dom') {
     context.addIssue({
       code: 'custom',
       path: ['renderMode'],

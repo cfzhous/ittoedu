@@ -458,4 +458,109 @@ describe('Course Project V9 core contract', () => {
     if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
     expect(flowSurface.backgroundColor).toBe('#ffffff')
   })
+
+  it('validates runtime protocol discriminators and versions', () => {
+    const makeRuntimeProject = (runtimeDef: CourseProjectDocument['surfaces'][0] extends { type: 'slide' } ? any : never, frameMode: 'absolute' | 'legacy-whole-canvas' = 'absolute') => {
+      const project = minimalSlideProject()
+      const slideSurface = project.surfaces[0] as Extract<CourseProjectDocument['surfaces'][0], { type: 'slide' }>
+      slideSurface.scenes[0]!.layerItems = [{
+        layerItemId: 'runtime-item',
+        label: '运行时',
+        frame: {
+          mode: frameMode,
+          x: 0,
+          y: 0,
+          width: 1280,
+          height: 720,
+        },
+        order: 0,
+        visible: true,
+        locked: false,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'surface',
+        playbackInitialVisibility: 'inherit',
+        kind: 'runtime',
+        runtime: runtimeDef,
+      }]
+      return project
+    }
+
+    const validCanvasRuntime = makeRuntimeProject({
+      protocol: 'canvas-runtime',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'phaser',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})',
+      content: { values: { label: 'Canvas Runtime' } },
+      assets: {},
+    }, 'absolute')
+    expect(courseProjectDocumentSchema.safeParse(validCanvasRuntime).success).toBe(true)
+
+    const validSurfaceRuntime = makeRuntimeProject({
+      protocol: 'surface-runtime',
+      runtimeApiVersion: 3,
+      enabled: true,
+      renderMode: 'dom',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return {destroy(){}}}})',
+      content: { values: { label: 'Surface Runtime' } },
+      assets: {},
+    }, 'absolute')
+    expect(courseProjectDocumentSchema.safeParse(validSurfaceRuntime).success).toBe(true)
+
+    const invalidCanvasRuntimeWithApi3 = makeRuntimeProject({
+      protocol: 'canvas-runtime',
+      runtimeApiVersion: 3,
+      enabled: true,
+      renderMode: 'phaser',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:3,create(){return {destroy(){}}}})',
+      content: { values: { label: 'Bad Canvas Runtime' } },
+      assets: {},
+    }, 'absolute')
+    expect(courseProjectDocumentSchema.safeParse(invalidCanvasRuntimeWithApi3).success).toBe(false)
+
+    const invalidSurfaceRuntimeWithPhaser = makeRuntimeProject({
+      protocol: 'surface-runtime',
+      runtimeApiVersion: 3,
+      enabled: true,
+      renderMode: 'phaser',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return {destroy(){}}}})',
+      content: { values: { label: 'Bad Surface Runtime' } },
+      assets: {},
+    }, 'absolute')
+    expect(courseProjectDocumentSchema.safeParse(invalidSurfaceRuntimeWithPhaser).success).toBe(false)
+
+    const legacyRuntime = makeRuntimeProject({
+      protocol: 'legacy-runtime-v2',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'phaser',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})',
+      content: { values: { label: 'Legacy Runtime' } },
+      assets: {},
+    }, 'legacy-whole-canvas')
+    expect(courseProjectDocumentSchema.safeParse(legacyRuntime).success).toBe(true)
+
+    const legacyRuntimeWithAbsoluteFrame = makeRuntimeProject({
+      protocol: 'legacy-runtime-v2',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'phaser',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})',
+      content: { values: { label: 'Legacy Runtime' } },
+      assets: {},
+    }, 'absolute')
+    expect(courseProjectDocumentSchema.safeParse(legacyRuntimeWithAbsoluteFrame).success).toBe(false)
+
+    const canvasRuntimeWithLegacyFrame = makeRuntimeProject({
+      protocol: 'canvas-runtime',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'phaser',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})',
+      content: { values: { label: 'Canvas Runtime' } },
+      assets: {},
+    }, 'legacy-whole-canvas')
+    expect(courseProjectDocumentSchema.safeParse(canvasRuntimeWithLegacyFrame).success).toBe(false)
+  })
 })

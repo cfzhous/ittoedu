@@ -1275,7 +1275,9 @@
                         "type": "string",
                         "enum": [
                           "surface-v1",
-                          "legacy-runtime-v2"
+                          "legacy-runtime-v2",
+                          "canvas-runtime",
+                          "surface-runtime"
                         ]
                       },
                       "runtimeApiVersion": {
@@ -1927,7 +1929,9 @@
                                   "type": "string",
                                   "enum": [
                                     "surface-v1",
-                                    "legacy-runtime-v2"
+                                    "legacy-runtime-v2",
+                                    "canvas-runtime",
+                                    "surface-runtime"
                                   ]
                                 },
                                 "runtimeApiVersion": {
@@ -2611,7 +2615,9 @@
                                     "type": "string",
                                     "enum": [
                                       "surface-v1",
-                                      "legacy-runtime-v2"
+                                      "legacy-runtime-v2",
+                                      "canvas-runtime",
+                                      "surface-runtime"
                                     ]
                                   },
                                   "runtimeApiVersion": {
@@ -3414,7 +3420,9 @@
                                   "type": "string",
                                   "enum": [
                                     "surface-v1",
-                                    "legacy-runtime-v2"
+                                    "legacy-runtime-v2",
+                                    "canvas-runtime",
+                                    "surface-runtime"
                                   ]
                                 },
                                 "runtimeApiVersion": {
@@ -4105,7 +4113,9 @@
                                   "type": "string",
                                   "enum": [
                                     "surface-v1",
-                                    "legacy-runtime-v2"
+                                    "legacy-runtime-v2",
+                                    "canvas-runtime",
+                                    "surface-runtime"
                                   ]
                                 },
                                 "runtimeApiVersion": {
@@ -4793,7 +4803,9 @@
                                   "type": "string",
                                   "enum": [
                                     "surface-v1",
-                                    "legacy-runtime-v2"
+                                    "legacy-runtime-v2",
+                                    "canvas-runtime",
+                                    "surface-runtime"
                                   ]
                                 },
                                 "runtimeApiVersion": {

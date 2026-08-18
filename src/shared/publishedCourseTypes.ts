@@ -74,7 +74,7 @@ export interface PublishedComponentLayerItem extends PublishedLayerItemBase {
 export interface PublishedRuntimeLayerItem extends PublishedLayerItemBase {
   kind: 'runtime'
   runtime: {
-    protocol: 'surface-v1' | 'legacy-runtime-v2'
+    protocol: 'surface-v1' | 'legacy-runtime-v2' | 'canvas-runtime' | 'surface-runtime'
     runtimeApiVersion: 2 | 3
     enabled: boolean
     renderMode: RuntimeRenderMode

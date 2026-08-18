@@ -100,7 +100,7 @@ export interface CourseRuntimeContent {
 
 export interface CourseRuntimeDefinition {
   /** New runtimes use `surface-v1`; migrated V8 runtimes remain explicit. */
-  protocol: 'surface-v1' | 'legacy-runtime-v2'
+  protocol: 'surface-v1' | 'legacy-runtime-v2' | 'canvas-runtime' | 'surface-runtime'
   runtimeApiVersion: 2 | 3
   enabled: boolean
   renderMode: RuntimeRenderMode
