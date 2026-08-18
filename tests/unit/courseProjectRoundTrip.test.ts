@@ -331,10 +331,10 @@ describe('Course Project V9 protocol round-trip', () => {
       : undefined
     if (canvasRuntime?.kind !== 'runtime') throw new Error('expected canvas runtime')
     expect(canvasRuntime.runtime).toMatchObject({
-      protocol: 'legacy-runtime-v2',
+      protocol: 'canvas-runtime',
       runtimeApiVersion: 2,
     })
-    expect(canvasRuntime.frame.mode).toBe('legacy-whole-canvas')
+    expect(canvasRuntime.frame.mode).toBe('absolute')
 
     const surface = projects['surface-runtime']!
     const surfaceRuntime = surface.surfaces[0]?.type === 'slide'
@@ -342,7 +342,7 @@ describe('Course Project V9 protocol round-trip', () => {
       : undefined
     if (surfaceRuntime?.kind !== 'runtime') throw new Error('expected surface runtime')
     expect(surfaceRuntime.runtime).toMatchObject({
-      protocol: 'surface-v1',
+      protocol: 'surface-runtime',
       runtimeApiVersion: 3,
       renderMode: 'dom',
     })

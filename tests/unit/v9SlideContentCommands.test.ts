@@ -463,11 +463,11 @@ describe('V9 Slide content commands', () => {
       {
         id: 'runtime-1',
         runtime: {
-          protocol: 'surface-v1',
+          protocol: 'surface-runtime',
           runtimeApiVersion: 3,
           enabled: true,
           renderMode: 'dom',
-          source: 'CoursewareRuntime.define({ runtimeApiVersion: 3, protocol: "surface-v1" })',
+          source: 'CoursewareRuntime.define({ runtimeApiVersion: 3, protocol: "surface-runtime" })',
           content: {
             values: { title: '动态标题' },
             metadata: { title: { label: '标题' } },

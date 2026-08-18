@@ -364,13 +364,19 @@ function collectProtocolIssues(
   const issues: CourseProjectValidationFinding[] = []
   visitLayerItems(project, (item, path) => {
     if (item.kind !== 'runtime') return
-    const current =
+    const currentSurface =
+      item.runtime.protocol === 'surface-runtime' &&
+      item.runtime.runtimeApiVersion === SURFACE_RUNTIME_API_VERSION
+    const currentCanvas =
+      item.runtime.protocol === 'canvas-runtime' &&
+      item.runtime.runtimeApiVersion === RUNTIME_API_VERSION
+    const legacySurface =
       item.runtime.protocol === 'surface-v1' &&
       item.runtime.runtimeApiVersion === SURFACE_RUNTIME_API_VERSION
     const migrated =
       item.runtime.protocol === 'legacy-runtime-v2' &&
       item.runtime.runtimeApiVersion === RUNTIME_API_VERSION
-    if (!current && !migrated) {
+    if (!currentSurface && !currentCanvas && !legacySurface && !migrated) {
       issues.push({
         severity: 'error',
         code: 'runtime-protocol',

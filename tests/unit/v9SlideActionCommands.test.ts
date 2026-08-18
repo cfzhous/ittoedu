@@ -105,7 +105,7 @@ function runtimeBoundTo(layerItemId: string, order: number, bindTo: string): Run
     playbackInitialVisibility: 'inherit',
     kind: 'runtime',
     runtime: {
-      protocol: 'surface-v1',
+      protocol: 'surface-runtime',
       runtimeApiVersion: 3,
       enabled: true,
       renderMode: 'dom',

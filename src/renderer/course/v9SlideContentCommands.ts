@@ -526,11 +526,11 @@ function defaultSurfaceRuntime(
   content: CourseRuntimeDefinition['content'] = { values: {} },
 ): CourseRuntimeDefinition {
   return {
-    protocol: 'surface-v1',
+    protocol: 'surface-runtime',
     runtimeApiVersion: 3,
     enabled: true,
     renderMode: 'dom',
-    source: 'CoursewareRuntime.define({ runtimeApiVersion: 3, protocol: "surface-v1" })',
+    source: 'CoursewareRuntime.define({ runtimeApiVersion: 3, protocol: "surface-runtime" })',
     content: structuredClone(content),
     assets: structuredClone(assets),
   }

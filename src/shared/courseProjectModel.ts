@@ -560,7 +560,7 @@ function migrateRuntime(
     label,
     kind: 'runtime',
     frame: {
-      mode: 'legacy-whole-canvas',
+      mode: 'absolute',
       x: 0,
       y: 0,
       width: 1280,
@@ -574,7 +574,7 @@ function migrateRuntime(
     hitPolicy: 'surface',
     playbackInitialVisibility: 'inherit',
     runtime: {
-      protocol: 'legacy-runtime-v2',
+      protocol: 'canvas-runtime',
       runtimeApiVersion: 2,
       enabled: runtime.enabled,
       renderMode: runtime.renderMode,
