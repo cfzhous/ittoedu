@@ -23,10 +23,8 @@ import {
   APP_E2E_TEMP_DIRECTORY_NAME,
   APP_NAME,
 } from '../../src/shared/constants'
-import {
-  BACKGROUND_E2E_ENV,
-  BACKGROUND_E2E_WINDOW_ORIGIN,
-} from '../../src/main/windowVisibility'
+import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const root = resolve(__dirname, '..', '..')
 const outputDir = join(tmpdir(), APP_E2E_TEMP_DIRECTORY_NAME)
@@ -98,24 +96,6 @@ interface LaunchedEditor {
   consoleErrors: string[]
   consoleWarnings: string[]
   externalRequests: string[]
-}
-
-async function expectBackgroundWindowsIsolated(
-  app: ElectronApplication,
-  required = backgroundE2e === '1',
-): Promise<void> {
-  if (!required) return
-  await expect.poll(() => app.evaluate(({ BrowserWindow }, origin) => {
-    const windows = BrowserWindow.getAllWindows()
-    return windows.length > 0 && windows.every((window) => {
-      const bounds = window.getBounds()
-      return !window.isVisible() &&
-        !window.isFocused() &&
-        window.getOpacity() === 0 &&
-        bounds.x === origin &&
-        bounds.y === origin
-    })
-  }, BACKGROUND_E2E_WINDOW_ORIGIN)).toBe(true)
 }
 
 function collectCourseLayerItems(project: CourseProjectDocument): LayerItem[] {
