@@ -112,14 +112,14 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | ID | 内容 | 验证 |
 |---|---|---|
 | T0 | tag、V9 夹具、工作区已有产品补丁收口 | 1 个 round-trip 测试 |
-| T1 | **E 已合入**。A0/D 可与 P5-persist 并行。A/C 暂缓。B 阻塞于夹具 + `editorStore` 生产写入 | 1–2 个合同测试 |
+| T1 | **E / A0 / D 已合入**。A/C 暂缓。B 阻塞于夹具 + `editorStore` 生产写入 | 1–2 个合同测试 |
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T0、T1-E、T2、T3、T4、T5、P1–P8（含 P5-persist）已合入。可并行：T6-docs、T6-scan、T1-D、T1-A0、T3-aliases。T6 全量验证等预备切片。T1-B 等 T3-aliases 后改 `editorStore`。T1-A 真迁移 / T1-C 仍暂缓。
+T0、T1-E、T1-A0、T1-D、T2、T3、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan 已合入。可领取：T3-aliases。T6 全量验证等 T3-aliases。T1-B 等别名合入后改 `editorStore`。T1-A 真迁移 / T1-C 仍暂缓。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 

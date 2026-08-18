@@ -1,6 +1,6 @@
 # T1-D 合同 JSON 快照（不接 CI 哈希门禁）
 
-> 状态：**可领取**  
+> 状态：**已合入，禁止重做**  
 > 并行：可与 P5-persist、T6-docs、T6-scan、T1-A0 分树  
 > 合同变化：否（快照当前 Schema，不改判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)

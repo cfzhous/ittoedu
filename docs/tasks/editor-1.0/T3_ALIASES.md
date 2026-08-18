@@ -14,7 +14,12 @@ T3 已把后端 kind 收成 `slide-authoring`，但 `slideBackendPort.ts` / `edi
 ```text
 src/renderer/store/slideBackendPort.ts
 src/renderer/store/editorStore.ts          只改 alias import / 调用名，禁止改 persistSpatial / 背景色 / backend 创建
+src/renderer/App.tsx                       只改 selectSlideCandidateBackend 等函数名
+src/renderer/ui/PropertiesTab.tsx          同上，禁止改画布色 ColorInput
+src/renderer/ui/Workspace.tsx              同上，禁止改手势 / 试运行 / P8 挂载
+src/renderer/authoring/v9TeacherControllerAuthoring.ts  只改函数名
 tests/unit/v9SlideBackendSelection.test.ts  若仍断言旧名字
+tests/unit/editor10ForbiddenTokens.test.ts  只改 alias 白名单路径，不要动 legacy-* 白名单
 docs/tasks/editor-1.0/T3_ALIASES_HANDOFF.md
 ```
 

@@ -37,24 +37,24 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T3](T3_BACKEND.md) | 单一 `slide-authoring`；Flow/Spatial 时 `slideBackend === null` |
 | [T5](T5_READ_MODEL.md) | NodesTab 经 `course/read-model` 取投影；`groupedVisualRows` 未改 |
 | [P5](P5_CANVAS_BACKGROUND.md) **persist** | Spatial/Flow 画布色写入可选字段；编辑与宿主同读；缺省不脏写 |
+| [T1](T1_A0_CONTRACTS_BARRELS.md) **A0** | `src/shared/contracts/**` 只做 re-export |
+| [T1](T1_D_CONTRACTS_GEN.md) **D** | `generate:contracts` / `check:contracts` 快照 |
+| [T6-docs](T6_DOCS.md) | `docs/contracts/` 三份说明 |
+| [T6-scan](T6_SCAN.md) | 禁止项棘轮测试 + 白名单 |
 
 **可领取（互斥见表）**
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [T6-docs](T6_DOCS.md) | `cursor/t6-docs-de5c` | 只写 `docs/contracts/**` |
-| [T6-scan](T6_SCAN.md) | `cursor/t6-scan-de5c` | 只新建禁止项测试；禁止改 `src/` |
-| [T1-D](T1_D_CONTRACTS_GEN.md) | `cursor/t1-contracts-gen-de5c` | 只新增 generate/check 脚本与 `artifacts/contracts/**`；`package.json` 只加两条 script |
-| [T1-A0](T1_A0_CONTRACTS_BARRELS.md) | `cursor/t1-contracts-barrels-de5c` | 只新建 `src/shared/contracts/**` re-export |
-| [T3-aliases](T3_ALIASES.md) | `cursor/t3-aliases-de5c` | 只改 candidate 函数别名；禁止改 `canvasMode` / 画布色 |
+| [T3-aliases](T3_ALIASES.md) | `cursor/t3-aliases-de5c` | 函数别名 + 调用方机械改名；禁止改 `canvasMode` / 画布色。已有工人在写，不要再开第二个 |
 
 **必须等待**
 
 | 任务 | 等什么 |
 |---|---|
-| [T6](T6_FREEZE.md) 全量验证 / CI / tag | T6-docs、T6-scan、T1-D 合入更稳 |
-| [T1](T1_SCHEMA.md) A（真迁移）/ C | T1-A0 合入后由父代理改看板 |
-| [T1](T1_SCHEMA.md) B | 先改 T0 `canvas-runtime` 夹具 + 生产写入，再删 `legacy-*`；与 T3-aliases 抢 `editorStore`，等别名合入 |
+| [T6](T6_FREEZE.md) 全量验证 / CI / tag | T3-aliases 合入后更新扫描白名单更稳 |
+| [T1](T1_SCHEMA.md) A（真迁移）/ C | 父代理改看板 |
+| [T1](T1_SCHEMA.md) B | 与 T3-aliases 抢 `editorStore`，等别名合入 |
 
 ## 卫生清理（12.1 已完成，不要重做）
 
@@ -73,11 +73,11 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
          P1 P2 P3 P4 P5-CSS P5-persist P6 P7 P8
 
 现在可并行（分 worktree）：
-  T6-docs / T6-scan / T1-D / T1-A0 / T3-aliases
+  T3-aliases
 
 然后：
   T3-aliases 合入 → T1-B
-  预备切片合入 → T6 全量验证（唯一全量）
+  T3-aliases 合入 → T6 全量验证（唯一全量）
 ```
 
 P5-persist 已合入。不要回退宿主上的 P8 组件挂载，也不要再改画布色接线。

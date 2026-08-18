@@ -1,6 +1,6 @@
 # T1-A0 共享合同桶（只新建 re-export）
 
-> 状态：**可领取**  
+> 状态：**已合入，禁止重做**  
 > 并行：可与 P5-persist、T6-docs、T6-scan、T1-D 分树  
 > 合同变化：否  
 > 工人先读：[02_WORKER.md](02_WORKER.md)
