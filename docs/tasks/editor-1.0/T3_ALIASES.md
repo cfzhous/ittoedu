@@ -1,7 +1,8 @@
 # T3-aliases 去掉 candidate 别名
 
-> 状态：**可领取**（P5-persist 已合入）  
-> 并行：可与 T6-docs / T6-scan / T1-D / T1-A0 分树；禁止与 T1-B 同时改 `editorStore.ts`  
+> 状态：**可领取**（已有工人在写，不要再开第二个）  
+> 并行：禁止与 T1-B 同时改 `editorStore.ts`  
+> T6-scan 已证明 `selectSlideCandidateBackend` 还出现在 App / PropertiesTab / Workspace / v9TeacherControllerAuthoring，必须一并机械改名。  
 > 合同变化：否  
 > 工人先读：[02_WORKER.md](02_WORKER.md)
 
