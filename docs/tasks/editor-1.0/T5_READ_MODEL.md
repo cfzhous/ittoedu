@@ -1,6 +1,6 @@
 # T5 隔离内部 Read Model
 
-> 状态：**可领取**（T3 已合入）  
+> 状态：**已合入，禁止重做**
 > 并行：可与 P5-persist 分树（文件不重叠）  
 > 合同变化：无  
 > 教师手感：必须不变  
@@ -65,11 +65,11 @@ npx vitest run tests/unit/v9GlobalLayerUiAdapter.test.tsx tests/unit/readModelBo
 
 ## 完成判定
 
-- [ ] NodesTab 不直接 import archive/migration
-- [ ] `groupedVisualRows` 行为与 P7 相同
-- [ ] 未拆 Store / 未重写 Workspace
-- [ ] 已 push `cursor/t5-read-model-de5c`
-- [ ] 有 `T5_HANDOFF.md`
+- [x] NodesTab 不直接 import archive/migration
+- [x] `groupedVisualRows` 行为与 P7 相同
+- [x] 未拆 Store / 未重写 Workspace
+- [x] 已 push `cursor/t5-read-model-de5c`
+- [x] 有 `T5_HANDOFF.md`
 
 ## 下游
 

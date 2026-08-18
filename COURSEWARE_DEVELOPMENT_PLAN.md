@@ -115,10 +115,10 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
-| T5 | Read Model 边界 | 1 个 UI 适配测试 |
+| T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T1-E、T2、P1–P4、P5-CSS、P6、P7、P2 已合入。T3 / T4 / P8 可分 worktree。T5 在 T3 后。P5-persist 在 P8 后。T6 在剩余项完成后。T1-B 未改夹具前不要删 `legacy-*`。
+T0、T1-E、T2、T3、T4、T5、P1–P4、P5-CSS、P6、P7、P8 已合入。剩余可领取：P5-persist。T6 等 P5-persist。T1-A/C/D 暂缓。T1-B 未改夹具前不要删 `legacy-*`。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
