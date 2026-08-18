@@ -18,7 +18,7 @@ import { commitSlideProjectMutation } from '@/renderer/course/slideEditorCommand
 import {
   addSlideScene,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import { addSpatialCameraFrameFromSession } from '@/renderer/course/spatialCameraCommands'
 import { openSpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'

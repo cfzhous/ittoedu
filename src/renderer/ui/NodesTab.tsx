@@ -37,7 +37,7 @@ import {
   Sigma,
 } from 'lucide-react'
 import type { SceneNode } from '../../shared/projectTypes'
-import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
+import { courseLayerItemToSceneNode } from '../store/slideEditorProjection'
 import {
   describeLayerImpact,
   visualFrontToBackRows,

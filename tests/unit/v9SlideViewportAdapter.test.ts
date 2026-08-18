@@ -17,9 +17,9 @@ import {
   worldToClient,
 } from '@/renderer/authoring/stageViewportTransform'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   EditorPhaserBridge,
   adaptV9SlideLayerItemHit,
@@ -298,7 +298,7 @@ function v9ViewportFixture(): CourseProjectDocument {
 }
 
 function injectCandidate() {
-  const backend = createSlideCandidateBackend(openSlideAuthoringSession(v9ViewportFixture()))
+  const backend = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
   return backend
 }

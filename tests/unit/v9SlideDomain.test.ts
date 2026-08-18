@@ -18,7 +18,7 @@ import {
   addSlideScene,
   buildSlideAuthoringSnapshot,
   buildSlideEditorView,
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   deleteSlidePresentationState,
   deleteSlideScene,
   duplicateSlidePresentationState,
@@ -36,7 +36,7 @@ import {
   transformSlideNativeLayers,
   undoSlideAuthoring,
   type SlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 
 /**
  * V9 fixture. Proves Slide domain (session / scene / state / selection / history).
@@ -497,7 +497,7 @@ describe('V9 Slide domain', () => {
 
   it('exposes an injectable candidate backend without touching store or V8 project', () => {
     const project = v9SlideFixture()
-    const backend = createSlideCandidateBackend(openSlideAuthoringSession(project))
+    const backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
     expect(backend.kind).toBe('v9-slide-candidate')
     const added = backend.addScene({ now: NOW, expectedRevision: backend.getSnapshot().revision })
     expect(added.ok).toBe(true)

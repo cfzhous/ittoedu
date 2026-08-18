@@ -914,12 +914,10 @@ export function redoSlideAuthoring(
 }
 
 /**
- * Injectable V9 Slide candidate for R2-SEAM. Holds one in-memory session.
- * R2-SEAM may keep this object behind a test/dev flag; this task does not
- * touch editorStore or App.
+ * V9 Slide authoring backend. Holds one in-memory session.
  */
-export interface SlideCandidateBackend {
-  readonly kind: 'v9-slide-candidate'
+export interface SlideAuthoringBackend {
+  readonly kind: 'slide-authoring'
   getSession(): SlideAuthoringSession
   getSnapshot(): SlideAuthoringSnapshot
   makeTarget(layerItemId: string, field?: string): SlideAuthoringTarget
@@ -959,15 +957,15 @@ function bindBackend(
   return result
 }
 
-export function createSlideCandidateBackend(
+export function createSlideAuthoringBackend(
   initial: SlideAuthoringSession,
-): SlideCandidateBackend {
+): SlideAuthoringBackend {
   let session = freezeSession(initial)
   const run = (
     execute: (current: SlideAuthoringSession) => SlideCommandResult,
   ): SlideCommandResult => bindBackend(() => session, (next) => { session = next }, execute)
   return {
-    kind: 'v9-slide-candidate',
+    kind: 'slide-authoring',
     getSession: () => session,
     getSnapshot: () => buildSlideAuthoringSnapshot(session),
     makeTarget: (layerItemId, field) => makeSlideAuthoringTarget(session, layerItemId, field),

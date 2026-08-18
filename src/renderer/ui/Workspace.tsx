@@ -125,7 +125,7 @@ import type { PublishedCourseSession } from '../../player/surfaces/publishedDyna
 import { FlowWorkspace } from './FlowWorkspace'
 import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
 import { buildFlowEditorView } from '../course/flowEditorView'
-import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
+import { courseLayerItemToSceneNode } from '../store/slideEditorProjection'
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../phaser/v9SpatialHitAdapter'
 import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'

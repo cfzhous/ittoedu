@@ -55,7 +55,7 @@ import { buildSlideEditorView, type SlideEditorLayerView } from './slideEditorVi
 import {
   makeSlideAuthoringTarget,
   type SlideAuthoringSession,
-} from './v9SlideVerticalSlice'
+} from './slideAuthoringBackend'
 
 /**
  * V8 `offsetDefaultInsertion` contract from editorStore.

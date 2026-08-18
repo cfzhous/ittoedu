@@ -31,11 +31,11 @@ import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
   setSlideEditingScope,
   type SlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   selectEditingNodes,
   selectSelectedNode,
@@ -278,7 +278,7 @@ describe('V9 Slide text/formula transactions', () => {
 
   it('opens a canvas text/formula session with authoringAddress, revision and generation', () => {
     const session = openSlideAuthoringSession(v9SlideFixture())
-    const backend = createSlideCandidateBackend(session)
+    const backend = createSlideAuthoringBackend(session)
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
     const candidate = selectSlideCandidateBackend(useEditorStore.getState())
 
@@ -552,7 +552,7 @@ describe('V9 Slide text/formula transactions', () => {
     const session = openSlideAuthoringSession(v9SlideFixture())
     expect(session.selection.selectionIds).toEqual([])
     useEditorStore.getState().injectV9SlideCandidateBackend(
-      createSlideCandidateBackend(session),
+      createSlideAuthoringBackend(session),
     )
     const store = useEditorStore.getState()
     expect(store.selectedNodeIds).toEqual([])

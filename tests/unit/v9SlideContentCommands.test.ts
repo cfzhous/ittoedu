@@ -14,7 +14,7 @@ import {
   openSlideAuthoringSession,
   setSlideEditingScope,
   type SlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   addSlideComponentLayer,
   addSlideImageLayer,

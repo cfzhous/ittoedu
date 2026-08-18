@@ -10,9 +10,9 @@ import {
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { createTeacherControllerNode } from '@/renderer/project/createProject'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   CONTROLLER_MOVE_REASON,
 } from '@/renderer/course/effectiveLayerCommands'
@@ -213,7 +213,7 @@ function v9ThreeLocationFixture(): CourseProjectDocument {
 }
 
 function injectCandidate(project = v9ThreeLocationFixture()) {
-  const backend = createSlideCandidateBackend(openSlideAuthoringSession(project))
+  const backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)
   return backend
 }

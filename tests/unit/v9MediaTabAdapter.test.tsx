@@ -7,9 +7,9 @@ import {
   createMediaAssetImport,
 } from '@/renderer/project/assetManager'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import { dedupeCourseMediaImports } from '@/renderer/project/v9AssetAdapter'
 import {
   selectAudioSettings,
@@ -92,7 +92,7 @@ function v9EmptySlideFixture() {
 }
 
 function injectCandidate() {
-  const backend = createSlideCandidateBackend(
+  const backend = createSlideAuthoringBackend(
     openSlideAuthoringSession(v9EmptySlideFixture()),
   )
   useEditorStore.getState().injectV9SlideCandidateBackend(backend)

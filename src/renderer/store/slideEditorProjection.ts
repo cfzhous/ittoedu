@@ -8,8 +8,8 @@ import type {
 import type { SceneDocument, SceneNode, SceneNodeOverride } from '../../shared/projectTypes'
 import {
   buildSlideEditorView,
-  type SlideCandidateBackend,
-} from '../course/v9SlideVerticalSlice'
+  type SlideAuthoringBackend,
+} from '../course/slideAuthoringBackend'
 
 const NATIVE_NODE_TYPES = new Set([
   'text',
@@ -21,7 +21,7 @@ const NATIVE_NODE_TYPES = new Set([
 ])
 
 function slideSurface(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
 ): SlideSurfaceDocument | null {
   const snapshot = backend.getSnapshot()
   const surface = backend.getSession().history.present.surfaces.find(
@@ -31,7 +31,7 @@ function slideSurface(
 }
 
 function locationIdForScene(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   sceneId: string,
 ): string | null {
   const snapshot = backend.getSnapshot()
@@ -97,7 +97,7 @@ function layerItemOverrideToNodeOverride(
   return next as SceneNodeOverride
 }
 
-export function projectV9EditingNodes(backend: SlideCandidateBackend): SceneNode[] {
+export function projectV9EditingNodes(backend: SlideAuthoringBackend): SceneNode[] {
   const session = backend.getSession()
   const view = buildSlideEditorView({
     project: session.history.present,
@@ -112,7 +112,7 @@ export function projectV9EditingNodes(backend: SlideCandidateBackend): SceneNode
 }
 
 export function projectV9SceneDocument(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   sceneId: string,
 ): SceneDocument | null {
   const surface = slideSurface(backend)
@@ -160,11 +160,11 @@ export function projectV9SceneDocument(
   }
 }
 
-export function projectV9ActiveScene(backend: SlideCandidateBackend): SceneDocument | null {
+export function projectV9ActiveScene(backend: SlideAuthoringBackend): SceneDocument | null {
   return projectV9SceneDocument(backend, backend.getSnapshot().sceneId)
 }
 
-export function projectV9SlideScenes(backend: SlideCandidateBackend): SceneDocument[] {
+export function projectV9SlideScenes(backend: SlideAuthoringBackend): SceneDocument[] {
   const surface = slideSurface(backend)
   if (!surface) return []
   return surface.scenes.flatMap((scene) => {

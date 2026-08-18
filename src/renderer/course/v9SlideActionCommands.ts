@@ -43,7 +43,7 @@ import {
   sortSlideSceneLayerItems,
   type V9SlideClipboardPayload,
 } from './v9SlideClipboard'
-import { selectSlideLayers, type SlideAuthoringSession } from './v9SlideVerticalSlice'
+import { selectSlideLayers, type SlideAuthoringSession } from './slideAuthoringBackend'
 
 export type {
   V9SlideClipboardItem,

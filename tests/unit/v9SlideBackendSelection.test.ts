@@ -3,9 +3,9 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { COURSE_PROJECT_SCHEMA_VERSION } from '@/shared/courseProjectTypes'
 import type { NativeLayerItem, ScopedLayerItem } from '@/shared/courseProjectTypes'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
-} from '@/renderer/course/v9SlideVerticalSlice'
+} from '@/renderer/course/slideAuthoringBackend'
 import {
   selectSlideAuthoringSnapshot,
   selectSlideBackendKind,
@@ -143,7 +143,7 @@ function v9CandidateFixture() {
 }
 
 function makeCandidateBackend() {
-  return createSlideCandidateBackend(openSlideAuthoringSession(v9CandidateFixture()))
+  return createSlideAuthoringBackend(openSlideAuthoringSession(v9CandidateFixture()))
 }
 
 beforeEach(() => {
@@ -189,7 +189,7 @@ describe('V9 slide backend selection seam', () => {
 
   it('injects one V9 candidate and writes only the candidate document', () => {
     const source = v9CandidateFixture()
-    const backend = createSlideCandidateBackend(openSlideAuthoringSession(source))
+    const backend = createSlideAuthoringBackend(openSlideAuthoringSession(source))
 
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
 

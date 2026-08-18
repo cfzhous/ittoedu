@@ -340,15 +340,15 @@ import {
 import { commitSpatialAuthoringHistory, commitSpatialProjectMutation, rejectSpatialCommand, succeedSpatialCommand } from '../course/spatialAuthoringHistory'
 import { buildSpatialEditorView } from '../course/spatialEditorView'
 import {
-  createSlideCandidateBackend,
+  createSlideAuthoringBackend,
   openSlideAuthoringSession,
   slideAuthoringGeneration,
   type SlideAuthoringSession,
   transformSlideNativeLayers,
   type SlideAuthoringSnapshot,
-  type SlideCandidateBackend,
+  type SlideAuthoringBackend,
   type SlideCommandResult,
-} from '../course/v9SlideVerticalSlice'
+} from '../course/slideAuthoringBackend'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
@@ -373,7 +373,7 @@ import {
   courseLayerItemToSceneNode,
   projectV9EditingNodes,
   projectV9SlideScenes,
-} from './v9SlideUiProjection'
+} from './slideEditorProjection'
 
 enablePatches()
 
@@ -988,7 +988,7 @@ function existingLayerItemIds(project: CourseProjectDocument): Set<string> {
 }
 
 function buildSlideCandidateUi(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   edit: V9SlideContentEditSession | null,
 ): SlideCandidateUiProjection {
   const document = backend.getSession().history.present
@@ -1018,7 +1018,7 @@ function buildSlideCandidateUi(
 }
 
 function candidateViewState(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   edit: V9SlideContentEditSession | null,
 ): Pick<EditorState, 'slideCandidateUi' | 'slideCandidateEffectiveLayers'> {
   return {
@@ -1069,7 +1069,7 @@ function findCourseSlideScene(
 }
 
 function derivedV8ProjectFromBackend(
-  backend: SlideCandidateBackend,
+  backend: SlideAuthoringBackend,
   sidecar: CourseAssetSidecar | null,
   edit: V9SlideContentEditSession | null,
 ): ProjectDocument {
@@ -1609,11 +1609,11 @@ export interface EditorState {
   redo(): void
 
   /** Test/dev only. Do not bind to App, menus, or URL query. */
-  injectV9SlideCandidateBackend(backend: SlideCandidateBackend): void
+  injectV9SlideCandidateBackend(backend: SlideAuthoringBackend): void
   /** Test/dev only. Discards the in-memory candidate and returns the session to V8. */
   clearV9SlideCandidateBackend(): void
   runSlideCandidateCommand(
-    run: (backend: SlideCandidateBackend) => SlideCommandResult,
+    run: (backend: SlideAuthoringBackend) => SlideCommandResult,
   ): SlideCommandResult
   applySlideCandidateSession(session: SlideAuthoringSession): void
   applySlideCandidateCommand(
@@ -2812,13 +2812,13 @@ function collectLiveEditorItemIds(state: EditorState): readonly string[] {
 
 export const useEditorStore = create<EditorState>((set, get) => {
   const initialCourse = createBlankCourseProject()
-  const initialBackend = createSlideCandidateBackend(openSlideAuthoringSession(initialCourse))
+  const initialBackend = createSlideAuthoringBackend(openSlideAuthoringSession(initialCourse))
   const initialSidecar = emptyCourseAssetSidecar()
   const initialSnapshot = initialBackend.getSnapshot()
   const initialProject = derivedV8ProjectFromBackend(initialBackend, initialSidecar, null)
 
   const applyV9Backend = (
-    backend: SlideCandidateBackend,
+    backend: SlideAuthoringBackend,
     extra: {
       sidecar?: CourseAssetSidecar
       path?: string | null
@@ -2912,7 +2912,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return result
     }
     let nextBackend = result.nextSession
-      ? createSlideCandidateBackend(result.nextSession)
+      ? createSlideAuthoringBackend(result.nextSession)
       : current.slideBackend
     const editedLayerItemId = extra.clearContentEdit
       ? current.v9ContentEdit?.target.layerItemId
@@ -2924,7 +2924,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           expectedRevision: liveSnapshot.revision,
         })
         if (restored.ok && restored.nextSession) {
-          nextBackend = createSlideCandidateBackend(restored.nextSession)
+          nextBackend = createSlideAuthoringBackend(restored.nextSession)
         }
       }
     }
@@ -3552,7 +3552,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   const commitOpenCandidateContentEdit = (
     nextSelectionIds: readonly string[],
-  ): SlideCandidateBackend | null => {
+  ): SlideAuthoringBackend | null => {
     const state = get()
     const backend = selectSlideCandidateBackend(state)
     const edit = state.v9ContentEdit
@@ -3569,7 +3569,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     return selectSlideCandidateBackend(get())
   }
 
-  const persistOpenV9ContentEdit = (): SlideCandidateBackend | null => {
+  const persistOpenV9ContentEdit = (): SlideAuthoringBackend | null => {
     const state = get()
     const backend = selectSlideCandidateBackend(state)
     const edit = state.v9ContentEdit
@@ -4003,7 +4003,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
           })
           return true
         }
-        const backend = createSlideCandidateBackend(openSlideAuthoringSession(archive.project))
+        const backend = createSlideAuthoringBackend(openSlideAuthoringSession(archive.project))
         applyV9Backend(backend, {
           sidecar: freezeCourseAssetSidecar(archive.assetFiles),
           dirty: false,
@@ -4313,7 +4313,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     createNewProject() {
       const project = createBlankCourseProject()
       applyV9Backend(
-        createSlideCandidateBackend(openSlideAuthoringSession(project)),
+        createSlideAuthoringBackend(openSlideAuthoringSession(project)),
         {
           sidecar: emptyCourseAssetSidecar(),
           path: null,
@@ -4365,7 +4365,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return
       }
       applyV9Backend(
-        createSlideCandidateBackend(openSlideAuthoringSession(project)),
+        createSlideAuthoringBackend(openSlideAuthoringSession(project)),
         {
           sidecar: freezeCourseAssetSidecar(assetFiles),
           path,
@@ -5137,7 +5137,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (location.kind === 'slide-scene') {
         if (state.spatialSession || state.flowSession) {
           applyV9Backend(
-            createSlideCandidateBackend(openSlideAuthoringSession(project, { locationId })),
+            createSlideAuthoringBackend(openSlideAuthoringSession(project, { locationId })),
             preserve,
           )
           set({ courseAuthoringSession: nextAuthoringSession })
@@ -9091,7 +9091,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
             let next = session
             if (sceneFramePatches.length > 0) {
               const current = new Map(
-                projectV9EditingNodes(createSlideCandidateBackend(next)).map((node) => [node.id, node]),
+                projectV9EditingNodes(createSlideAuthoringBackend(next)).map((node) => [node.id, node]),
               )
               const transformed = transformSlideNativeLayers(next, {
                 nodes: sceneFramePatches.flatMap((item) => {
@@ -9843,7 +9843,7 @@ export const selectSlideBackendKind = (state: EditorState): SlideBackendKind =>
 
 export const selectSlideCandidateBackend = (
   state: EditorState,
-): SlideCandidateBackend | null =>
+): SlideAuthoringBackend | null =>
   isV9SlideCandidateBackend(state.slideBackend) ? state.slideBackend : null
 
 export const selectSlideAuthoringSnapshot = (
