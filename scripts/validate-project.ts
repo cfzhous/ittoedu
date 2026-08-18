@@ -1,13 +1,156 @@
+import { unzipSync } from 'fflate'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
 import {
-  projectValidationExitCode,
-  serializeProjectValidationReport,
-  unreadableProjectValidationReport,
-  validateProjectArchiveBytes,
-  type ProjectValidationFatalError,
-} from '../src/renderer/project/validateProjectArchive'
+  collectCoursePackageExportPreflight,
+  type CoursePackagePreflightItem,
+} from '../src/renderer/export/course/buildCoursePackages'
+import { buildPublishedCourseV2Payload } from '../src/renderer/export/course/buildPublishedCourse'
+import {
+  auditCourseExportAssets,
+  buildCourseExportPageList,
+  type CourseExportReportItem,
+} from '../src/renderer/export/course/buildCoursePrintArtifacts'
+import {
+  detectCourseProjectArchiveFormat,
+  openCourseProjectArchive,
+  type CourseProjectArchiveData,
+} from '../src/renderer/project/courseProjectArchive'
+import {
+  COMPONENT_RUNTIME_API_VERSION,
+  COMPONENT_SCHEMA_VERSION,
+  RUNTIME_API_VERSION,
+} from '../src/shared/constants'
+import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
+import {
+  COURSE_PROJECT_SCHEMA_VERSION,
+  type CourseProjectDocument,
+  type LayerItem,
+} from '../src/shared/courseProjectTypes'
+import { UserFacingError } from '../src/shared/errors'
+import { detectLayoutMeasurementMode } from '../src/shared/layoutMeasure'
+import { PUBLISHED_COURSE_VERSION } from '../src/shared/publishedCourseTypes'
+import { compareStableStrings } from '../src/shared/stableOrder'
+import { SURFACE_RUNTIME_API_VERSION } from '../src/shared/surfaceRuntimeTypes'
+
+export const COURSE_PROJECT_VALIDATION_REPORT_VERSION = 1 as const
+export const INTERACTION_PROTOCOL_VERSION = 1 as const
+
+const CURRENT_PROTOCOLS = {
+  project: COURSE_PROJECT_SCHEMA_VERSION,
+  publishedCourse: PUBLISHED_COURSE_VERSION,
+  runtime: [RUNTIME_API_VERSION, SURFACE_RUNTIME_API_VERSION],
+  component: COMPONENT_SCHEMA_VERSION,
+  interaction: INTERACTION_PROTOCOL_VERSION,
+} as const
+
+const V8_ROOT_FIELDS = ['scenes', 'globalRuntime', 'globalNodes'] as const
+const VALIDATION_PLAYER_BUNDLE = '/* validate:course-project */\n'
+const USAGE =
+  '用法：npm run --silent validate:course-project -- <project.h5lesson>'
+
+export type CourseProjectValidationStatus = 'valid' | 'invalid' | 'unreadable'
+export type CourseProjectExportTarget =
+  | 'single-html'
+  | 'web-package'
+  | 'pdf'
+  | 'pptx'
+
+export interface CourseProjectValidationFatalError {
+  code:
+    | 'archive-invalid'
+    | 'input-unreadable'
+    | 'schema-invalid'
+    | 'unsupported-project-version'
+    | 'usage-error'
+    | 'validation-failed'
+  title: string
+  message: string
+  suggestion?: string
+}
+
+export interface CourseProjectValidationSchemaIssue {
+  path: Array<string | number>
+  code: string
+  message: string
+}
+
+export interface CourseProjectValidationFinding {
+  severity: 'error' | 'warning' | 'info'
+  code: string
+  message: string
+  path?: Array<string | number>
+  surfaceId?: string
+  layerItemId?: string
+}
+
+export interface CourseProjectExportPreflightReport {
+  reportVersion: 1
+  projectId: string
+  schemaVersion: typeof COURSE_PROJECT_SCHEMA_VERSION
+  target: CourseProjectExportTarget
+  items: CourseProjectValidationFinding[]
+  summary: {
+    error: number
+    warning: number
+    info: number
+    total: number
+    canExport: boolean
+  }
+}
+
+export interface CourseProjectValidationReport {
+  reportVersion: typeof COURSE_PROJECT_VALIDATION_REPORT_VERSION
+  status: CourseProjectValidationStatus
+  input: { filename: string }
+  measurement: {
+    mode: ReturnType<typeof detectLayoutMeasurementMode>
+    note: string
+  }
+  schema: {
+    valid: boolean
+    schemaVersion: number | null
+    issues: CourseProjectValidationSchemaIssue[]
+  }
+  project: null | {
+    id: string
+    title: string
+    locationCount: number
+    surfaceCount: number
+    assetCount: number
+    componentPackageCount: number
+  }
+  projectHealth: null | {
+    items: CourseProjectValidationFinding[]
+    summary: {
+      error: number
+      warning: number
+      info: number
+      total: number
+      canExport: boolean
+    }
+  }
+  exportPreflight: null | Record<
+    CourseProjectExportTarget,
+    CourseProjectExportPreflightReport
+  >
+  protocols: typeof CURRENT_PROTOCOLS | null
+  stableIds: null | { valid: boolean; issues: CourseProjectValidationFinding[] }
+  migrationMarkers: null | {
+    present: boolean
+    items: CourseProjectValidationFinding[]
+  }
+  summary: {
+    error: number
+    warning: number
+    info: number
+    total: number
+    canExport: boolean
+  }
+  fatal: CourseProjectValidationFatalError | null
+}
 
 interface ValidationCliIo {
   stdout(value: string): void
@@ -21,13 +164,588 @@ const defaultIo: ValidationCliIo = {
   read: async (filename) => readFile(filename),
 }
 
+const EMPTY_SUMMARY = {
+  error: 0,
+  warning: 0,
+  info: 0,
+  total: 0,
+  canExport: false,
+} as const
+
+function measurement(): CourseProjectValidationReport['measurement'] {
+  const mode = detectLayoutMeasurementMode()
+  return {
+    mode,
+    note: mode === 'browser-canvas'
+      ? '文本与公式布局使用浏览器 Canvas 字形测量。'
+      : 'Node 环境使用确定性字宽后备；布局诊断适合自动筛查，最终像素结果仍需真实导出或人工验收。',
+  }
+}
+
+export function unreadableCourseProjectValidationReport(
+  filename: string,
+  fatal: CourseProjectValidationFatalError,
+  schema: CourseProjectValidationReport['schema'] = {
+    valid: false,
+    schemaVersion: null,
+    issues: [],
+  },
+): CourseProjectValidationReport {
+  return {
+    reportVersion: COURSE_PROJECT_VALIDATION_REPORT_VERSION,
+    status: 'unreadable',
+    input: { filename },
+    measurement: measurement(),
+    schema,
+    project: null,
+    projectHealth: null,
+    exportPreflight: null,
+    protocols: null,
+    stableIds: null,
+    migrationMarkers: null,
+    summary: { ...EMPTY_SUMMARY },
+    fatal,
+  }
+}
+
+function summarizeFindings(
+  items: readonly CourseProjectValidationFinding[],
+): {
+  error: number
+  warning: number
+  info: number
+  total: number
+  canExport: boolean
+} {
+  const summary = {
+    error: 0,
+    warning: 0,
+    info: 0,
+    total: items.length,
+    canExport: true,
+  }
+  for (const item of items) summary[item.severity] += 1
+  summary.canExport = summary.error === 0
+  return summary
+}
+
+function declaredSchemaVersion(value: unknown): number | null {
+  if (typeof value !== 'object' || value === null) return null
+  const version = Reflect.get(value, 'schemaVersion')
+  return typeof version === 'number' && Number.isInteger(version) ? version : null
+}
+
+function peekProjectJson(bytes: Uint8Array): unknown | undefined {
+  try {
+    const files = unzipSync(bytes)
+    const projectBytes = files['project.json']
+    if (!projectBytes) return undefined
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(projectBytes)) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function schemaIssuesFromValue(value: unknown): CourseProjectValidationSchemaIssue[] {
+  const parsed = courseProjectDocumentSchema.safeParse(value)
+  if (parsed.success) return []
+  return parsed.error.issues.map((issue) => ({
+    path: issue.path.map((segment) => (
+      typeof segment === 'string' || typeof segment === 'number' ? segment : String(segment)
+    )),
+    code: issue.code,
+    message: issue.message,
+  }))
+}
+
+function visitLayerItems(
+  project: CourseProjectDocument,
+  visit: (item: LayerItem, path: Array<string | number>) => void,
+): void {
+  project.globalLayerItems.forEach((entry, index) => {
+    visit(entry.item, ['globalLayerItems', index, 'item'])
+  })
+  project.surfaces.forEach((surface, surfaceIndex) => {
+    surface.surfaceLayerItems.forEach((entry, index) => {
+      visit(entry.item, ['surfaces', surfaceIndex, 'surfaceLayerItems', index, 'item'])
+    })
+    if (surface.type === 'slide') {
+      surface.scenes.forEach((scene, sceneIndex) => {
+        scene.layerItems.forEach((item, index) => {
+          visit(item, ['surfaces', surfaceIndex, 'scenes', sceneIndex, 'layerItems', index])
+        })
+      })
+    }
+    if (surface.type === 'spatial-2d') {
+      surface.world.layerItems.forEach((item, index) => {
+        visit(item, ['surfaces', surfaceIndex, 'world', 'layerItems', index])
+      })
+    }
+  })
+}
+
+function collectStableIdIssues(
+  project: CourseProjectDocument,
+): CourseProjectValidationFinding[] {
+  const issues: CourseProjectValidationFinding[] = []
+  const seen = new Map<string, Array<string | number>>()
+  const remember = (id: string, path: Array<string | number>, code: string): void => {
+    const previous = seen.get(id)
+    if (previous) {
+      issues.push({
+        severity: 'error',
+        code,
+        message: `稳定 ID 重复：${id}`,
+        path,
+      })
+      return
+    }
+    seen.set(id, path)
+  }
+  remember(`project:${project.id}`, ['id'], 'duplicate-stable-id')
+  project.locations.forEach((location, index) => {
+    remember(`location:${location.id}`, ['locations', index, 'id'], 'duplicate-stable-id')
+  })
+  project.surfaces.forEach((surface, surfaceIndex) => {
+    remember(`surface:${surface.id}`, ['surfaces', surfaceIndex, 'id'], 'duplicate-stable-id')
+  })
+  visitLayerItems(project, (item, path) => {
+    remember(`layer:${item.layerItemId}`, [...path, 'layerItemId'], 'duplicate-stable-id')
+  })
+  return issues
+}
+
+function collectMigrationMarkerIssues(
+  project: CourseProjectDocument,
+): CourseProjectValidationFinding[] {
+  const issues: CourseProjectValidationFinding[] = []
+  visitLayerItems(project, (item, path) => {
+    if (item.frame.mode === 'legacy-whole-canvas') {
+      issues.push({
+        severity: 'error',
+        code: 'migration-marker',
+        message: '当前 Course Project V9 不得保留 legacy-whole-canvas 迁移标记。',
+        path: [...path, 'frame', 'mode'],
+        layerItemId: item.layerItemId,
+      })
+    }
+    if (item.kind === 'runtime' && item.runtime.protocol === 'legacy-runtime-v2') {
+      issues.push({
+        severity: 'error',
+        code: 'migration-marker',
+        message: '当前 Course Project V9 不得保留 legacy-runtime-v2 迁移标记。',
+        path: [...path, 'runtime', 'protocol'],
+        layerItemId: item.layerItemId,
+      })
+    }
+  })
+  return issues
+}
+
+function collectV8FieldIssues(value: unknown): CourseProjectValidationFinding[] {
+  if (typeof value !== 'object' || value === null) return []
+  const record = value as Record<string, unknown>
+  return V8_ROOT_FIELDS.flatMap((field) => (
+    Object.prototype.hasOwnProperty.call(record, field)
+      ? [{
+          severity: 'error' as const,
+          code: 'v8-field',
+          message: `当前 Course Project V9 不得包含 Project V8 字段 ${field}。`,
+          path: [field],
+        }]
+      : []
+  ))
+}
+
+function collectProtocolIssues(
+  project: CourseProjectDocument,
+  archive: CourseProjectArchiveData,
+): CourseProjectValidationFinding[] {
+  const issues: CourseProjectValidationFinding[] = []
+  visitLayerItems(project, (item, path) => {
+    if (item.kind !== 'runtime') return
+    const current =
+      item.runtime.protocol === 'surface-v1' &&
+      item.runtime.runtimeApiVersion === SURFACE_RUNTIME_API_VERSION
+    const migrated =
+      item.runtime.protocol === 'legacy-runtime-v2' &&
+      item.runtime.runtimeApiVersion === RUNTIME_API_VERSION
+    if (!current && !migrated) {
+      issues.push({
+        severity: 'error',
+        code: 'runtime-protocol',
+        message: `Runtime 协议不受支持：${item.runtime.protocol} / API ${item.runtime.runtimeApiVersion}。`,
+        path: [...path, 'runtime'],
+        layerItemId: item.layerItemId,
+      })
+    }
+  })
+  for (const [recordKey, files] of Object.entries(archive.componentFiles)) {
+    const manifestBytes = files['manifest.json']
+    if (!manifestBytes) {
+      issues.push({
+        severity: 'error',
+        code: 'component-protocol',
+        message: `组件 ${recordKey} 缺少 manifest.json。`,
+        path: ['componentPackages', recordKey],
+      })
+      continue
+    }
+    try {
+      const manifest = JSON.parse(
+        new TextDecoder('utf-8', { fatal: true }).decode(manifestBytes),
+      ) as { schemaVersion?: unknown; runtimeApiVersion?: unknown }
+      if (manifest.schemaVersion !== COMPONENT_SCHEMA_VERSION) {
+        issues.push({
+          severity: 'error',
+          code: 'component-protocol',
+          message: `组件 ${recordKey} 的 Schema 不是 Component API ${COMPONENT_SCHEMA_VERSION}。`,
+          path: ['componentPackages', recordKey, 'schemaVersion'],
+        })
+      }
+      if (manifest.runtimeApiVersion !== COMPONENT_RUNTIME_API_VERSION) {
+        issues.push({
+          severity: 'error',
+          code: 'component-protocol',
+          message: `组件 ${recordKey} 的 Runtime 不是 Component Runtime API ${COMPONENT_RUNTIME_API_VERSION}。`,
+          path: ['componentPackages', recordKey, 'runtimeApiVersion'],
+        })
+      }
+    } catch {
+      issues.push({
+        severity: 'error',
+        code: 'component-protocol',
+        message: `组件 ${recordKey} 的 manifest.json 不可读。`,
+        path: ['componentPackages', recordKey],
+      })
+    }
+  }
+  return issues
+}
+
+function mapPackagePreflightItems(
+  items: readonly CoursePackagePreflightItem[],
+): CourseProjectValidationFinding[] {
+  return items
+    .filter((item) => item.code !== 'player-bundle-empty')
+    .map((item) => ({
+      severity: item.severity,
+      code: item.code,
+      message: item.message,
+      ...(item.path ? { path: [...item.path] } : {}),
+    }))
+}
+
+function mapPrintItems(
+  items: readonly CourseExportReportItem[],
+): CourseProjectValidationFinding[] {
+  return items.map((item) => ({
+    severity: item.severity,
+    code: item.severity === 'error'
+      ? 'static-export-preflight'
+      : item.severity === 'warning'
+        ? 'static-export-warning'
+        : 'static-export-info',
+    message: item.message,
+    ...(item.assetId ? { path: ['assets', item.assetId] } : {}),
+  }))
+}
+
+function collectExportReports(
+  archive: CourseProjectArchiveData,
+): Record<CourseProjectExportTarget, CourseProjectExportPreflightReport> {
+  let components: ReturnType<typeof componentPackagesFromArchive> = {}
+  try {
+    components = componentPackagesFromArchive(
+      archive.project,
+      archive.componentFiles,
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '组件包无法用于导出预检。'
+    const items: CourseProjectValidationFinding[] = [{
+      severity: 'error',
+      code: 'component-bytes-missing',
+      message,
+    }]
+    const toReport = (
+      target: CourseProjectExportTarget,
+    ): CourseProjectExportPreflightReport => ({
+      reportVersion: 1,
+      projectId: archive.project.id,
+      schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+      target,
+      items,
+      summary: summarizeFindings(items),
+    })
+    return {
+      'single-html': toReport('single-html'),
+      'web-package': toReport('web-package'),
+      pdf: toReport('pdf'),
+      pptx: toReport('pptx'),
+    }
+  }
+  const resources = {
+    assetFiles: archive.assetFiles,
+    components,
+  }
+  const now = new Date(archive.project.updatedAt)
+  const generatedAt = Number.isNaN(now.valueOf()) ? new Date(0) : now
+  const htmlItems = mapPackagePreflightItems(
+    collectCoursePackageExportPreflight(
+      archive.project,
+      'standalone-html',
+      resources,
+      VALIDATION_PLAYER_BUNDLE,
+      generatedAt,
+    ).items,
+  )
+  const webItems = mapPackagePreflightItems(
+    collectCoursePackageExportPreflight(
+      archive.project,
+      'web-package',
+      resources,
+      VALIDATION_PLAYER_BUNDLE,
+      generatedAt,
+    ).items,
+  )
+  const printItems: CourseProjectValidationFinding[] = []
+  try {
+    const published = buildPublishedCourseV2Payload({
+      project: archive.project,
+      assetFiles: archive.assetFiles,
+      components,
+    })
+    const rawPrint: CourseExportReportItem[] = []
+    auditCourseExportAssets(published, rawPrint, (assetId) => {
+      const bytes = archive.assetFiles[assetId]
+      if (!bytes) return undefined
+      return {
+        filename: archive.project.assets[assetId]?.filename ?? `${assetId}.bin`,
+        mimeType: archive.project.assets[assetId]?.mimeType ?? 'application/octet-stream',
+        bytes,
+      }
+    })
+    printItems.push(...mapPrintItems(rawPrint))
+    if (buildCourseExportPageList(published).length === 0) {
+      printItems.push({
+        severity: 'error',
+        code: 'static-export-preflight',
+        message: '当前 Course Project V9 没有可导出的 PDF/PPTX 页面。',
+      })
+    }
+    const hasInteractions =
+      archive.project.globalInteractions.length > 0 ||
+      archive.project.surfaces.some((surface) => (
+        surface.type === 'slide' &&
+        surface.scenes.some((scene) => scene.interactions.length > 0)
+      ))
+    if (hasInteractions) {
+      printItems.push({
+        severity: 'info',
+        code: 'static-export-interactions-omitted',
+        message: '声明式互动不会写入 PDF/PPTX 静态导出。',
+      })
+    }
+  } catch (error) {
+    printItems.push({
+      severity: 'error',
+      code: 'static-export-preflight',
+      message: error instanceof Error ? error.message : 'Published Course V2 预检失败。',
+    })
+  }
+
+  const toReport = (
+    target: CourseProjectExportTarget,
+    items: CourseProjectValidationFinding[],
+  ): CourseProjectExportPreflightReport => ({
+    reportVersion: 1,
+    projectId: archive.project.id,
+    schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+    target,
+    items,
+    summary: summarizeFindings(items),
+  })
+
+  return {
+    'single-html': toReport('single-html', htmlItems),
+    'web-package': toReport('web-package', webItems),
+    pdf: toReport('pdf', printItems),
+    pptx: toReport('pptx', printItems),
+  }
+}
+
+function combinedSummary(
+  health: ReturnType<typeof summarizeFindings>,
+  reports: Record<CourseProjectExportTarget, CourseProjectExportPreflightReport>,
+): CourseProjectValidationReport['summary'] {
+  const summary = {
+    error: health.error,
+    warning: health.warning,
+    info: health.info,
+    total: health.total,
+    canExport: true,
+  }
+  for (const report of Object.values(reports)) {
+    for (const item of report.items) {
+      summary[item.severity] += 1
+      summary.total += 1
+    }
+  }
+  summary.canExport = summary.error === 0
+  return summary
+}
+
+function unsupportedVersionFatal(
+  schemaVersion: number | null,
+): CourseProjectValidationFatalError {
+  if (schemaVersion === 8) {
+    return {
+      code: 'unsupported-project-version',
+      title: '工程版本不受支持',
+      message: '该文件是 Project V8，不是当前 Course Project V9 工程格式。',
+      suggestion: '请使用 Course Project V9 .h5lesson。无界面校验不再把 Project V8 当作当前格式。',
+    }
+  }
+  return {
+    code: 'unsupported-project-version',
+    title: '工程版本不受支持',
+    message: `该文件的格式版本为 ${schemaVersion ?? '未声明'}，当前无界面校验只接受 Course Project V9。`,
+  }
+}
+
+export function validateCourseProjectArchiveBytes(
+  bytes: Uint8Array,
+  filename: string,
+): CourseProjectValidationReport {
+  const rawProject = peekProjectJson(bytes)
+  const declaredVersion = declaredSchemaVersion(rawProject)
+  const probe = detectCourseProjectArchiveFormat(bytes)
+
+  if (probe.kind === 'v8' || probe.kind === 'unsupported') {
+    return unreadableCourseProjectValidationReport(filename, unsupportedVersionFatal(
+      probe.identity.schemaVersion ?? declaredVersion,
+    ), {
+      valid: false,
+      schemaVersion: probe.identity.schemaVersion ?? declaredVersion,
+      issues: [],
+    })
+  }
+  if (probe.kind === 'corrupted') {
+    return unreadableCourseProjectValidationReport(filename, {
+      code: 'archive-invalid',
+      title: '课程工程文件损坏',
+      message: probe.reason,
+    }, {
+      valid: false,
+      schemaVersion: declaredVersion,
+      issues: [],
+    })
+  }
+
+  let archive: CourseProjectArchiveData
+  try {
+    archive = openCourseProjectArchive(bytes)
+  } catch (error) {
+    const issues = rawProject === undefined ? [] : schemaIssuesFromValue(rawProject)
+    const schemaInvalid = issues.length > 0
+    const fatal: CourseProjectValidationFatalError = error instanceof UserFacingError
+      ? {
+          code: schemaInvalid ? 'schema-invalid' : 'archive-invalid',
+          title: error.title,
+          message: error.message,
+          suggestion: error.suggestion,
+        }
+      : {
+          code: 'validation-failed',
+          title: '工程校验失败',
+          message: error instanceof Error ? error.message : '发生未知错误。',
+        }
+    return unreadableCourseProjectValidationReport(filename, fatal, {
+      valid: false,
+      schemaVersion: declaredVersion,
+      issues,
+    })
+  }
+
+  const v8Fields = collectV8FieldIssues(rawProject)
+  const migrationMarkers = collectMigrationMarkerIssues(archive.project)
+  const stableIdIssues = collectStableIdIssues(archive.project)
+  const protocolIssues = collectProtocolIssues(archive.project, archive)
+  const healthItems = [
+    ...v8Fields,
+    ...migrationMarkers,
+    ...stableIdIssues,
+    ...protocolIssues,
+  ]
+  const healthSummary = summarizeFindings(healthItems)
+  const exportPreflight = collectExportReports(archive)
+  const summary = combinedSummary(healthSummary, exportPreflight)
+
+  return {
+    reportVersion: COURSE_PROJECT_VALIDATION_REPORT_VERSION,
+    status: summary.canExport ? 'valid' : 'invalid',
+    input: { filename },
+    measurement: measurement(),
+    schema: {
+      valid: true,
+      schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+      issues: [],
+    },
+    project: {
+      id: archive.project.id,
+      title: archive.project.title,
+      locationCount: archive.project.locations.length,
+      surfaceCount: archive.project.surfaces.length,
+      assetCount: Object.keys(archive.project.assets).length,
+      componentPackageCount: Object.keys(archive.project.componentPackages).length,
+    },
+    projectHealth: { items: healthItems, summary: healthSummary },
+    exportPreflight,
+    protocols: CURRENT_PROTOCOLS,
+    stableIds: {
+      valid: stableIdIssues.length === 0,
+      issues: stableIdIssues,
+    },
+    migrationMarkers: {
+      present: migrationMarkers.length > 0,
+      items: migrationMarkers,
+    },
+    summary,
+    fatal: null,
+  }
+}
+
+export function courseProjectValidationExitCode(
+  report: CourseProjectValidationReport,
+): 0 | 1 | 2 {
+  if (report.status === 'unreadable') return 2
+  return report.summary.canExport ? 0 : 1
+}
+
+function normalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeJson)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
+      .sort(([left], [right]) => compareStableStrings(left, right))
+      .map(([key, nested]) => [key, normalizeJson(nested)]),
+  )
+}
+
+export function serializeCourseProjectValidationReport(
+  report: CourseProjectValidationReport,
+): string {
+  return `${JSON.stringify(normalizeJson(report))}\n`
+}
+
 function fatal(
   filename: string,
-  error: ProjectValidationFatalError,
+  error: CourseProjectValidationFatalError,
   io: ValidationCliIo,
 ): 2 {
-  const report = unreadableProjectValidationReport(filename, error)
-  io.stdout(serializeProjectValidationReport(report))
+  const report = unreadableCourseProjectValidationReport(filename, error)
+  io.stdout(serializeCourseProjectValidationReport(report))
   io.stderr(`${error.title}：${error.message}\n`)
   return 2
 }
@@ -40,7 +758,7 @@ export async function runValidateProjectCli(
     return fatal('', {
       code: 'usage-error',
       title: '参数错误',
-      message: '用法：npm run --silent validate:project -- <project.h5lesson>',
+      message: USAGE,
     }, io)
   }
 
@@ -50,7 +768,7 @@ export async function runValidateProjectCli(
     return fatal(filename, {
       code: 'usage-error',
       title: '文件类型不支持',
-      message: '无界面工程校验只接受当前 Project V8 .h5lesson 文件。',
+      message: '无界面工程校验只接受当前 Course Project V9 .h5lesson 文件。',
     }, io)
   }
 
@@ -65,12 +783,12 @@ export async function runValidateProjectCli(
     }, io)
   }
 
-  const report = validateProjectArchiveBytes(bytes, filename)
-  io.stdout(serializeProjectValidationReport(report))
+  const report = validateCourseProjectArchiveBytes(bytes, filename)
+  io.stdout(serializeCourseProjectValidationReport(report))
   if (report.fatal) {
     io.stderr(`${report.fatal.title}：${report.fatal.message}\n`)
   }
-  return projectValidationExitCode(report)
+  return courseProjectValidationExitCode(report)
 }
 
 const invokedPath = process.argv[1]
@@ -82,12 +800,12 @@ if (
     .then((exitCode) => { process.exitCode = exitCode })
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : '发生未知错误。'
-      const report = unreadableProjectValidationReport('', {
+      const report = unreadableCourseProjectValidationReport('', {
         code: 'validation-failed',
         title: '工程校验失败',
         message,
       })
-      process.stdout.write(serializeProjectValidationReport(report))
+      process.stdout.write(serializeCourseProjectValidationReport(report))
       process.stderr.write(`工程校验失败：${message}\n`)
       process.exitCode = 2
     })
