@@ -124,6 +124,10 @@ import { mountPublishedCourseTryRun, attachPublishedCourseStageFit } from './cou
 import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
 import { FlowWorkspace } from './FlowWorkspace'
 import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
+import {
+  findComponentPackageSource,
+  mountPublishedComponent,
+} from '../../player/surfaces/publishedComponentMount'
 import { buildFlowEditorView } from '../course/flowEditorView'
 import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../phaser/v9SpatialHitAdapter'
@@ -499,6 +503,83 @@ function spatialAuthoringMedia(
     return node.name || node.type
   }
   return null
+}
+
+function SpatialComponentItemContent({
+  layerItemId,
+  item,
+  componentPackages,
+  assetUrls,
+}: {
+  layerItemId: string
+  item: LayerItem
+  componentPackages: Record<string, ComponentPackageData>
+  assetUrls: Record<string, string>
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  if (item.kind !== 'component') return null
+  const pkg = findComponentPackageSource(componentPackages, item.component.packageId, item.component.version)
+  const fallbackUrl = item.staticFallbackAssetId ? assetUrls[item.staticFallbackAssetId] : undefined
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !pkg) return
+    const handle = mountPublishedComponent(el, {
+      container: el,
+      componentId: item.component.packageId,
+      version: item.component.version,
+      instanceId: layerItemId,
+      width: item.frame.width,
+      height: item.frame.height,
+      props: item.props,
+      staticFallbackAssetId: item.staticFallbackAssetId,
+      components: componentPackages,
+      resolveAsset: (id) => assetUrls[id],
+      mode: 'edit',
+      interactive: false,
+    })
+    return () => handle.destroy()
+  }, [item.component.packageId, item.component.version, layerItemId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg])
+
+  if (!pkg) {
+    if (fallbackUrl) {
+      return (
+        <img
+          src={fallbackUrl}
+          alt={`${item.component.packageId} 后备`}
+          draggable={false}
+          style={SPATIAL_MEDIA_FILL}
+        />
+      )
+    }
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(23, 32, 51, 0.88)',
+          color: '#f8fafc',
+          padding: 4,
+          textAlign: 'center',
+          fontSize: 12,
+        }}
+      >
+        <strong>{item.component.packageId}</strong>
+        <span style={{ fontSize: 10, color: '#94a3b8' }}>v{item.component.version}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
+    />
+  )
 }
 
 function SpatialSelectionOverlay({
@@ -999,7 +1080,14 @@ function SpatialLocationWorkspace({
                       fontFamily: node.type === 'text' ? node.style.fontFamily : undefined,
                     }}
                   >
-                    {node.type === 'text' ? node.text
+                    {layer.item.kind === 'component' ? (
+                      <SpatialComponentItemContent
+                        layerItemId={layer.selectionId}
+                        item={layer.item as LayerItem}
+                        componentPackages={componentPackages}
+                        assetUrls={assetUrls}
+                      />
+                    ) : node.type === 'text' ? node.text
                       : node.type === 'formula' ? node.accessibleText
                       : spatialAuthoringMedia(node, assetUrls)
                         ?? (node.type === 'external-component' ? node.name || '组件' : node.name || node.type)}
@@ -1075,6 +1163,13 @@ function SpatialLocationWorkspace({
                           name: location.label,
                         }))}
                         currentSceneId={session.selection.locationId}
+                      />
+                    ) : layer.item.kind === 'component' ? (
+                      <SpatialComponentItemContent
+                        layerItemId={layer.selectionId}
+                        item={layer.item as LayerItem}
+                        componentPackages={componentPackages}
+                        assetUrls={assetUrls}
                       />
                     ) : (
                       media ?? (node.name || node.type)

@@ -40,6 +40,11 @@ import {
   type OpenSpatialRuntimeSessionOptions,
   type SpatialRuntimeSession,
 } from './spatialRuntimeSession'
+import {
+  mountPublishedComponent,
+  type PublishedComponentMountHandle,
+  type PublishedComponentPackageSource,
+} from '../publishedComponentMount'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -73,6 +78,7 @@ export interface SpatialSurfaceHostOptions {
   audioChangeSource?: SpatialAudioChangeSource
   courseProgressSource?: SpatialCourseProgressSource
   resolveAsset?: (assetId: string) => string | undefined
+  components?: Record<string, PublishedComponentPackageSource>
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
     item: PublishedNativeLayerItem,
@@ -87,6 +93,7 @@ interface SpatialHostRecord {
   entry: SpatialPlaybackEntry
   wrapper: HTMLElement | SVGGElement
   controllerDom: TeacherControllerDom | null
+  componentHandle: PublishedComponentMountHandle | null
 }
 
 function safeColor(value: string | undefined, fallback: string): string {
@@ -118,7 +125,16 @@ function layerCenter(item: PublishedLayerItem): { x: number; y: number } {
   }
 }
 
-function createWorldItem(dom: Document, item: PublishedLayerItem, resolveAsset: (assetId: string) => string | undefined): SVGGElement {
+function createWorldItem(
+  dom: Document,
+  item: PublishedLayerItem,
+  resolveAsset: (assetId: string) => string | undefined,
+  options?: {
+    components?: Record<string, PublishedComponentPackageSource>
+    interactive?: boolean
+    onMountComponent?: (handle: PublishedComponentMountHandle) => void
+  },
+): SVGGElement {
   const group = dom.createElementNS(SVG_NS, 'g')
   const { frame } = item
   if (item.kind === 'native' && item.content.nativeType === 'image') {
@@ -176,6 +192,34 @@ function createWorldItem(dom: Document, item: PublishedLayerItem, resolveAsset: 
     rect.setAttribute('fill', safeColor(item.content.data.style.fillColor, '#e2e8f0'))
     rect.setAttribute('stroke', safeColor(item.content.data.style.borderColor, '#64748b'))
     group.appendChild(rect)
+  } else if (item.kind === 'component') {
+    const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
+    foreign.setAttribute('x', String(frame.x))
+    foreign.setAttribute('y', String(frame.y))
+    foreign.setAttribute('width', String(frame.width))
+    foreign.setAttribute('height', String(frame.height))
+    const holder = dom.createElement('div')
+    holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+    holder.style.width = '100%'
+    holder.style.height = '100%'
+    holder.style.position = 'relative'
+    holder.style.pointerEvents = 'auto'
+    foreign.appendChild(holder)
+    group.appendChild(foreign)
+    const handle = mountPublishedComponent(holder, {
+      container: holder,
+      componentId: item.component.packageId,
+      version: item.component.version,
+      instanceId: item.layerItemId,
+      width: frame.width,
+      height: frame.height,
+      props: item.props,
+      staticFallbackAssetId: item.staticFallbackAssetId,
+      components: options?.components,
+      resolveAsset,
+      interactive: options?.interactive ?? true,
+    })
+    options?.onMountComponent?.(handle)
   } else {
     const rect = dom.createElementNS(SVG_NS, 'rect')
     rect.setAttribute('x', String(frame.x))
@@ -204,7 +248,16 @@ function createWorldItem(dom: Document, item: PublishedLayerItem, resolveAsset: 
   return group
 }
 
-function createViewportHud(dom: Document, item: PublishedLayerItem): HTMLElement {
+function createViewportHud(
+  dom: Document,
+  item: PublishedLayerItem,
+  options?: {
+    components?: Record<string, PublishedComponentPackageSource>
+    resolveAsset?: (assetId: string) => string | undefined
+    interactive?: boolean
+    onMountComponent?: (handle: PublishedComponentMountHandle) => void
+  },
+): HTMLElement {
   const root = dom.createElement('div')
   root.className = 'spatial-viewport-hud'
   Object.assign(root.style, {
@@ -212,6 +265,27 @@ function createViewportHud(dom: Document, item: PublishedLayerItem): HTMLElement
     width: '100%',
     height: '100%',
     overflow: 'hidden',
+    position: 'relative',
+    pointerEvents: 'auto',
+  })
+  if (item.kind === 'component') {
+    const handle = mountPublishedComponent(root, {
+      container: root,
+      componentId: item.component.packageId,
+      version: item.component.version,
+      instanceId: item.layerItemId,
+      width: item.frame.width,
+      height: item.frame.height,
+      props: item.props,
+      staticFallbackAssetId: item.staticFallbackAssetId,
+      components: options?.components,
+      resolveAsset: options?.resolveAsset,
+      interactive: options?.interactive ?? true,
+    })
+    options?.onMountComponent?.(handle)
+    return root
+  }
+  Object.assign(root.style, {
     color: '#172033',
     background: '#ffffff',
     border: '1px solid #cbd5e1',
@@ -231,6 +305,7 @@ export class SpatialSurfaceHost {
   readonly id: string
   #session: SpatialRuntimeSession
   #options: SpatialSurfaceHostOptions
+  #components: Record<string, PublishedComponentPackageSource> | undefined
   #root: HTMLElement | null = null
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
@@ -252,7 +327,10 @@ export class SpatialSurfaceHost {
         playbackPathId: options.playbackPathId ?? null,
       }),
       viewport,
-      options,
+      {
+        ...options,
+        components: course.components,
+      },
     )
   }
 
@@ -262,6 +340,9 @@ export class SpatialSurfaceHost {
     options: SpatialSurfaceHostOptions & OpenSpatialRuntimeSessionOptions = {},
   ) {
     this.#options = options
+    this.#components = ('components' in source && source.components
+      ? source.components as Record<string, PublishedComponentPackageSource>
+      : undefined) ?? options.components
     this.#session = openSpatialRuntimeSession(source, viewport, {
       surfaceId: options.surfaceId,
       playbackPathId: options.playbackPathId ?? (
@@ -404,7 +485,10 @@ export class SpatialSurfaceHost {
     this.#destroyed = true
     this.#audioDisposer?.()
     this.#audioDisposer = null
-    for (const record of this.#records.values()) record.controllerDom?.destroy()
+    for (const record of this.#records.values()) {
+      record.controllerDom?.destroy()
+      record.componentHandle?.destroy()
+    }
     this.#records.clear()
     this.#controllerSession.clear()
     this.#root?.remove()
@@ -535,6 +619,7 @@ export class SpatialSurfaceHost {
     for (const [id, record] of [...this.#records.entries()]) {
       if (nextIds.has(id)) continue
       record.controllerDom?.destroy()
+      record.componentHandle?.destroy()
       record.wrapper.remove()
       this.#records.delete(id)
     }
@@ -574,6 +659,10 @@ export class SpatialSurfaceHost {
   #createRecord(entry: SpatialPlaybackEntry): SpatialHostRecord {
     const dom = this.#world!.ownerDocument
     const viewport = isSpatialViewportPlaybackItem(entry.source, entry.item)
+    let componentHandle: PublishedComponentMountHandle | null = null
+    const onMountComponent = (handle: PublishedComponentMountHandle) => {
+      componentHandle = handle
+    }
     if (viewport) {
       const wrapper = dom.createElement('div')
       wrapper.className = 'spatial-viewport-item'
@@ -603,17 +692,26 @@ export class SpatialSurfaceHost {
         wrapper.appendChild(content)
         controllerDom = this.#mountTeacherController(entry.item, content)
       } else {
-        wrapper.appendChild(createViewportHud(dom, entry.item))
+        wrapper.appendChild(createViewportHud(dom, entry.item, {
+          components: this.#components,
+          resolveAsset: this.#resolveAsset,
+          interactive: this.#session.active,
+          onMountComponent,
+        }))
       }
-      return { entry, wrapper, controllerDom }
+      return { entry, wrapper, controllerDom, componentHandle }
     }
-    const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset)
+    const wrapper = createWorldItem(dom, entry.item, this.#resolveAsset, {
+      components: this.#components,
+      interactive: this.#session.active,
+      onMountComponent,
+    })
     wrapper.dataset.spatialLayerRecord = 'true'
     wrapper.dataset.layerItemId = entry.item.layerItemId
     wrapper.dataset.layerKind = entry.item.kind
     wrapper.dataset.layerSource = entry.source
     wrapper.dataset.coordinateSpace = 'world'
-    return { entry, wrapper, controllerDom: null }
+    return { entry, wrapper, controllerDom: null, componentHandle }
   }
 
   #applyRecord(record: SpatialHostRecord): void {

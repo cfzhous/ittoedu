@@ -37,6 +37,11 @@ import {
   flowRuntimeTocPageAnchorId,
   type FlowRuntimeTocEntry,
 } from './flowRuntimeToc'
+import {
+  mountPublishedComponent,
+  type PublishedComponentMountHandle,
+  type PublishedComponentPackageSource,
+} from '../publishedComponentMount'
 
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
@@ -50,6 +55,7 @@ export interface FlowSurfaceHostOptions {
   /** Runtime-session only. Default is collapsed (scheme 1). */
   initialTocOpen?: boolean
   resolveAsset?: (assetId: string) => string | undefined
+  components?: Record<string, PublishedComponentPackageSource>
   audio?: Pick<CourseAudioApi, 'muted' | 'setMuted' | 'toggleMuted'>
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
@@ -72,6 +78,7 @@ export interface FlowHostAudioSession {
 export class FlowSurfaceHost {
   readonly kind = 'flow' as const
   #playback: FlowPublishedPlaybackDocument
+  #components: Record<string, PublishedComponentPackageSource> | undefined
   #surfaceId: string
   #locationId: string
   #options: FlowSurfaceHostOptions
@@ -83,11 +90,15 @@ export class FlowSurfaceHost {
   #toc: FlowRuntimeTocChrome | null = null
   #controller: TeacherControllerDom | null = null
   #controllerSessions = new Map<string, TeacherControllerDomSession>()
+  #componentHandles: PublishedComponentMountHandle[] = []
   #active = false
   #queue: Promise<void> = Promise.resolve()
 
   constructor(source: FlowPublishedPlaybackSource, options: FlowSurfaceHostOptions = {}) {
     this.#playback = toFlowPublishedPlayback(source)
+    this.#components = ('components' in source && source.components
+      ? source.components as Record<string, PublishedComponentPackageSource>
+      : undefined) ?? options.components
     this.#options = { ...options }
     this.#audio = options.audio ?? createFlowHostAudioSession(
       this.#playback.media?.audio.defaultMuted === true,
@@ -211,6 +222,9 @@ export class FlowSurfaceHost {
   updatePublishedCourse(source: FlowPublishedPlaybackSource): Promise<void> {
     return this.#enqueue(async () => {
       this.#playback = toFlowPublishedPlayback(source)
+      if ('components' in source && source.components) {
+        this.#components = source.components as Record<string, PublishedComponentPackageSource>
+      }
       if (!this.#playback.surfaces.some((surface) => surface.id === this.#surfaceId)) {
         this.#surfaceId = this.#playback.surfaces[0]!.id
         this.#locationId = flowPageStartLocationId(this.#playback, this.#surfaceId)
@@ -224,6 +238,7 @@ export class FlowSurfaceHost {
 
   destroy(): Promise<void> {
     return this.#enqueue(async () => {
+      this.#destroyComponentHandles()
       this.#destroyController()
       this.#toc?.destroy()
       this.#toc = null
@@ -234,6 +249,17 @@ export class FlowSurfaceHost {
       this.#container = null
       this.#active = false
     })
+  }
+
+  #destroyComponentHandles(): void {
+    for (const handle of this.#componentHandles) {
+      try {
+        handle.destroy()
+      } catch (error) {
+        console.error('Flow 组件销毁失败', error)
+      }
+    }
+    this.#componentHandles = []
   }
 
   #enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -250,11 +276,17 @@ export class FlowSurfaceHost {
 
   #render(): void {
     if (!this.#root || !this.#overlay) return
+    this.#destroyComponentHandles()
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
     const article = renderFlowArticle(surface, {
       playback: this.#playback,
+      components: this.#components,
       resolveAsset: this.#options.resolveAsset,
       dom: this.#root.ownerDocument,
+      interactive: this.#active,
+      onMountComponent: (handle) => {
+        this.#componentHandles.push(handle)
+      },
     })
     this.#article?.remove()
     this.#root.insertBefore(article, this.#overlay)
@@ -278,6 +310,13 @@ export class FlowSurfaceHost {
         overlay.ownerDocument,
         entry,
         (assetId) => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
+        {
+          components: this.#components,
+          interactive: this.#active,
+          onMountComponent: (handle) => {
+            this.#componentHandles.push(handle)
+          },
+        },
       ))
     }
   }
@@ -512,6 +551,11 @@ function renderStaticOverlayItem(
   dom: Document,
   entry: { item: PublishedLayerItem; source: 'global' | 'surface' },
   resolveAsset: (assetId: string) => string | undefined,
+  options?: {
+    components?: Record<string, PublishedComponentPackageSource>
+    interactive?: boolean
+    onMountComponent?: (handle: PublishedComponentMountHandle) => void
+  },
 ): HTMLElement {
   const wrap = dom.createElement('div')
   wrap.dataset.flowOverlayItem = entry.item.layerItemId
@@ -522,7 +566,8 @@ function renderStaticOverlayItem(
   wrap.style.width = `${entry.item.frame.width}px`
   wrap.style.height = `${entry.item.frame.height}px`
   wrap.style.opacity = String(entry.item.opacity)
-  wrap.style.pointerEvents = entry.item.kind === 'native' && entry.item.content.nativeType === 'video'
+  wrap.style.pointerEvents = (entry.item.kind === 'native' && entry.item.content.nativeType === 'video')
+    || entry.item.kind === 'component'
     ? 'auto'
     : 'none'
   wrap.style.zIndex = String(entry.item.order)
@@ -557,11 +602,26 @@ function renderStaticOverlayItem(
     wrap.textContent = entry.item.content.data.text
     return wrap
   }
-  const fallback = entry.item.kind === 'component'
-    ? entry.item.staticFallbackAssetId
-    : entry.item.kind === 'runtime'
-      ? entry.item.runtime.staticFallback?.assetId
-      : undefined
+  if (entry.item.kind === 'component') {
+    const handle = mountPublishedComponent(wrap, {
+      container: wrap,
+      componentId: entry.item.component.packageId,
+      version: entry.item.component.version,
+      instanceId: entry.item.layerItemId,
+      width: entry.item.frame.width,
+      height: entry.item.frame.height,
+      props: entry.item.props,
+      staticFallbackAssetId: entry.item.staticFallbackAssetId,
+      components: options?.components,
+      resolveAsset,
+      interactive: options?.interactive ?? true,
+    })
+    options?.onMountComponent?.(handle)
+    return wrap
+  }
+  const fallback = entry.item.kind === 'runtime'
+    ? entry.item.runtime.staticFallback?.assetId
+    : undefined
   if (fallback) {
     const url = resolveAsset(fallback)
     if (url) {
@@ -581,8 +641,11 @@ function renderFlowArticle(
   surface: PublishedFlowSurface,
   options: {
     playback: FlowPublishedPlaybackDocument
+    components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
+    interactive?: boolean
+    onMountComponent?: (handle: PublishedComponentMountHandle) => void
   },
 ): HTMLElement {
   const { dom } = options
@@ -604,7 +667,10 @@ function renderFlowArticle(
   article.appendChild(reading)
 
   for (const block of surface.blocks) {
-    renderBlockDom(block, reading, options)
+    renderBlockDom(block, reading, {
+      ...options,
+      readingWidth: surface.layout.readingWidth,
+    })
   }
   return article
 }
@@ -614,8 +680,12 @@ function renderBlockDom(
   parent: HTMLElement,
   options: {
     playback: FlowPublishedPlaybackDocument
+    components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
+    readingWidth?: number
+    interactive?: boolean
+    onMountComponent?: (handle: PublishedComponentMountHandle) => void
   },
 ): void {
   const dom = parent.ownerDocument
@@ -780,22 +850,26 @@ function renderBlockDom(
     }
     case 'component': {
       const figure = assignBlock(dom.createElement('figure'))
-      const url = resolvePlaybackAssetUrl(
-        options.playback,
-        block.staticFallbackAssetId,
-        options.resolveAsset,
-      )
-      if (url) {
-        const image = dom.createElement('img')
-        image.src = url
-        image.alt = `${block.component.packageId} 后备`
-        figure.appendChild(image)
-      } else {
-        const fallback = dom.createElement('p')
-        fallback.textContent = `[组件后备：${block.component.packageId}@${block.component.version}]`
-        figure.appendChild(fallback)
-      }
+      figure.className = 'flow-block-component'
+      figure.style.position = 'relative'
+      figure.style.width = '100%'
+      figure.style.minHeight = '240px'
+      const handle = mountPublishedComponent(figure, {
+        container: figure,
+        componentId: block.component.packageId,
+        version: block.component.version,
+        instanceId: block.id,
+        width: options.readingWidth ?? 760,
+        height: 320,
+        props: block.props,
+        staticFallbackAssetId: block.staticFallbackAssetId,
+        components: options.components,
+        resolveAsset: (assetId) => resolvePlaybackAssetUrl(options.playback, assetId, options.resolveAsset),
+        interactive: options.interactive ?? true,
+      })
+      options.onMountComponent?.(handle)
       parent.appendChild(figure)
+      return
     }
   }
 }

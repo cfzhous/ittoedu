@@ -446,4 +446,104 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
 
     await host.destroy()
   })
+
+  it('mounts Component API 4 interactive components in world foreignObject and viewport HUD', async () => {
+    function encodeUtf16(src: string) {
+      const bytes = new Uint8Array(src.length * 2)
+      for (let i = 0; i < src.length; i++) {
+        const code = src.charCodeAt(i)
+        bytes[i * 2] = code & 0xff
+        bytes[i * 2 + 1] = code >>> 8
+      }
+      let binary = ''
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
+      return { encoding: 'base64-utf16le' as const, data: btoa(binary) }
+    }
+
+    const course = playbackCourse()
+    course.components['spatial-card@1.0.0'] = {
+      id: 'spatial-card',
+      name: '空间卡片',
+      version: '1.0.0',
+      contentSha256: 'sha-spatial-card',
+      apiVersion: 4,
+      scopes: ['scene', 'global'],
+      renderMode: 'dom',
+      code: encodeUtf16(`
+        window.CoursewareComponent.define({
+          id: 'spatial-card',
+          runtimeApiVersion: 4,
+          create(context) {
+            const card = document.createElement('div')
+            card.className = 'spatial-interactive-card'
+            card.textContent = context.props.title || '卡片内容'
+            context.dom.root.appendChild(card)
+            return {
+              destroy() { card.remove() },
+            }
+          },
+        })
+      `),
+      assets: {},
+    }
+
+    const spatialSurf = course.surfaces[0] as import('@/shared/publishedCourseTypes').PublishedSpatialSurface
+    spatialSurf.world.layerItems.push({
+      layerItemId: 'world-comp-1',
+      kind: 'component',
+      component: { packageId: 'spatial-card', version: '1.0.0' },
+      props: { title: '世界组件' },
+      staticFallbackAssetId: 'world-comp-fallback',
+      frame: { mode: 'absolute', x: 200, y: 150, width: 120, height: 60 },
+      order: 10,
+      visible: true,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit',
+    })
+
+    course.globalLayerItems.push({
+      item: {
+        layerItemId: 'hud-comp-1',
+        kind: 'component',
+        component: { packageId: 'spatial-card', version: '1.0.0' },
+        props: { title: 'HUD组件' },
+        staticFallbackAssetId: 'hud-comp-fallback',
+        frame: { mode: 'absolute', x: 10, y: 10, width: 100, height: 40 },
+        order: 20,
+        visible: true,
+        rotation: 0,
+        opacity: 1,
+        hitPolicy: 'auto',
+        playbackInitialVisibility: 'inherit',
+      },
+      visibility: { mode: 'all', locationIds: [] },
+    })
+
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    // World component in foreignObject
+    const worldItem = container.querySelector('[data-layer-item-id="world-comp-1"]')
+    expect(worldItem).not.toBeNull()
+    const foreign = worldItem?.querySelector('foreignObject')
+    expect(foreign).not.toBeNull()
+    const worldMount = foreign?.querySelector('.published-component-mount')
+    expect(worldMount).not.toBeNull()
+    const worldCard = worldMount?.shadowRoot?.querySelector('.spatial-interactive-card')
+    expect(worldCard?.textContent).toBe('世界组件')
+
+    // HUD component in screenLayer
+    const hudItem = container.querySelector('[data-layer-item-id="hud-comp-1"]')
+    expect(hudItem).not.toBeNull()
+    const hudMount = hudItem?.querySelector('.published-component-mount')
+    expect(hudMount).not.toBeNull()
+    const hudCard = hudMount?.shadowRoot?.querySelector('.spatial-interactive-card')
+    expect(hudCard?.textContent).toBe('HUD组件')
+
+    await host.destroy()
+  })
 })

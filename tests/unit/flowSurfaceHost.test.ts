@@ -419,4 +419,118 @@ describe('FlowSurfaceHost playback controller and video', () => {
       },
     )).toBeNull()
   })
+
+  it('mounts Component API 4 interactive components in paper block and overlay when package exists', async () => {
+    function encodeUtf16(src: string) {
+      const bytes = new Uint8Array(src.length * 2)
+      for (let i = 0; i < src.length; i++) {
+        const code = src.charCodeAt(i)
+        bytes[i * 2] = code & 0xff
+        bytes[i * 2 + 1] = code >>> 8
+      }
+      let binary = ''
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!)
+      return { encoding: 'base64-utf16le' as const, data: btoa(binary) }
+    }
+
+    const course = publishedCourse()
+    course.components['flow-quiz@1.0.0'] = {
+      id: 'flow-quiz',
+      name: '测验',
+      version: '1.0.0',
+      contentSha256: 'sha-quiz',
+      apiVersion: 4,
+      scopes: ['scene', 'global'],
+      renderMode: 'dom',
+      code: encodeUtf16(`
+        window.CoursewareComponent.define({
+          id: 'flow-quiz',
+          runtimeApiVersion: 4,
+          create(context) {
+            const btn = document.createElement('button')
+            btn.className = 'quiz-submit'
+            btn.textContent = context.props.question || '题目'
+            context.dom.root.appendChild(btn)
+            return {
+              destroy() { btn.remove() },
+            }
+          },
+        })
+      `),
+      assets: {},
+    }
+
+    const flowSurf = course.surfaces[0] as PublishedFlowSurface
+    flowSurf.blocks.push({
+      id: 'flow-comp-block',
+      type: 'component',
+      component: { packageId: 'flow-quiz', version: '1.0.0' },
+      props: { question: '互动测验一' },
+      staticFallbackAssetId: 'quiz-fallback',
+    })
+
+    flowSurf.surfaceLayerItems = [
+      {
+        item: {
+          layerItemId: 'overlay-comp-1',
+          kind: 'component',
+          component: { packageId: 'flow-quiz', version: '1.0.0' },
+          props: { question: '浮层测验' },
+          staticFallbackAssetId: 'overlay-quiz-fallback',
+          frame: { mode: 'absolute', x: 100, y: 100, width: 200, height: 80 },
+          order: 15,
+          visible: true,
+          rotation: 0,
+          opacity: 1,
+          hitPolicy: 'auto',
+          playbackInitialVisibility: 'inherit',
+        },
+        visibility: { mode: 'all', locationIds: [] },
+      },
+    ]
+
+    const { host, container } = await mountHost(course)
+
+    // Paper block component
+    const blockEl = container.querySelector('[data-flow-block-id="flow-comp-block"]')
+    expect(blockEl).not.toBeNull()
+    const blockMount = blockEl?.querySelector('.published-component-mount')
+    expect(blockMount).not.toBeNull()
+    const blockBtn = blockMount?.shadowRoot?.querySelector('.quiz-submit')
+    expect(blockBtn?.textContent).toBe('互动测验一')
+
+    // Overlay component
+    const overlayEl = container.querySelector('[data-flow-overlay-item="overlay-comp-1"]')
+    expect(overlayEl).not.toBeNull()
+    const overlayMount = overlayEl?.querySelector('.published-component-mount')
+    expect(overlayMount).not.toBeNull()
+    const overlayBtn = overlayMount?.shadowRoot?.querySelector('.quiz-submit')
+    expect(overlayBtn?.textContent).toBe('浮层测验')
+
+    await host.destroy()
+  })
+
+  it('renders fallback image with resolved URL when component package is missing', async () => {
+    const course = publishedCourse()
+    course.assets['missing-fallback-img'] = {
+      mimeType: 'image/png',
+      url: 'https://example.test/missing-fallback.png',
+    }
+    const flowSurf = course.surfaces[0] as PublishedFlowSurface
+    flowSurf.blocks.push({
+      id: 'missing-comp-block',
+      type: 'component',
+      component: { packageId: 'uninstalled-pkg', version: '1.0.0' },
+      props: {},
+      staticFallbackAssetId: 'missing-fallback-img',
+    })
+
+    const { host, container } = await mountHost(course)
+    const blockEl = container.querySelector('[data-flow-block-id="missing-comp-block"]')
+    expect(blockEl).not.toBeNull()
+    const img = blockEl?.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('https://example.test/missing-fallback.png')
+    await host.destroy()
+  })
 })

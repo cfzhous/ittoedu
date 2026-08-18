@@ -71,6 +71,11 @@ import {
   type FlowBlockContextCommand,
 } from './FlowBlockContextToolbar'
 import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
+import {
+  findComponentPackageSource,
+  mountPublishedComponent,
+} from '../../player/surfaces/publishedComponentMount'
+import type { ComponentPackageData } from '../../shared/componentTypes'
 
 const FLOW_OVERLAY_HANDLE_RADIUS = 10
 
@@ -84,6 +89,7 @@ export interface FlowWorkspaceProps {
   readonly readOnly?: boolean
   /** Sidecar bytes for edit-mode previews. Production falls back to the editor store. */
   readonly assetFiles?: Record<string, Uint8Array>
+  readonly componentPackages?: Record<string, ComponentPackageData>
 }
 
 export function FlowInlineRichTextEditor({
@@ -363,10 +369,97 @@ function renderFlowPaperMedia(
   )
 }
 
+function FlowOverlayComponentContent({
+  layer,
+  componentPackages,
+  assetUrls,
+}: {
+  layer: FlowEditorLayerView
+  componentPackages?: Record<string, ComponentPackageData>
+  assetUrls: Record<string, string>
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const item = layer.item as LayerItem
+  if (item.kind !== 'component') return null
+  const pkg = findComponentPackageSource(componentPackages, item.component.packageId, item.component.version)
+  const fallbackUrl = item.staticFallbackAssetId ? assetUrls[item.staticFallbackAssetId] : undefined
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !pkg) return
+    const handle = mountPublishedComponent(el, {
+      container: el,
+      componentId: item.component.packageId,
+      version: item.component.version,
+      instanceId: layer.selectionId,
+      width: item.frame.width,
+      height: item.frame.height,
+      props: item.props,
+      staticFallbackAssetId: item.staticFallbackAssetId,
+      components: componentPackages,
+      resolveAsset: (id) => assetUrls[id],
+      mode: 'edit',
+      interactive: false,
+    })
+    return () => handle.destroy()
+  }, [item.component.packageId, item.component.version, layer.selectionId, item.frame.width, item.frame.height, item.props, item.staticFallbackAssetId, componentPackages, assetUrls, pkg])
+
+  if (!pkg) {
+    if (fallbackUrl) {
+      return (
+        <img
+          src={fallbackUrl}
+          data-flow-overlay-media="image"
+          data-flow-asset-id={item.staticFallbackAssetId}
+          alt={`${item.component.packageId} 后备`}
+          style={overlayMediaFillStyle()}
+        />
+      )
+    }
+    return (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(23, 32, 51, 0.88)',
+          color: '#f8fafc',
+          padding: 8,
+          textAlign: 'center',
+          fontSize: 12,
+        }}
+      >
+        <strong>{item.component.packageId}</strong>
+        <span style={{ fontSize: 10, color: '#94a3b8' }}>v{item.component.version}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
+    />
+  )
+}
+
 function renderFlowOverlayCardContent(
   layer: FlowEditorLayerView,
   assetUrls: Record<string, string>,
+  componentPackages?: Record<string, ComponentPackageData>,
 ): ReactNode {
+  if (layer.item.kind === 'component') {
+    return (
+      <FlowOverlayComponentContent
+        layer={layer}
+        componentPackages={componentPackages}
+        assetUrls={assetUrls}
+      />
+    )
+  }
   const media = nativeOverlayMedia(layer.item as LayerItem)
   if (!media) return layer.item.label || '浮层'
   const url = assetUrls[media.assetId]
@@ -392,6 +485,71 @@ function renderFlowOverlayCardContent(
       playsInline
       preload="metadata"
       style={overlayMediaFillStyle()}
+    />
+  )
+}
+
+function FlowComponentBlockView({
+  block,
+  readingWidth,
+  componentPackages,
+  assetUrls,
+}: {
+  block: Extract<FlowBlock, { type: 'component' }>
+  readingWidth: number
+  componentPackages?: Record<string, ComponentPackageData>
+  assetUrls: Record<string, string>
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const pkg = findComponentPackageSource(componentPackages, block.component.packageId, block.component.version)
+  const fallbackUrl = block.staticFallbackAssetId ? assetUrls[block.staticFallbackAssetId] : undefined
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !pkg) return
+    const handle = mountPublishedComponent(el, {
+      container: el,
+      componentId: block.component.packageId,
+      version: block.component.version,
+      instanceId: block.id,
+      width: readingWidth,
+      height: 320,
+      props: block.props,
+      staticFallbackAssetId: block.staticFallbackAssetId,
+      components: componentPackages,
+      resolveAsset: (id) => assetUrls[id],
+      mode: 'edit',
+      interactive: false,
+    })
+    return () => handle.destroy()
+  }, [block.component.packageId, block.component.version, block.id, block.props, block.staticFallbackAssetId, componentPackages, assetUrls, readingWidth, pkg])
+
+  if (!pkg) {
+    return (
+      <aside
+        data-flow-component-package-id={block.component.packageId}
+        data-flow-component-version={block.component.version}
+      >
+        {fallbackUrl ? (
+          <img
+            src={fallbackUrl}
+            data-flow-static-fallback-asset-id={block.staticFallbackAssetId}
+            alt={`${block.component.packageId} 后备`}
+            style={{ maxWidth: '100%', display: 'block' }}
+          />
+        ) : null}
+        <strong>互动组件：{block.component.packageId}</strong>
+        <p>版本 {block.component.version}</p>
+      </aside>
+    )
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      data-flow-component-package-id={block.component.packageId}
+      data-flow-component-version={block.component.version}
+      style={{ width: '100%', minHeight: 320, position: 'relative' }}
     />
   )
 }
@@ -482,6 +640,7 @@ export function FlowWorkspace({
   onTextEditChange,
   readOnly = false,
   assetFiles,
+  componentPackages: propComponentPackages,
 }: FlowWorkspaceProps) {
   const paperRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -495,6 +654,8 @@ export function FlowWorkspace({
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
   const storeAssetFiles = useEditorStore(selectMediaAssetFiles)
+  const storeComponentPackages = useEditorStore((state) => state.componentPackages)
+  const componentPackages = propComponentPackages ?? storeComponentPackages
   const sidecarFiles = assetFiles ?? storeAssetFiles
   const assetUrls = useMemo(
     () => createFlowAssetObjectUrls(project.assets, sidecarFiles),
@@ -1204,13 +1365,12 @@ export function FlowWorkspace({
         break
       case 'component':
         body = (
-          <aside data-flow-component-package-id={block.component.packageId} data-flow-component-version={block.component.version}>
-            {block.staticFallbackAssetId
-              ? <img data-flow-static-fallback-asset-id={block.staticFallbackAssetId} alt="" />
-              : null}
-            <strong>互动组件：{block.component.packageId}</strong>
-            <p>版本 {block.component.version}</p>
-          </aside>
+          <FlowComponentBlockView
+            block={block}
+            readingWidth={view.layout.readingWidth}
+            componentPackages={componentPackages}
+            assetUrls={assetUrls}
+          />
         )
         break
     }
@@ -1448,7 +1608,7 @@ export function FlowWorkspace({
                     currentSceneId={locationId}
                   />
                 ) : (
-                  renderFlowOverlayCardContent(layer, assetUrls)
+                  renderFlowOverlayCardContent(layer, assetUrls, componentPackages)
                 )}
                 {selected && !readOnly && !layer.item.locked ? (
                   STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {

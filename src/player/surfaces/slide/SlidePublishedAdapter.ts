@@ -26,6 +26,10 @@ import {
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
+import {
+  mountPublishedComponent,
+  type PublishedComponentMountHandle,
+} from '../publishedComponentMount'
 
 function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
   return structuredClone(payload)
@@ -182,6 +186,11 @@ function appendLayerNode(
   source: 'scene' | 'surface' | 'global',
   resolveAsset: (assetId: string) => string | undefined,
   mountTeacherController?: (wrap: HTMLElement, item: PublishedNativeLayerItem) => void,
+  options?: {
+    components?: PublishedCourseV2Payload['components']
+    interactive?: boolean
+    mountComponent?: (handle: PublishedComponentMountHandle) => void
+  },
 ): void {
   if (!item.visible || item.playbackInitialVisibility === 'hidden') return
   const wrap = dom.createElement('div')
@@ -195,7 +204,7 @@ function appendLayerNode(
   wrap.style.width = `${item.frame.width}px`
   wrap.style.height = `${item.frame.height}px`
   wrap.style.opacity = String(item.opacity)
-  wrap.style.pointerEvents = isPublishedInteractiveLayer(item) ? 'auto' : 'none'
+  wrap.style.pointerEvents = isPublishedInteractiveLayer(item) || item.kind === 'component' ? 'auto' : 'none'
   wrap.style.zIndex = String(item.order)
   if (item.kind === 'native') wrap.dataset.nativeType = item.content.nativeType
   if (isPublishedTeacherController(item)) {
@@ -237,17 +246,20 @@ function appendLayerNode(
     }
   } else if (item.kind === 'component') {
     wrap.dataset.slideFallbackKind = 'component'
-    const url = item.staticFallbackAssetId
-      ? resolveAsset(item.staticFallbackAssetId)
-      : undefined
-    if (url) {
-      appendFallbackImage(wrap, url, `${item.component.packageId} 后备`)
-    } else {
-      applyVisibleTextFallback(
-        wrap,
-        firstVisibleText(item.props) ?? item.component.packageId,
-      )
-    }
+    const handle = mountPublishedComponent(wrap, {
+      container: wrap,
+      componentId: item.component.packageId,
+      version: item.component.version,
+      instanceId: item.layerItemId,
+      width: item.frame.width,
+      height: item.frame.height,
+      props: item.props,
+      staticFallbackAssetId: item.staticFallbackAssetId,
+      components: options?.components,
+      resolveAsset,
+      interactive: options?.interactive ?? true,
+    })
+    options?.mountComponent?.(handle)
   } else if (item.kind === 'runtime') {
     wrap.dataset.slideFallbackKind = 'runtime'
     const url = item.runtime.staticFallback
@@ -282,6 +294,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #active = false
   #services: SurfacePlayerServices | null = null
   #controllers: TeacherControllerDom[] = []
+  #componentHandles: PublishedComponentMountHandle[] = []
   #controllerSessions = new Map<string, TeacherControllerDomSession>()
   #muted = false
 
@@ -359,11 +372,23 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async destroy(): Promise<void> {
+    this.#destroyComponents()
     this.#destroyControllers()
     this.#root?.remove()
     this.#root = null
     this.#active = false
     this.#services = null
+  }
+
+  #destroyComponents(): void {
+    for (const handle of this.#componentHandles) {
+      try {
+        handle.destroy()
+      } catch (error) {
+        console.error('Slide component destroy failed', error)
+      }
+    }
+    this.#componentHandles = []
   }
 
   #destroyControllers(): void {
@@ -487,6 +512,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #render(): void {
     const root = this.#root
     if (!root) return
+    this.#destroyComponents()
     this.#destroyControllers()
     const surface = findSlideSurface(this.#payload, this.id)
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
@@ -503,16 +529,23 @@ export class SlidePublishedAdapter implements SurfaceHost {
     const mountController = (wrap: HTMLElement, item: PublishedNativeLayerItem) => {
       this.#mountTeacherController(wrap, item)
     }
+    const layerOptions = {
+      components: this.#payload.components,
+      interactive: this.#active,
+      mountComponent: (handle: PublishedComponentMountHandle) => {
+        this.#componentHandles.push(handle)
+      },
+    }
     for (const item of scene.layerItems) {
-      appendLayerNode(root.ownerDocument, stage, item, 'scene', this.#resolveAsset, mountController)
+      appendLayerNode(root.ownerDocument, stage, item, 'scene', this.#resolveAsset, mountController, layerOptions)
     }
     for (const entry of this.#payload.globalLayerItems) {
       if (!isScopedVisible(entry, location.id)) continue
-      appendLayerNode(root.ownerDocument, stage, entry.item, 'global', this.#resolveAsset, mountController)
+      appendLayerNode(root.ownerDocument, stage, entry.item, 'global', this.#resolveAsset, mountController, layerOptions)
     }
     for (const entry of surface.surfaceLayerItems) {
       if (!isScopedVisible(entry, location.id)) continue
-      appendLayerNode(root.ownerDocument, stage, entry.item, 'surface', this.#resolveAsset, mountController)
+      appendLayerNode(root.ownerDocument, stage, entry.item, 'surface', this.#resolveAsset, mountController, layerOptions)
     }
   }
 }
