@@ -1,66 +1,76 @@
 # T5 隔离内部 Read Model
 
-> 依赖：T3  
-> 并行：否  
+> 状态：**未合入**（**必须等 T3 合入**）  
+> 并行：否。P7 已合入；只改 NodesTab 的 import 边界  
 > 合同变化：无  
-> 教师手感：必须不变
+> 教师手感：必须不变  
+> 工人先读：[02_WORKER.md](02_WORKER.md)
 
-## 目标
+## 一句话
 
-允许 1.0 继续用成熟 UI，禁止 V8-shaped 类型继续扩散到新代码。不要求删光 `SceneNode`。
+新代码不要再直接从 UI 文件 import archive/migration。V8-shaped `SceneNode` 只允许待在明确适配层。**不要求删光 SceneNode，不拆 editorStore，不重写 Workspace。**
+
+## 基线（T3 合入后才开工）
+
+- P7 已把教师控制器排除在「场景 / 本页 / 世界」外，只出现在「全局」。函数：`groupedVisualRows`（`NodesTab.tsx` 约 244）。**禁止改过滤条件。**
+- T3 会把 `v9SlideUiProjection.ts` 重命名为 `slideEditorProjection.ts`。本任务跟 T3 后的文件名。
+- `Workspace.tsx` 继续消费成熟节点结构。本阶段允许。
 
 ## 允许修改
 
 ```text
-src/renderer/course/read-model/**          （新建）
-src/renderer/ui/NodesTab.tsx               （只改 import 边界，不改分组交互）
-src/renderer/store/v9SlideUiProjection.ts  （若尚未在 T3 改名）
-tests/unit/v9GlobalLayerUiAdapter.test.tsx
-新建一个窄架构测试（可选，计入本任务最小验证）
+src/renderer/course/read-model/**           新建；只做 re-export / 薄适配
+src/renderer/ui/NodesTab.tsx               只改 import 路径，不改分组交互 / groupedVisualRows 逻辑
+src/renderer/store/slideEditorProjection.ts 或 T3 后的等价文件  仅当需要从这里 re-export
+tests/unit/v9GlobalLayerUiAdapter.test.tsx  不得削弱 P7 断言
+tests/unit/readModelBoundary.test.ts        新建（必须）
+docs/tasks/editor-1.0/T5_HANDOFF.md
 ```
 
-不要重写 `Workspace.tsx`、不要拆 `editorStore.ts`、不要改 Schema。不要回退 P7 的图层分组（控制器不得出现在「场景 / 本页 / 世界」）。与 P7 禁止同时改 `NodesTab.tsx`。
+## 禁止
 
-## 工作项
+- 重写 `Workspace.tsx`、拆 `editorStore.ts`、改 Schema。
+- 把 `SceneNode` 存进 project.json / session 当第二份工程。
+- 把控制器重新放进「场景 / 本页 / 世界」。
+- 删除 `courseLayerItemToSceneNode`；可以把它移到 read-model 并 re-export。
 
-暂时允许：
+## 逐步算法
 
-- LayerItem → Editor `SceneNode` View
-- Presentation override → 属性 View
-- Workspace 消费成熟节点结构
-- Player Authoring 暂用完整 Native 快照
+1. 建 `src/renderer/course/read-model/index.ts`。
+2. 把 NodesTab 当前直接依赖的投影函数改成从 read-model import（例如 `courseLayerItemToSceneNode`、effective layer 行类型）。**函数行为不变。**
+3. `tests/unit/readModelBoundary.test.ts` 用读源码字符串或 ESLint-style 断言（选简单的）：
 
-必须形成的边界：
+```ts
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
-```text
-Course Project V9
-      → Editor Read Model / Projection Adapter
-      → Workspace / Properties / Layer Panel
+const ui = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/renderer/ui/NodesTab.tsx'), 'utf8')
+expect(ui).not.toMatch(/courseProjectArchive/)
+expect(ui).not.toMatch(/courseProjectMigration/)
+expect(ui).not.toMatch(/from ['"]@\/renderer\/project\/courseProjectArchive['"]/)
 ```
 
-架构约束（用测试钉住，不要靠口头）：
+路径按真实相对位置调整。不要对整个 `src/renderer/ui` 做一次误伤扫描（Workspace 仍可暂时投影）。
 
-- UI 不直接导入 archive/migration
-- UI 不写 Project JSON
-- 写操作走 Course Commands
-- `SceneNode` 投影不得存成第二份工程
+4. `v9GlobalLayerUiAdapter.test.tsx` 必须仍然通过：控制器不在场景/本页/世界组。
 
 ## 最小验证
 
-只跑：
-
 ```powershell
-npx vitest run tests/unit/v9GlobalLayerUiAdapter.test.tsx
+npx vitest run tests/unit/v9GlobalLayerUiAdapter.test.tsx tests/unit/readModelBoundary.test.ts
 ```
 
-若新增了架构测试文件，只再跑那一个文件。
+然后 `git diff --check`。
 
-## Gate
+## 完成判定
 
-- V8-shaped View 只在明确适配层。
-- Store 唯一持久化文档是 V9。
-- 本阶段不要求删光 `SceneNode`。
+- [ ] NodesTab 不直接 import archive/migration
+- [ ] `groupedVisualRows` 行为与 P7 相同
+- [ ] 未拆 Store / 未重写 Workspace
+- [ ] 已 push `cursor/t5-read-model-de5c`
+- [ ] 有 `T5_HANDOFF.md`
 
 ## 下游
 
-T6。1.0 之后的渐进解耦不在本任务。若 P7 未做，T6 前必须先做 P7 或在本任务 HANDOFF 声明图层分组仍待 P7。
+T6。1.0 之后才删光 SceneNode。

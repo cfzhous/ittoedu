@@ -1,11 +1,12 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.3  
+> 计划版本：12.4  
 > 更新日期：2026-08-18  
-> 12.3 变更：补充「互动组件在流式讲义与无限画布中不可用」为车道 P8，排在 P1/P3/P4 之后（同文件宿主）。本轮只入计划，实现留给后续，不与正在进行的 P1–P7 抢宿主。  
-> 12.2 变更：把 2026-08-18 定位的教师可见缺陷（试运行/预览控制器与视频、Flow/Spatial 媒体编辑、画布底色、课程树删除与跨组、图层中的全局控制器）收进车道 P；合同冻结仍走车道 C（T0–T6）。两条车道可分 worktree 并行，同一提交不得混改 Schema 判别器和教师手感。  
-> 12.1 变更：教师确认没有要再打开的 V8 `.h5lesson`，删除导入、不保留密封导入器；删除已失效的重建任务包与 V8 Builder Skill；执行拆到 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)，每环最小验证，全量只在最后。  
-> 取代：计划 11.0–12.2。已删除 `docs/tasks/v8-to-v9-rebuild/**`，不得再领取 R0–R8。  
+> 12.4 变更：剩余任务卡（T3/T4/T5/T6/P5-persist/P8）改成逐步算法、允许/禁止文件和停手条件，给高性价比第三方工人执行；父代理只合入与复检。工人协议见 `docs/tasks/editor-1.0/02_WORKER.md`。T1-B 在 T0 `canvas-runtime` 夹具仍写 `legacy-runtime-v2` 前禁止删判别器。P8 在 P1/P3/P4 合入后可领取。  
+> 12.3 变更：补充「互动组件在流式讲义与无限画布中不可用」为车道 P8，排在 P1/P3/P4 之后（同文件宿主）。  
+> 12.2 变更：把 2026-08-18 定位的教师可见缺陷收进车道 P；合同冻结仍走车道 C（T0–T6）。同一提交不得混改 Schema 判别器和教师手感。  
+> 12.1 变更：删除 V8 导入与失效重建任务包；执行拆到 [docs/tasks/editor-1.0/00_INDEX.md](docs/tasks/editor-1.0/00_INDEX.md)。  
+> 取代：计划 11.0–12.3。已删除 `docs/tasks/v8-to-v9-rebuild/**`，不得再领取 R0–R8。  
 > 当前工程格式：Course Project `schemaVersion: 9`  
 > 发布格式：Published Course V2  
 > 运行时：Runtime API 2 / Surface Runtime API 3  
@@ -110,14 +111,14 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | ID | 内容 | 验证 |
 |---|---|---|
 | T0 | tag、V9 夹具、工作区已有产品补丁收口 | 1 个 round-trip 测试 |
-| T1 | 共享合同、去掉 legacy Runtime 判别器、**Spatial/Flow 可选画布底色字段** | 1–2 个合同测试 |
+| T1 | **E 已合入**（可选底色）。A/C/D 暂缓。B 阻塞于 T0 `canvas-runtime` 夹具仍写 `legacy-runtime-v2` | 1–2 个合同测试 |
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T1 之后 T2 / T3 / T4 可分 worktree 并行；同一 worktree 内 T2 先于 T3。T5 在 T3 后。T6 在 **T2–T5 与 P1–P8** 全部完成后。
+T1-E、T2、P1–P4、P5-CSS、P6、P7、P2 已合入。T3 / T4 / P8 可分 worktree。T5 在 T3 后。P5-persist 在 P8 后。T6 在剩余项完成后。T1-B 未改夹具前不要删 `legacy-*`。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
@@ -256,7 +257,7 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
 - 原因：`NodesTab` 统一有效图层按 owner 分组；控制器在「全局」，标签「全课、不可下沉」，仍在同一棵树。
 - 修：图层树默认不把教师控制器列在「场景 / 本页 / 世界」里。允许只在「全局」保留一条，或收到「全课控件」入口（已有 `global-layer-entry`）。禁止再复制一份进场景。不启动 V10 owner 迁移。
 
-**P8 Flow / Spatial 互动组件（12.3，后续实现）**
+**P8 Flow / Spatial 互动组件（12.4 可领取；P1/P3/P4 已合入）**
 
 - 现象：在流式讲义和无限画布中插入或已有的互动组件不可用：编辑看不到真实组件、不能点选编辑属性所依赖的画布命中；试运行/整课预览不能交互。
 - 原因：Slide **编辑**仍走隔离 Player iframe，有 `componentTargets` 真挂载。Flow/Spatial 与 CoursePlayer 上的 Published 宿主都没有挂 Component API 4：
@@ -266,7 +267,7 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
   - Spatial 运行 `createWorldItem` 对 component 画蓝底矩形 + `packageId`；`createViewportHud` 只有文字。
   - `SlidePublishedAdapter` 在试运行路径上也只画静态后备（与 Flow/Spatial 同一缺口）；P8 抽出共用挂载，三种表面试运行一起接，避免三套假完成。
 - 修：在 P1 宿主与 P3/P4 编辑绘制合入之后，用现有 `ComponentRegistry` / 组件会话把 Component API 4 挂进 Flow 稿纸块、Flow 浮层、Spatial 世界（HTML overlay，不要塞进 SVG 当唯一载体）和 Spatial HUD。编辑态可命中、属性可改、`authoringAddress` 稳定；试运行可交互。包缺失或打印/捕获时才用 `staticFallbackAssetId`。不改 Component API 版本，不复制 CourseStudio。
-- 顺序：禁止与正在进行的 P1/P3/P4 并行改同一宿主文件。
+- 顺序：禁止与 P5-persist 同时改同一宿主。逐步算法与 helper 形状见任务卡。
 
 **稳定性**
 

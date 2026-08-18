@@ -1,5 +1,7 @@
 # P3 Flow 编辑态图片与视频
 
+> 状态：**已合入，禁止重做**。P8 只许改 component 预览，禁止回退 image/video blob。
+
 > 依赖：T0 若已改 `FlowWorkspace.tsx`，接在该提交之后  
 > 并行：可与 P1 分树（P1 改运行宿主，本任务改编辑稿纸/浮层）  
 > 合同变化：无  

@@ -1,5 +1,8 @@
 # T2 删除 V8 导入
 
+> 状态：**已合入，禁止重做**  
+> 残留（不要在本卡重做；交给 T3/T6 扫描）：`editorStore.loadProject` 仍可能调用 `migrateProjectV8ToCourseProjectV9`；`courseProjectModel.ts` 仍有该 helper。
+
 > 依赖：T1  
 > 可与 T3、T4 分树并行；同一 worktree 内先于 T3  
 > 合同变化：打开路径只接受 V9  

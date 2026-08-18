@@ -8,8 +8,9 @@
 |---|---|
 | 产品概览、启动、架构与命令 | [根目录 README](../README.md) |
 | 教师和课件作者操作 | [用户指南](USER_GUIDE.md) |
-| 当前软件路线与 Editor 1.0 收尾 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)（12.3：车道 C 合同 + 车道 P 教师可见缺陷） |
+| 当前软件路线与 Editor 1.0 收尾 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)（12.4：车道 C 合同 + 车道 P 教师可见缺陷） |
 | 可并行执行任务（T0–T6 与 P1–P8；全量只在最后） | [docs/tasks/editor-1.0/00_INDEX.md](tasks/editor-1.0/00_INDEX.md) |
+| 第三方工人协议 | [docs/tasks/editor-1.0/02_WORKER.md](tasks/editor-1.0/02_WORKER.md) |
 | 新 Agent 代码入口 | [PROJECT_COGNITION_INDEX.md](../PROJECT_COGNITION_INDEX.md) |
 | AI 教学策划 | [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) |
 | AI 构建 Course Project V9 | [`build-courseware-project`](../.agents/skills/build-courseware-project/SKILL.md) |

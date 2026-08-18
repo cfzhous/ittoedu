@@ -1,5 +1,7 @@
 # P4 Spatial 选中框、编辑媒体、试运行媒体
 
+> 状态：**已合入，禁止重做**。P8 只许改 component 绘制，禁止回退旋转选框 / video。
+
 > 依赖：与 P1 抢 `SpatialSurfaceHost.ts` 时先 P1  
 > 并行：编辑态文件可与 P1 分树，合入前 rebase host  
 > 合同变化：无  

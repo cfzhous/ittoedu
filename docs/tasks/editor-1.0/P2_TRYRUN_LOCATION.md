@@ -1,7 +1,11 @@
 # P2 Mixed 试运行跨位置保留运行态
 
-> 依赖：建议 P1 已合入（否则只能测 mode 位，测不了跳转后的控制器）  
-> 并行：否。独占 `editorStore` 激活路径；与 T3、P6 的 Store 接线互斥  
+> 状态：**已合入，禁止重做**  
+> 回归测试：`tests/unit/tryRunLocationMode.test.ts`  
+> T3 必须保留 `extra.canvasMode ?? 'edit'` 与 run 下跳转仍为 `run`。
+
+> 依赖：P1 已合入  
+> 并行：否（当时相对 T3/P6-store）  
 > 合同变化：无  
 > 车道：P
 

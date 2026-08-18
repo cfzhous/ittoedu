@@ -1,7 +1,21 @@
 # T1 V9 Schema 最终收口
 
-> 依赖：T0  
-> 并行：否（独占合同文件）  
+> 工人先读：[02_WORKER.md](02_WORKER.md)
+
+## 合入状态（先读再动手）
+
+| 分段 | 状态 | 说明 |
+|---|---|---|
+| **E** 可选 `backgroundColor?` | **已合入，禁止重做** | Spatial/Flow 可选字段；`resolveCourseSurfaceBackgroundColor`；夹具 round-trip 已覆盖 omitted/explicit |
+| **A** 抽离 `src/shared/contracts/**` | **暂缓** | 不阻塞 T3/T4/P8。需要大范围移动类型。未领取前不要做。 |
+| **B** 删除 `legacy-runtime-v2` / `legacy-whole-canvas` | **阻塞** | T0 夹具 `tests/fixtures/course-project-v9/canvas-runtime.h5lesson` **仍持久化** `legacy-runtime-v2` + `legacy-whole-canvas`。未先改夹具 + round-trip 测试前，禁止删判别器。 |
+| **C** 审计顶层字段 | **暂缓** | 与 A 一起。禁止把 `PROJECT_SCHEMA_VERSION` 改成 9。 |
+| **D** 合同产物脚本 | **暂缓** | 生成入口可与 A 一起；哈希门禁仍是 T6。 |
+
+当前不要领取 A–D，除非父代理在看板把状态改成「可领取」。
+
+> 依赖：T0（已合入）  
+> 并行：E 已完成；A–D 独占合同文件  
 > 合同变化：是  
 > 教师手感：必须不变
 
@@ -120,12 +134,12 @@ npx vitest run tests/unit/courseProjectRoundTrip.test.ts
 
 不要跑全量、typecheck、e2e。
 
-## Gate
+## Gate（分段）
 
-- V9 不再把 `projectSchema.ts` 当工程权威。
-- 无 `legacy-*` 持久化判别器。
-- 无教师可感知 UI 变化（可选 `backgroundColor` 缺省白，旧工程打开仍白）。
+- **E 已满足**：可选 `backgroundColor` 缺省白，旧工程打开仍白。
+- **A 未领取前**：V9 仍可暂时从现有 `courseProjectSchema.ts` 解析；不要假装 contracts 目录已经存在。
+- **B 未领取前**：允许夹具继续持久化 `legacy-runtime-v2`。T6 扫描时把夹具列入白名单，而不是在 T6 删判别器。
 
 ## 下游
 
-T2、T3、T4 可分树并行。P5 的持久化接线等本任务 E 合入。
+T2 已合入。T3 / T4 / P8 可分树。P5-persist 等 P8。T1-B 必须先改 T0 canvas-runtime 夹具。

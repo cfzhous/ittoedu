@@ -1,5 +1,7 @@
 # P1 运行态视频与教师控制器
 
+> 状态：**已合入，禁止重做**。P8 只许改 component 分支，禁止回退控制器 offset / video。
+
 > 依赖：T0 已把工作区控制器/图层补丁从混杂 diff 里分离  
 > 并行：可与 P3、P6、P7、T2、T4 分树；与 P4 抢 `SpatialSurfaceHost.ts` 时先做本任务  
 > 合同变化：无  

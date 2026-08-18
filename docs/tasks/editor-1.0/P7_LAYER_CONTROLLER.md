@@ -1,5 +1,7 @@
 # P7 图层树中的全局控制器
 
+> 状态：**已合入，禁止重做**。T5 只改 NodesTab import，禁止改 `groupedVisualRows`。
+
 > 依赖：无  
 > 并行：可与 P1 分树；与 T5 抢 `NodesTab.tsx`，禁止同时改  
 > 合同变化：无  

@@ -1,55 +1,109 @@
 # P5 画布默认白、可改颜色
 
-> 依赖：持久化字段等 T1；CSS 默认白可先于 T1  
-> 并行：CSS 可与 P4 分树，合入时不要互相覆盖 spatial viewport 背景  
-> 合同变化：无（字段在 T1）。本任务只接线  
+> 工人先读：[02_WORKER.md](02_WORKER.md)
+
+本卡两段。**禁止**一个 commit 既改 CSS 又改 Schema。T1 字段与 CSS 必须分开（CSS 已分开并合入）。
+
+---
+
+## P5-CSS（已合入，禁止重做）
+
+已在集成分支：
+
+- `.workspace--spatial .canvas-viewport` 默认白
+- `derivedV8ProjectFromSpatial` 的场景底目前是字面量 `'#ffffff'`（还没读 V9 字段）
+- `tests/unit/spatialCanvasBackground.test.ts` 用 `resolveCourseSurfaceBackgroundColor`
+
+不要再把 CSS 改回 `#111318`。
+
+---
+
+## P5-persist（未合入，可领取）
+
+> 依赖：T1 E 已合入（`backgroundColor?`）；**必须等 P8 合入后再改宿主**（同改 `FlowSurfaceHost` / `SpatialSurfaceHost` / `FlowWorkspace` / Spatial `Workspace`）  
+> 并行：否（相对 P8）  
+> 合同变化：无  
 > 车道：P
 
-## 目标
+### 一句话
 
-Slide / Flow / Spatial 编辑与运行画布默认白色。教师可改颜色，值写入 V9（Slide 场景字段；Spatial/Flow 用 T1 的可选 `backgroundColor`，缺省 `#ffffff`）。
+教师能在属性里改 Spatial/Flow 画布颜色，值写入已有可选字段；编辑视口与试运行宿主读同一字段。缺省与旧工程 = `#ffffff`。打开时不得把缺省写成黑再保存。
 
-## 允许修改
+### 基线
+
+- 类型：`SpatialSurfaceDocument.backgroundColor?`、`FlowSurfaceDocument.backgroundColor?`
+- 读取：`resolveCourseSurfaceBackgroundColor` / `DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR`（`src/shared/courseProjectModel.ts`）
+- Slide 场景 `backgroundColor` 已有属性 `ColorInput id="scene-background"`（`PropertiesTab.tsx` 约 2321）→ **不要改语义、不要改 id**
+- Spatial 属性：`SpatialPageProperties`（约 1999）现在没有画布色
+- Flow 属性：`FlowPageProperties`（约 2065）现在没有稿纸色
+- `spatialEditorCommands.ts` **没有** 改 surface `backgroundColor` 的 command
+- 宿主 SVG/文章背景还没读该字段
+
+### 允许修改
 
 ```text
-src/renderer/styles/globals.css
-src/renderer/ui/Workspace.tsx                 （Spatial 视口背景读取文档）
-src/renderer/ui/FlowWorkspace.tsx             （稿纸/页铬读取文档，若 T1 加了 Flow 字段）
-src/renderer/ui/PropertiesTab.tsx             （Spatial/Flow 背景色控件；Slide 已有则不要改语义）
-src/renderer/store/editorStore.ts             （只改 derivedV8ProjectFromSpatial 的 backgroundColor 来源，禁止再写死 #111318）
-src/player/surfaces/spatial/SpatialSurfaceHost.ts
-src/player/surfaces/flow/FlowSurfaceHost.ts   （仅文章/舞台背景）
-src/renderer/course/spatialEditorCommands.ts  （更新表面 backgroundColor 的 command，若尚无）
-tests/unit/spatialCanvasBackground.test.ts    （新建 1 个）
+src/renderer/ui/PropertiesTab.tsx              只给 SpatialPageProperties / FlowPageProperties 加 ColorInput
+src/renderer/ui/Workspace.tsx                  只改 Spatial 视口 style 背景读取文档；禁止改手势/试运行启动
+src/renderer/ui/FlowWorkspace.tsx              只改稿纸/页铬背景读取 surface.backgroundColor
+src/renderer/store/editorStore.ts              只改 derivedV8ProjectFromSpatial 的 backgroundColor 来源（用 resolveCourseSurfaceBackgroundColor），禁止再写死 #111318
+src/player/surfaces/spatial/SpatialSurfaceHost.ts  只改舞台/SVG 底色
+src/player/surfaces/flow/FlowSurfaceHost.ts        只改文章/舞台背景，禁止改组件/视频/控制器
+src/renderer/course/spatialEditorCommands.ts   新增 updateSpatialSurfaceBackgroundColor
+src/renderer/course/flowEditorCommands.ts      或 flowDocumentModel.ts：新增 updateFlowSurfaceBackgroundColor（二选一，HANDOFF 写明）
+src/renderer/store/editorStore.ts              若必须薄封装 runSpatialCommand / applyFlowCommand，只加这两个 setter，禁止改 backend
+tests/unit/spatialCanvasBackground.test.ts     扩展：改色后文档字段在、缺省不写入黑
+docs/tasks/editor-1.0/P5_HANDOFF.md
 ```
 
-T1 未合入时：**禁止**改 `courseProjectTypes.ts`。只把 CSS 从 `#111318` 改为 `#ffffff`，属性面板可以暂缺。
+不要改 `courseProjectTypes.ts` / schema。
 
-## 工作项
+### 规定 command 形状
 
-1. `.workspace--spatial .canvas-viewport` 默认白；暗色网点改为在浅底上可读，或随背景亮度切换。
-2. `derivedV8ProjectFromSpatial` 读取 V9 字段，缺省 `#ffffff`。
-3. T1 字段合入后：属性「画布背景色」写入 Spatial surface；试运行 SVG/host 与编辑视口同一颜色。
-4. Slide 继续用场景 `backgroundColor`，默认白，不改字段名。
-5. Flow 稿纸保持白；若 T1 给了 Flow 字段，属性可改页铬/稿纸底。
-6. 旧工程无该字段视为白，不得在打开时写成黑再保存。
+```ts
+updateSpatialSurfaceBackgroundColor(session, backgroundColor: string)
+updateFlowSurfaceBackgroundColor(session, backgroundColor: string)
+```
 
-## 最小验证
+- 合法 CSS 色（与现有 `ColorInput` 一致）写入 surface 字段，bump revision。
+- 空 / 非法 → 拒绝或忽略，不要写成 `#111318`。
+- **不要**在打开工程时把 `undefined` 规范成写回磁盘的 `'#ffffff'`（读取用 resolve；持久化保持 omitted = 白）。
 
-T1 未合入、只改 CSS 时，只跑现有 round-trip 夹具不作为本任务验证；对本任务 diff：`git diff --check`。并新增或运行：
+### 属性 UI
+
+- Spatial：`data-testid="spatial-canvas-background"`，label `画布背景色`
+- Flow：`data-testid="flow-paper-background"`，label `稿纸背景色`
+- 使用已有 `ColorInput` 组件，不要新设计器。
+
+### 宿主
+
+- Spatial 运行 SVG 根 fill = `resolveCourseSurfaceBackgroundColor(surface.backgroundColor)`
+- Flow 运行文章/舞台背景同样
+- 编辑视口同样
+- 试运行 chrome 若仍是深色边框可以保留；**画布内容区**必须跟字段走
+
+### 最小验证
 
 ```powershell
 npx vitest run tests/unit/spatialCanvasBackground.test.ts
 ```
 
-若本阶段还没有测试文件（纯 CSS），在 HANDOFF 写明，T1 合入后的接线提交必须带上该测试。
+然后 `git diff --check`。
 
-## Gate
+断言至少包括：
 
-- 新建无限画布看起来是白底。
-- 改色后保存重开颜色还在（字段合入后）。
-- 没有把底色只写进假 V8 投影。
+1. 省略字段 → resolve 为 `#ffffff`，打开后字段仍是 `undefined`（不要脏写）。
+2. 调用 update command 后字段等于给定色，再 round-trip 命令结果里还在。
+3. `derivedV8ProjectFromSpatial` 的 `scenes[0].backgroundColor` 等于 resolve 后的值。
 
-## 下游
+### 完成判定
+
+- [ ] 属性可改 Spatial/Flow 色并写入 V9 可选字段
+- [ ] 缺省白，旧工程不因打开被存成黑
+- [ ] 编辑与宿主同色
+- [ ] Slide 场景色控件未改语义
+- [ ] 已 push `cursor/p5-canvas-persist-de5c`
+- [ ] 有 `P5_HANDOFF.md`
+
+### 下游
 
 T6 三种表面新建课例截图对照。
