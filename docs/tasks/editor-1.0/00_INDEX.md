@@ -5,7 +5,7 @@
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
-> 12.5：T6-CI、T6-nav、T1-B1、T1-B 已合入。T6 全量验证可领取。T1-A / T1-C 不进本轮冻结。不得宣称 Editor 1.0 已发布。  
+> 12.5：T6 typecheck 停手。本轮补 T1-A / T1-C 后再按红项优先重开 T6（已绿不重跑，整轮五条只一次）。不得宣称 Editor 1.0 已发布。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -51,14 +51,16 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [T6](T6_FREEZE.md) 全量验证 | `cursor/t6-freeze-de5c` | 本包唯一全量；不要打 tag |
+| [T1-A](T1_A_MOVE.md) | `cursor/t1-a-move-de5c` | 合同源文件迁入 `contracts/`；含 Published 画布色对齐 |
+| [T1-C](T1_C_AUDIT.md) | `cursor/t1-c-audit-de5c` | 顶层字段审计；不要改 `PROJECT_SCHEMA_VERSION` 数值 |
+| [T6-tc-tests](T6_TC_TESTS.md) | `cursor/t6-tc-tests-de5c` | 测试与 `validate-project.ts` |
 
 **必须等待**
 
 | 任务 | 等什么 |
 |---|---|
-| [T1](T1_SCHEMA.md) A（真迁移）/ C | **不进本轮冻结**。大范围搬类型 / 改顶层字段会作废 T6。若要进 1.0，必须停 T6、先做 A/C、再重跑全量；禁止冻完再领 |
-| 发布 tag / `accepted` | 教师明确验收；T6 自动化不能代替 |
+| [T6](T6_FREEZE.md) 重开 | T1-A、T1-C、T6-tc-tests 合入后只追仍红的 `typecheck`；已绿不重跑；整轮五条只在红项清完后一次 |
+| 发布 tag / `accepted` | 教师明确验收 |
 
 ## 卫生清理（12.1 已完成，不要重做）
 
@@ -77,11 +79,11 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
          P1 P2 P3 P4 P5-CSS P5-persist P6 P7 P8
 
 现在可并行（分 worktree）：
-  T6 全量验证（唯一）
+  T1-A / T1-C / T6-tc-tests
 
 然后：
+  三张合入 → 重开 T6（只追红项；整轮五条只一次）
   教师视觉复核与 accepted；不要由自动化打发布 tag
-  T1-A / T1-C 默认 1.0 之后；禁止 T6 后再改合同目录结构或顶层字段
 ```
 
 P5-persist 已合入。不要回退宿主上的 P8 组件挂载，也不要再改画布色接线。
@@ -94,9 +96,12 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 每个任务只跑该文件「最小验证」列出的命令，外加 `git diff --check`。
 
-禁止在 T0–T5 与 P1–P8 运行：`npm test`、`npm run typecheck`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。
+**红项优先。** 当前 T6 红项是 `typecheck`。绿过的 `check:contracts` 不要重跑（除非本卡改了 `scripts/generate-contracts.ts` 或 `artifacts/contracts/**`）。修红时只跑红命令或红测文件。不要每次修改后跑 T6 五条命令。
 
-**全量验证只在 T6。**
+禁止在中间任务运行：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。  
+本轮例外：只有 [T1-A](T1_A_MOVE.md) 与 [T6-tc-tests](T6_TC_TESTS.md) 允许 `npm run typecheck`（因为那就是当前红项）。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
+
+**全量验证只在 T6，且整轮五条只在红项清完后跑一次。**
 
 ## 领取方式（第三方工人）
 

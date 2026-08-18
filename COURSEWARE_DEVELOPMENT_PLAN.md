@@ -2,7 +2,7 @@
 
 > 计划版本：12.5  
 > 更新日期：2026-08-18  
-> 12.5 变更：T6-CI、T6-nav、T1-B1、T1-B 已合入。T6 全量验证可领取。T1-A / T1-C 不进本轮冻结。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
+> 12.5 变更：T6 全量在 typecheck 停手。本轮补 T1-A / T1-C 与测试对齐后重开 T6。修红只跑红命令/红测文件；已绿步骤不重跑；整轮五条只在红项清完后跑一次。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
 > 12.4 变更：剩余任务卡（T3/T4/T5/T6/P5-persist/P8）改成逐步算法、允许/禁止文件和停手条件，给高性价比第三方工人执行；父代理只合入与复检。工人协议见 `docs/tasks/editor-1.0/02_WORKER.md`。T1-B 在 T0 `canvas-runtime` 夹具仍写 `legacy-runtime-v2` 前禁止删判别器。P8 在 P1/P3/P4 合入后可领取。  
 > 12.3 变更：补充「互动组件在流式讲义与无限画布中不可用」为车道 P8，排在 P1/P3/P4 之后（同文件宿主）。  
 > 12.2 变更：把 2026-08-18 定位的教师可见缺陷收进车道 P；合同冻结仍走车道 C（T0–T6）。同一提交不得混改 Schema 判别器和教师手感。  
@@ -36,8 +36,8 @@
 
 | 缺口 | 车道 | 任务 |
 |---|---|---|
-| V9 Native 合同仍依赖 `projectTypes.ts` / `projectSchema.ts` | C | T1-A（暂缓） |
-| 顶层字段审计 | C | T1-C（暂缓） |
+| V9 Native 合同仍部分依赖 `projectTypes.ts`（`SceneNode` 内部适配） | C | T1-A（搬 V9 源文件；不删 SceneNode） |
+| 顶层字段审计 | C | T1-C（本轮） |
 | Spatial（及可选 Flow 页铬）缺少可持久化画布底色；缺省应白 | C+P | T1 加可选字段，P5 接线 |
 | 打开 V8 仍走「导入旧版工程」；空白工程仍 `create V8 then migrate` | C | T2 |
 | 双后端 + `v9-slide-candidate` | C | T3 |
@@ -112,14 +112,14 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | ID | 内容 | 验证 |
 |---|---|---|
 | T0 | tag、V9 夹具、工作区已有产品补丁收口 | 1 个 round-trip 测试 |
-| T1 | **E / A0 / D / B1 / B 已合入**。A/C 暂缓 | 1–2 个合同测试 |
+| T1 | **E / A0 / D / B1 / B 已合入**。A/C 纳入本轮冻结收口 | 红项优先：typecheck / 本卡单测 |
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav 已合入。T6 全量验证可领取。T1-A 真迁移 / T1-C 默认不进本轮冻结（若要进 1.0 必须先于 T6）。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
+T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav 已合入。T6 全量在 typecheck 停手；先合 T1-A / T1-C / T6-tc-tests，再按红项优先重开 T6（已绿不重跑，整轮五条只跑一次）。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
@@ -136,7 +136,7 @@ T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T2、T3、T3-aliases、T4、T5、P1–
 | P7 | 图层树不再把全局控制器当成场景物件 | 不挡播放；与 T5 抢 `NodesTab` |
 | P8 | Flow / Spatial（及 CoursePlayer 上的 Slide 试运行）挂载 Component API 4 | 与 P1/P3/P4 抢同一宿主与编辑绘制；**必须等那些任务合入后再做** |
 
-中间任务禁止 `npm test`、`typecheck`、e2e、`build:desktop`、`verify`。P 车道最小验证仍是 1–2 个 Vitest 文件；**艺术验收只在 T6 前的课例复核，不在中间宣称 `art candidate`。**
+中间任务禁止 `npm test`、e2e、`build:desktop`、`verify`。默认也禁止 `typecheck`；本轮仅 T1-A / T6-tc-tests 可跑当前红命令 `typecheck`。P 车道最小验证仍是 1–2 个 Vitest 文件；**艺术验收只在 T6 前的课例复核，不在中间宣称 `art candidate`。** 不要每次修改后跑 T6 五条命令。
 
 ---
 
