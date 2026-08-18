@@ -295,6 +295,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   it('defaults the store backend to V9 and paints candidate source labels', () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     expect(selectSlideAuthoringBackend(useEditorStore.getState())).not.toBeNull()
+    useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
     expect(screen.getByTestId('nodes-tab')).toBeTruthy()
     expect(screen.getByText('有效图层')).toBeTruthy()
@@ -311,21 +312,31 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(rowsForListKind(projection!, 'scene-only').some((row) => row.isTeacherController)).toBe(false)
     expect(projection!.unifiedRows.some((row) => row.id === 'teacher-controller-main' && row.source === 'global')).toBe(true)
 
-    render(<NodesTab />)
+    const { rerender } = render(<NodesTab />)
     expect(screen.getByText('有效图层')).toBeTruthy()
-    expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('全课')
-    expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('不可下沉')
+    // Under default scene scope, teacher-controller is filtered out of the rendered layer tree
+    expect(screen.queryByTestId('node-item-teacher-controller-main')).toBeNull()
+    expect(screen.queryByTestId('node-source-teacher-controller-main')).toBeNull()
+    // Global banner is still in global group, so nodes-layer-group-global exists, but contains only global-banner
     expect(screen.getByTestId('nodes-layer-group-global')).toBeTruthy()
+    expect(layerGroupNodeIds('global')).toEqual(['global-banner'])
     expect(screen.getByTestId('nodes-layer-group-scene')).toBeTruthy()
-    expect(layerGroupNodeIds('global')).toContain('teacher-controller-main')
     expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
     expect(
       screen.getByTestId('nodes-layer-group-scene')
         .querySelector('.node-type-icon[title="teacher-controller"]'),
     ).toBeNull()
-    expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
     expect(screen.getByTestId('node-source-slide-title').textContent).toContain('本页')
     expect(screen.getByTestId('node-source-global-banner').textContent).toContain('全课')
+
+    // After switching to global scope, teacher-controller is visible under 全局
+    useEditorStore.getState().setEditingScope('global')
+    rerender(<NodesTab />)
+    expect(screen.getByTestId('nodes-layer-group-global')).toBeTruthy()
+    expect(layerGroupNodeIds('global')).toContain('teacher-controller-main')
+    expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('全课')
+    expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('不可下沉')
+    expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
   })
 
   it('groupedVisualRows keeps one controller under 全局 and out of scene/surface/world', () => {
@@ -402,6 +413,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     injectCandidate(v9WithMisplacedControllerCopies())
     const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const globalBefore = JSON.stringify(before.globalLayerItems)
+    useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
     expect(screen.queryByTestId('node-item-teacher-controller-scene-copy')).toBeNull()
     expect(screen.queryByTestId('node-item-teacher-controller-surface-copy')).toBeNull()
@@ -487,13 +499,24 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(preview.textContent).toContain(`${layout.width} × ${layout.height}`)
     expect(preview.textContent).toContain(layout.buttons[0]!.label)
 
+    // With scope === 'scene', pointerDown on teacher controller returns no target or preview
+    useEditorStore.getState().setEditingScope('scene')
     const controller = createV9TeacherControllerAuthoringController()
     const transform = createStageViewportTransform(VIEW)
     const west = worldToClient(transform, { x: 190, y: 670 })
+    const sceneDown = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
+    expect(sceneDown.kind).toBe('v9-controller-candidate')
+    if (sceneDown.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(sceneDown.target).toBeUndefined()
+    expect(sceneDown.preview).toBeUndefined()
+
+    // Switch scope to 'global', pointerDown on teacher controller activates authoring target and preview
+    useEditorStore.getState().setEditingScope('global')
     const down = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
     expect(down.kind).toBe('v9-controller-candidate')
     if (down.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
     expect(down.overlay).toBeTruthy()
+    expect(down.target?.layerItemId).toBe('teacher-controller-main')
     const dragged = { x: west.x - 40, y: west.y }
     expect(clientToWorld(transform, dragged).x).toBeCloseTo(150)
     const previewMove = controller.pointerMove(dragged, VIEW)
