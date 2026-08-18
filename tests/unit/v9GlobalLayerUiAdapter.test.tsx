@@ -35,7 +35,12 @@ import {
   selectSlideCandidateDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
-import { NodesTab } from '@/renderer/ui/NodesTab'
+import type { EffectiveLayerProjectionRow } from '@/renderer/course/effectiveLayerProjection'
+import {
+  groupedVisualRows,
+  isForeignTeacherControllerDrop,
+  NodesTab,
+} from '@/renderer/ui/NodesTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 
 /**
@@ -213,6 +218,60 @@ function injectCandidate(project = v9ThreeLocationFixture()) {
   return backend
 }
 
+function visualRow(
+  id: string,
+  owner: EffectiveLayerProjectionRow['owner'],
+  options: { isTeacherController?: boolean; ownerKey?: string } = {},
+): EffectiveLayerProjectionRow {
+  return {
+    id,
+    owner,
+    ownerKey: options.ownerKey ?? owner,
+    isTeacherController: Boolean(options.isTeacherController),
+  } as EffectiveLayerProjectionRow
+}
+
+function v9WithMisplacedControllerCopies(): CourseProjectDocument {
+  const project = structuredClone(v9ThreeLocationFixture())
+  const controller = project.globalLayerItems.find(
+    (entry) => entry.item.layerItemId === 'teacher-controller-main',
+  )?.item
+  if (!controller || controller.kind !== 'native') throw new Error('missing global controller')
+  const slide = project.surfaces[0]
+  if (!slide || slide.type !== 'slide') throw new Error('expected slide')
+  slide.surfaceLayerItems = [
+    scoped(nativeText('page-shared', 4, '本页共享')),
+    scoped({
+      ...structuredClone(controller),
+      layerItemId: 'teacher-controller-surface-copy',
+      label: '本页控制器副本',
+      order: 5,
+    }),
+  ]
+  slide.scenes[0] = {
+    ...slide.scenes[0]!,
+    layerItems: [
+      ...slide.scenes[0]!.layerItems,
+      {
+        ...structuredClone(controller),
+        layerItemId: 'teacher-controller-scene-copy',
+        label: '场景控制器副本',
+        order: 21,
+      },
+    ],
+  }
+  return courseProjectDocumentSchema.parse(project)
+}
+
+function layerGroupNodeIds(groupId: 'global' | 'surface' | 'scene' | 'world'): string[] {
+  return [...screen.getByTestId(`nodes-layer-group-${groupId}`)
+    .querySelectorAll('[data-testid^="node-item-"]')]
+    .flatMap((element) => {
+      const id = element.getAttribute('data-testid')
+      return id ? [id.replace('node-item-', '')] : []
+    })
+}
+
 function controllerFrame() {
   const document = selectSlideCandidateDocument(useEditorStore.getState())
   const item = document?.globalLayerItems.find(
@@ -258,8 +317,109 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('不可下沉')
     expect(screen.getByTestId('nodes-layer-group-global')).toBeTruthy()
     expect(screen.getByTestId('nodes-layer-group-scene')).toBeTruthy()
+    expect(layerGroupNodeIds('global')).toContain('teacher-controller-main')
+    expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
+    expect(
+      screen.getByTestId('nodes-layer-group-scene')
+        .querySelector('.node-type-icon[title="teacher-controller"]'),
+    ).toBeNull()
+    expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
     expect(screen.getByTestId('node-source-slide-title').textContent).toContain('本页')
     expect(screen.getByTestId('node-source-global-banner').textContent).toContain('全课')
+  })
+
+  it('groupedVisualRows keeps one controller under 全局 and out of scene/surface/world', () => {
+    const globalController = visualRow('teacher-controller-main', 'global', {
+      isTeacherController: true,
+      ownerKey: 'global',
+    })
+    const groups = groupedVisualRows([
+      visualRow('slide-title', 'scene', { ownerKey: 'scene:scene-1' }),
+      visualRow('teacher-controller-scene-copy', 'scene', {
+        isTeacherController: true,
+        ownerKey: 'scene:scene-1',
+      }),
+      visualRow('page-shared', 'surface', { ownerKey: 'surface:surface-slide' }),
+      visualRow('teacher-controller-surface-copy', 'surface', {
+        isTeacherController: true,
+        ownerKey: 'surface:surface-slide',
+      }),
+      visualRow('world-shape', 'world', { ownerKey: 'world:surface-spatial' }),
+      visualRow('teacher-controller-world-copy', 'world', {
+        isTeacherController: true,
+        ownerKey: 'world:surface-spatial',
+      }),
+      visualRow('global-banner', 'global', { ownerKey: 'global' }),
+      globalController,
+    ])
+    expect(groups.map((group) => group.id)).toEqual(['global', 'surface', 'scene', 'world'])
+    expect(groups.find((group) => group.id === 'global')?.rows.map((row) => row.id))
+      .toEqual(['global-banner', 'teacher-controller-main'])
+    expect(groups.find((group) => group.id === 'surface')?.rows.map((row) => row.id))
+      .toEqual(['page-shared'])
+    expect(groups.find((group) => group.id === 'scene')?.rows.map((row) => row.id))
+      .toEqual(['slide-title'])
+    expect(groups.find((group) => group.id === 'world')?.rows.map((row) => row.id))
+      .toEqual(['world-shape'])
+    expect(groups.flatMap((group) => group.rows).filter((row) => row.isTeacherController))
+      .toEqual([globalController])
+  })
+
+  it('groupedVisualRows can list a stray world controller only under 全局', () => {
+    const groups = groupedVisualRows([
+      visualRow('world-shape', 'world', { ownerKey: 'world:surface-spatial' }),
+      visualRow('teacher-controller-main', 'world', {
+        isTeacherController: true,
+        ownerKey: 'world:surface-spatial',
+      }),
+    ])
+    expect(groups.find((group) => group.id === 'world')?.rows.map((row) => row.id))
+      .toEqual(['world-shape'])
+    expect(groups.find((group) => group.id === 'global')?.rows.map((row) => row.id))
+      .toEqual(['teacher-controller-main'])
+  })
+
+  it('isForeignTeacherControllerDrop refuses any non-global owner', () => {
+    const controller = visualRow('teacher-controller-main', 'global', {
+      isTeacherController: true,
+      ownerKey: 'global',
+    })
+    const banner = visualRow('global-banner', 'global', { ownerKey: 'global' })
+    const scene = visualRow('slide-title', 'scene', { ownerKey: 'scene:scene-1' })
+    const sceneController = visualRow('teacher-controller-scene-copy', 'scene', {
+      isTeacherController: true,
+      ownerKey: 'scene:scene-1',
+    })
+    expect(isForeignTeacherControllerDrop(controller, banner)).toBe(false)
+    expect(isForeignTeacherControllerDrop(banner, controller)).toBe(false)
+    expect(isForeignTeacherControllerDrop(controller, scene)).toBe(true)
+    expect(isForeignTeacherControllerDrop(scene, controller)).toBe(true)
+    expect(isForeignTeacherControllerDrop(sceneController, scene)).toBe(true)
+    expect(isForeignTeacherControllerDrop(scene, banner)).toBe(false)
+  })
+
+  it('hides misplaced teacher-controller copies without rewriting globalLayerItems', () => {
+    injectCandidate(v9WithMisplacedControllerCopies())
+    const before = selectSlideCandidateDocument(useEditorStore.getState())!
+    const globalBefore = JSON.stringify(before.globalLayerItems)
+    render(<NodesTab />)
+    expect(screen.queryByTestId('node-item-teacher-controller-scene-copy')).toBeNull()
+    expect(screen.queryByTestId('node-item-teacher-controller-surface-copy')).toBeNull()
+    expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
+    expect(layerGroupNodeIds('surface')).toEqual(['page-shared'])
+    expect(layerGroupNodeIds('global')).toContain('teacher-controller-main')
+    expect(layerGroupNodeIds('global')).not.toContain('teacher-controller-scene-copy')
+    expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
+    expect(screen.getByTestId('node-source-teacher-controller-main').textContent)
+      .toContain('全课、不可下沉')
+
+    const after = selectSlideCandidateDocument(useEditorStore.getState())!
+    expect(JSON.stringify(after.globalLayerItems)).toBe(globalBefore)
+    const slide = after.surfaces[0]
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide')
+    expect(slide.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-scene-copy')).toBe(true)
+    expect(slide.surfaceLayerItems.some((entry) => entry.item.layerItemId === 'teacher-controller-surface-copy')).toBe(true)
+    expect(slide.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-main')).toBe(false)
   })
 
   it('reorders inside one owner with one history entry and refuses moving the controller onto a scene', () => {
