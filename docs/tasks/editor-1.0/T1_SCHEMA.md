@@ -11,13 +11,13 @@
 | **A** 抽离并改 import | **可领取** [T1-A](T1_A_MOVE.md) | 源文件迁入 `contracts/`；旧路径 re-export；含 Published 画布色对齐 |
 | **B1** 增加 `canvas-runtime` / `surface-runtime` | **已合入，禁止重做** [T1-B1](T1_B1_ADD_DISCRIMINATORS.md) | 只 additive；旧值当时仍合法 |
 | **B** 切换写入并删除 `legacy-*` | **已合入，禁止重做** [T1-B](T1_B_SWITCH.md) | 生产写入与 T0 夹具已是 `canvas-runtime` / `surface-runtime` |
-| **C** 审计顶层字段 | **可领取** [T1-C](T1_C_AUDIT.md) | 顶层已是 `.strict()`；加未知字段测试；`PROJECT_SCHEMA_VERSION` 仍为 8 |
+| **C** 审计顶层字段 | **已合入，禁止重做** [T1-C](T1_C_AUDIT.md) | 顶层已是 `.strict()`；未知键测试；`PROJECT_SCHEMA_VERSION` 仍为 8 |
 | **D** 合同产物脚本 | **已合入，禁止重做** | `generate:contracts` / `check:contracts`；哈希门禁仍是 T6 冻结切片。 |
 
-当前领取 A 与 C。不要重做 A0。迁文件前先做 T1-A commit 1 的 Published 对齐。
+当前只领取 A。不要重做 A0 / C。迁文件前先做 T1-A commit 1 的 Published 对齐。
 
 > 依赖：T0（已合入）  
-> 并行：E / A0 / D / B1 / B 已合入；A 与 C 可与 T6-tc-tests 分树；A 独占合同源文件  
+> 并行：E / A0 / D / B1 / B / C 已合入；A 可与 T6-tc-tests 分树；A 独占合同源文件  
 > 合同变化：是  
 > 教师手感：必须不变
 

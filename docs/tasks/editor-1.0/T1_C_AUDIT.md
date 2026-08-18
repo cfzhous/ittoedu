@@ -1,6 +1,6 @@
 # T1-C 审计 Course Project V9 顶层字段
 
-> 状态：**可领取**（本轮冻结收口；必须在重开 T6 全量之前）  
+> 状态：**已合入，禁止重做**  
 > 并行：可与 [T1-A](T1_A_MOVE.md)、[T6-tc-tests](T6_TC_TESTS.md) 分树  
 > 合同变化：仅当发现无产品语义的顶层预埋字段才删；当前 `courseProjectDocumentSchema` 已是 `.strict()`，默认只加测试与文档  
 > 工人先读：[02_WORKER.md](02_WORKER.md)

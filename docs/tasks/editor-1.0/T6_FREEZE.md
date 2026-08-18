@@ -1,6 +1,6 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**全量未通过**。重开前先合 [T1-A](T1_A_MOVE.md)、[T1-C](T1_C_AUDIT.md)、[T6-tc-tests](T6_TC_TESTS.md)。  
+> 状态：**全量未通过**。T1-C 已合入。重开前先合 [T1-A](T1_A_MOVE.md)、[T6-tc-tests](T6_TC_TESTS.md)。  
 > 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
 > **本包唯一允许跑 `npm test` / e2e / `build:desktop` 的任务。** 修红过程中不要把五条命令当循环。T1-A / T6-tc-tests 可跑当前红命令 `typecheck`。

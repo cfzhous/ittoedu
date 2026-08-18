@@ -37,7 +37,7 @@
 | 缺口 | 车道 | 任务 |
 |---|---|---|
 | V9 Native 合同仍部分依赖 `projectTypes.ts`（`SceneNode` 内部适配） | C | T1-A（搬 V9 源文件；不删 SceneNode） |
-| 顶层字段审计 | C | T1-C（本轮） |
+| 顶层字段审计 | C | T1-C（已合入） |
 | Spatial（及可选 Flow 页铬）缺少可持久化画布底色；缺省应白 | C+P | T1 加可选字段，P5 接线 |
 | 打开 V8 仍走「导入旧版工程」；空白工程仍 `create V8 then migrate` | C | T2 |
 | 双后端 + `v9-slide-candidate` | C | T3 |
@@ -112,14 +112,14 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | ID | 内容 | 验证 |
 |---|---|---|
 | T0 | tag、V9 夹具、工作区已有产品补丁收口 | 1 个 round-trip 测试 |
-| T1 | **E / A0 / D / B1 / B 已合入**。A/C 纳入本轮冻结收口 | 红项优先：typecheck / 本卡单测 |
+| T1 | **E / A0 / D / B1 / B / C 已合入**。A 仍在本轮冻结收口 | 红项优先：typecheck / 本卡单测 |
 | T2 | 删除 V8 导入与 migration | 2 个 archive/migration 测试 |
 | T3 | 单后端、去掉 candidate | 1–2 个 backend 测试 |
 | T4 | 能力索引、validate CLI | 1–2 个 capabilities/CLI 测试 |
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | 合同哈希、CI、禁止项、教师 accepted | **唯一全量验证** |
 
-T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav 已合入。T6 全量在 typecheck 停手；先合 T1-A / T1-C / T6-tc-tests，再按红项优先重开 T6（已绿不重跑，整轮五条只跑一次）。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
+T0、T1-E、T1-A0、T1-D、T1-B1、T1-B、T1-C、T2、T3、T3-aliases、T4、T5、P1–P8（含 P5-persist）、T6-docs、T6-scan、T6-CI、T6-nav 已合入。T6 全量在 typecheck 停手；先合 T1-A / T6-tc-tests，再按红项优先重开 T6（已绿不重跑，整轮五条只跑一次）。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
