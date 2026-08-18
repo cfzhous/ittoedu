@@ -1,52 +1,78 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**全量验证不可领取**，直到 T1-B 合入（T6-CI / T6-nav / T3-aliases / 合同说明 / 扫描 / 快照已合入）  
-> 预备切片已拆出：[T6-docs](T6_DOCS.md)、[T6-scan](T6_SCAN.md)、[T1-D](T1_D_CONTRACTS_GEN.md)、[T6-CI](T6_CI.md)、[T6-nav](T6_NAV.md)  
+> 状态：**可领取**（T1-B / T6-CI / T6-nav / T6-docs / T6-scan / T1-D 已合入）  
+> 并行：否。本包唯一全量验证。  
+> 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
 > **本包唯一允许跑 typecheck / 全量 test / e2e / build:desktop 的任务**
 
-必须已经合入才能跑下方「全量验证」：T0、T1-E、T2、T3、T4、T5、P1、P2、P3、P4、P5-CSS、P5-persist、P6、P7、P8。  
-T1-A/C 若仍暂缓：扫描到其它历史 token 时记入白名单。**不要在 T6 偷偷删判别器**；删 `legacy-*` 是 [T1-B](T1_B_SWITCH.md)。
+预备切片已合入：[T6-docs](T6_DOCS.md)、[T6-scan](T6_SCAN.md)、[T1-D](T1_D_CONTRACTS_GEN.md)、[T6-CI](T6_CI.md)、[T6-nav](T6_NAV.md)。  
+T1-A / T1-C 仍暂缓。扫描仍可白名单 `migrateProjectV8ToCourseProjectV9`。`legacy-runtime-v2` / `legacy-whole-canvas` 的 src 白名单必须保持 `[]`（T1-B 已删）。不要在 T6 偷偷改判别器。
 
-> 依赖：P5-persist 已合入；全量验证等 T6-docs / T6-scan / T1-D  
-> 并行：全量验证否；预备切片可分树
+> 依赖：T1-B 已合入  
+> 并行：全量验证否
 
-## 目标
+## 一句话
 
-冻结合同、接上 CI、扫禁止项、教师 `accepted` 后才能发布。
+按顺序跑全量验证；把 CI 从只跑 `check:contracts` 扩到 typecheck 与 `npm test`。不要打发布 tag，不要宣称 Editor 1.0 已发布。自动化最多 `engineering candidate`。
 
 ## 允许修改
 
 ```text
-docs/contracts/COURSE_PROJECT_V9.md
-docs/contracts/V9_COMPATIBILITY_POLICY.md
-docs/contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md
-artifacts/contracts/**
-CI 配置（每个 PR 接 check:contracts / typecheck / test / build:desktop / 关键 E2E）
-README.md / docs/USER_GUIDE.md / AGENTS.md   （只补冻结后的版本与命令，不改产品故事）
+.github/workflows/check-contracts.yml
+.github/workflows/*.yml
+docs/tasks/editor-1.0/T6_FREEZE_HANDOFF.md
 ```
 
-不要再改 Schema 判别器。12.2–12.3 列出的教师缺陷必须已在 P1–P8 合入；本任务只做冻结、CI 与验收，发现新缺陷再开新的车道 P 补丁，不要塞进合同提交。
+仅当全量命令因 **T1-B 机械残留**（测试还在把 `surface-v1` / `legacy-*` 当成 `CourseRuntimeDefinition`）失败时，才允许改那个失败的 `tests/**` 文件，并在 HANDOFF 列出。禁止改 `src/shared/courseProjectSchema.ts`、UI、夹具判别器。
 
-## 工作项
+## 禁止
 
-1. 写合同文档与兼容政策。
-2. `check:contracts` 证明磁盘产物与源码生成一致；普通 PR 不得改 V9 合同哈希。
-3. 禁止项扫描，正式源码不得出现（测试/历史评论除外，白名单写进合同文档）：
+- 改 Schema / 类型判别器、RuntimeHost、教师 UI、P8 挂载、画布色。
+- 打 tag `editor-v1.0.0`、开 `release/1.x`。
+- 写「Editor 1.0 已发布」或把课例标成 `accepted` / `art candidate`。
+- 为了绿而删测试、放宽 schema、把失败命令从 CI 拿掉。
+- 运行完整 `npm run verify:full`，除非 HANDOFF 说明教师清单要求。
+- 把 Vite `chunks larger than 500 kB` 当缺陷修。
+
+## 逐步算法
+
+1. 从 `origin/cursor/cloud-agent-1787062947578-owgrj` 建 `cursor/t6-freeze-de5c`。
+2. **按顺序**跑，失败即停，把完整命令、退出码、第一段错误写入 HANDOFF：
 
 ```text
-Project V8          （作为当前格式）
-schemaVersion: 8    （作为可打开工程）
-legacy-runtime-v2
-legacy-whole-canvas
-v9-slide-candidate
-V8SlideBackend
-migrateProjectV8
-build-project-v8-courseware
-导入旧版工程
+npm run check:contracts
+npm run typecheck
+npm test
+npm run build:desktop
+npm run test:e2e
 ```
 
-4. 发布准备：tag `editor-v1.0.0`、分支 `release/1.x`。未获教师 `accepted` 不要打发布 tag。
+3. `git diff --check`。
+4. 若 2 全部通过：扩展 GitHub Actions（可同一 workflow 加 job，或新 yml）：
+   - 保留现有 `check:contracts` job
+   - 增加 `typecheck`：`npm ci` 后 `npm run typecheck`
+   - 增加 `test`：`npm ci` 后 `npm test`
+   - `build:desktop` / `test:e2e` 若在 `ubuntu-latest` 无法稳定跑 Electron，**不要**加一个会假绿的 job；HANDOFF 写明缺口。本地已经跑过即可。
+5. 不要改合同快照，除非 `check:contracts` 证明源码与快照不一致——那种情况 **停**，不要手改巨大 JSON。
+6. 写 `T6_FREEZE_HANDOFF.md`：每条命令通过/失败；CI 加了什么；明确 **未** 做视觉课例复核、**未** 教师 accepted、**未** 打 tag。
+
+## 最小验证
+
+就是上面的全量五条，外加 `git diff --check`。不要再拆到别的任务补跑。
+
+## 完成判定
+
+- [ ] 五条命令的结果写进 HANDOFF（通过或失败即停）
+- [ ] 未宣称发布 / 未打 tag
+- [ ] 已 push `cursor/t6-freeze-de5c`
+- [ ] 有 `T6_FREEZE_HANDOFF.md`
+
+## 目标
+
+冻结合同、接上 CI、扫禁止项、教师 `accepted` 后才能发布。T6-docs / T6-scan / T1-D / T6-CI / T6-nav 已合入；本切片只跑全量命令并扩展 CI。不要再改 Schema 判别器。发现新的教师缺陷就开新的车道 P，不要塞进合同提交。
+
+发布准备（tag `editor-v1.0.0`、分支 `release/1.x`）**不属于本工人**：未获教师 `accepted` 不要打发布 tag。
 
 ## 全量验证（只在这里跑）
 

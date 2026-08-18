@@ -5,7 +5,7 @@
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)  
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
-> 12.5：T6-CI 与 T1-B1 已合入。T6-nav 已合入。T6 全量验证等 T1-B。  
+> 12.5：T6-CI、T6-nav、T1-B1、T1-B 已合入。T6 全量验证可领取。不得宣称 Editor 1.0 已发布。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -45,19 +45,20 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T6-CI](T6_CI.md) | GitHub Actions 只跑 `check:contracts` |
 | [T1](T1_B1_ADD_DISCRIMINATORS.md) **B1** | 增加 `canvas-runtime` / `surface-runtime`；旧值当时仍合法 |
 | [T6-nav](T6_NAV.md) | 文档导航接到 `docs/contracts/` 与 generate/check:contracts |
+| [T1](T1_B_SWITCH.md) **B** | 生产写入与夹具改为 `canvas-runtime` / `surface-runtime`；旧判别器已删 |
 
 **可领取（互斥见表）**
 
 | 任务 | 分支名 | 互斥 |
 |---|---|---|
-| [T1-B](T1_B_SWITCH.md) | `cursor/t1-b-switch-de5c` | 先切换写入与 T0 夹具，再删 `legacy-*` / `surface-v1` |
+| [T6](T6_FREEZE.md) 全量验证 | `cursor/t6-freeze-de5c` | 本包唯一全量；不要打 tag |
 
 **必须等待**
 
 | 任务 | 等什么 |
 |---|---|
-| [T6](T6_FREEZE.md) 全量验证 / tag | T1-B 合入后再跑 typecheck / 全量 test / e2e / desktop |
 | [T1](T1_SCHEMA.md) A（真迁移）/ C | 父代理改看板 |
+| 发布 tag / `accepted` | 教师明确验收；T6 自动化不能代替 |
 
 ## 卫生清理（12.1 已完成，不要重做）
 
@@ -76,15 +77,15 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
          P1 P2 P3 P4 P5-CSS P5-persist P6 P7 P8
 
 现在可并行（分 worktree）：
-  T1-B
+  T6 全量验证（唯一）
 
 然后：
-  T1-B 合入 → T6 全量验证（唯一全量）
+  教师视觉复核与 accepted；不要由自动化打发布 tag
 ```
 
 P5-persist 已合入。不要回退宿主上的 P8 组件挂载，也不要再改画布色接线。
 
-T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再改 `groupedVisualRows`。T1-B **可以**改 `editorStore.ts` 里 Runtime 持久化判别器写入，不要借机重命名 session 字段。
+T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再改 `groupedVisualRows`。T1-B 已合入：不要把 `legacy-runtime-v2` 写回 Schema。
 
 不要同一提交改 Schema 判别器和教师可感知 UI。
 

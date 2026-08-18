@@ -10,14 +10,14 @@
 | **A0** 合同桶 re-export | **已合入，禁止重做** | `src/shared/contracts/**` |
 | **A** 抽离并改 import | **暂缓** | 等父代理改看板。大范围移动类型。 |
 | **B1** 增加 `canvas-runtime` / `surface-runtime` | **已合入，禁止重做** [T1-B1](T1_B1_ADD_DISCRIMINATORS.md) | 只 additive；旧值当时仍合法 |
-| **B** 切换写入并删除 `legacy-*` | **可领取** [T1-B](T1_B_SWITCH.md) | 先改夹具 + 生产写入 + round-trip，再删判别器 |
+| **B** 切换写入并删除 `legacy-*` | **已合入，禁止重做** [T1-B](T1_B_SWITCH.md) | 生产写入与 T0 夹具已是 `canvas-runtime` / `surface-runtime` |
 | **C** 审计顶层字段 | **暂缓** | 与 A 一起。禁止把 `PROJECT_SCHEMA_VERSION` 改成 9。 |
 | **D** 合同产物脚本 | **已合入，禁止重做** | `generate:contracts` / `check:contracts`；哈希门禁仍是 T6 冻结切片。 |
 
-当前不要领取 A（真迁移）/ C。A0 / D / B1 已合入。B 可领。
+当前不要领取 A（真迁移）/ C。A0 / D / B1 / B 已合入。
 
 > 依赖：T0（已合入）  
-> 并行：E / A0 / D / B1 已合入；B 可与 T6-nav 分树；A 真迁移 / C 仍独占  
+> 并行：E / A0 / D / B1 / B 已合入；A 真迁移 / C 仍独占  
 > 合同变化：是  
 > 教师手感：必须不变
 
@@ -140,8 +140,8 @@ npx vitest run tests/unit/courseProjectRoundTrip.test.ts
 
 - **E 已满足**：可选 `backgroundColor` 缺省白，旧工程打开仍白。
 - **A 未领取前**：V9 仍可暂时从现有 `courseProjectSchema.ts` 解析；不要假装 contracts 目录已经存在。
-- **B 未完成前**：夹具与生产写入仍可能含旧判别器；T6 扫描白名单覆盖 `src/` 残留。T1-B 领取后不得再让两种格式共存。
+- **B 已满足**：持久化只有 `canvas-runtime` / `surface-runtime`；`LayerFrame.mode` 只有 `absolute`。T6 扫描这两个 token 的 src 白名单必须为空。
 
 ## 下游
 
-T2 / T1-A0 / T1-D / T1-B1 / P5-persist 已合入。T1-B 按 [T1_B_SWITCH.md](T1_B_SWITCH.md) 切换写入并删除旧判别器。
+T2 / T1-A0 / T1-D / T1-B1 / T1-B / P5-persist 已合入。T6 冻结切片跑全量验证；不要再改 Runtime 判别器。
