@@ -1,15 +1,40 @@
 # FINAL_GATE_REPORT
 
 > owner：R8-Z 汇总；协调者可追加失败行
-> 当前状态：Wave 8a；**R8-F 通过**（RECHECK-13 全量前 23 绿 + [`R8-F-LAST4.md`](../handoffs/R8-F-LAST4.md) 定向后 4 绿）；G/H/Z 未领；不提交
+> 当前状态：G+H 已交；教师未验收；**不提交 `accepted`**
 
-- typecheck/unit/build results: capabilities / typecheck / Vitest / `build:desktop` **verified**；现有 27 条 e2e **verified**（23 全量 + 4 定向，教师豁免再跑一遍 27）。未宣称项目级 engineering candidate（留给 R8-Z）。
-- unresolved issues: [`R8-C-TRIAGE.md`](../handoffs/R8-C-TRIAGE.md)、[`R8-D-TRIAGE.md`](../handoffs/R8-D-TRIAGE.md)
-- machine status: C–F verified；项目级 `engineering candidate` 仍由 R8-Z 写
-- experience status: `unverified`
+- baseline / final HEAD / worktree: 基线 `f27275658c6dfaa12f2ce35cd9368dcdebe99451`；当前产品 `C:\Users\74755\Documents\HTML课件编辑器` / `main` / `e53c126cef768eaed2377baf95dd21ea24964090`
+- full command expansion: 各子任务只跑 `10_R8` §11 写出的那一条。R8-Z **未**再跑 `npm run verify` / typecheck / Vitest / e2e / `build:desktop`。
+- command results and durations:
+  - R8-C-RECHECK-3：`npm run typecheck` exit 0
+  - R8-D-RECHECK-2：`npm test` 189 文件 / 1118 测试全绿
+  - R8-E：`npm run build:desktop` exit 0，墙钟 6789 ms
+  - R8-F：RECHECK-13 全量前 23 绿 + LAST4 定向后 4 绿（教师豁免再跑一遍 27）
+  - R8-G：三视口约 66 s，`evidence.passed=true`
+  - R8-H：17 项全量约 61652 ms，`evidence.passed=true`
+- typecheck/unit/build results: capabilities / typecheck / Vitest / `build:desktop` **verified**
+- V9 E2E coverage: 现有 27 条 e2e **verified**（23 全量 + 4 定向）
+- V8 preservation results: 项 16 打开 `examples/sample-project.h5lesson` 出现显式导入对话框与导入报告；原文件 size/mtime 未改
+- three-viewport visual evidence: `output/r8-g-visual/`；1280×720、1366×768 全绿；1920×1080 被本机工作区钳制为 1560×992（环境，非产品失败）
+- experience checklist results: `output/r8-h-experience/evidence.json` 17/17 pass。截图与 `exports/` 同目录
+- migration/recovery evidence: V8 显式导入；丢弃本地恢复副本；保存重开 `roundtrip.h5lesson`
+- export artifact paths and open checks:
+  - `output/r8-h-experience/exports/course.html` 1946016 字节，`<!doctyp`
+  - `course-web.zip` 548919 字节，ZIP
+  - `course.pptx` 59451 字节，ZIP/OOXML
+  - `course.pdf` 996 字节，`%PDF-1.4`（全量会话在 V8 导入后写出，体积偏小；独立 Mixed 跑项 17 时约 82KB）
+  - `course.docx` 3568 字节，ZIP/OOXML
+  - 抽查：magic + 体积。未强制打开 Word / PowerPoint / 系统浏览器
+- unresolved issues:
+  - 教师尚未验收
+  - [`R8-C-TRIAGE.md`](../handoffs/R8-C-TRIAGE.md)、[`R8-D-TRIAGE.md`](../handoffs/R8-D-TRIAGE.md) 仅作历史
+  - R8-H 项 12 路径/关系按钮未露出；项 17 全量 PDF 偏小
+- machine status: `engineering candidate`
+- experience status: `art candidate`
 - teacher decision: `pending`
 
 ## R8 失败记录
+
 
 | ID | Command/step | First error | Reproduction | Owner | Requirement | Repair task | Recheck | Status |
 |---|---|---|---|---|---|---|---|---|

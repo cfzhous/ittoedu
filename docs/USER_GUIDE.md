@@ -14,7 +14,7 @@
 
 入口会先把仓库 `.agents/skills/` 中的两个权威课件 Skill 幂等同步到当前用户的 `%USERPROFILE%\.agents\skills`，首次缺少依赖时再自动执行 `npm ci`，随后构建 Player、Renderer、Electron 并直接打开应用。之后每次双击都会同步 Skill 并按当前源码重新构建，不会调用 `electron-builder`，也不会生成 `release/`、Portable EXE 或安装程序。需要在终端启动时可使用 `npm start`，它同样会自动执行 Skill 安装；也可只运行 `npm run install:courseware-skills`。
 
-Skill 安装器只管理 `orchestrate-courseware` 与 `build-project-v8-courseware`。目标内容未变化时不会重复复制；只有仍与安装记录树签名匹配的副本才会自动更新。用户修改过或非本项目管理的同名 Skill 会保留并显示人工处理提示，编辑器仍可继续启动。旧 `build-project-v7-courseware` 只在既往由本项目管理且字节与已知官方版一致时安全退役；修改过或未管理的 V7 副本会保留。安装过程不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 未立即显示新版本时应重启 Codex。它们属于外部 AI 创作工作流，不代表 Editor 1.x 内置了 AI 生成功能。
+Skill 安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`。目标内容未变化时不会重复复制；只有仍与安装记录树签名匹配的副本才会自动更新。用户改过的已管理 Skill 会保留并显示人工处理提示，编辑器仍可继续启动。未纳入管理记录的同名当前 Skill 会用仓库副本覆盖。旧 `build-project-v8-courseware` 与 `build-project-v7-courseware` 只在既往由本项目管理且字节仍与安装记录或已知官方版一致时安全退役；修改过或未管理的旧 Builder 副本会保留。安装过程不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 未立即显示新版本时应重启 Codex。它们属于外部 AI 创作工作流，不代表 Editor 1.x 内置了 AI 生成功能。
 
 仓库中历史 1.6.0 便携版/目录版记录不包含当前 Project V8 能力，不应作为当前版本启动入口或分发物。
 

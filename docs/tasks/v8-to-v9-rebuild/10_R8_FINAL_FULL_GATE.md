@@ -1,6 +1,6 @@
 # R8-FINAL — 唯一全量自动化、真实体验与教师验收
 
-> 状态：Wave 8a 机器 C/D/E 已绿；**R8-F 通过**（RECHECK-13 全量前 23 绿 + LAST4 定向后 4 绿）。范围不减；禁止任何子任务跑完整 `npm run verify`。G/H/Z 未领。
+> 状态：Wave 8a 机器 C/D/E 已绿；**R8-F 通过**（RECHECK-13 全量前 23 绿 + LAST4 定向后 4 绿）。**R8-G 通过**（`output/r8-g-visual/`）。**R8-H 通过**（`output/r8-h-experience/`）。**R8-Z 已汇总**。教师 `pending`。范围不减；禁止任何子任务跑完整 `npm run verify`。
 > 授权：仅 R8-* 子任务可运行各自写出的全量命令。禁止任何子任务跑完整 `npm run verify`。
 > 加速手册：[`artifacts/R6_R8_EXECUTION_PLAYBOOK.md`](artifacts/R6_R8_EXECUTION_PLAYBOOK.md)
 > 计划版本：根计划 11.4
@@ -265,8 +265,8 @@ npm test
 - **R8-E**：`npm run build:desktop`。等 A–D HANDOFF。
 - **R8-F**：`npm run test:e2e`（现有 spec，不为 11 条各新建文件）。等 E，且 Electron 槽空闲。
 - **R8-G**：三视口 §6。等 F。证据 `output/r8-g-visual/`。
-- **R8-H**：§7 的 17 项。等 G。证据 `output/r8-h-experience/`。任一项未执行/受阻则不得标完成。
-- **R8-Z**：填 `artifacts/FINAL_GATE_REPORT.md`。机器全绿才能写项目级 `engineering candidate`。体验全过才能写 `art candidate`。`teacher decision` 保持 `pending`。
+- **R8-H**：§7 的 17 项。等 G。证据 `output/r8-h-experience/`。任一项未执行/受阻则不得标完成。**已通过。**
+- **R8-Z**：填 `artifacts/FINAL_GATE_REPORT.md`。机器全绿才能写项目级 `engineering candidate`。体验全过才能写 `art candidate`。`teacher decision` 保持 `pending`。**已汇总。**
 
 ### 11.7 各子任务完成态
 

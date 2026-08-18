@@ -1,7 +1,7 @@
 # V8 → V9 重建：AI 可执行并行任务索引
 
-> 状态：默认工程真相已是 V9；R0–R7 engineering candidate；Wave 8a `IN_PROGRESS`；**R8-F 通过**；已测通过的产品已合回 `main` 与仓库根目录；`R8-G/H/Z` 未领取；不得宣称 art/accepted
-> 当前产品：仓库根目录 / `main`（`95eacc1`）
+> 状态：默认工程真相已是 V9；R0–R7 engineering candidate；Wave 8a 机器侧已过；**R8-F 通过**；**R8-G 通过**；**R8-H 通过**；**R8-Z 已汇总**（机器 `engineering candidate`；体验 `art candidate`；`teacher decision: pending`）；已测通过的产品已合回 `main` 与仓库根目录；不得宣称 `accepted`
+> 当前产品：仓库根目录 / `main`
 > 唯一产品总纲：[`COURSEWARE_DEVELOPMENT_PLAN.md`](../../../COURSEWARE_DEVELOPMENT_PLAN.md)
 > 共享执行合同：[`01_SHARED_EXECUTION_CONTRACT.md`](01_SHARED_EXECUTION_CONTRACT.md)
 > 候选 V8 基线：`f27275658c6dfaa12f2ce35cd9368dcdebe99451`
@@ -115,7 +115,7 @@ flowchart TD
 | R5 | [`07_R5_SPATIAL_AUTHORING.md`](07_R5_SPATIAL_AUTHORING.md) | 共享元素内核的无限画布、镜头、路径与关系 | `engineering candidate for this stage` |
 | R6 | [`08_R6_MIXED_AND_COURSE_STRUCTURE.md`](08_R6_MIXED_AND_COURSE_STRUCTURE.md) | 工程内主按钮+下拉、课树、跨 surface 路由 | `engineering candidate for this stage`；壳层锁已释放 |
 | R7 | [`09_R7_DELIVERY_AND_MIGRATION.md`](09_R7_DELIVERY_AND_MIGRATION.md) | 整课 V2 Player、导出写文件、persistence 补洞 | Gate 通过；`R7E-R7Z-01` open（non-blocking） |
-| R8 | [`10_R8_FINAL_FULL_GATE.md`](10_R8_FINAL_FULL_GATE.md) | 全量自动化、三视口、17 项体验、教师验收 | Wave 8a：A–E 已交；**R8-F 通过**（23 全量 + 4 定向）；G–Z 未领 |
+| R8 | [`10_R8_FINAL_FULL_GATE.md`](10_R8_FINAL_FULL_GATE.md) | 全量自动化、三视口、17 项体验、教师验收 | Wave 8a：A–H 已交；**R8-Z 已汇总**；教师 `pending`；不得 `accepted` |
 
 ## 6. 中央热点所有权
 
@@ -298,3 +298,6 @@ git diff --check 只列本任务实际改过的文件，禁止整目录。
 | R8-F-RECHECK-12 | [R8-F-RECHECK-12 全量e2e](96506038-ba3d-4fd8-8150-2025d7a5e968) | 不写源码 | [`handoffs/R8-F-RECHECK-12.md`](handoffs/R8-F-RECHECK-12.md) | `blocked`；22 passed / 2 failed / 3 did not run；简洁模式与图片导入全量绿；新红「流程 8」`.form-textarea` |
 | R8-FIX-TEXT-PROPS | [R8-FIX-TEXT-PROPS 局部格式后文字栏](e1ab73b1-deb9-466b-8495-687b3e24c9ec) | Control+Enter 关闭 overlay 后属性栏仍显示 `.form-textarea` | [`handoffs/R8-FIX-TEXT-PROPS.md`](handoffs/R8-FIX-TEXT-PROPS.md) | `lane_candidate`；RECHECK-13 全量 32.6s 绿；`R8F-RICHTEXT-01` verified |
 | R8-F-LAST4 | R8-F-LAST4 最后四条定向 | 不写源码 | [`handoffs/R8-F-LAST4.md`](handoffs/R8-F-LAST4.md) | **通过**；流程 8B 2.5m / 流程 9 26.1s / 课例 3.8s / render-host 16.6s |
+| R8-G | R8-G 三视口视觉 | 只读产品源码 + `output/r8-g-visual/` | [`handoffs/R8-G.md`](handoffs/R8-G.md) | **通过**；三视口 §6 全绿；1920 受本机工作区钳制为 1560×992 |
+| R8-H | R8-H 17 项真实体验 | 只读产品源码 + `output/r8-h-experience/` | [`handoffs/R8-H.md`](handoffs/R8-H.md) | **通过**；§7 十七项全绿；Vite `:5178`；全量约 62 s |
+| R8-Z | R8-Z 汇总报告 | 只汇总；不写源码、不跑 verify | [`handoffs/R8-Z.md`](handoffs/R8-Z.md) | **已汇总** [`artifacts/FINAL_GATE_REPORT.md`](artifacts/FINAL_GATE_REPORT.md)；机器 `engineering candidate`；体验 `art candidate`；教师 `pending` |

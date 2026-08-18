@@ -73,7 +73,7 @@ async function createSkill(
 
 async function createCurrentSources(): Promise<void> {
   await createSkill(sourceRoot, 'orchestrate-courseware', '# Orchestrate current\n')
-  await createSkill(sourceRoot, 'build-project-v8-courseware', '# Build V8 current\n')
+  await createSkill(sourceRoot, 'build-courseware-project', '# Build current\n')
 }
 
 async function listFiles(directory: string, prefix = ''): Promise<string[]> {
@@ -173,7 +173,7 @@ afterEach(async () => {
 windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
   it('installs the current Skills with manifest v2 signatures and is idempotent', async () => {
     const first = await runInstaller()
-    expect(first.stdout).toContain('Installed/updated: orchestrate-courseware, build-project-v8-courseware')
+    expect(first.stdout).toContain('Installed/updated: orchestrate-courseware, build-courseware-project')
 
     const manifestPath = path.join(destinationRoot, manifestName)
     const firstManifestText = await readFile(manifestPath, 'utf8')
@@ -183,18 +183,19 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
     expect(manifest.source).toBe('ittoedu-courseware-editor')
     expect(Object.keys(manifest.skills)).toEqual([
       'orchestrate-courseware',
-      'build-project-v8-courseware',
+      'build-courseware-project',
     ])
     expect(manifest.skills['orchestrate-courseware']?.installedTreeSignature)
       .toBe(await treeSignature(path.join(sourceRoot, 'orchestrate-courseware')))
-    expect(manifest.skills['build-project-v8-courseware']?.installedTreeSignature)
-      .toBe(await treeSignature(path.join(sourceRoot, 'build-project-v8-courseware')))
+    expect(manifest.skills['build-courseware-project']?.installedTreeSignature)
+      .toBe(await treeSignature(path.join(sourceRoot, 'build-courseware-project')))
     expect(manifest.retiredSkills['build-project-v7-courseware']?.status).toBe('not-present')
+    expect(manifest.retiredSkills['build-project-v8-courseware']?.status).toBe('not-present')
     expect(manifest.lastTransactionId).toMatch(/^[0-9a-f]{32}$/)
 
     await new Promise((resolve) => setTimeout(resolve, 50))
     const second = await runInstaller()
-    expect(second.stdout).toContain('Already current: orchestrate-courseware, build-project-v8-courseware')
+    expect(second.stdout).toContain('Already current: orchestrate-courseware, build-courseware-project')
     expect(await readFile(manifestPath, 'utf8')).toBe(firstManifestText)
     expect((await stat(manifestPath)).mtimeMs).toBe(firstManifestStat.mtimeMs)
   })
@@ -271,17 +272,17 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
     expect((await readManifest()).skills).not.toHaveProperty('orchestrate-courseware')
   })
 
-  it('preserves an unmanaged same-name current Skill and still installs the other Skill', async () => {
+  it('replaces an unmanaged same-name current Skill with the repository copy', async () => {
     await createSkill(destinationRoot, 'orchestrate-courseware', '# User custom copy\n')
 
     const result = await runInstaller()
-    expect(`${result.stdout}\n${result.stderr}`).toContain('unmanaged same-name copy')
+    expect(result.stdout).toContain('Installed/updated: orchestrate-courseware')
     expect(await readFile(
       path.join(destinationRoot, 'orchestrate-courseware', 'SKILL.md'),
       'utf8',
-    )).toContain('# User custom copy')
-    expect(await exists(path.join(destinationRoot, 'build-project-v8-courseware', 'SKILL.md'))).toBe(true)
-    expect((await readManifest()).skills).not.toHaveProperty('orchestrate-courseware')
+    )).toContain('# Orchestrate current')
+    expect(await exists(path.join(destinationRoot, 'build-courseware-project', 'SKILL.md'))).toBe(true)
+    expect((await readManifest()).skills).toHaveProperty('orchestrate-courseware')
   })
 
   it('retires an unmodified v1-managed V7 copy whose bytes match a known signature', async () => {
@@ -336,6 +337,35 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
       .toBe('removed')
   })
 
+  it('retires a v2-managed V8 Builder copy only when it still matches the recorded installed signature', async () => {
+    const legacyPath = await createSkill(
+      destinationRoot,
+      'build-project-v8-courseware',
+      '# V2 managed V8\n',
+    )
+    const legacySignature = await treeSignature(legacyPath)
+    await writeJson(path.join(destinationRoot, manifestName), {
+      schemaVersion: 2,
+      source: 'ittoedu-courseware-editor',
+      skills: {
+        'build-project-v8-courseware': {
+          installedTreeSignature: legacySignature,
+        },
+      },
+      retiredSkills: {},
+      lastTransactionId: '00000000000000000000000000000000',
+    })
+
+    const result = await runInstaller()
+    expect(result.stdout).toContain('Retired managed legacy Skill: build-project-v8-courseware')
+    expect(await exists(legacyPath)).toBe(false)
+    expect(await exists(path.join(destinationRoot, 'build-courseware-project', 'SKILL.md'))).toBe(true)
+    expect((await readManifest()).retiredSkills['build-project-v8-courseware']?.status)
+      .toBe('removed')
+    expect((await readManifest()).skills).toHaveProperty('build-courseware-project')
+    expect((await readManifest()).skills).not.toHaveProperty('build-project-v8-courseware')
+  })
+
   it('preserves modified and unmanaged V7 copies and removes them from management', async () => {
     const legacyPath = await createSkill(
       destinationRoot,
@@ -385,7 +415,7 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
     expect(`${result.stdout}\n${result.stderr}`).toContain('Managed Skill manifest is invalid')
     expect(await readFile(manifestPath, 'utf8')).toBe('{ definitely-not-json')
     expect(await exists(path.join(destinationRoot, 'orchestrate-courseware'))).toBe(false)
-    expect(await exists(path.join(destinationRoot, 'build-project-v8-courseware'))).toBe(false)
+    expect(await exists(path.join(destinationRoot, 'build-courseware-project'))).toBe(false)
   })
 
   it('rolls back an interrupted directory commit before retrying the installation', async () => {
@@ -403,7 +433,7 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
 
     const recovered = await runInstaller()
     expect(recovered.stdout).toContain('Rolled back an interrupted installer transaction')
-    expect(recovered.stdout).toContain('Installed/updated: orchestrate-courseware, build-project-v8-courseware')
+    expect(recovered.stdout).toContain('Installed/updated: orchestrate-courseware, build-courseware-project')
     const manifest = await readManifest()
     expect(manifest.schemaVersion).toBe(2)
     expect(await treeSignature(path.join(destinationRoot, 'orchestrate-courseware')))

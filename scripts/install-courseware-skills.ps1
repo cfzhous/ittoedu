@@ -26,9 +26,12 @@ if ([string]::IsNullOrWhiteSpace($DestinationRoot)) {
 
 $currentSkillNames = @(
   'orchestrate-courseware',
+  'build-courseware-project'
+)
+$retiredSkillNames = @(
+  'build-project-v7-courseware',
   'build-project-v8-courseware'
 )
-$retiredSkillName = 'build-project-v7-courseware'
 $manifestFileName = '.ittoedu-courseware-editor-managed-skills.json'
 $sourceId = 'ittoedu-courseware-editor'
 
@@ -54,8 +57,8 @@ if (
   $env:COURSEWARE_SKILLS_TEST_MODE -eq '1' -and
   -not [string]::IsNullOrWhiteSpace($env:COURSEWARE_SKILLS_TEST_V7_SIGNATURE)
 ) {
-  $knownLegacyTreeSignatures[$retiredSkillName] = @(
-    $knownLegacyTreeSignatures[$retiredSkillName]
+  $knownLegacyTreeSignatures['build-project-v7-courseware'] = @(
+    $knownLegacyTreeSignatures['build-project-v7-courseware']
   ) + @($env:COURSEWARE_SKILLS_TEST_V7_SIGNATURE.ToLowerInvariant())
 }
 
@@ -343,7 +346,7 @@ function Assert-TransactionOperationPaths {
     [Parameter(Mandatory = $true)][string]$TransactionRoot
   )
 
-  $allowedNames = @($currentSkillNames) + @($retiredSkillName)
+  $allowedNames = @($currentSkillNames) + @($retiredSkillNames)
   if ($allowedNames -notcontains [string]$Operation.name) {
     throw "Transaction contains an unexpected Skill name: $($Operation.name)"
   }
@@ -399,7 +402,7 @@ function Assert-ValidTransactionJournal {
         throw "Install transaction has an invalid old tree signature: $name"
       }
     } elseif ($kind -eq 'retire') {
-      if ($name -ne $retiredSkillName -or -not (Test-ValidTreeSignature -Value $oldSignature)) {
+      if ($retiredSkillNames -notcontains $name -or -not (Test-ValidTreeSignature -Value $oldSignature)) {
         throw "Retire transaction has an invalid Skill or tree signature: $name"
       }
     } else {
@@ -711,9 +714,25 @@ try {
     }
 
     if (-not $safeManagedCopy) {
-      $reason = if ($v1Managed -or $v2Managed) { 'modified managed copy' } else { 'unmanaged same-name copy' }
-      $preserved += "$skillName ($reason)"
-      Write-Warning "[Courseware Skills] Preserved $reason`: $targetSkillPath"
+      if ($v1Managed -or $v2Managed) {
+        $preserved += "$skillName (modified managed copy)"
+        continue
+      }
+      if ($targetSignature -ceq $sourceSignature) {
+        $desiredManaged[$skillName] = $sourceSignature
+        $unchanged += $skillName
+        continue
+      }
+      $installPlans += [pscustomobject]@{
+        kind = 'install'
+        name = $skillName
+        sourcePath = $sourceSkillPath
+        targetPath = $targetSkillPath
+        hadTarget = $true
+        expectedOldSignature = $targetSignature
+        expectedNewSignature = $sourceSignature
+      }
+      $desiredManaged[$skillName] = $sourceSignature
       continue
     }
 
@@ -733,75 +752,82 @@ try {
     }
   }
 
-  $retirePlan = $null
-  $retiredTargetPath = Join-Path $destinationRootPath $retiredSkillName
-  $retiredRecord = [ordered]@{}
-  $existingRetiredRecord = if ($manifestState.retiredRecords.ContainsKey($retiredSkillName)) {
-    $manifestState.retiredRecords[$retiredSkillName]
-  } else {
-    $null
-  }
-  $existingRetiredStatus = Get-OptionalProperty -InputObject $existingRetiredRecord -Name 'status'
-  $existingRetiredLastSignature = Get-OptionalProperty -InputObject $existingRetiredRecord -Name 'lastManagedTreeSignature'
-  $v2RetiredInstalledSignature = if ($manifestState.v2ManagedSignatures.ContainsKey($retiredSkillName)) {
-    [string]$manifestState.v2ManagedSignatures[$retiredSkillName]
-  } elseif (
-    $null -ne $existingRetiredRecord -and
-    $null -ne $existingRetiredLastSignature
-  ) {
-    [string]$existingRetiredLastSignature
-  } else {
-    $null
-  }
-  $v1RetiredManaged = @($manifestState.v1ManagedNames) -contains $retiredSkillName
+  $retirePlans = @()
+  $retiredRemovedNames = @()
+  $retiredJson = [ordered]@{}
 
-  if (Test-Path -LiteralPath $retiredTargetPath) {
-    if (-not (Test-Path -LiteralPath $retiredTargetPath -PathType Container)) {
-      throw "Retired Skill destination is not a directory: $retiredTargetPath"
-    }
-    Assert-PlainDirectory -Path $retiredTargetPath -Label 'Retired Skill destination'
-    $retiredTargetSignature = Get-DirectoryTreeSignature -Path $retiredTargetPath
-    $retireAllowed = (
-      (-not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature) -and
-        $retiredTargetSignature -ceq $v2RetiredInstalledSignature) -or
-      ($v1RetiredManaged -and
-        (Test-KnownLegacySignature -SkillName $retiredSkillName -Signature $retiredTargetSignature))
-    )
-    if ($retireAllowed) {
-      $retirePlan = [pscustomobject]@{
-        kind = 'retire'
-        name = $retiredSkillName
-        sourcePath = $null
-        targetPath = $retiredTargetPath
-        hadTarget = $true
-        expectedOldSignature = $retiredTargetSignature
-        expectedNewSignature = $null
-      }
-      $retiredRecord.status = 'removed'
-      $retiredRecord.lastManagedTreeSignature = $retiredTargetSignature
+  foreach ($retiredSkillName in $retiredSkillNames) {
+    $retiredTargetPath = Join-Path $destinationRootPath $retiredSkillName
+    $retiredRecord = [ordered]@{}
+    $existingRetiredRecord = if ($manifestState.retiredRecords.ContainsKey($retiredSkillName)) {
+      $manifestState.retiredRecords[$retiredSkillName]
     } else {
-      $retiredRecord.status = if ($v1RetiredManaged -or -not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature)) {
-        'preserved-modified'
-      } else {
-        'preserved-unmanaged'
+      $null
+    }
+    $existingRetiredStatus = Get-OptionalProperty -InputObject $existingRetiredRecord -Name 'status'
+    $existingRetiredLastSignature = Get-OptionalProperty -InputObject $existingRetiredRecord -Name 'lastManagedTreeSignature'
+    $v2RetiredInstalledSignature = if ($manifestState.v2ManagedSignatures.ContainsKey($retiredSkillName)) {
+      [string]$manifestState.v2ManagedSignatures[$retiredSkillName]
+    } elseif (
+      $null -ne $existingRetiredRecord -and
+      $null -ne $existingRetiredLastSignature
+    ) {
+      [string]$existingRetiredLastSignature
+    } else {
+      $null
+    }
+    $v1RetiredManaged = @($manifestState.v1ManagedNames) -contains $retiredSkillName
+
+    if (Test-Path -LiteralPath $retiredTargetPath) {
+      if (-not (Test-Path -LiteralPath $retiredTargetPath -PathType Container)) {
+        throw "Retired Skill destination is not a directory: $retiredTargetPath"
       }
-      $retiredRecord.observedTreeSignature = $retiredTargetSignature
+      Assert-PlainDirectory -Path $retiredTargetPath -Label 'Retired Skill destination'
+      $retiredTargetSignature = Get-DirectoryTreeSignature -Path $retiredTargetPath
+      $retireAllowed = (
+        (-not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature) -and
+          $retiredTargetSignature -ceq $v2RetiredInstalledSignature) -or
+        ($v1RetiredManaged -and
+          (Test-KnownLegacySignature -SkillName $retiredSkillName -Signature $retiredTargetSignature))
+      )
+      if ($retireAllowed) {
+        $retirePlans += [pscustomobject]@{
+          kind = 'retire'
+          name = $retiredSkillName
+          sourcePath = $null
+          targetPath = $retiredTargetPath
+          hadTarget = $true
+          expectedOldSignature = $retiredTargetSignature
+          expectedNewSignature = $null
+        }
+        $retiredRecord.status = 'removed'
+        $retiredRecord.lastManagedTreeSignature = $retiredTargetSignature
+        $retiredRemovedNames += $retiredSkillName
+      } else {
+        $retiredRecord.status = if ($v1RetiredManaged -or -not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature)) {
+          'preserved-modified'
+        } else {
+          'preserved-unmanaged'
+        }
+        $retiredRecord.observedTreeSignature = $retiredTargetSignature
+        if (-not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature)) {
+          $retiredRecord.lastManagedTreeSignature = $v2RetiredInstalledSignature
+        }
+        $preserved += "$retiredSkillName ($($retiredRecord.status))"
+      }
+    } elseif ($null -ne $existingRetiredRecord -and $existingRetiredStatus -eq 'removed') {
+      $retiredRecord.status = 'removed'
+      if ($null -ne $existingRetiredLastSignature) {
+        $retiredRecord.lastManagedTreeSignature = [string]$existingRetiredLastSignature
+      }
+    } else {
+      $retiredRecord.status = 'not-present'
       if (-not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature)) {
         $retiredRecord.lastManagedTreeSignature = $v2RetiredInstalledSignature
       }
-      $preserved += "$retiredSkillName ($($retiredRecord.status))"
-      Write-Warning "[Courseware Skills] Preserved $($retiredRecord.status)`: $retiredTargetPath"
     }
-  } elseif ($null -ne $existingRetiredRecord -and $existingRetiredStatus -eq 'removed') {
-    $retiredRecord.status = 'removed'
-    if ($null -ne $existingRetiredLastSignature) {
-      $retiredRecord.lastManagedTreeSignature = [string]$existingRetiredLastSignature
-    }
-  } else {
-    $retiredRecord.status = 'not-present'
-    if (-not [string]::IsNullOrWhiteSpace($v2RetiredInstalledSignature)) {
-      $retiredRecord.lastManagedTreeSignature = $v2RetiredInstalledSignature
-    }
+
+    $retiredJson[$retiredSkillName] = $retiredRecord
   }
 
   $skillsJson = [ordered]@{}
@@ -811,9 +837,6 @@ try {
         installedTreeSignature = [string]$desiredManaged[$skillName]
       }
     }
-  }
-  $retiredJson = [ordered]@{
-    $retiredSkillName = $retiredRecord
   }
   $manifestCore = [ordered]@{
     schemaVersion = 2
@@ -834,7 +857,10 @@ try {
       }
     }
     $existingRetired = [ordered]@{}
-    if ($manifestState.retiredRecords.ContainsKey($retiredSkillName)) {
+    foreach ($retiredSkillName in $retiredSkillNames) {
+      if (-not $manifestState.retiredRecords.ContainsKey($retiredSkillName)) {
+        continue
+      }
       $record = $manifestState.retiredRecords[$retiredSkillName]
       $recordStatus = Get-OptionalProperty -InputObject $record -Name 'status'
       $recordObservedSignature = Get-OptionalProperty -InputObject $record -Name 'observedTreeSignature'
@@ -858,8 +884,8 @@ try {
 
   $needsManifestWrite = $manifestCoreJson -cne $existingCoreJson
   $directoryPlans = @($installPlans)
-  if ($null -ne $retirePlan) {
-    $directoryPlans += $retirePlan
+  if ($retirePlans.Count -gt 0) {
+    $directoryPlans += $retirePlans
   }
 
   if ($directoryPlans.Count -gt 0 -or $needsManifestWrite) {
@@ -966,8 +992,8 @@ try {
   if ($unchanged.Count -gt 0) {
     Write-Output ('[Courseware Skills] Already current: ' + ($unchanged -join ', '))
   }
-  if ($null -ne $retirePlan) {
-    Write-Output ('[Courseware Skills] Retired managed legacy Skill: ' + $retiredSkillName)
+  if ($retiredRemovedNames.Count -gt 0) {
+    Write-Output ('[Courseware Skills] Retired managed legacy Skill: ' + ($retiredRemovedNames -join ', '))
   }
   if ($preserved.Count -gt 0) {
     Write-Output ('[Courseware Skills] Preserved for manual review: ' + ($preserved -join ', '))

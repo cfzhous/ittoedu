@@ -34,7 +34,7 @@ npm start
 npm run install:courseware-skills
 ```
 
-安装器只管理 `orchestrate-courseware` 与 `build-project-v8-courseware`。它记录已安装树签名：内容未变时直接跳过，只更新仍与管理记录匹配的副本；用户修改过或非本项目管理的同名副本会保留并提示人工处理。旧 `build-project-v7-courseware` 只有在既往由本项目管理且字节签名与已知官方版一致时才安全退役；修改过或未管理的 V7 副本仍保留。安装器不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 是外部 AI 创作工作流，不会把 AI 能力嵌入 Editor 1.x。
+安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`。它记录已安装树签名：内容未变时直接跳过，只更新仍与管理记录匹配的副本；用户改过的已管理副本会保留并提示人工处理。未纳入管理记录的同名当前 Skill 会用仓库副本覆盖，以便全局安装始终跟随仓库最新版。旧 `build-project-v8-courseware` 与 `build-project-v7-courseware` 只有在既往由本项目管理且字节仍与安装记录或已知官方版一致时才安全退役；修改过或未管理的旧 Builder 副本仍保留。安装器不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 是外部 AI 创作工作流，不会把 AI 能力嵌入 Editor 1.x。
 
 开始修改前建议先建立基线：
 
