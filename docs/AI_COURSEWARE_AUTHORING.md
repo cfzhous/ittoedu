@@ -1,8 +1,10 @@
-# AI 互动课件创作与接入规范（Editor 1.0.0 / Project V8）
+# AI 互动课件创作与接入规范（历史背景）
+
+> **状态：历史文档（2026-08-13）。** 当前执行入口是 [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) → [`build-courseware-project`](../.agents/skills/build-courseware-project/SKILL.md)，工程格式是 Course Project V9。下文中的 Project V8、Hash 审批、`implementation-ready`、Evidence 清单和 `build-project-v8-courseware` 描述当时的外部 Builder 合同，**不是当前教师工作流**。协议级事实（Runtime API 2、Component API 4、1280×720）仍可能有效；以源码与 Schema 为准。
 
 > 读者：维护 Project V8 工程协议、审阅生成结果或需要理解实现边界的人类；AI 的机器执行入口是仓库 Skill。
 >
-> 机器路由：先由 [orchestrate-courseware Skill](../.agents/skills/orchestrate-courseware/SKILL.md) 形成 V2 课例并派生哈希有效的 `implementation-ready`，再由 [build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md) 选择载体、维护 Authoring Inventory、实现、局部 Patch、验证和交付证据。本文是工程事实与设计说明，不是每次创作必须全文读取的第二套工作流。
+> 机器路由（当时）：编排 Skill 形成课例合同，再交给当时的 V8 Builder。当前请改用 `build-courseware-project`。本文是工程事实与设计说明，不是每次创作必须全文读取的第二套工作流。
 >
 > 目标：依据已经批准的体验合同，一次产出可由本编辑器打开、轻改、预览和导出的完整 `.h5lesson`，不因编辑器面板能力而牺牲成品效果。
 
@@ -686,7 +688,7 @@ PPTX 中：
 
 ## 15. V8 Builder 的执行与审阅边界
 
-机器执行顺序、文件布局和停止条件以 [build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md) 为准；本文保留协议事实和供人类审阅的工程清单。Builder 只按任务加载相关章节，不需要把本文全文作为启动上下文。
+机器执行顺序、文件布局和停止条件以 [build-courseware-project Skill](../.agents/skills/build-courseware-project/SKILL.md) 为准；本文保留协议事实和供人类审阅的工程清单。Builder 只按任务加载相关章节，不需要把本文全文作为启动上下文。
 
 1. 入口脚本重跑 V2 课例 `implementation-ready` 校验、`check:ai-capabilities` 和生成证据哈希。缺少精确内容、批准失效、仍有 blocking 决策或 Capability 不可信时返回编排层，不从聊天、旧工程或模板补写。
 2. 在课例内部 `03-development-plan.md` 把每个 `SCN-*` / `STATE-*`、内容源、静态帧、共享机制和验收证据映射到 `native-owned | runtime-owned | hybrid-owned | component-composed`。这份内部工程计划不是新增的人类教学门禁。

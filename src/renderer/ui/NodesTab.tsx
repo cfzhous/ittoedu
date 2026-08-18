@@ -234,6 +234,23 @@ function SortableNode({
   )
 }
 
+function groupedVisualRows(visualRows: readonly EffectiveLayerProjectionRow[]): readonly {
+  readonly id: 'global' | 'surface' | 'scene' | 'world'
+  readonly label: string
+  readonly rows: readonly EffectiveLayerProjectionRow[]
+}[] {
+  const specs = [
+    { id: 'global' as const, label: '全局', owner: 'global' as const },
+    { id: 'surface' as const, label: '本页', owner: 'surface' as const },
+    { id: 'scene' as const, label: '场景', owner: 'scene' as const },
+    { id: 'world' as const, label: '世界', owner: 'world' as const },
+  ]
+  return specs.flatMap((spec) => {
+    const rows = visualRows.filter((row) => row.owner === spec.owner)
+    return rows.length === 0 ? [] : [{ id: spec.id, label: spec.label, rows }]
+  })
+}
+
 function rowAsNode(row: EffectiveLayerProjectionRow): NodesTabRowNode {
   const projected = courseLayerItemToSceneNode(row.item)
   if (projected) return projected
@@ -396,8 +413,6 @@ export function NodesTab() {
     )
   }
 
-  const rowById = new Map((visualRows ?? []).map((row) => [row.id, row]))
-
   return (
     <div className="nodes-tree" data-testid="nodes-tab">
       <div className="tree-root" onClick={() => selectNode(null)}>
@@ -434,15 +449,42 @@ export function NodesTab() {
               strategy={verticalListSortingStrategy}
             >
               <div className="nodes-list">
-                {nodes.map((node) => {
-                  const row = rowById.get(node.id)
-                  return (
+                {visualRows && candidate ? groupedVisualRows(visualRows).map((group) => (
+                  <section
+                    key={group.id}
+                    className="nodes-layer-group"
+                    data-testid={`nodes-layer-group-${group.id}`}
+                  >
+                    <h3 className="nodes-layer-group__title">{group.label}</h3>
+                    {group.rows.map((row) => {
+                      const node = rowAsNode(row)
+                      return (
+                        <SortableNode
+                          key={node.id}
+                          node={node}
+                          selected={selectedNodeIds.includes(node.id)}
+                          sourceLabel={row.isTeacherController
+                            ? `${row.sourceLabel}、不可下沉`
+                            : row.sourceLabel}
+                          impactLabel={describeLayerImpact(row.impact)}
+                          onSelect={(additive) => {
+                            selectNode(node.id, additive)
+                            if (additive) setActiveTab('layers')
+                          }}
+                          onDelete={() => deleteNode(node.id)}
+                          onDuplicate={() => duplicateNode(node.id)}
+                          onRename={(name) => updateNode(node.id, { name })}
+                          onToggleVisible={() => updateNode(node.id, { visible: !node.visible })}
+                          onToggleLocked={() => updateNode(node.id, { locked: !node.locked })}
+                        />
+                      )
+                    })}
+                  </section>
+                )) : nodes.map((node) => (
                   <SortableNode
                     key={node.id}
                     node={node}
                     selected={selectedNodeIds.includes(node.id)}
-                    sourceLabel={row?.sourceLabel}
-                    impactLabel={row ? describeLayerImpact(row.impact) : undefined}
                     onSelect={(additive) => {
                       selectNode(node.id, additive)
                       if (additive) setActiveTab('layers')
@@ -453,8 +495,7 @@ export function NodesTab() {
                     onToggleVisible={() => updateNode(node.id, { visible: !node.visible })}
                     onToggleLocked={() => updateNode(node.id, { locked: !node.locked })}
                   />
-                  )
-                })}
+                ))}
               </div>
             </SortableContext>
           </DndContext>

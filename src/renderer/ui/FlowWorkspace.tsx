@@ -10,9 +10,10 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode } from '../../shared/projectTypes'
-import type { CourseProjectDocument, FlowBlock } from '../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../shared/courseProjectTypes'
 import type { FlowCommandResult } from '../course/flowEditorCommands'
 import {
   executeFlowDelete,
@@ -24,6 +25,14 @@ import {
   selectFlowOverlay,
   type FlowEditorSelection,
 } from '../course/flowEditorSlice'
+import { transformFlowOverlayFrame, type FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAdapters'
+import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
+import {
+  resizeWorldFrameFromHandle,
+  STAGE_RESIZE_HANDLE_DIRECTIONS,
+  type StageRect,
+  type StageResizeHandleDirection,
+} from '../authoring/stageViewportTransform'
 import {
   applyFlowTextEditGesture,
   beginFlowFormulaEdit,
@@ -59,12 +68,15 @@ import {
   FlowBlockContextToolbar,
   type FlowBlockContextCommand,
 } from './FlowBlockContextToolbar'
+import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
+
+const FLOW_OVERLAY_HANDLE_RADIUS = 10
 
 export interface FlowWorkspaceProps {
   readonly project: CourseProjectDocument
   readonly view: FlowEditorView
   readonly selection: FlowEditorSelection | null
-  readonly onProjectChange?: (result: FlowCommandResult) => void
+  readonly onProjectChange?: (result: FlowCommandResult | FlowSharedAuthoringResult) => void
   readonly onSelectionChange?: (selection: FlowEditorSelection | null) => void
   readonly onTextEditChange?: (edit: FlowTextEditSession | null) => void
   readonly readOnly?: boolean
@@ -253,16 +265,70 @@ function FlowPlainStringEditor({
   return <input {...shared} />
 }
 
-function overlayCardStyle(layer: FlowEditorLayerView): CSSProperties {
+function overlayCardStyle(layer: FlowEditorLayerView, preview?: StageRect | null): CSSProperties {
+  const frame = preview ?? layer.item.frame
   return {
     position: 'absolute',
-    left: layer.item.frame.x,
-    top: layer.item.frame.y,
-    width: layer.item.frame.width,
-    height: layer.item.frame.height,
+    left: frame.x,
+    top: frame.y,
+    width: frame.width,
+    height: frame.height,
     boxSizing: 'border-box',
     pointerEvents: 'auto',
   }
+}
+
+function overlayLocalPoint(
+  overlay: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
+  const bounds = overlay.getBoundingClientRect()
+  return {
+    x: clientX - bounds.left,
+    y: clientY - bounds.top,
+  }
+}
+
+function hitFlowOverlayResizeHandle(
+  frame: StageRect,
+  local: { x: number; y: number },
+): StageResizeHandleDirection | null {
+  for (const direction of STAGE_RESIZE_HANDLE_DIRECTIONS) {
+    const point = overlayHandlePoint(frame, direction)
+    if (Math.hypot(local.x - point.x, local.y - point.y) <= FLOW_OVERLAY_HANDLE_RADIUS) {
+      return direction
+    }
+  }
+  return null
+}
+
+function overlayHandlePoint(
+  frame: StageRect,
+  direction: StageResizeHandleDirection,
+): { x: number; y: number } {
+  const left = frame.x
+  const top = frame.y
+  const right = frame.x + frame.width
+  const bottom = frame.y + frame.height
+  const midX = frame.x + frame.width / 2
+  const midY = frame.y + frame.height / 2
+  if (direction === 'nw') return { x: left, y: top }
+  if (direction === 'n') return { x: midX, y: top }
+  if (direction === 'ne') return { x: right, y: top }
+  if (direction === 'e') return { x: right, y: midY }
+  if (direction === 'se') return { x: right, y: bottom }
+  if (direction === 's') return { x: midX, y: bottom }
+  if (direction === 'sw') return { x: left, y: bottom }
+  return { x: left, y: midY }
+}
+
+interface FlowOverlayGesture {
+  readonly type: 'move' | 'resize'
+  readonly layerItemId: string
+  readonly direction?: StageResizeHandleDirection
+  readonly startLocal: { x: number; y: number }
+  readonly startFrame: StageRect
 }
 
 function isTextTarget(target: EventTarget | null): boolean {
@@ -303,9 +369,12 @@ export function FlowWorkspace({
   const editRef = useRef<FlowTextEditSession | null>(null)
   const [edit, setEdit] = useState<FlowTextEditSession | null>(null)
   const [restyleToken, setRestyleToken] = useState(0)
-  const [toolbarPlacement, setToolbarPlacement] = useState<'top' | 'below'>('top')
+  const [toolbarPlacement, setToolbarPlacement] = useState<'top' | 'below'>('below')
   const [formulaBlockId, setFormulaBlockId] = useState<string | null>(null)
   const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
+  const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
 
   const setEditState = (next: FlowTextEditSession | null) => {
     editRef.current = next
@@ -344,7 +413,8 @@ export function FlowWorkspace({
     const update = () => {
       const scrollRect = scrollRef.current!.getBoundingClientRect()
       const blockRect = block.getBoundingClientRect()
-      setToolbarPlacement(blockRect.top - scrollRect.top < 36 ? 'below' : 'top')
+      const hasLayout = scrollRect.height > 0 && blockRect.height > 0
+      setToolbarPlacement(hasLayout && scrollRect.bottom - blockRect.bottom < 48 ? 'top' : 'below')
     }
     update()
     const observer = new ResizeObserver(update)
@@ -356,7 +426,15 @@ export function FlowWorkspace({
     }
   }, [edit?.blockId])
 
-  const emitProject = (result: FlowCommandResult) => {
+  useLayoutEffect(() => {
+    const blockId = selection?.selectedBlockId
+    if (!blockId || !scrollRef.current) return
+    const block = scrollRef.current.querySelector(`[data-flow-block-id="${blockId}"]`)
+    if (!(block instanceof HTMLElement) || typeof block.scrollIntoView !== 'function') return
+    block.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [selection?.selectedBlockId])
+
+  const emitProject = (result: FlowCommandResult | FlowSharedAuthoringResult) => {
     if (result.ok && result.nextDocument) onProjectChange?.(result)
   }
 
@@ -1019,7 +1097,7 @@ export function FlowWorkspace({
           <FlowBlockContextToolbar
             block={block}
             edit={editingThis ? edit : null}
-            placement={editingThis ? toolbarPlacement : 'top'}
+            placement={editingThis ? toolbarPlacement : 'below'}
             onPreserveSelection={() => {
               const editor = scrollRef.current?.querySelector('[data-testid="flow-inline-editor"]')
               if (editor instanceof HTMLElement) {
@@ -1036,6 +1114,123 @@ export function FlowWorkspace({
 
   const rootBlocks = childrenByParent.get(null) ?? []
   const overlayLayers = view.overlayLayers.filter((layer) => layer.effectiveVisible)
+  const overlayScenes = project.locations.map((entry) => ({
+    id: entry.id,
+    name: entry.label,
+  }))
+
+  const overlayFrameOf = (layer: FlowEditorLayerView): StageRect => {
+    if (overlayPreview?.id === layer.selectionId) return overlayPreview.frame
+    return {
+      x: layer.item.frame.x,
+      y: layer.item.frame.y,
+      width: layer.item.frame.width,
+      height: layer.item.frame.height,
+    }
+  }
+
+  const beginOverlayGesture = (
+    event: ReactPointerEvent<HTMLElement>,
+    layer: FlowEditorLayerView,
+  ) => {
+    if (readOnly || event.button !== 0 || layer.item.locked) {
+      if (!readOnly) {
+        if (editRef.current) commitCurrent(false)
+        emitSelection(selectFlowOverlay(
+          project,
+          locationId,
+          [layer.selectionId],
+          layer.source === 'global' ? 'global' : 'page',
+        ))
+      }
+      return
+    }
+    const overlay = overlayRef.current
+    if (!overlay) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (editRef.current) commitCurrent(false)
+    emitSelection(selectFlowOverlay(
+      project,
+      locationId,
+      [layer.selectionId],
+      layer.source === 'global' ? 'global' : 'page',
+    ))
+    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
+    const startFrame = overlayFrameOf(layer)
+    const handleEl = event.target instanceof HTMLElement
+      ? event.target.closest('[data-handle]')
+      : null
+    const handleAttr = handleEl?.getAttribute('data-handle')
+    const direction = (STAGE_RESIZE_HANDLE_DIRECTIONS as readonly string[]).includes(handleAttr ?? '')
+      ? handleAttr as StageResizeHandleDirection
+      : hitFlowOverlayResizeHandle(startFrame, local)
+    overlayGestureRef.current = {
+      type: direction ? 'resize' : 'move',
+      layerItemId: layer.selectionId,
+      ...(direction ? { direction } : {}),
+      startLocal: local,
+      startFrame,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const moveOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = overlayGestureRef.current
+    const overlay = overlayRef.current
+    if (!gesture || !overlay) return
+    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
+    const next = gesture.type === 'resize' && gesture.direction
+      ? resizeWorldFrameFromHandle(
+          gesture.startFrame,
+          gesture.direction,
+          local,
+          MIN_NODE_SIZE,
+        )
+      : {
+          x: gesture.startFrame.x + (local.x - gesture.startLocal.x),
+          y: gesture.startFrame.y + (local.y - gesture.startLocal.y),
+          width: gesture.startFrame.width,
+          height: gesture.startFrame.height,
+        }
+    setOverlayPreview({ id: gesture.layerItemId, frame: next })
+  }
+
+  const endOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = overlayGestureRef.current
+    const overlay = overlayRef.current
+    overlayGestureRef.current = null
+    if (!gesture || !overlay) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
+    const next = gesture.type === 'resize' && gesture.direction
+      ? resizeWorldFrameFromHandle(
+          gesture.startFrame,
+          gesture.direction,
+          local,
+          MIN_NODE_SIZE,
+        )
+      : {
+          x: gesture.startFrame.x + (local.x - gesture.startLocal.x),
+          y: gesture.startFrame.y + (local.y - gesture.startLocal.y),
+          width: gesture.startFrame.width,
+          height: gesture.startFrame.height,
+        }
+    setOverlayPreview(null)
+    const selected = selectFlowOverlay(
+      project,
+      locationId,
+      [gesture.layerItemId],
+      view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId)?.source === 'global'
+        ? 'global'
+        : 'page',
+    )
+    emitProject(transformFlowOverlayFrame(project, selected, next, {
+      expectedRevision: project.revision,
+    }))
+  }
 
   return (
     <div
@@ -1088,28 +1283,74 @@ export function FlowWorkspace({
       </div>
       {overlayLayers.length > 0 ? (
         <div
+          ref={overlayRef}
           className="flow-authoring-layer-overlay"
           data-testid="flow-authoring-layer-overlay"
           style={{ position: 'absolute', inset: 0, zIndex: 4, pointerEvents: 'none' }}
         >
-          {overlayLayers.map((layer) => (
-            <button
-              key={layer.selectionId}
-              type="button"
-              className={`flow-layer-card${selection?.selectedOverlayIds.includes(layer.selectionId) ? ' flow-layer-card--selected' : ''}`}
-              data-layer-item-id={layer.selectionId}
-              data-testid={`flow-layer-card-${layer.selectionId}`}
-              aria-label={layer.item.label || '浮层'}
-              style={overlayCardStyle(layer)}
-              onClick={(event) => {
-                event.stopPropagation()
-                if (editRef.current) commitCurrent(false)
-                emitSelection(selectFlowOverlay(project, locationId, [layer.selectionId], selection?.authoringScope ?? 'page'))
-              }}
-            >
-              {layer.item.label || '浮层'}
-            </button>
-          ))}
+          {overlayLayers.map((layer) => {
+            const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
+            const selected = selection?.selectedOverlayIds.includes(layer.selectionId) === true
+            const controller = isTeacherControllerLayerItem(layer.item)
+            return (
+              <div
+                key={layer.selectionId}
+                role="button"
+                tabIndex={readOnly ? -1 : 0}
+                className={`flow-layer-card${selected ? ' flow-layer-card--selected' : ''}${controller ? ' flow-layer-card--controller' : ''}`}
+                data-layer-item-id={layer.selectionId}
+                data-testid={`flow-layer-card-${layer.selectionId}`}
+                aria-label={layer.item.label || '浮层'}
+                style={overlayCardStyle(layer, preview)}
+                onPointerDown={(event) => beginOverlayGesture(event, layer)}
+                onPointerMove={moveOverlayGesture}
+                onPointerUp={endOverlayGesture}
+                onPointerCancel={endOverlayGesture}
+              >
+                {controller ? (
+                  <TeacherControllerAuthoringChrome
+                    item={layer.item as LayerItem}
+                    frame={overlayFrameOf(layer)}
+                    rotation={layer.item.rotation}
+                    canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+                    getRenderedStageBounds={() => {
+                      const bounds = overlayRef.current?.getBoundingClientRect()
+                      return {
+                        width: Math.max(1, bounds?.width || CANVAS_WIDTH),
+                        height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
+                      }
+                    }}
+                    scenes={overlayScenes}
+                    currentSceneId={locationId}
+                  />
+                ) : (
+                  layer.item.label || '浮层'
+                )}
+                {selected && !readOnly && !layer.item.locked ? (
+                  STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
+                    const point = overlayHandlePoint(overlayFrameOf(layer), direction)
+                    const frame = overlayFrameOf(layer)
+                    return (
+                      <div
+                        key={direction}
+                        className="flow-layer-card__handle"
+                        data-handle={direction}
+                        data-testid={`flow-overlay-handle-${layer.selectionId}-${direction}`}
+                        style={{
+                          position: 'absolute',
+                          left: point.x - frame.x - 4,
+                          top: point.y - frame.y - 4,
+                          width: 8,
+                          height: 8,
+                          pointerEvents: 'auto',
+                        }}
+                      />
+                    )
+                  })
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       ) : null}
       {formulaNode ? (

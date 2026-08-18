@@ -178,6 +178,58 @@ describe('buildSlidePreviewRebuildKey', () => {
     expect(leftKey).toContain('"mode":"run"')
     expect(leftKey).toContain('"currentSceneId":"scene-1"')
   })
+
+  it('ignores controller frame, rotation, and editingScope so overlay preview does not remount the isolated Player', () => {
+    const controller = (frame: { x: number; y: number }, rotation: number) => ({
+      item: {
+        layerItemId: 'teacher-controller',
+        label: '教师控制器',
+        frame: { mode: 'absolute' as const, x: frame.x, y: frame.y, width: 900, height: 64 },
+        order: 80,
+        visible: true,
+        locked: false,
+        rotation,
+        opacity: 1,
+        hitPolicy: 'auto' as const,
+        playbackInitialVisibility: 'inherit' as const,
+        kind: 'native' as const,
+        content: {
+          nativeType: 'teacher-controller' as const,
+          data: {
+            title: '教师控制台',
+            showSceneProgress: true,
+            compact: false,
+            collapsible: true,
+            defaultCollapsed: false,
+            buttons: [],
+            style: {
+              backgroundColor: '#172033',
+              backgroundOpacity: 0.94,
+              accentColor: '#e7b85c',
+              textColor: '#f8fafc',
+              cornerRadius: 16,
+            },
+            includeInStaticExports: false,
+          },
+        },
+      },
+      visibility: { mode: 'all' as const, locationIds: [] },
+    })
+
+    const baseline = buildSlidePreviewRebuildKey(input({
+      candidateGlobals: [controller({ x: 190, y: 638 }, 0)],
+    }))
+    expect(buildSlidePreviewRebuildKey(input({
+      editingScope: 'global',
+      candidateGlobals: [controller({ x: 240, y: 600 }, 12)],
+    }))).toBe(baseline)
+
+    const hidden = controller({ x: 190, y: 638 }, 0)
+    hidden.item.visible = false
+    expect(buildSlidePreviewRebuildKey(input({
+      candidateGlobals: [hidden],
+    }))).not.toBe(baseline)
+  })
 })
 
 describe('slidePreviewComponentPackageFingerprint', () => {

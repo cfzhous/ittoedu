@@ -1,10 +1,10 @@
-# AI 互动课件 Skill 设计与迁移说明（V2 / Project V8）
+# AI 互动课件 Skill 设计与迁移说明（历史背景）
 
-> 状态：W1 机器工作流已实现并通过工程验证；W3 的同机 Windows/离线可移植性专项已达到 `engineering candidate`；W2 两个全新课例尚待有效人类决策、成品制作和结果验收，W3 内部正式版 1.0 尚未接受。
+> **状态：历史文档（2026-08-13）。** 当前机器执行权威是 [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) 与 [`build-courseware-project`](../.agents/skills/build-courseware-project/SKILL.md)。下文中的 Project V8、Hash 批准、`implementation-ready` 和 `build-project-v8-courseware` 已过时。
 >
-> 机器执行权威：仓库 [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) 与 [`build-project-v8-courseware`](../.agents/skills/build-project-v8-courseware/SKILL.md)。本文只解释设计理由、边界和迁移关系，不复制第二套可执行流程。
+> 本文只解释当时的设计理由、边界和从 Skill V1 的迁移关系，不复制第二套可执行流程。
 >
-> 当前协议：固定 1280×720 的 PPT 兼容 Slide；Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4。Editor 1.7.0 / Project V7 的原始 Skill V1 设计由 Git 标签 `internal-prototype-1.7.0` 保存，不是当前入口。
+> Editor 1.7.0 / Project V7 的原始 Skill V1 设计由 Git 标签 `internal-prototype-1.7.0` 保存。
 
 ## 1. 第一性目标
 
@@ -181,7 +181,7 @@ V1 课例只能作为未批准输入。迁移时先审计，把原始字节完�
 
 ## 9. 当前验证状态与后续门禁
 
-W1 的实现与自动化证据见 [课件工作流 W1 验证记录](reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md)，W3 的同机隔离可移植性增量见 [W3 Windows / 离线可移植性验证记录](reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)，完整路线见 [内部正式版与多表面开发计划](../MULTI_SURFACE_DEVELOPMENT_PLAN.md)。当前边界是：
+W1 的实现与自动化证据见 [课件工作流 W1 验证记录](reviews/COURSEWARE_WORKFLOW_W1_VERIFICATION_20260813.md)，W3 的同机隔离可移植性增量见 [W3 Windows / 离线可移植性验证记录](reviews/W3_WINDOWS_PORTABILITY_VERIFICATION_20260813.md)，完整路线见根目录 [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)。当前边界是：
 
 - 编排 V2、V8 Builder、前向夹具、真实性证据和受管安装迁移已达到 `engineering candidate`；
 - 前向夹具只证明机制，不计入产品验收；

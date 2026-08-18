@@ -192,6 +192,7 @@ describe('FlowWorkspace paper', () => {
     expect(scroll).toHaveStyle({ overflow: 'auto' })
     expect(workspace).not.toHaveStyle({ width: '1280px' })
     expect(workspace).not.toHaveStyle({ height: '720px' })
+    expect(screen.getByTestId('flow-layer-card-overlay-text')).toBeTruthy()
   })
 
   it('selects a block on click and enters contenteditable on double-click, Enter, or a second text click', () => {
@@ -259,6 +260,7 @@ describe('FlowWorkspace paper', () => {
     const block = screen.getByTestId('flow-block-p-body')
     const toolbar = screen.getByTestId('flow-block-context-toolbar')
     expect(block?.contains(toolbar)).toBe(true)
+    expect(toolbar).toHaveAttribute('data-flow-toolbar-placement', 'below')
     expect(screen.getByTestId('flow-range-toolbar')).toBeTruthy()
     fireEvent.mouseDown(screen.getByLabelText('局部加粗'))
     expect(onSelectionChange).not.toHaveBeenCalled()

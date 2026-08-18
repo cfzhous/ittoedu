@@ -202,6 +202,30 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
+  it('mounts the global teacher controller on Slide Published Adapter', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const controllerId = payload.globalLayerItems.find((entry) => (
+      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    ))?.item.layerItemId
+    expect(controllerId).toBeTruthy()
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    const slideRoot = container.querySelector<HTMLElement>('.slide-published-adapter')
+    expect(slideRoot?.querySelector('.slide-native-teacher-controller')).not.toBeNull()
+    expect(slideRoot?.querySelector(`[data-native-type="teacher-controller"]`)).not.toBeNull()
+    expect(slideRoot?.querySelector(`[data-global-layer-item="${controllerId}"]`)).not.toBeNull()
+    container.remove()
+  })
+
   it('shows include-scoped global component fallback only on the selected location', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({

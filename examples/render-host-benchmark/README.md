@@ -1,12 +1,12 @@
-# Project V8 渲染宿主过渡基准
+# 渲染宿主过渡基准
 
-这是一份可重复生成、完全离线的 Project V8 工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Project V8 JSON 根据内容职责选择最小的渲染增强层。组件路径统一使用 Component API 4，并分别覆盖 DOM 与 Phaser 渲染面。
+这是一份可重复生成、完全离线的课件工程，用于回答一个具体问题：编辑器不应把 DOM、Phaser 或 Three.js 中的任何一个当成业务核心，而应让 Course Project V9 JSON 根据内容职责选择最小的渲染增强层。组件路径统一使用 Component API 4，并分别覆盖 DOM 与 Phaser 渲染面。生成脚本若仍写出 `schemaVersion: 8`，属于待 T2/T4 收口的夹具，不是产品仍在写 V8。
 
 基准刻意把五类能力分成五页，便于直接比较编辑边界、运行时能力、组件复用价值和兼容成本。
 
 | 场景 | 承载方式 | 要验证的结论 |
 | --- | --- | --- |
-| 01 纯原生节点 | Project V8 文字与图形 | 稳定、高编辑需求内容不需要 runtime |
+| 01 纯原生节点 | 工程内文字与图形 | 稳定、高编辑需求内容不需要 runtime |
 | 02 Runtime API 2 Phaser runtime | `renderMode: phaser` | 只用一次的粒子/程序动画直接写在场景 runtime 更短 |
 | 03 Runtime API 2 Three.js runtime | `renderMode: dom` | Three.js 可预打包进单个 runtime，核心 Player 不需要导入 Three.js |
 | 04 Component API 4 DOM 表格 | `renderMode: dom` 组件 | 高复用、需结构化编辑的表格适合组件化 |

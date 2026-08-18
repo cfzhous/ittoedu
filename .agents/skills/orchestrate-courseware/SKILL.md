@@ -64,4 +64,4 @@ Builder 发现真正的教学内容缺口或需要改变教师已确认的体验
 
 ## 5. 仓库遗留文件
 
-本目录若仍含 `scripts/`、`references/`、`assets/` 或 `tests/`，那是 Project V8 课例合同机的遗留配套，只给仓库内 `$build-project-v8-courseware` 做导入/兼容校验。当前编排不要运行这些脚本，也不要再写 `case.json`、Hash 审批或 `01-courseware-contract.md`。
+本目录若仍含 `scripts/`、`references/`、`assets/` 或 `tests/`，那是历史课例合同机（Hash / `case.json`）的遗留配套。当前编排不要运行这些脚本，也不要再写 `case.json`、Hash 审批或 `01-courseware-contract.md`。

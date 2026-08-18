@@ -1,0 +1,121 @@
+# T1 V9 Schema 最终收口
+
+> 依赖：T0  
+> 并行：否（独占合同文件）  
+> 合同变化：是  
+> 教师手感：必须不变
+
+## 目标
+
+让 V9 依赖共享合同，而不是把 `projectSchema.ts` 当工程权威。清掉迁移型 `legacy-*` 持久化判别器。为 T6 的哈希门禁准备生成入口。
+
+## 允许修改
+
+```text
+src/shared/courseProjectTypes.ts
+src/shared/courseProjectSchema.ts
+src/shared/courseProjectModel.ts
+src/shared/projectTypes.ts
+src/shared/projectSchema.ts
+src/shared/constants.ts
+src/shared/interactionTypes.ts
+src/shared/interactionSchema.ts
+src/shared/runtimeTypes.ts
+src/shared/runtimeSchema.ts
+src/shared/surfaceRuntimeTypes.ts
+src/shared/playerAuthoringProtocol.ts
+src/shared/contracts/**          （新建）
+scripts/generate-contracts.ts   （新建，可先生成不接 CI）
+scripts/check-contracts.ts
+artifacts/contracts/**          （新建快照；哈希冻结放到 T6）
+tests/unit/courseProjectCoreContract.test.ts
+tests/unit/courseProjectRoundTrip.test.ts
+```
+
+不要改 `App.tsx`、导入 UI、`editorStore` 后端命名、能力索引文案。
+
+## 工作项
+
+### A. 抽离共享稳定协议
+
+建议目录（可按现有风格改名，依赖方向不能反）：
+
+```text
+src/shared/contracts/
+  native-v1/
+  interaction-v1/
+  media-v1/
+  design-v1/
+  component-v4/
+  runtime/
+  course-project-v9/
+  published-course-v2/
+```
+
+```text
+Course Project V9  →  稳定共享合同  ←  Player / Editor / Export
+```
+
+禁止继续：`Course Project V9 → projectSchema.ts 作为工程权威`。
+
+先移动/重命名，不改字段语义。`TextNode` 等可保持原样，但归属共享 Native 合同。Interaction 正式名为 Interaction Protocol V1。旧 UI 需要 `SceneNode` 时，由内部适配器消费共享 Native 合同。
+
+### B. 清理 Runtime 合同
+
+删除持久化中的 `legacy-runtime-v2`、`legacy-whole-canvas`。
+
+建议表达（保留既有 API 数字）：
+
+```ts
+type CourseRuntimeDefinition =
+  | {
+      protocol: 'canvas-runtime'
+      runtimeApiVersion: 2
+      renderMode: 'dom' | 'phaser' | 'hybrid'
+    }
+  | {
+      protocol: 'surface-runtime'
+      runtimeApiVersion: 3
+      renderMode: 'dom'
+    }
+```
+
+Frame 只保留绝对几何。全画布 Runtime 写 `x=0, y=0, width=1280, height=720`。
+
+切换：先加新判别器与转换测试 → 一次性切换生产写入 → 删除旧判别器。不得让两种持久化格式长期共存。不重写 RuntimeHost。
+
+### C. 审计顶层字段
+
+只保留当前产品语义。禁止为 AI、协作或未知需求预埋大块自由 JSON。禁止用 `.passthrough()`、`z.unknown()` 弱化核心合同。
+
+`constants.ts` 的 `PROJECT_SCHEMA_VERSION = 8` 不得再被当成当前工程版本；当前工程版本只来自 `COURSE_PROJECT_SCHEMA_VERSION`。
+
+### D. 合同产物
+
+新增 `artifacts/contracts/*.schema.json` 与 `contract-manifest.json`，以及 `generate:contracts` / `check:contracts`。本任务生成即可；**把哈希门禁接到每个 PR 留给 T6。**
+
+## 最小验证
+
+只跑：
+
+```powershell
+npx vitest run tests/unit/courseProjectCoreContract.test.ts
+```
+
+若本任务改了 round-trip 夹具形状，可再加：
+
+```powershell
+npx vitest run tests/unit/courseProjectRoundTrip.test.ts
+```
+
+不要跑全量、typecheck、e2e。
+
+## Gate
+
+- V9 不再把 `projectSchema.ts` 当工程权威。
+- 无 `legacy-*` 持久化判别器。
+- 无教师可感知 UI 变化。
+
+## 下游
+
+T2、T3、T4 可分树并行。

@@ -1,12 +1,12 @@
 # 场景与全局自由运行时开发指南（API 2）
 
-本文定义 Editor 1.0.0 / Project V8 中 `scene.runtime` 与 `globalRuntime` 的自由运行时创作协议。运行时只使用 `RuntimeDocument.runtimeApiVersion: 2`；API 1 会在当前入口得到明确拒绝。组件协议是另一套独立版本体系。
+> **当前工程格式是 Course Project V9。** 下文若仍出现 Project V8，只表示运行时曾随 V8 Native 形状一起定义；以 `src/shared/runtimeTypes.ts`、`runtimeSchema.ts` 和源码为准。
 
-文档同步基线：**2026-08-12**。当前源码包版本为 1.0.0 收敛分支；生产 Schema、宿主、预览与发布路径只接受 Runtime API 2。
+本文定义 `scene.runtime` / 画布运行时与 `globalRuntime` 的自由运行时创作协议。运行时只使用 `RuntimeDocument.runtimeApiVersion: 2`；API 1 会在当前入口得到明确拒绝。组件协议是另一套独立版本体系。
 
-新工程必须写 `schemaVersion: 8`。旧 Project V1–V7 会由产品入口明确拒绝，不再是加载迁移输入，也不能通过只改版本号变成有效 V8。
+文档同步基线：**2026-08-18**。生产 Schema、宿主、预览与发布路径只接受 Runtime API 2。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
 
-Project V8 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 `SceneDocument.presentation` 承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions` 声明。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
+Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。运行时用于承载不必组件化的复杂判定、连续交互、事件协调与瞬态效果；它不是组件包。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。运行时只承担声明式规则不足以表达的部分，并可驱动这些可编辑状态。
 
 完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、运行时离线规则和四格式预检。该命令不执行运行时代码或真实导出，Node 布局近似也不能替代像素验收。
 
@@ -16,7 +16,7 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 
 类型真值以 [`src/shared/runtimeTypes.ts`](../src/shared/runtimeTypes.ts) 和 [`src/shared/runtimeSchema.ts`](../src/shared/runtimeSchema.ts) 为准。
 
-需要机器读取当前能力时，可从 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 发现 Runtime API 2 分域 Schema、协议版本和限制，再按需读取 `schemas/runtime-api2.json`。该生成物只是当前实现契约索引，不是运行时代码生成器、编辑器内 AI 或 Project V8 实现 Skill。
+需要机器读取当前能力时，可从 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 发现 Runtime API 2 分域 Schema、协议版本和限制，再按需读取 `schemas/runtime-api2.json`。该生成物只是当前实现契约索引，不是运行时代码生成器、编辑器内 AI 或课件 Builder。
 
 ## 1. 选择场景运行时还是全局运行时
 

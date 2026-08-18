@@ -123,10 +123,13 @@ import { mountFlowLocationTryRun } from './flowLocationTryRun'
 import { mountPublishedCourseTryRun, attachPublishedCourseStageFit } from './coursePlayerTryRun'
 import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
 import { FlowWorkspace } from './FlowWorkspace'
+import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
 import { buildFlowEditorView } from '../course/flowEditorView'
 import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../phaser/v9SpatialHitAdapter'
 import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
 import { runtimeTargetMatchesEditingContext } from '../authoring/runtimeAuthoringContext'
 import {
   beginComponentTextEditSession,
@@ -968,28 +971,58 @@ function SpatialLocationWorkspace({
               }}
             >
               {hudItems.map((layer) => {
+                const preview = previewById.get(layer.selectionId)
+                const frame = preview ?? layer.item.frame
                 const node = courseLayerItemToSceneNode(layer.item as LayerItem)
                 if (!node) return null
+                const controller = isTeacherControllerLayerItem(layer.item as LayerItem)
                 return (
                   <div
                     key={layer.selectionId}
                     className="spatial-world-item"
                     data-hud-id={layer.selectionId}
                     style={{
-                      left: layer.item.frame.x,
-                      top: layer.item.frame.y,
-                      width: layer.item.frame.width,
-                      height: layer.item.frame.height,
-                      background: node.type === 'teacher-controller' ? '#172033' : 'rgba(23,32,51,0.88)',
+                      left: preview?.x ?? frame.x,
+                      top: preview?.y ?? frame.y,
+                      width: preview?.width ?? frame.width,
+                      height: preview?.height ?? frame.height,
+                      background: controller ? 'transparent' : 'rgba(23,32,51,0.88)',
                       color: '#f8fafc',
                       borderRadius: 12,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontSize: 13,
+                      overflow: 'hidden',
                     }}
                   >
-                    {node.name || (node.type === 'teacher-controller' ? '教师控制台' : node.type)}
+                    {controller ? (
+                      <TeacherControllerAuthoringChrome
+                        item={layer.item as LayerItem}
+                        frame={{
+                          x: preview?.x ?? frame.x,
+                          y: preview?.y ?? frame.y,
+                          width: preview?.width ?? frame.width,
+                          height: preview?.height ?? frame.height,
+                        }}
+                        rotation={preview?.rotation ?? layer.item.rotation}
+                        canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+                        getRenderedStageBounds={() => {
+                          const bounds = viewportRef.current?.getBoundingClientRect()
+                          return {
+                            width: Math.max(1, bounds?.width || CANVAS_WIDTH),
+                            height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
+                          }
+                        }}
+                        scenes={session.history.present.locations.map((location) => ({
+                          id: location.id,
+                          name: location.label,
+                        }))}
+                        currentSceneId={session.selection.locationId}
+                      />
+                    ) : (
+                      node.name || node.type
+                    )}
                   </div>
                 )
               })}
@@ -3199,7 +3232,11 @@ function SlideLocationWorkspace({
           )
         ) {
           controllerPointerActiveRef.current = true
+          if (controllerResult.target) {
+            store.selectNode(controllerResult.target.layerItemId)
+          }
           setControllerOverlay(controllerResult.overlay)
+          event.currentTarget.setPointerCapture(event.pointerId)
           event.preventDefault()
           event.stopPropagation()
           return
@@ -3285,6 +3322,9 @@ function SlideLocationWorkspace({
             }
           }
           controllerPointerActiveRef.current = false
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
           event.preventDefault()
           event.stopPropagation()
           return

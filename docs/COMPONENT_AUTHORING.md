@@ -1,14 +1,16 @@
 # 互动组件开发指南（V4）
 
-本文定义 Editor 1.0.0 / Project V8 使用的 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
+> **当前工程格式是 Course Project V9。** 下文若仍出现 Project V8，只表示组件实例曾随 V8 Native 形状一起保存；以 `src/shared/componentTypes.ts`、`componentSchema.ts` 和源码为准。
 
-文档同步基线：**2026-08-13**。当前源码包版本为 1.0.0 收敛分支；生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
+本文定义 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
+
+文档同步基线：**2026-08-18**。生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
 
 产品发布者是 ittoedu。ittoedu 自有组件命名空间为 `com.ittoedu.*`；第三方作者必须使用自己控制的反向域名，文档中的 `com.example.*` 仅为示例，不能据此冒用 ittoedu 身份。
 
 编辑器只接受 V4：严格声明 `supportedScopes` 与 `renderMode`，使用 DOM/Phaser 分能力上下文、可见性/暂停生命周期和确定性捕获准备。V1–V3 包会在导入边界得到明确的“不受支持”诊断。
 
-组件必须使用 V4。Project V8 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。Project V8 中，可枚举的场景节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用 `SceneDocument.interactions` 或 `ProjectDocument.globalInteractions`；全局规则通过 `scene.in` 限定生效场景。一次性复杂场景互动或一次性跨场景规则不必做成组件，可分别使用 `scene.runtime` 和 `globalRuntime`。组件只用于高复用、需参数化、需版本化或便于教师反复配置的能力。旧 Project V1–V7 与 Component API 1–3 均明确拒绝。
+组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions；全局规则通过 location / scene 限定生效范围。一次性复杂场景互动或一次性跨场景规则不必做成组件，可使用画布或 surface 运行时。组件只用于高复用、需参数化、需版本化或便于教师反复配置的能力。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
 
 中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布。编辑状态由隔离 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过本文的显式文字目标向宿主描述“哪一段 Props 可在何处编辑”，不能访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。
 

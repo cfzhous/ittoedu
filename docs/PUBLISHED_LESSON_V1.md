@@ -1,18 +1,18 @@
 # PublishedLesson V1 发布格式
 
-PublishedLesson V1 是单 HTML 与网页包共用的单向 Player 输入。它由 Project V8 在导出边界编译产生，不是工程文件，也不是 `.h5lesson` 的另一种保存形式。Project 断代未改变发布语义，因此本轮不升级 PublishedLesson 格式版本。
+PublishedLesson V1 是单 HTML 与网页包共用的单向 Player 输入。它由 Course Project V9（经 Published Course V2 producer）在导出边界编译产生，不是工程文件，也不是 `.h5lesson` 的另一种保存形式。作者工程从 V8 切到 V9 不自动升级本发布格式版本。
 
 ## 目标与边界
 
 - Player 的场景、命名状态、声明式交互、声音、视频、自由运行时和组件行为保持不变；
-- 成品不主动交付完整 Project V8、历史记录、工程时间、组件包目录和编辑器配置；
+- 成品不主动交付完整 Course Project V9、历史记录、工程时间、组件包目录和编辑器配置；
 - 发布结果不能重新导入编辑器恢复为 `.h5lesson`；
 - 不做 DRM。浏览器必须取得可执行逻辑和运行素材，有技术能力的接收者仍可检查和分析成品。
 
 发布链路：
 
 ```text
-Project V8 + 工程素材 + 组件包
+Course Project V9 + 工程素材 + 组件包
               │
               ▼
        单向发布编译与检查
@@ -40,7 +40,7 @@ PublishedLesson V1 只保留 Player 执行所需数据：
 
 以下作者态内容不会进入发布数据：
 
-- `project` 包装、`schemaVersion: 8`、工程 ID；
+- 完整工程包装、`schemaVersion`、工程 ID；
 - `createdAt`、`updatedAt`、历史记录和编辑器视图状态；
 - `componentPackages`、原始包路径、`manifest.json` 与独立 `runtime.js`；
 - 组件 `editor.properties/pages`、变体、预设、说明和缩略图；

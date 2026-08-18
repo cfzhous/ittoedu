@@ -1180,7 +1180,7 @@ button:disabled {
 }
 
 .runtime-preview-loading--error {
-  z-index: 8;
+  z-index: 9;
   color: #fecaca;
   background: rgba(27, 17, 20, 0.97);
 }
@@ -2841,6 +2841,35 @@ button:disabled {
 
 .nodes-list {
   padding-left: 15px;
+}
+
+.nodes-layer-group {
+  margin: 0 0 10px;
+}
+
+.nodes-layer-group__title {
+  margin: 8px 0 2px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.flow-layer-card {
+  overflow: visible;
+}
+
+.flow-layer-card--selected {
+  outline: 1px solid var(--accent, #5b9cff);
+}
+
+.flow-layer-card__handle {
+  box-sizing: border-box;
+  border: 1px solid #fff;
+  border-radius: 1px;
+  background: var(--accent, #5b9cff);
+  z-index: 2;
 }
 
 .node-item {

@@ -298,4 +298,33 @@ describe('Spatial world vs viewport view transforms', () => {
     expect(controller.viewportTransform(VIEWPORT).scale).not.toBe(2)
     expect(controller.viewportTransform(VIEWPORT).scale).toBe(overlay.scale)
   })
+
+  it('previews viewport controller move then writes the global frame on pointerup', () => {
+    const host = hostOf(openSpatialAuthoringSession(fixture(), {
+      locationId: LOCATION_ID,
+      sessionId: 'spatial-session-r5b-hud-move',
+    }))
+    const controller = createSpatialWorldAuthoringController(host)
+    const overlay = createSpatialViewportOverlayTransform(VIEWPORT)
+    const start = worldToClient(overlay, { x: 200, y: 650 })
+    const moved = worldToClient(overlay, { x: 240, y: 680 })
+    const down = controller.pointerDown({ x: start.x, y: start.y }, VIEWPORT)
+    expect(down.hit?.layerItemId).toBe('global-teacher-controller')
+    expect(down.command?.historyEntry).toBe(false)
+    const preview = controller.pointerMove({ x: moved.x, y: moved.y }, VIEWPORT)
+    expect(preview.preview?.[0]).toMatchObject({
+      layerItemId: 'global-teacher-controller',
+      x: 230,
+      y: 668,
+    })
+    expect(host.session().history.present.revision).toBe(1)
+    const up = controller.pointerUp({ x: moved.x, y: moved.y }, VIEWPORT)
+    expect(up.command?.ok).toBe(true)
+    expect(up.command?.historyEntry).toBe(true)
+    const item = host.session().history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-teacher-controller',
+    )!.item
+    expect(item.frame).toMatchObject({ x: 230, y: 668, width: 900, height: 64 })
+    expect(item.frame.x).not.toBe(-440)
+  })
 })

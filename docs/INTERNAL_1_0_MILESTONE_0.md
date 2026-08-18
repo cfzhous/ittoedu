@@ -4,9 +4,9 @@
 >
 > 日期：2026-08-07
 >
-> 适用目标：Editor 1.0.0 / Project V8 / Runtime API 2 / Component API 4
+> 适用目标（当时）：Editor 1.0.0 / Project V8 / Runtime API 2 / Component API 4。当前工程格式已是 Course Project V9。
 
-本文把根目录 [开发计划](../MULTI_SURFACE_DEVELOPMENT_PLAN.md) 的里程碑 0 转成可执行合同。协议断代已经完成；本文只解释当时的决策、归档入口和处置理由，不再充当待执行清单。当前能力、测试数量与后续工作以 [文档导航](README.md) 中列出的现行文档为准。
+本文把当时的里程碑 0 转成可执行合同。协议断代已经完成；本文只解释当时的决策、归档入口和处置理由，不再充当待执行清单。当前能力、测试数量与后续工作以 [文档导航](README.md) 和根目录 [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md) 为准。
 
 ## 1. 可恢复基线
 
@@ -182,7 +182,7 @@ interface ComponentCatalogV1 {
 | `docs/RUNTIME_AUTHORING.md`、`docs/COMPONENT_AUTHORING.md` | 改写 | 删除旧协议描述；当前链接使用不带历史代际的文件名 |
 | `docs/RUNTIME_V3_DEVELOPMENT_PLAN.md` | 从主干删除 | 历史内容由标签 `internal-prototype-1.7.0` 保留 |
 | `README.md`、`docs/USER_GUIDE.md` | 改写 | 只描述当前正式版真实能力和旧格式拒绝方式 |
-| `MULTI_SURFACE_DEVELOPMENT_PLAN.md` | 保留 | 作为正式版收敛与后续多表面路线图，持续登记进度 |
+| `MULTI_SURFACE_DEVELOPMENT_PLAN.md` | 已删除（2026-08-18） | 当时作为正式版收敛路线图；现行总纲是根目录 `COURSEWARE_DEVELOPMENT_PLAN.md` |
 
 ## 7. 分段实现门禁
 

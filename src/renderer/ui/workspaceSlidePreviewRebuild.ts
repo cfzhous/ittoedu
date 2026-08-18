@@ -117,9 +117,8 @@ function candidateGlobalStructure(entry: ScopedLayerItem) {
   return {
     id: entry.item.layerItemId,
     type: entry.item.kind === 'native' ? entry.item.content.nativeType : entry.item.kind,
+    visible: entry.item.visible,
     visibility: entry.visibility,
-    frame: entry.item.frame,
-    rotation: entry.item.rotation,
   }
 }
 
@@ -162,7 +161,6 @@ export function buildSlidePreviewRebuildKey(
   return JSON.stringify({
     mode: input.canvasMode,
     authoringContext: [
-      input.editingScope,
       input.scene.id,
       input.activePresentationStateId ?? null,
     ],

@@ -1,9 +1,11 @@
-# Project V8 前向机制夹具
+# 历史 V8 课例夹具
 
-这里的夹具只冻结 W1-5 的 Builder 机制输入：
+这些目录是 W1 时期为 `build-project-v8-courseware` 准备的前向机制输入。该 Skill 已从仓库删除。
 
-- `native-simple`：原生节点主导的公式课件；
-- `runtime-hybrid-high-risk`：Runtime 负责连续互动、原生节点负责稳定复核态的高风险纵切；
-- `e2e-native-fast`：从哈希有效 V2 课例出发，走过 Skill 初始化、真实 TS Builder、归档回读、Inventory、持久化人工编辑模拟、稳定 ID 局部 Patch 和两次 implementation 校验。
+**不要把本目录当成当前产品夹具。** Course Project V9 永久夹具由 [T0](../../docs/tasks/editor-1.0/T0_BASELINE.md) 建立；本目录在 [T2](../../docs/tasks/editor-1.0/T2_REMOVE_V8.md) 把通用保存/导出/恢复行为迁走后删除。
 
-测试使用仓库真实 Project V8 创建、Schema 与归档 API 生成并回开 `.h5lesson`。`e2e-native-fast` 的人工编辑只代表已保存归档的机制模拟，不是编辑器 UI 证据。夹具不包含也不声称完成编辑器 UI、Player、HTML/网页包、PDF/PPTX、截图、录屏或人工验收；这些真实产品证据留给 W2。
+原内容概要：
+
+- `native-simple`：原生节点主导的公式课件
+- `runtime-hybrid-high-risk`：Runtime 负责连续互动、原生节点负责稳定复核态
+- `e2e-native-fast`：当时的 Skill 初始化与归档回读模拟

@@ -1,7 +1,7 @@
 # R0 公式作者编辑技术决策
 
 > 日期：2026-08-11
-> 范围：Editor 1.0.0 / Project V8 `FormulaNode`
+> 范围：Editor 1.0.0 `FormulaNode`（当时合同写在 Project V8；当前工程是 Course Project V9，公式 AST 合同仍适用）
 > 结果：**采用无新依赖的受限线性输入与模板编辑；MathLive 保持在未来隔离试验门禁**
 
 ## 1. 目标与不可变边界

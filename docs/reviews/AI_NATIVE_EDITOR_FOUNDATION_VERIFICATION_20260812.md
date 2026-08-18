@@ -2,7 +2,7 @@
 
 > 日期：2026-08-12
 >
-> 对应路线：[内部正式版与多表面开发计划 §6.10](../../MULTI_SURFACE_DEVELOPMENT_PLAN.md#610-ai-native-编辑器基建增量2026-08-12)
+> 对应路线：当时的多表面计划已删除；现行总纲见根目录 [COURSEWARE_DEVELOPMENT_PLAN.md](../../COURSEWARE_DEVELOPMENT_PLAN.md)
 >
 > 当前状态：**软件本体实现与自动化验收完成，签发为 `engineering candidate`；不是产品完成或发布签发**
 >

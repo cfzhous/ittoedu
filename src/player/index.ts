@@ -37,17 +37,26 @@ export function startPlayer(
   return new PlayerApp(payload, rootElement, options)
 }
 
-function showBootstrapError(error: unknown): void {
-  console.error('课件播放器启动失败', error)
-  const root = document.getElementById('lesson-root')
-  if (!root) {
-    return
+function reportPlayerBootstrapFailure(error: unknown, rootId: string, className: string): void {
+  console.error(rootId === 'course-root' ? '课程播放器启动失败' : '课件播放器启动失败', error)
+  const root = document.getElementById(rootId)
+  if (root) {
+    const message = document.createElement('div')
+    message.className = className
+    message.textContent = '课件加载失败。请重新导出课件后再试。'
+    root.replaceChildren(message)
   }
+  const detail = error instanceof Error && error.message.trim()
+    ? error.message
+    : '课件加载失败。'
+  postEditorBridgeMessage({
+    type: 'courseware-preview-bootstrap:error',
+    message: detail,
+  })
+}
 
-  const message = document.createElement('div')
-  message.className = 'lesson-player-error'
-  message.textContent = '课件加载失败。请重新导出课件后再试。'
-  root.replaceChildren(message)
+function showBootstrapError(error: unknown): void {
+  reportPlayerBootstrapFailure(error, 'lesson-root', 'lesson-player-error')
 }
 
 function postEditorBridgeMessage(message: Record<string, unknown>): void {
@@ -422,11 +431,7 @@ function bootstrapPublishedCourse(): boolean {
   void session.mount(root).then(() => {
     attachPublishedCoursePresenter(root, session, payload)
   }).catch((error) => {
-    console.error('课程播放器启动失败', error)
-    const message = document.createElement('div')
-    message.className = 'course-player-error'
-    message.textContent = '课件加载失败。请重新导出课件后再试。'
-    root.replaceChildren(message)
+    reportPlayerBootstrapFailure(error, 'course-root', 'course-player-error')
   })
   return true
 }

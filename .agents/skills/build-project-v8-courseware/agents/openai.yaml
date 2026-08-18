@@ -1,4 +1,0 @@
-interface:
-  display_name: "Project V8 课件实现"
-  short_description: "构建可编辑、行为可证据化的 Project V8 互动课件"
-  default_prompt: "Use $build-project-v8-courseware to implement this approved case as a Project V8 lesson, verify observable behavior and authoring outcomes, and deliver evidence."

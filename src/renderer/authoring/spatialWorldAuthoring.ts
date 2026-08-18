@@ -60,6 +60,7 @@ import {
   spatialSurfaceIn,
   spatialWorldPointerDeltaToWorld,
   transformSpatialWorldLayersInSession,
+  transformSpatialViewportLayersInSession,
   zoomSpatialSessionCamera,
   type AddSpatialWorldComponentLayerInput,
   type AddSpatialWorldImageLayerInput,
@@ -173,12 +174,27 @@ interface PanGesture {
   readonly startCamera: SpatialSessionCamera
 }
 
+interface ViewportMoveGesture {
+  readonly type: 'viewport-move'
+  readonly startViewport: StagePoint
+  readonly nodes: readonly SpatialEditorWorldTransform[]
+}
+
+interface ViewportResizeGesture {
+  readonly type: 'viewport-resize'
+  readonly direction: StageResizeHandleDirection
+  readonly startViewport: StagePoint
+  readonly nodes: readonly SpatialEditorWorldTransform[]
+}
+
 type SpatialWorldGesture =
   | MoveGesture
   | ResizeGesture
   | RotateGesture
   | MarqueeGesture
   | PanGesture
+  | ViewportMoveGesture
+  | ViewportResizeGesture
 
 export function spatialWorldViewTransform(
   viewport: StageRect,
@@ -291,6 +307,33 @@ function writableWorldTransforms(session: SpatialAuthoringSession): SpatialEdito
   })
 }
 
+function viewportFrames(session: SpatialAuthoringSession): Map<string, SpatialEditorWorldTransform> {
+  const frames = new Map<string, SpatialEditorWorldTransform>()
+  for (const layer of editorView(session).layers) {
+    if (layer.coordinateSpace !== 'viewport' || layer.source !== 'global') continue
+    frames.set(layer.selectionId, {
+      layerItemId: layer.selectionId,
+      x: layer.item.frame.x,
+      y: layer.item.frame.y,
+      width: layer.item.frame.width,
+      height: layer.item.frame.height,
+      rotation: layer.item.rotation,
+    })
+  }
+  return frames
+}
+
+function writableViewportTransforms(session: SpatialAuthoringSession): SpatialEditorWorldTransform[] {
+  const frames = viewportFrames(session)
+  const hits = new Map(layerHits(session).map((target) => [target.layerItemId, target]))
+  return session.selection.selectionIds.flatMap((id) => {
+    const frame = frames.get(id)
+    const hit = hits.get(id)
+    if (!frame || !hit || hit.locked || !hit.writable || hit.coordinateSpace !== 'viewport') return []
+    return [frame]
+  })
+}
+
 function makeTargets(session: SpatialAuthoringSession): SpatialAuthoringTarget[] {
   return session.selection.selectionIds.flatMap((layerItemId) => {
     try {
@@ -345,10 +388,11 @@ export function spatialWorldSelectionOverlay(
 export function spatialViewportHudOverlay(
   viewport: StageRect,
   session: SpatialAuthoringSession,
+  preview?: readonly SpatialEditorWorldTransform[],
 ): StageSelectionOverlayGeometry | null {
   return stageSelectionOverlayGeometry(
     createSpatialViewportOverlayTransform(viewport),
-    overlayItemsFromSelection(session, undefined, 'viewport'),
+    overlayItemsFromSelection(session, preview, 'viewport'),
   )
 }
 
@@ -459,7 +503,42 @@ function hitHandle(
   return null
 }
 
-function marqueeRect(start: StagePoint, world: StagePoint): StageRect {
+function hitViewportHandle(
+  session: SpatialAuthoringSession,
+  viewportPoint: StagePoint,
+): { kind: 'resize'; direction: StageResizeHandleDirection } | null {
+  const hits = new Map(layerHits(session).map((target) => [target.layerItemId, target]))
+  const selected = session.selection.selectionIds.flatMap((id) => {
+    const target = hits.get(id)
+    if (!target || target.coordinateSpace !== 'viewport') return []
+    return [target]
+  })
+  if (selected.length === 0 || selected.every((target) => target.locked)) return null
+  const rotation = selected.length === 1 ? selected[0]!.bounds.rotation : 0
+  const box = selected.length === 1
+    ? {
+        x: selected[0]!.bounds.x,
+        y: selected[0]!.bounds.y,
+        width: selected[0]!.bounds.width,
+        height: selected[0]!.bounds.height,
+      }
+    : (() => {
+        const left = Math.min(...selected.map((item) => item.bounds.x))
+        const top = Math.min(...selected.map((item) => item.bounds.y))
+        const right = Math.max(...selected.map((item) => item.bounds.x + item.bounds.width))
+        const bottom = Math.max(...selected.map((item) => item.bounds.y + item.bounds.height))
+        return { x: left, y: top, width: right - left, height: bottom - top }
+      })()
+  for (const direction of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const) {
+    const point = stageResizeHandleWorldPoint(box, direction, rotation)
+    if (Math.hypot(viewportPoint.x - point.x, viewportPoint.y - point.y) <= HANDLE_HIT_RADIUS) {
+      return { kind: 'resize', direction }
+    }
+  }
+  return null
+}
+
+function marqueeRect(start: StagePoint, world: StagePoint) {
   return {
     x: Math.min(start.x, world.x),
     y: Math.min(start.y, world.y),
@@ -528,7 +607,7 @@ function resultOf(
     ),
     viewportOverlay: stageSelectionOverlayGeometry(
       viewportTransform,
-      overlayItemsFromSelection(session, undefined, 'viewport'),
+      overlayItemsFromSelection(session, preview, 'viewport'),
     ),
     targets: makeTargets(session),
     ...extra,
@@ -549,7 +628,7 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
     spatialWorldSelectionOverlay(viewport, host.getSession(), preview ?? undefined)
 
   const viewportOverlayGeometry = (viewport: StageRect) =>
-    spatialViewportHudOverlay(viewport, host.getSession())
+    spatialViewportHudOverlay(viewport, host.getSession(), preview ?? undefined)
 
   const selectFromLayerIds = (
     layerItemIds: readonly string[],
@@ -574,6 +653,21 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
     const session = host.getSession()
     const client = { x: pointer.x, y: pointer.y }
     const world = pointerToSpatialWorld(client, viewport, session.sessionCamera)
+    const viewportPoint = pointerToSpatialViewport(client, viewport)
+    const viewportHandle = hitViewportHandle(session, viewportPoint)
+    const viewportWritable = writableViewportTransforms(session)
+
+    if (viewportHandle?.kind === 'resize' && viewportWritable.length > 0) {
+      gesture = {
+        type: 'viewport-resize',
+        direction: viewportHandle.direction,
+        startViewport: viewportPoint,
+        nodes: viewportWritable,
+      }
+      preview = viewportWritable.map((node) => ({ ...node }))
+      return resultOf(host, viewport, { preview })
+    }
+
     const handle = hitHandle(session, world)
     const writable = writableWorldTransforms(session)
 
@@ -607,9 +701,19 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
           additive: pointer.additive === true,
         }, { expectedRevision: current.history.present.revision }),
       )
-      gesture = null
-      preview = null
-      return resultOf(host, viewport, { command, hit })
+      const nextWritable = writableViewportTransforms(host.getSession())
+      if (nextWritable.length > 0 && !hit.locked) {
+        gesture = {
+          type: 'viewport-move',
+          startViewport: viewportPoint,
+          nodes: nextWritable,
+        }
+        preview = nextWritable.map((node) => ({ ...node }))
+      } else {
+        gesture = null
+        preview = null
+      }
+      return resultOf(host, viewport, { command, preview: preview ?? undefined, hit })
     }
 
     if (hit?.coordinateSpace === 'world' && hit.source === 'world') {
@@ -671,8 +775,26 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
       viewport,
       previewCamera ?? session.sessionCamera,
     )
+    const viewportPoint = pointerToSpatialViewport(client, viewport)
     if (!gesture) return resultOf(host, viewport)
 
+    if (gesture.type === 'viewport-move') {
+      preview = previewMove({
+        type: 'move',
+        startWorld: gesture.startViewport,
+        nodes: gesture.nodes,
+      }, viewportPoint)
+      return resultOf(host, viewport, { preview })
+    }
+    if (gesture.type === 'viewport-resize') {
+      preview = previewResize({
+        type: 'resize',
+        direction: gesture.direction,
+        startWorld: gesture.startViewport,
+        nodes: gesture.nodes,
+      }, viewportPoint)
+      return resultOf(host, viewport, { preview })
+    }
     if (gesture.type === 'move') {
       preview = previewMove(gesture, world)
       return resultOf(host, viewport, { preview })
@@ -743,6 +865,30 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
         }),
       )
       return resultOf(host, viewport, { command, previewCamera: undefined })
+    }
+
+    if (active.type === 'viewport-move' || active.type === 'viewport-resize') {
+      const viewportPoint = pointerToSpatialViewport(client, viewport)
+      const next = active.type === 'viewport-move'
+        ? previewMove({
+            type: 'move',
+            startWorld: active.startViewport,
+            nodes: active.nodes,
+          }, viewportPoint)
+        : previewResize({
+            type: 'resize',
+            direction: active.direction,
+            startWorld: active.startViewport,
+            nodes: active.nodes,
+          }, viewportPoint)
+      preview = null
+      previewCamera = null
+      const command = applyCommand(host, (current) =>
+        transformSpatialViewportLayersInSession(current, { layers: next }, {
+          expectedRevision: current.history.present.revision,
+        }),
+      )
+      return resultOf(host, viewport, { command, preview: undefined })
     }
 
     const next = active.type === 'move'

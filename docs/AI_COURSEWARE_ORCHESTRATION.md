@@ -2,19 +2,21 @@
 
 > 适用范围：跨学科、当前已实现的 PPT 兼容固定画布课件
 >
-> 适用版本：策划与验收阶段跨工程版本复用；当前主干目标为 Editor 1.0.0 / Project V8
+> **状态：历史文档（2026-08-13）。** 当前编排以 [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) 为准；构建入口是 [`build-courseware-project`](../.agents/skills/build-courseware-project/SKILL.md)。下文 Project V8 / Hash / `implementation-ready` 已过时。
+>
+> 适用版本：策划与验收阶段的设计背景；当前主干目标为 Course Project V9
 >
 > 文档角色：面向人类的设计背景、审阅解释与长期治理说明；机器执行以仓库 Skill、校验器和当前协议代码为准
 >
 > 同步基线：2026-08-13
 
-本文解释从教学需求进入到成品接受之间的设计意图、人类判断、质量关注点和复用治理。仓库 [orchestrate-courseware Skill](../.agents/skills/orchestrate-courseware/SKILL.md) 是课例编排的机器执行权威；它把本文中仍需执行的规则收敛为 V2 课例、适应性路径、哈希审批和派生 readiness。[build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md) 是当前工程实现的机器执行权威。[当前创作与接入规范](AI_COURSEWARE_AUTHORING.md) 保留 Project V8 的工程事实与设计理由。AI 不需要在每次创作前把两份长文全文载入上下文，应按 Skill 路由并只读取当前任务所需章节。
+本文解释从教学需求进入到成品接受之间的设计意图、人类判断、质量关注点和复用治理。仓库 [orchestrate-courseware Skill](../.agents/skills/orchestrate-courseware/SKILL.md) 是当前课例编排的机器执行权威。[build-courseware-project Skill](../.agents/skills/build-courseware-project/SKILL.md) 是当前工程实现的机器执行权威。[创作与接入规范](AI_COURSEWARE_AUTHORING.md) 是同期历史背景。AI 不需要在每次创作前把两份长文全文载入上下文，应按当前 Skill 路由。
 
 职责边界如下：编排 Skill 冻结目标、证据、精确内容、呈现脚本和必要的高风险视觉方向；学科 Skill、用户材料或本次提示词提供数学、语文、实验安全等专有知识；Builder Skill 选择原生/运行时/混合/组件载体并负责 Authoring Inventory、实现、局部 Patch、验证、导出和证据；只有指定人类可以批准 review scope 或把结果标为 `accepted`。通用工作流保持薄，不为学科差异扩张一套常驻通用状态机。
 
 Editor 1.x 没有内置模型调用或 AI patch。本流程由编辑器外部的 AI 创作会话执行；需要人类决策时先把宿主无关的 `DecisionPrompt` 写入课例。宿主暴露 `request_user_input` 时直接调用，不要求或检查 Plan mode；工具缺失时只在确有安全默认值时记录 `safe-default`，否则保留同一 blocking 决策并提出一个简短等价文本问题，收到回答后记录为 `user-text`。这不表示人工智能已经集成进 Editor 1.x。
 
-当前主干只接受固定 1280×720、可兼容导出 PPTX 的 Project V8 Slide 工程；Project V1–V7 均不受支持。当前实现链为 Project V8 / Runtime API 2 / Runtime Authoring 1 / Component API 4，哈希有效的 V2 `implementation-ready` 课例可交给 V8 Builder。其他尚未实现的创作表面不属于本文生成协议，不得由 AI 伪造 Project 字段或成品能力。
+当前主干只接受固定 1280×720 的 Course Project V9（含 Slide / Flow / Spatial / Mixed）。旧 Project V1–V8 均不受支持。当前实现链为 Course Project V9 / Runtime API 2/3 / Component API 4。不得由 AI 伪造未发布 Project 字段或成品能力。
 
 ## 1. 编排层的职责
 
@@ -515,7 +517,7 @@ interface PresentationBeat {
 
 ### 11.3 实现入口
 
-编排层不先做技术计划。所需 reviews 完成后运行 V2 校验器，让它从当前输入、决策、制品与批准 scope 派生 `implementation-ready`；随后交给 [build-project-v8-courseware Skill](../.agents/skills/build-project-v8-courseware/SKILL.md)。Builder 会重跑入口校验，再按需读取 Capability 子合同和 [当前创作与接入规范](AI_COURSEWARE_AUTHORING.md) 的相关工程章节，选择载体并创建内部开发计划与 Authoring Inventory。Builder 若发现新的用户可见取舍，返回编排层修订相应制品，而不是自行猜写。
+编排层不先做技术计划。所需 reviews 完成后运行 V2 校验器，让它从当前输入、决策、制品与批准 scope 派生 `implementation-ready`；随后交给 [build-courseware-project Skill](../.agents/skills/build-courseware-project/SKILL.md)。Builder 会重跑入口校验，再按需读取 Capability 子合同和 [当前创作与接入规范](AI_COURSEWARE_AUTHORING.md) 的相关工程章节，选择载体并创建内部开发计划与 Authoring Inventory。Builder 若发现新的用户可见取舍，返回编排层修订相应制品，而不是自行猜写。
 
 ## 12. V2 课例真相与派生 `implementation-ready`
 

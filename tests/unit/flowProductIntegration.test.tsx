@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import { listFlowCourseTreePages } from '@/renderer/course/flowEditorView'
+import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
@@ -124,14 +125,29 @@ describe('Flow product shell wiring', () => {
     fireEvent.click(screen.getByTestId('add-text'))
     expect(useEditorStore.getState().errorMessage).toBeNull()
     expect(flowDocument().revision).toBe(startRevision + 1)
+    const createdId = useEditorStore.getState().flowSession?.selection.selectedBlockId
+    expect(createdId).toBeTruthy()
+    const created = findFlowBlockRecursive(flowSurface().blocks, createdId!)
+    expect(created?.block.type).toBe('paragraph')
+
+    const heading = flowSurface().blocks.find((block) => block.type === 'heading')
+    expect(heading && heading.type === 'heading').toBe(true)
+    const flow = useEditorStore.getState().flowSession
+    if (!flow || !heading) throw new Error('expected flow heading')
+    useEditorStore.setState({
+      flowSession: {
+        ...flow,
+        selection: selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [heading.id]),
+      },
+    })
 
     cleanup()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.queryByLabelText('文字内容')).toBeNull()
     expect(screen.queryByText('文字内容')).toBeNull()
     fireEvent.click(screen.getByTestId('flow-format-bold'))
-    const heading = flowSurface().blocks.find((block) => block.type === 'heading')
-    expect(heading && heading.type === 'heading' ? heading.runs?.some((run) => run.style?.bold) : false).toBe(true)
+    const formatted = flowSurface().blocks.find((block) => block.type === 'heading')
+    expect(formatted && formatted.type === 'heading' ? formatted.runs?.some((run) => run.style?.bold) : false).toBe(true)
   })
 
   it('inserts MediaTab images as document blocks and round-trips a V9 archive', () => {

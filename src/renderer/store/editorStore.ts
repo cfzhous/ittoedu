@@ -921,13 +921,6 @@ function commandTargetForRow(row: EffectiveLayerProjectionRow) {
   }
 }
 
-function refusesTeacherControllerOwnerMove(
-  from: EffectiveLayerProjectionRow,
-  to: EffectiveLayerProjectionRow,
-): boolean {
-  return (from.isTeacherController || to.isTeacherController) && from.ownerKey !== to.ownerKey
-}
-
 function sessionFromLayerResult(
   session: SlideAuthoringSession,
   result: LayerCommandResult,
@@ -4162,7 +4155,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const from = projection?.unifiedRows.find((row) => row.id === fromId)
         const to = projection?.unifiedRows.find((row) => row.id === toId)
         if (!from || !to) return
-        if (refusesTeacherControllerOwnerMove(from, to)) return
         const destination: EffectiveLayerOwnerDestination = {
           source: to.owner,
           surfaceId: to.scopeToken.surfaceId,
@@ -4182,7 +4174,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const from = projection?.unifiedRows.find((row) => row.id === fromId)
         const to = projection?.unifiedRows.find((row) => row.id === toId)
         if (!from || !to) return
-        if (refusesTeacherControllerOwnerMove(from, to)) return
         const destination: EffectiveLayerOwnerDestination = {
           source: to.owner,
           surfaceId: to.scopeToken.surfaceId,
@@ -4202,7 +4193,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const from = projection?.unifiedRows.find((row) => row.id === fromId)
       const to = projection?.unifiedRows.find((row) => row.id === toId)
       if (!from || !to) return
-      if (refusesTeacherControllerOwnerMove(from, to)) return
       const destination: EffectiveLayerOwnerDestination = {
         source: to.owner,
         surfaceId: to.scopeToken.surfaceId,
@@ -6160,13 +6150,24 @@ export const useEditorStore = create<EditorState>((set, get) => {
         const found = flow.selection.selectedBlockId
           ? findFlowBlockRecursive(surface.blocks, flow.selection.selectedBlockId)
           : null
-        persistFlowResult(insertFlowEditorBlock(document, {
+        const inserted = insertFlowEditorBlock(document, {
           surfaceId: flow.selection.surfaceId,
           parentId: found?.parentId ?? null,
           index: found ? found.index + 1 : surface.blocks.length,
           block: { type: 'paragraph', text: '' },
-        }, { expectedRevision: document.revision }), {
+        }, { expectedRevision: document.revision })
+        const createdId = inserted.createdBlockIds?.[0]
+        persistFlowResult(inserted, {
           statusMessage: '已插入段落',
+          ...(inserted.ok && inserted.nextDocument && createdId
+            ? {
+                selection: selectFlowEditorBlocks(
+                  inserted.nextDocument,
+                  flow.selection.locationId,
+                  [createdId],
+                ),
+              }
+            : {}),
         })
         return
       }

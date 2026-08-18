@@ -18,6 +18,9 @@ import type {
 } from '../../shared/courseProjectTypes'
 import { createTeacherControllerNode } from '../project/createProject'
 import {
+  synchronizeCourseTeacherControllerControls,
+} from '../../shared/teacherControllerConsistency'
+import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,
@@ -793,6 +796,9 @@ export function deleteGlobalLayerItem(
       if (index < 0) throw new Error(`找不到全局图层：${entry.item.layerItemId}`)
       draft.globalLayerItems.splice(index, 1)
       stripLayerReferencesFromInteractions(draft, new Set([entry.item.layerItemId]))
+      if (isTeacherControllerLayerItem(entry.item)) {
+        synchronizeCourseTeacherControllerControls(draft)
+      }
     }, impact?.message ?? `已删除“${entry.item.label}”`, options)
   } catch (error) {
     return failLayerCommand(error instanceof Error ? error.message : '无法删除全局图层')

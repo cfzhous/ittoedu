@@ -3,20 +3,29 @@ import type {
   CourseLocation,
   NativeElementContent,
 } from '../../../shared/courseProjectTypes'
+import type { TeacherControllerAction } from '../../../shared/projectTypes'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
+  PublishedNativeLayerItem,
   PublishedScopedLayerItem,
   PublishedSlideScene,
   PublishedSlideSurface,
 } from '../../../shared/publishedCourseTypes'
+import { buildMixedDeepLink } from '../mixed/MixedCourseNavigator'
 import type {
   SurfaceCapture,
   SurfaceCaptureRequest,
   SurfaceHost,
   SurfaceMountContext,
+  SurfacePlayerServices,
   SurfaceResetScope,
 } from '../SurfaceHost'
+import {
+  TeacherControllerDom,
+  teacherControllerDomNode,
+  type TeacherControllerDomSession,
+} from '../../teacherControllerDom'
 
 function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
   return structuredClone(payload)
@@ -153,15 +162,23 @@ function applyVisibleTextFallback(wrap: HTMLElement, text: string): void {
   wrap.textContent = text
 }
 
+function isPublishedTeacherController(
+  item: PublishedLayerItem,
+): item is PublishedNativeLayerItem & {
+  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
+} {
+  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
 function appendLayerNode(
   dom: Document,
   parent: HTMLElement,
   item: PublishedLayerItem,
   source: 'scene' | 'surface' | 'global',
   resolveAsset: (assetId: string) => string | undefined,
+  mountTeacherController?: (wrap: HTMLElement, item: PublishedNativeLayerItem) => void,
 ): void {
   if (!item.visible || item.playbackInitialVisibility === 'hidden') return
-  if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') return
   const wrap = dom.createElement('div')
   wrap.dataset.slideLayerItem = item.layerItemId
   wrap.dataset.layerSource = source
@@ -173,10 +190,12 @@ function appendLayerNode(
   wrap.style.width = `${item.frame.width}px`
   wrap.style.height = `${item.frame.height}px`
   wrap.style.opacity = String(item.opacity)
-  wrap.style.pointerEvents = 'none'
+  wrap.style.pointerEvents = isPublishedTeacherController(item) ? 'auto' : 'none'
   wrap.style.zIndex = String(item.order)
   if (item.kind === 'native') wrap.dataset.nativeType = item.content.nativeType
-  if (item.kind === 'native' && item.content.nativeType === 'text') {
+  if (isPublishedTeacherController(item)) {
+    mountTeacherController?.(wrap, item)
+  } else if (item.kind === 'native' && item.content.nativeType === 'text') {
     applyNativeTextStyle(wrap, item.content.data)
   } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
     const data = item.content.data
@@ -244,6 +263,10 @@ export class SlidePublishedAdapter implements SurfaceHost {
   #locationId: string
   #root: HTMLElement | null = null
   #active = false
+  #services: SurfacePlayerServices | null = null
+  #controllers: TeacherControllerDom[] = []
+  #controllerSessions = new Map<string, TeacherControllerDomSession>()
+  #muted = false
 
   constructor(
     payload: PublishedCourseV2Payload,
@@ -280,6 +303,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
     root.hidden = !this.#active
     context.container.appendChild(root)
     this.#root = root
+    this.#services = context.services
     this.#render()
   }
 
@@ -318,14 +342,126 @@ export class SlidePublishedAdapter implements SurfaceHost {
   }
 
   async destroy(): Promise<void> {
+    this.#destroyControllers()
     this.#root?.remove()
     this.#root = null
     this.#active = false
+    this.#services = null
+  }
+
+  #destroyControllers(): void {
+    for (const controller of this.#controllers) controller.destroy()
+    this.#controllers = []
+  }
+
+  #controllerSessionFor(item: PublishedLayerItem): TeacherControllerDomSession {
+    const existing = this.#controllerSessions.get(item.layerItemId)
+    if (existing) return existing
+    const collapsed = isPublishedTeacherController(item)
+      ? item.content.data.collapsible && item.content.data.defaultCollapsed
+      : false
+    const session: TeacherControllerDomSession = {
+      offset: { dx: 0, dy: 0 },
+      collapsed,
+    }
+    this.#controllerSessions.set(item.layerItemId, session)
+    return session
+  }
+
+  #mountTeacherController(wrap: HTMLElement, item: PublishedNativeLayerItem): void {
+    if (!isPublishedTeacherController(item) || this.#payload.playback.controls === 'none') return
+    const root = this.#root
+    if (!root) return
+    const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
+    const controller = new TeacherControllerDom({
+      node,
+      container: wrap,
+      canvas: { width: 1280, height: 720 },
+      getRenderedStageBounds: () => {
+        const bounds = root.getBoundingClientRect()
+        return {
+          width: Math.max(1, bounds.width || 1280),
+          height: Math.max(1, bounds.height || 720),
+        }
+      },
+      scenes: this.#payload.locations.map((location) => ({
+        id: location.id,
+        name: location.label,
+      })),
+      getCurrentSceneId: () => this.#locationId,
+      getStateLabel: () => null,
+      getStatus: () => ({
+        muted: this.#muted,
+        fullscreen: Boolean(root.ownerDocument.fullscreenElement),
+      }),
+      getSession: () => this.#controllerSessionFor(item),
+      onSessionChange: (next) => {
+        this.#controllerSessions.set(item.layerItemId, next)
+      },
+      onAction: (action) => {
+        void this.#handleControllerAction(action)
+      },
+      getInteractive: () => this.#active,
+    })
+    this.#controllers.push(controller)
+  }
+
+  async #handleControllerAction(action: TeacherControllerAction): Promise<void> {
+    if (action.type === 'audio.toggle-mute') {
+      this.#muted = !this.#muted
+      for (const controller of this.#controllers) controller.refreshStatus()
+      return
+    }
+    if (action.type === 'player.fullscreen.toggle') {
+      const root = this.#root
+      const dom = root?.ownerDocument
+      if (!dom) return
+      if (dom.fullscreenElement) await dom.exitFullscreen?.()
+      else await root?.requestFullscreen?.()
+      for (const controller of this.#controllers) controller.refreshStatus()
+      return
+    }
+    const locations = this.#payload.locations
+    const index = locations.findIndex((location) => location.id === this.#locationId)
+    if (action.type === 'scene.next' && index >= 0 && index < locations.length - 1) {
+      await this.#navigateTo(locations[index + 1]!)
+      return
+    }
+    if (action.type === 'scene.previous' && index > 0) {
+      await this.#navigateTo(locations[index - 1]!)
+      return
+    }
+    if (action.type === 'course.restart') {
+      const start = locations.find((location) => location.id === this.#payload.startLocationId)
+        ?? locations[0]
+      if (start) await this.#navigateTo(start)
+      return
+    }
+    if (action.type === 'scene.replay') {
+      const current = locations[index] ?? locations.find((location) => location.id === this.#locationId)
+      if (current) await this.#navigateTo(current)
+      return
+    }
+    if (action.type === 'scene.go') {
+      const target = locations.find((location) => (
+        location.id === action.sceneId
+        || (location.kind === 'slide-scene' && location.sceneId === action.sceneId)
+      ))
+      if (target) await this.#navigateTo(target)
+    }
+  }
+
+  async #navigateTo(location: CourseLocation): Promise<void> {
+    await this.#services?.navigate(buildMixedDeepLink({
+      locationId: location.id,
+      surfaceId: location.surfaceId,
+    }))
   }
 
   #render(): void {
     const root = this.#root
     if (!root) return
+    this.#destroyControllers()
     const surface = findSlideSurface(this.#payload, this.id)
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
     const scene = sceneOf(surface, location)
@@ -338,16 +474,19 @@ export class SlidePublishedAdapter implements SurfaceHost {
     stage.style.position = 'absolute'
     stage.style.inset = '0'
     root.appendChild(stage)
+    const mountController = (wrap: HTMLElement, item: PublishedNativeLayerItem) => {
+      this.#mountTeacherController(wrap, item)
+    }
     for (const item of scene.layerItems) {
-      appendLayerNode(root.ownerDocument, stage, item, 'scene', this.#resolveAsset)
+      appendLayerNode(root.ownerDocument, stage, item, 'scene', this.#resolveAsset, mountController)
     }
     for (const entry of this.#payload.globalLayerItems) {
       if (!isScopedVisible(entry, location.id)) continue
-      appendLayerNode(root.ownerDocument, stage, entry.item, 'global', this.#resolveAsset)
+      appendLayerNode(root.ownerDocument, stage, entry.item, 'global', this.#resolveAsset, mountController)
     }
     for (const entry of surface.surfaceLayerItems) {
       if (!isScopedVisible(entry, location.id)) continue
-      appendLayerNode(root.ownerDocument, stage, entry.item, 'surface', this.#resolveAsset)
+      appendLayerNode(root.ownerDocument, stage, entry.item, 'surface', this.#resolveAsset, mountController)
     }
   }
 }

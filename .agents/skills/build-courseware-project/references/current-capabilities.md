@@ -9,4 +9,4 @@
 - Capability Index 未声明的功能视为不可用；计划、旧示例和旧 Skill 不能补足它。
 - 组件必须满足当前 availability、许可、维护者和质量门槛；否则回退为课例本地模块或停止。
 - Agent Kit 的 CourseProject 是构建输入合同，不是产品持久化 Schema；只有当前产品编译器输出的 Project 才是工程真相。
-- Flow、Spatial 2D、Mixed 或下一版协议只能在当前索引与编译器同时发布后使用。
+- Flow、Spatial 2D、Mixed 已是当前产品能力：用 Capability Index 与源码确认边界，不要按旧计划把它们当成未发布。

@@ -449,6 +449,8 @@ describe('V9 effective / global layer commands', () => {
     )
     expect(withoutController.ok).toBe(true)
     expect(findGlobalTeacherController(withoutController.nextDocument!)).toBeUndefined()
+    expect(withoutController.nextDocument?.playback.controls).toBe('none')
+    expect(courseProjectDocumentSchema.safeParse(withoutController.nextDocument).success).toBe(true)
 
     const restored = restoreDefaultTeacherController(withoutController.nextDocument!, {
       expectedRevision: withoutController.nextDocument!.revision,

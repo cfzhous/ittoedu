@@ -1,4 +1,4 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES } from '../../shared/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES, MIN_NODE_SIZE } from '../../shared/constants'
 import {
   applyComponentVariant,
   resolveComponentPresetProps,
@@ -964,6 +964,75 @@ export function setFlowOverlayVisibleAtLocation(
     }
   } catch (error) {
     return fail(error instanceof Error ? error.message : '无法更新当前页显隐')
+  }
+}
+
+export function transformFlowOverlayFrame(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+  options: FlowCommandOptions = {},
+): FlowSharedAuthoringResult {
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return fail('请先选择一个浮层或全局层项目')
+  const located = locateCourseLayer(document, overlayId)
+  if (!located) return fail(`找不到浮层：${overlayId}`)
+  if (located.source !== 'global' && located.source !== 'surface') {
+    return fail('当前选择不是页面浮层')
+  }
+  if (isTeacherControllerLayerItem(located.item) && located.source !== 'global') {
+    return fail(FLOW_CONTROLLER_EMBED_REASON)
+  }
+  const locked = teacherLocked(located.item)
+  if (locked) return locked
+  if (
+    !Number.isFinite(frame.x) ||
+    !Number.isFinite(frame.y) ||
+    !Number.isFinite(frame.width) ||
+    !Number.isFinite(frame.height) ||
+    frame.width < MIN_NODE_SIZE ||
+    frame.height < MIN_NODE_SIZE
+  ) {
+    return fail('浮层尺寸无效')
+  }
+  const current = located.item.frame
+  const unchanged =
+    Math.abs(current.x - frame.x) < 0.01 &&
+    Math.abs(current.y - frame.y) < 0.01 &&
+    Math.abs(current.width - frame.width) < 0.01 &&
+    Math.abs(current.height - frame.height) < 0.01
+  if (unchanged) {
+    return {
+      ok: true,
+      reason: '未变化',
+      nextDocument: document,
+      historyEntry: false,
+      selection,
+      ownership: 'viewport-overlay',
+    }
+  }
+  const mutated = runOverlayMutation(document, options, (draft) => {
+    const next = locateCourseLayer(draft, overlayId)
+    if (!next || (next.source !== 'global' && next.source !== 'surface')) {
+      throw new Error('找不到浮层')
+    }
+    if (isTeacherControllerLayerItem(next.item) && next.source !== 'global') {
+      throw new Error(FLOW_CONTROLLER_EMBED_REASON)
+    }
+    next.item.frame = {
+      mode: 'absolute',
+      x: frame.x,
+      y: frame.y,
+      width: frame.width,
+      height: frame.height,
+    }
+    return []
+  }, '已调整浮层位置')
+  if (!mutated.ok) return mutated
+  return {
+    ...mutated,
+    selection,
+    ownership: 'viewport-overlay',
   }
 }
 

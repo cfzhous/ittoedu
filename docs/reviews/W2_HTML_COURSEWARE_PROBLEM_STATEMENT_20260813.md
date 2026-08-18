@@ -1,7 +1,7 @@
 # W2 HTML 互动课件问题说明与联合研判请求
 
 - 日期：2026-08-13
-- 状态：问题说明；尚未形成修复决策
+- 状态：历史问题说明；不是当前执行入口。现行总纲见根目录 `COURSEWARE_DEVELOPMENT_PLAN.md`。当时的 `build-project-v8-courseware` 已从仓库删除。
 - 主产品：HTML / Project V8 互动课件
 - 兼容形态：PDF、PPTX，仅要求静态可读、内容完整和差异诚实，不以对象级还原作为当前主目标
 - 涉及课例：高中数学“二次函数＋判别式”、高中语文《赤壁赋》证据路径
@@ -23,7 +23,7 @@
 当前创作链分为两段：
 
 - [orchestrate-courseware](../../.agents/skills/orchestrate-courseware/SKILL.md) 冻结教学目标、证据、精确内容、教师/学生控制、错误反馈和呈现脚本；
-- [build-project-v8-courseware](../../.agents/skills/build-project-v8-courseware/SKILL.md) 选择 `native-owned | runtime-owned | hybrid-owned | component-composed`，生成 Project V8、HTML 和证据。
+- [当时的 V8 Builder](../../.agents/skills/build-courseware-project/SKILL.md) 选择载体并生成工程、HTML 和证据（原文指向已删除的 `build-project-v8-courseware`）。
 
 两个 W2 课例均通过了现有结构校验、Project 校验、编辑保存重开、HTML/网页包和证据校验，manifest 标记为：
 

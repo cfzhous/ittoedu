@@ -1,5 +1,7 @@
 # W3 Windows / 离线可移植性工程验证记录（2026-08-13）
 
+> 历史证据。同机 `engineering candidate`，不是当前发布 Gate。
+
 ## 1. 结论
 
 本轮把 W3 中可由当前 Windows 主机自动证明的“应用复制、工程移动、组件断源、自包含离线交付、文档启动合同”补成了真实工程验证。结果为 **`engineering candidate`**，不是 W3 完成、不是内部正式版 `accepted`。

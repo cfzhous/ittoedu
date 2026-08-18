@@ -906,6 +906,96 @@ export function transformSpatialWorldLayersInSession(
   }
 }
 
+/**
+ * One completed viewport/HUD gesture. Writes global frames only; world items
+ * stay on `transformSpatialWorldLayers`. Teacher controller cannot sink.
+ */
+export function transformSpatialViewportLayers(
+  history: SpatialAuthoringHistory,
+  selection: SpatialAuthoringSelection,
+  input: SpatialEditorTransformInput,
+  now?: string,
+): SpatialAuthoringHistory {
+  const transforms = [...(input.nodes ?? input.layers ?? [])]
+  if (transforms.length === 0) return history
+  const layerItemIds = transforms.map((transform) => transform.layerItemId)
+  if (new Set(layerItemIds).size !== layerItemIds.length) {
+    throw new SpatialCommandError('invalid-selection', '一次变换不能包含重复元素')
+  }
+  transforms.forEach(validateWorldTransform)
+
+  const selectedIds = new Set(selection.selectionIds)
+  const unselectedId = layerItemIds.find((layerItemId) => !selectedIds.has(layerItemId))
+  if (unselectedId !== undefined) {
+    throw new SpatialCommandError('invalid-selection', '变换目标不在当前选择中')
+  }
+
+  const view = buildSpatialEditorView({
+    project: history.present,
+    locationId: selection.locationId,
+  })
+  if (view.surfaceId !== selection.surfaceId) {
+    throw new Error('所选空间表面已失效，请重新选择')
+  }
+
+  const layerById = new Map(view.layers.map((layer) => [layer.selectionId, layer]))
+  const plans = transforms.map((transform) => {
+    const layer = layerById.get(transform.layerItemId)
+    if (!layer) throw new SpatialCommandError('invalid-selection', '所选元素已失效，请重新选择')
+    if (layer.source !== 'global' || layer.coordinateSpace !== 'viewport') {
+      throw new SpatialCommandError(SPATIAL_REJECT_WRONG_OWNER, '视口元素必须留在全局层')
+    }
+    if (layer.item.locked) {
+      throw new SpatialCommandError(SPATIAL_REJECT_LOCKED, '当前元素已锁定')
+    }
+    const changed =
+      layer.item.frame.x !== transform.x ||
+      layer.item.frame.y !== transform.y ||
+      layer.item.frame.width !== transform.width ||
+      layer.item.frame.height !== transform.height ||
+      layer.item.rotation !== transform.rotation
+    return { transform, changed }
+  })
+  if (!plans.some((plan) => plan.changed)) return history
+
+  const next = commitSpatialProjectMutation(history.present, (draft) => {
+    const globalById = new Map(draft.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item]))
+    for (const { transform, changed } of plans) {
+      if (!changed) continue
+      const item = globalById.get(transform.layerItemId)
+      if (!item) throw new SpatialCommandError('invalid-selection', '所选元素已失效，请重新选择')
+      item.frame.x = transform.x
+      item.frame.y = transform.y
+      item.frame.width = transform.width
+      item.frame.height = transform.height
+      item.rotation = transform.rotation
+    }
+  }, now)
+
+  return commitSpatialAuthoringHistory(history, next)
+}
+
+export function transformSpatialViewportLayersInSession(
+  session: SpatialAuthoringSession,
+  input: SpatialEditorTransformInput,
+  options: SpatialCommandOptions = {},
+): SpatialCommandResult {
+  const stale = rejectSpatialIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    const history = transformSpatialViewportLayers(
+      session.history,
+      session.selection,
+      input,
+      options.now,
+    )
+    if (history === session.history) return succeedSpatialCommand(session, false)
+    return succeedSpatialCommand(replaceSpatialSession(session, { history }), true)
+  } catch (error) {
+    return catchSpatialCommand(session, error)
+  }
+}
+
 function requireWorldSelection(
   history: SpatialAuthoringHistory,
   selection: SpatialAuthoringSelection,
