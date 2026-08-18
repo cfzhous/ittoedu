@@ -385,6 +385,40 @@ function sceneLayerView(
   return layer
 }
 
+function ownedLayerView(
+  session: SlideAuthoringSessionRef,
+  layerItemId: string,
+): SlideEditorLayerView {
+  const view = buildSlideEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: session.selection.stateId,
+  })
+  const layer = view.layers.find((candidate) => candidate.selectionId === layerItemId)
+  if (!layer) throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+  if (layer.source !== session.scope) {
+    throw new SlideCommandError(
+      SLIDE_REJECT_WRONG_OWNER,
+      session.scope === 'global' ? '当前选择不属于全局层' : '当前选择不属于当前幻灯片场景',
+    )
+  }
+  return layer
+}
+
+function requireUnlockedOwnedLayer(
+  session: SlideAuthoringSessionRef,
+  layerItemId: string,
+): SlideEditorLayerView {
+  const layer = ownedLayerView(session, layerItemId)
+  if (layer.item.locked) {
+    throw new SlideCommandError(SLIDE_REJECT_LOCKED, '当前元素已锁定')
+  }
+  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'teacher-controller') {
+    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器不由本命令编辑')
+  }
+  return layer
+}
+
 function requireUnlockedSceneLayer(
   session: SlideAuthoringSessionRef,
   layerItemId: string,
@@ -870,7 +904,7 @@ export function updateSlideNativeLayerContent(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const layer = requireUnlockedSceneLayer(session, layerItemId)
+    const layer = requireUnlockedOwnedLayer(session, layerItemId)
     if (layer.item.kind !== 'native') {
       throw new SlideCommandError('invalid-target', '当前选择不是原生图层')
     }
@@ -888,6 +922,18 @@ export function updateSlideNativeLayerContent(
       return succeed(session, false)
     }
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
+      if (session.scope === 'global') {
+        const globalEntry = draft.globalLayerItems.find((entry) => entry.item.layerItemId === layerItemId)
+        if (!globalEntry || globalEntry.item.kind !== 'native') {
+          throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+        }
+        globalEntry.item.content.data = mergeCourseNativeData(
+          globalEntry.item.content.data as Record<string, unknown>,
+          nativeData,
+        ) as typeof globalEntry.item.content.data
+        if (patch.label !== undefined) globalEntry.item.label = patch.label
+        return
+      }
       const { scene } = slideSceneContext(draft, session)
       writeNativeData(
         scene,

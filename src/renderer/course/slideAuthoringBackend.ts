@@ -823,7 +823,7 @@ export function transformSlideNativeLayers(
 ): SlideCommandResult {
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
-  if (session.scope !== 'scene') {
+  if (session.scope !== 'scene' && session.scope !== 'global') {
     return reject(session, SLIDE_REJECT_WRONG_OWNER)
   }
   try {
@@ -831,6 +831,7 @@ export function transformSlideNativeLayers(
       session.history,
       session.selection,
       input,
+      session.scope,
       options.now,
     )
     if (history === session.history) return succeed(session, false)
