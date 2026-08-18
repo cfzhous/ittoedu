@@ -5629,7 +5629,7 @@ button:disabled {
 .workspace--spatial .canvas-viewport {
   inset: 42px 0 0;
   overflow: hidden;
-  background: #111318;
+  background: #ffffff;
 }
 
 .workspace--spatial .canvas-viewport::before {
@@ -5637,9 +5637,9 @@ button:disabled {
   content: "";
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 0.8px, transparent 0.8px);
+  background-image: radial-gradient(rgba(23, 32, 51, 0.22) 0.8px, transparent 0.8px);
   background-size: 28px 28px;
-  opacity: 0.55;
+  opacity: 0.35;
 }
 
 .spatial-world-layer,
