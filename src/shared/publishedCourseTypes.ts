@@ -145,12 +145,14 @@ export interface PublishedSlideSurface extends PublishedSurfaceBase {
 
 export interface PublishedFlowSurface extends PublishedSurfaceBase {
   type: 'flow'
+  backgroundColor?: string
   layout: { readingWidth: number; wideContentWidth: number }
   blocks: FlowBlock[]
 }
 
 export interface PublishedSpatialSurface extends PublishedSurfaceBase {
   type: 'spatial-2d'
+  backgroundColor?: string
   world: {
     bounds:
       | { mode: 'infinite' }

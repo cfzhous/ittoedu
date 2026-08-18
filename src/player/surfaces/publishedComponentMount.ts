@@ -3,10 +3,12 @@ import type {
   ComponentHostActions,
   ComponentManifest,
   ComponentPackageData,
+} from '../../shared/componentTypes'
+import type {
   PublishedCourseAsset,
   PublishedCourseComponent,
   PublishedCourseExecutableCode,
-} from '../../shared/componentTypes'
+} from '../../shared/publishedCourseTypes'
 import {
   tryCreateComponentLifecycle,
   type GuardedComponentInstanceLifecycle,
@@ -88,15 +90,22 @@ function extractManifest(source: PublishedComponentPackageSource): ComponentMani
   if ('manifest' in source && source.manifest) {
     return source.manifest
   }
+  const published = source as PublishedCourseComponent
   return {
-    id: source.id,
-    name: source.name ?? source.id,
-    version: source.version ?? '1.0.0',
-    apiVersion: 4,
-    scopes: source.scopes ?? ['scene', 'global'],
-    renderMode: source.renderMode ?? 'dom',
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    id: published.id,
+    name: published.name ?? published.id,
+    version: published.version ?? '1.0.0',
+    entry: '',
+    defaultSize: { width: 400, height: 300 },
+    minSize: { width: 100, height: 100 },
+    preserveAspectRatio: false,
+    supportedScopes: published.scopes ?? ['scene', 'global'],
+    renderMode: published.renderMode ?? 'dom',
+    assets: {},
     defaultProps: {},
-  } as ComponentManifest
+  }
 }
 
 function extractRuntimeSource(source: PublishedComponentPackageSource): string {

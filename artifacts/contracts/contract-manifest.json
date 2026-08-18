@@ -13,7 +13,7 @@
       "name": "publishedCourseV2Schema",
       "file": "published-course-v2.schema.json",
       "sourceOfTruth": "src/shared/publishedCourseSchema.ts",
-      "sha256": "dff184c184e98fa5400b1ec7968c4e7c928ed49cb78ca77cb17976db4409754f"
+      "sha256": "358673a46104cc109fbcb08d17c9cab6d71c1a80356afb6024b7339d50f1d4e9"
     },
     {
       "name": "componentManifestSchema",

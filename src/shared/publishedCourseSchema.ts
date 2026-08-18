@@ -191,6 +191,7 @@ const publishedSlideSurfaceSchema = z.object({
 const publishedFlowSurfaceSchema = z.object({
   ...publishedSurfaceBaseFields,
   type: z.literal('flow'),
+  backgroundColor: colorSchema.optional(),
   layout: z.object({
     readingWidth: finiteNumber.min(320).max(2_400),
     wideContentWidth: finiteNumber.min(320).max(4_000),
@@ -209,6 +210,7 @@ const semanticZoomSchema = z.object({
 const publishedSpatialSurfaceSchema = z.object({
   ...publishedSurfaceBaseFields,
   type: z.literal('spatial-2d'),
+  backgroundColor: colorSchema.optional(),
   world: z.object({
     bounds: z.discriminatedUnion('mode', [
       z.object({ mode: z.literal('infinite') }).strict(),

@@ -502,6 +502,7 @@ function publishSurface(
     return {
       ...base,
       type: 'flow',
+      ...(surface.backgroundColor !== undefined ? { backgroundColor: surface.backgroundColor } : {}),
       layout: cloneJson(surface.layout),
       blocks: publishFlowBlocks(sources, surface.blocks),
     }
@@ -509,6 +510,7 @@ function publishSurface(
   return {
     ...base,
     type: 'spatial-2d',
+    ...(surface.backgroundColor !== undefined ? { backgroundColor: surface.backgroundColor } : {}),
     world: {
       bounds: cloneJson(surface.world.bounds),
       layerItems: surface.world.layerItems.map((item) => publishLayerItem(sources, item)),
