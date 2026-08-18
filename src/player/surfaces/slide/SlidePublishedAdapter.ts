@@ -170,6 +170,11 @@ function isPublishedTeacherController(
   return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
 }
 
+function isPublishedInteractiveLayer(item: PublishedLayerItem): boolean {
+  return isPublishedTeacherController(item)
+    || (item.kind === 'native' && item.content.nativeType === 'video')
+}
+
 function appendLayerNode(
   dom: Document,
   parent: HTMLElement,
@@ -190,13 +195,25 @@ function appendLayerNode(
   wrap.style.width = `${item.frame.width}px`
   wrap.style.height = `${item.frame.height}px`
   wrap.style.opacity = String(item.opacity)
-  wrap.style.pointerEvents = isPublishedTeacherController(item) ? 'auto' : 'none'
+  wrap.style.pointerEvents = isPublishedInteractiveLayer(item) ? 'auto' : 'none'
   wrap.style.zIndex = String(item.order)
   if (item.kind === 'native') wrap.dataset.nativeType = item.content.nativeType
   if (isPublishedTeacherController(item)) {
     mountTeacherController?.(wrap, item)
   } else if (item.kind === 'native' && item.content.nativeType === 'text') {
     applyNativeTextStyle(wrap, item.content.data)
+  } else if (item.kind === 'native' && item.content.nativeType === 'video') {
+    const url = resolveAsset(item.content.data.assetId)
+    if (url) {
+      const video = dom.createElement('video')
+      video.controls = true
+      video.src = url
+      video.style.width = '100%'
+      video.style.height = '100%'
+      video.style.objectFit = 'contain'
+      video.style.pointerEvents = 'auto'
+      wrap.appendChild(video)
+    }
   } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
     const data = item.content.data
     wrap.style.boxSizing = 'border-box'
@@ -372,6 +389,9 @@ export class SlidePublishedAdapter implements SurfaceHost {
     if (!isPublishedTeacherController(item) || this.#payload.playback.controls === 'none') return
     const root = this.#root
     if (!root) return
+    const session = this.#controllerSessionFor(item)
+    wrap.style.left = `${item.frame.x + session.offset.dx}px`
+    wrap.style.top = `${item.frame.y + session.offset.dy}px`
     const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
     const controller = new TeacherControllerDom({
       node,
@@ -379,9 +399,13 @@ export class SlidePublishedAdapter implements SurfaceHost {
       canvas: { width: 1280, height: 720 },
       getRenderedStageBounds: () => {
         const bounds = root.getBoundingClientRect()
+        const width = bounds.width > 1 ? bounds.width : 1280
+        const height = bounds.height > 1 ? bounds.height : 720
         return {
-          width: Math.max(1, bounds.width || 1280),
-          height: Math.max(1, bounds.height || 720),
+          left: bounds.width > 1 ? bounds.left : 0,
+          top: bounds.height > 1 ? bounds.top : 0,
+          width,
+          height,
         }
       },
       scenes: this.#payload.locations.map((location) => ({
@@ -397,6 +421,8 @@ export class SlidePublishedAdapter implements SurfaceHost {
       getSession: () => this.#controllerSessionFor(item),
       onSessionChange: (next) => {
         this.#controllerSessions.set(item.layerItemId, next)
+        wrap.style.left = `${item.frame.x + next.offset.dx}px`
+        wrap.style.top = `${item.frame.y + next.offset.dy}px`
       },
       onAction: (action) => {
         void this.#handleControllerAction(action)

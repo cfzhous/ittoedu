@@ -1,6 +1,7 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { SpatialSurfaceHost } from '../../player/surfaces/spatial/SpatialSurfaceHost'
+import { publishedControllerNavigationTarget } from '../../player/surfaces/publishedDynamicHosts'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 
 /**
@@ -17,12 +18,14 @@ export async function mountSpatialLocationTryRun(input: {
   width?: number
   height?: number
 }) {
-  const host = SpatialSurfaceHost.fromPublishedCourse(
-    buildPublishedCourseV2Payload({
-      project: input.project,
-      assetFiles: input.assetFiles ?? {},
-      components: input.components ?? {},
-    }),
+  const published = buildPublishedCourseV2Payload({
+    project: input.project,
+    assetFiles: input.assetFiles ?? {},
+    components: input.components ?? {},
+  })
+  let host!: SpatialSurfaceHost
+  host = SpatialSurfaceHost.fromPublishedCourse(
+    published,
     {
       width: input.width ?? Math.max(1, input.container.clientWidth || 800),
       height: input.height ?? Math.max(1, input.container.clientHeight || 450),
@@ -30,6 +33,31 @@ export async function mountSpatialLocationTryRun(input: {
     {
       locationId: input.locationId,
       playbackPathId: input.playbackPathId ?? null,
+      playbackControls: published.playback.controls === 'none' ? 'none' : 'canvas',
+      courseProgressSource: {
+        getLocations: () => published.locations.map((location) => ({
+          id: location.id,
+          name: location.label,
+        })),
+        getCurrentLocationId: () => host.locationId,
+        getStateLabel: () => null,
+      },
+      executeTeacherControllerAction: async (action) => {
+        const target = publishedControllerNavigationTarget(action, {
+          locations: published.locations,
+          currentLocationId: host.locationId,
+          startLocationId: published.startLocationId,
+        })
+        if (!target || target.kind !== 'spatial-camera' || target.surfaceId !== host.id) {
+          return false
+        }
+        try {
+          await host.setLocationId(target.id)
+          return true
+        } catch {
+          return false
+        }
+      },
     },
   )
   await host.mount(input.container)
