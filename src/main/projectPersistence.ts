@@ -85,19 +85,7 @@ function declaredSchemaVersion(value: unknown): number | null {
   return typeof version === 'number' && Number.isInteger(version) ? version : null
 }
 
-function looksLikeCourseProjectV9(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false
-  const record = value as Record<string, unknown>
-  return Array.isArray(record.locations) && Array.isArray(record.surfaces)
-}
-
-function looksLikeProjectV8(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false
-  const record = value as Record<string, unknown>
-  return Array.isArray(record.scenes) && !looksLikeCourseProjectV9(value)
-}
-
-type RecoveryArchiveKind = 'v9' | 'legacy' | 'unsupported' | 'corrupted'
+type RecoveryArchiveKind = 'v9' | 'unsupported' | 'corrupted'
 
 /** Shallow zip probe for recovery isolation; main must not import renderer archive code. */
 function classifyRecoveryArchive(bytes: Uint8Array): RecoveryArchiveKind {
@@ -108,10 +96,7 @@ function classifyRecoveryArchive(bytes: Uint8Array): RecoveryArchiveKind {
     const value = JSON.parse(new TextDecoder().decode(projectBytes)) as unknown
     const schemaVersion = declaredSchemaVersion(value)
     if (schemaVersion === COURSE_PROJECT_SCHEMA_VERSION) return 'v9'
-    if (schemaVersion === 8 || looksLikeProjectV8(value)) return 'legacy'
     if (schemaVersion !== null) return 'unsupported'
-    if (looksLikeCourseProjectV9(value)) return 'v9'
-    if (looksLikeProjectV8(value)) return 'legacy'
     return 'corrupted'
   } catch {
     return 'corrupted'
@@ -123,20 +108,12 @@ function isRecoverableCourseProjectArchive(bytes: Uint8Array): boolean {
 }
 
 function recoveryArchiveRejectionError(kind: Exclude<RecoveryArchiveKind, 'v9'>): DesktopOperationError {
-  if (kind === 'legacy') {
-    return new DesktopOperationError(
-      'RECOVERY_LEGACY_FORMAT',
-      '自动恢复保存失败',
-      '恢复数据来自旧版工程格式，当前编辑器不会将其当作可恢复课程。',
-      '请通过“导入旧版工程”显式迁移后手动保存。',
-    )
-  }
   if (kind === 'unsupported') {
     return new DesktopOperationError(
       'RECOVERY_UNSUPPORTED_VERSION',
       '自动恢复保存失败',
       '恢复数据的格式版本不受当前编辑器支持。',
-      '请使用能打开该文件的编辑器版本，或从备份恢复。',
+      '请使用能打开该文件的编辑器版本，或从备份恢复。当前不会转换不受支持的工程。',
     )
   }
   return new DesktopOperationError(

@@ -213,16 +213,6 @@ async function launchHeadlessBrowser(): Promise<Browser> {
   })
 }
 
-async function confirmLegacyCourseImport(page: Page): Promise<void> {
-  const importDialog = page.getByRole('alertdialog', { name: '需要显式导入旧版工程' })
-  await expect(importDialog).toBeVisible()
-  await importDialog.getByRole('button', { name: '导入为当前课程工程' }).click()
-  const report = page.getByRole('dialog', { name: '旧版工程导入报告' })
-  await expect(report).toBeVisible()
-  await report.getByRole('button', { name: '完成' }).click()
-  await expect(report).toHaveCount(0)
-}
-
 async function shadowText(locator: Locator): Promise<string> {
   try {
     return await locator.evaluate((host) => (
@@ -679,7 +669,8 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
         pptxSave: exportedPptxPath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await confirmLegacyCourseImport(page)
+      await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
+        .toHaveCount(0)
       const sceneItems = page.locator('[data-testid^="scene-item-"]')
       await expect(sceneItems).toHaveCount(expectedPackageCount)
       for (const entry of matrixCases) {

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Course Project V9 永久夹具
 
 当前可打开的 `schemaVersion: 9` 工程归档（`.h5lesson`），供 round-trip、保存/重开和 T2 之后的通用打开/导出测试使用。
@@ -24,3 +25,10 @@
 ```bash
 npx tsx tests/fixtures/course-project-v9/build.ts
 ```
+=======
+# Course Project V9 夹具
+
+永久产品夹具，供打开、保存、重开和恢复测试使用。文件必须是 `schemaVersion: 9`。
+
+- `slide-native.json`：Slide 原生图片 + 嵌入组件，覆盖归档往返。
+>>>>>>> origin/cursor/t2-remove-v8-import-de5c
