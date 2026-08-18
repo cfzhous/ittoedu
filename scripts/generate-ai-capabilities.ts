@@ -22,6 +22,11 @@ import {
   COMPONENT_SCOPES,
 } from '../src/shared/componentTypes'
 import {
+  COURSE_PROJECT_SCHEMA_VERSION,
+  COURSE_SURFACE_TYPES,
+  LAYER_ITEM_KINDS,
+} from '../src/shared/courseProjectTypes'
+import {
   APP_VERSION,
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -33,7 +38,6 @@ import {
   MAX_SCENE_PRESENTATION_STATES,
   MIN_NODE_SIZE,
   MIN_VISIBLE_NODE_EDGE,
-  PROJECT_SCHEMA_VERSION,
   RECOMMENDED_PROJECT_SCENES,
   RECOMMENDED_SCENE_NODES,
   RUNTIME_API_VERSION,
@@ -59,21 +63,12 @@ import {
   MAX_INTERACTION_CONDITIONS,
   MAX_SCENE_INTERACTIONS,
 } from '../src/shared/interactionTypes'
+import { PUBLISHED_COURSE_FORMAT, PUBLISHED_COURSE_VERSION } from '../src/shared/publishedCourseTypes'
 import {
-  externalComponentNodeSchema,
-  formulaNodeSchema,
-  imageNodeSchema,
-  projectDocumentSchema,
-  sceneNodeSchema,
-  shapeNodeSchema,
-  teacherControllerNodeSchema,
-  textNodeSchema,
-  videoNodeSchema,
-} from '../src/shared/projectSchema'
-import {
-  SCENE_NODE_TYPES,
-  type NodeType,
-} from '../src/shared/projectTypes'
+  SURFACE_RUNTIME_API_VERSION,
+  type SurfaceRuntimeAuthoring,
+  type SurfaceRuntimeInstanceLifecycle,
+} from '../src/shared/surfaceRuntimeTypes'
 import {
   MAX_RUNTIME_ASSET_BINDINGS,
   MAX_RUNTIME_CONTENT_ENTRIES,
@@ -91,7 +86,6 @@ import {
   RUNTIME_RENDER_MODES,
   RUNTIME_SCOPES,
 } from '../src/shared/runtimeTypes'
-import { PUBLISHED_LESSON_VERSION } from '../src/shared/publishedLessonTypes'
 import { ASSESSMENT_EVALUATOR_REGISTRY } from '../src/shared/assessmentEvaluators'
 import {
   HOST_EVIDENCE_CONSOLE_PREFIX,
@@ -106,6 +100,18 @@ import {
 
 export const AI_CAPABILITY_INDEX_MAX_BYTES = 16_384
 export const AI_CAPABILITY_MANIFEST_VERSION = 1 as const
+export const INTERACTION_PROTOCOL_VERSION = 1 as const
+
+export const COURSE_NATIVE_TYPES = [
+  'text',
+  'formula',
+  'image',
+  'video',
+  'shape',
+  'teacher-controller',
+] as const
+
+type CourseNativeType = typeof COURSE_NATIVE_TYPES[number]
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const defaultProjectRoot = path.resolve(scriptDirectory, '..')
@@ -171,18 +177,39 @@ const componentLifecycleIsComplete: AssertExactly<
 
 void runtimeHostActionsAreComplete
 void runtimeLifecycleIsComplete
+const surfaceRuntimeLifecycleHooks = [
+  'setMode',
+  'resize',
+  'updateContent',
+  'updateAssets',
+  'setVisible',
+  'suspend',
+  'resume',
+  'prepareCapture',
+  'exportAuthoringCheckpoint',
+  'restoreAuthoringCheckpoint',
+  'destroy',
+] as const satisfies readonly (keyof SurfaceRuntimeInstanceLifecycle)[]
+
+const surfaceRuntimeAuthoringMethods = [
+  'registerText',
+  'registerAsset',
+  'invalidate',
+] as const satisfies readonly (keyof SurfaceRuntimeAuthoring)[]
+
+const surfaceRuntimeLifecycleIsComplete: AssertExactly<
+  keyof SurfaceRuntimeInstanceLifecycle,
+  typeof surfaceRuntimeLifecycleHooks[number]
+> = true
+const surfaceRuntimeAuthoringIsComplete: AssertExactly<
+  keyof SurfaceRuntimeAuthoring,
+  typeof surfaceRuntimeAuthoringMethods[number]
+> = true
+
 void componentHostActionsAreComplete
 void componentLifecycleIsComplete
-
-const nodeSchemas = {
-  text: textNodeSchema,
-  formula: formulaNodeSchema,
-  image: imageNodeSchema,
-  video: videoNodeSchema,
-  shape: shapeNodeSchema,
-  'teacher-controller': teacherControllerNodeSchema,
-  'external-component': externalComponentNodeSchema,
-} as const satisfies Record<NodeType, z.ZodType>
+void surfaceRuntimeLifecycleIsComplete
+void surfaceRuntimeAuthoringIsComplete
 
 interface ComponentSnapshotPackage extends ComponentCatalogPackage {
   actualSha256?: string
@@ -596,18 +623,7 @@ const nodeCapabilitySummary = {
       pptx: 'omitted-by-default',
     },
   },
-  'external-component': {
-    label: '外部组件',
-    authoringModes: ['professional'],
-    authoringScopes: ['manifest-dependent'],
-    exports: {
-      singleHtml: 'interactive',
-      webPackage: 'interactive',
-      pdf: 'isolated-static-capture',
-      pptx: 'isolated-static-capture',
-    },
-  },
-} as const satisfies Record<NodeType, {
+} as const satisfies Record<CourseNativeType, {
   label: string
   authoringModes: readonly string[]
   authoringScopes: readonly string[]
@@ -640,10 +656,11 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/renderer/components/componentPackageStore.ts',
     'src/renderer/components/importComponentPackage.ts',
     'src/renderer/export/exportSize.ts',
-    'src/renderer/export/exportPreflight.ts',
-    'src/renderer/project/createProject.ts',
-    'src/renderer/project/projectArchive.ts',
-    'src/renderer/project/validateProjectArchive.ts',
+    'src/renderer/export/course/buildCoursePackages.ts',
+    'src/renderer/export/course/buildCoursePrintArtifacts.ts',
+    'src/renderer/export/course/buildPublishedCourse.ts',
+    'src/renderer/project/createCourseProject.ts',
+    'src/renderer/project/courseProjectArchive.ts',
     'src/player/RuntimeHost.ts',
     'src/player/CourseRuntimeKernel.ts',
     'src/player/HostEvidenceRecorder.ts',
@@ -661,12 +678,13 @@ async function sourceEvidence(projectRoot: string): Promise<Array<{
     'src/shared/interactionTypes.ts',
     'src/shared/formulaRenderer.ts',
     'src/shared/layoutMeasure.ts',
-    'src/shared/projectHealth.ts',
-    'src/shared/projectSchema.ts',
-    'src/shared/projectTypes.ts',
-    'src/shared/publishedLessonTypes.ts',
+    'src/shared/courseProjectSchema.ts',
+    'src/shared/courseProjectTypes.ts',
+    'src/shared/publishedCourseSchema.ts',
+    'src/shared/publishedCourseTypes.ts',
     'src/shared/runtimeSchema.ts',
     'src/shared/runtimeTypes.ts',
+    'src/shared/surfaceRuntimeTypes.ts',
     'src/shared/stableOrder.ts',
     'src/shared/textLayout.ts',
   ]
@@ -688,11 +706,6 @@ export async function generateAiCapabilityArtifacts(
       ? '../courseware-components'
       : 'external-component-catalog')
 
-  const projectRootJsonSchema = jsonSchema(projectDocumentSchema)
-  const sceneNodeJsonSchema = jsonSchema(sceneNodeSchema)
-  const projectNodeSchemas = Object.fromEntries(
-    SCENE_NODE_TYPES.map((type) => [type, jsonSchema(nodeSchemas[type])]),
-  )
   const triggerJsonSchema = jsonSchema(interactionTriggerSchema)
   const conditionJsonSchema = jsonSchema(interactionConditionSchema)
   const actionJsonSchema = jsonSchema(interactionActionSchema)
@@ -703,8 +716,16 @@ export async function generateAiCapabilityArtifacts(
     throw new Error('package.json 版本与 APP_VERSION 常量不一致。')
   }
 
-  if (schemaLiteral(projectRootJsonSchema, 'schemaVersion') !== PROJECT_SCHEMA_VERSION) {
-    throw new Error('Project Schema 版本与 PROJECT_SCHEMA_VERSION 常量不一致。')
+  const currentProtocols = {
+    project: COURSE_PROJECT_SCHEMA_VERSION,
+    publishedCourse: PUBLISHED_COURSE_VERSION,
+    runtime: [RUNTIME_API_VERSION, SURFACE_RUNTIME_API_VERSION],
+    component: COMPONENT_SCHEMA_VERSION,
+    interaction: INTERACTION_PROTOCOL_VERSION,
+  } as const
+
+  if (COURSE_PROJECT_SCHEMA_VERSION !== 9) {
+    throw new Error('当前工程版本必须来自 COURSE_PROJECT_SCHEMA_VERSION = 9。')
   }
   if (schemaLiteral(runtimeJsonSchema, 'runtimeApiVersion') !== RUNTIME_API_VERSION) {
     throw new Error('Runtime Schema 版本与 RUNTIME_API_VERSION 常量不一致。')
@@ -719,11 +740,6 @@ export async function generateAiCapabilityArtifacts(
     throw new Error('Component Runtime 版本与常量不一致。')
   }
 
-  assertExactStrings(
-    'scene node',
-    SCENE_NODE_TYPES,
-    collectDiscriminatorValues(sceneNodeJsonSchema),
-  )
   assertExactStrings(
     'trigger',
     INTERACTION_TRIGGER_TYPES,
@@ -746,17 +762,49 @@ export async function generateAiCapabilityArtifacts(
   )
 
   const files = new Map<string, string>()
-  files.set('schemas/project-v8.json', canonicalJson({
-    contract: 'Project V8',
-    protocolVersion: PROJECT_SCHEMA_VERSION,
-    root: projectRootJsonSchema,
-    sceneNodeUnion: sceneNodeJsonSchema,
-    nodeSchemas: projectNodeSchemas,
-    sourceOfTruth: 'src/shared/projectSchema.ts',
+  files.set('schemas/course-project-v9.json', canonicalJson({
+    contract: 'Course Project V9',
+    protocolVersion: COURSE_PROJECT_SCHEMA_VERSION,
+    validation: 'zod:src/shared/courseProjectSchema.ts#courseProjectDocumentSchema',
+    root: {
+      type: 'object',
+      properties: {
+        schemaVersion: { const: COURSE_PROJECT_SCHEMA_VERSION },
+      },
+      required: [
+        'schemaVersion', 'id', 'revision', 'title', 'createdAt', 'updatedAt',
+        'assets', 'componentPackages', 'designTokens', 'media', 'playback',
+        'courseState', 'navigationGuards', 'locations', 'startLocationId',
+        'globalLayerItems', 'globalInteractions', 'surfaces',
+      ],
+    },
+    surfaces: COURSE_SURFACE_TYPES,
+    layerItemKinds: LAYER_ITEM_KINDS,
+    nativeTypes: COURSE_NATIVE_TYPES,
+    runtimeProtocols: {
+      current: { protocol: 'surface-v1', runtimeApiVersion: SURFACE_RUNTIME_API_VERSION },
+    },
+    nativeTypeSchemas: Object.fromEntries(
+      COURSE_NATIVE_TYPES.map((type) => [type, {
+        nativeType: { const: type },
+        ...nodeCapabilitySummary[type],
+      }]),
+    ),
+    sourceOfTruth: 'src/shared/courseProjectSchema.ts',
+  }))
+  files.set('schemas/published-course-v2.json', canonicalJson({
+    contract: 'Published Course V2',
+    format: PUBLISHED_COURSE_FORMAT,
+    formatVersion: PUBLISHED_COURSE_VERSION,
+    surfaces: COURSE_SURFACE_TYPES,
+    sourceOfTruth: [
+      'src/shared/publishedCourseTypes.ts',
+      'src/shared/publishedCourseSchema.ts',
+    ],
   }))
   files.set('schemas/interactions.json', canonicalJson({
-    contract: 'Project V8 declarative interactions',
-    protocolVersion: PROJECT_SCHEMA_VERSION,
+    contract: 'Interaction Protocol V1',
+    protocolVersion: INTERACTION_PROTOCOL_VERSION,
     discriminators: {
       trigger: INTERACTION_TRIGGER_TYPES,
       condition: INTERACTION_CONDITION_TYPES,
@@ -854,6 +902,24 @@ export async function generateAiCapabilityArtifacts(
       'src/player/TeacherEscapeControls.ts',
     ],
   }))
+  files.set('schemas/runtime-api3.json', canonicalJson({
+    contract: 'Surface Runtime API 3',
+    protocol: 'surface-v1',
+    runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
+    renderMode: 'dom',
+    hostContract: {
+      modes: ['playback', 'inspect', 'capture'],
+      hostActions: runtimeHostActionNames,
+      lifecycleHooks: surfaceRuntimeLifecycleHooks,
+      authoring: surfaceRuntimeAuthoringMethods,
+      content: ['ctx.content.get', 'ctx.content.all'],
+      assets: ['ctx.assets.url', 'ctx.assets.projectUrl'],
+    },
+    documentation: 'docs/RUNTIME_AUTHORING.md',
+    sourceOfTruth: [
+      'src/shared/surfaceRuntimeTypes.ts',
+    ],
+  }))
   files.set('schemas/component-api4.json', canonicalJson({
     contract: 'Component Schema 4 / Component Runtime API 4',
     componentSchemaVersion: COMPONENT_SCHEMA_VERSION,
@@ -887,14 +953,7 @@ export async function generateAiCapabilityArtifacts(
     sourceOfTruth: 'src/shared/diagnosticCodes.ts',
   }))
   files.set('limits.json', canonicalJson({
-    protocolVersions: {
-      project: PROJECT_SCHEMA_VERSION,
-      runtime: RUNTIME_API_VERSION,
-      runtimeAuthoring: RUNTIME_AUTHORING_API_VERSION,
-      componentSchema: COMPONENT_SCHEMA_VERSION,
-      componentRuntime: COMPONENT_RUNTIME_API_VERSION,
-      publishedLesson: PUBLISHED_LESSON_VERSION,
-    },
+    protocolVersions: currentProtocols,
     canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
     guidance: {
       recommendedProjectScenes: RECOMMENDED_PROJECT_SCENES,
@@ -922,6 +981,7 @@ export async function generateAiCapabilityArtifacts(
     note: '推荐值用于可维护性；防御上限用于损坏与滥用保护，不是日常创作目标。',
     sourceOfTruth: [
       'src/shared/constants.ts',
+      'src/shared/courseProjectTypes.ts',
       'src/shared/interactionTypes.ts',
       'src/shared/runtimeSchema.ts',
       'src/renderer/export/exportSize.ts',
@@ -936,19 +996,16 @@ export async function generateAiCapabilityArtifacts(
   const index = {
     manifestVersion: AI_CAPABILITY_MANIFEST_VERSION,
     editorVersion: APP_VERSION,
-    protocols: {
-      project: PROJECT_SCHEMA_VERSION,
-      runtime: RUNTIME_API_VERSION,
-      runtimeAuthoring: RUNTIME_AUTHORING_API_VERSION,
-      componentSchema: COMPONENT_SCHEMA_VERSION,
-      componentRuntime: COMPONENT_RUNTIME_API_VERSION,
-      publishedLesson: PUBLISHED_LESSON_VERSION,
-      componentCatalog: COMPONENT_CATALOG_VERSION,
+    protocols: currentProtocols,
+    surfaces: {
+      types: COURSE_SURFACE_TYPES,
+      status: 'available',
     },
-    nodes: SCENE_NODE_TYPES.map((type) => ({
+    layerItemKinds: LAYER_ITEM_KINDS,
+    nodes: COURSE_NATIVE_TYPES.map((type) => ({
       type,
       ...nodeCapabilitySummary[type],
-      schema: `schemas/project-v8.json#/nodeSchemas/${type}`,
+      schema: `schemas/course-project-v9.json#/nativeTypeSchemas/${type}`,
     })),
     interactions: {
       schema: 'schemas/interactions.json',
@@ -963,7 +1020,9 @@ export async function generateAiCapabilityArtifacts(
     },
     assessmentEvaluators: ASSESSMENT_EVALUATOR_REGISTRY,
     runtime: {
+      versions: [RUNTIME_API_VERSION, SURFACE_RUNTIME_API_VERSION],
       schema: 'schemas/runtime-api2.json',
+      surfaceSchema: 'schemas/runtime-api3.json',
       authoringModes: ['professional'],
       scopes: RUNTIME_SCOPES,
       exports: {
@@ -976,6 +1035,7 @@ export async function generateAiCapabilityArtifacts(
     components: {
       schema: 'schemas/component-api4.json',
       catalog: 'component-catalog.snapshot.json',
+      catalogVersion: COMPONENT_CATALOG_VERSION,
       catalogStatus: componentCatalogSnapshot.status,
       packageAdmission: {
         requiredAvailability: 'available',
@@ -994,20 +1054,25 @@ export async function generateAiCapabilityArtifacts(
         pptx: 'isolated-static-capture',
       },
     },
+    publishedCourse: 'schemas/published-course-v2.json',
     diagnostics: 'diagnostics.json',
     limits: 'limits.json',
     validation: {
-      command: 'npm run --silent validate:project -- <project.h5lesson>',
-      input: 'Project V8 .h5lesson',
+      command: 'npm run --silent validate:course-project -- <project.h5lesson>',
+      input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
       checks: [
-        'project-schema',
+        'course-project-v9-schema',
         'project-health',
+        'assets-and-components',
+        'runtime-component-protocol',
         'single-html-preflight',
         'web-package-preflight',
         'pdf-preflight',
         'pptx-preflight',
+        'stable-ids',
+        'no-v8-fields-or-migration-markers',
       ],
       exitCodes: {
         valid: 0,
@@ -1021,12 +1086,12 @@ export async function generateAiCapabilityArtifacts(
       language: 'typescript',
       runner: 'npx tsx --tsconfig <editor-root>/tsconfig.json <case-dir>/implementation/build.ts',
       entrypoints: {
-        createProject: 'src/renderer/project/createProject.ts',
-        projectArchive: 'src/renderer/project/projectArchive.ts',
+        createCourseProject: 'src/renderer/project/createCourseProject.ts',
+        courseProjectArchive: 'src/renderer/project/courseProjectArchive.ts',
         importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
-        projectSchema: 'src/shared/projectSchema.ts',
+        courseProjectSchema: 'src/shared/courseProjectSchema.ts',
       },
-      output: 'Project V8 .h5lesson',
+      output: 'Course Project V9 .h5lesson',
       constraints: [
         'use-real-repository-apis',
         'no-shadow-project-dsl',
@@ -1057,12 +1122,7 @@ export async function generateAiCapabilityArtifacts(
     deterministic: true,
     generatedAt: null,
     note: '为保持相同输入的字节级确定性，证据不写入时钟或绝对路径。',
-    protocols: {
-      project: PROJECT_SCHEMA_VERSION,
-      runtime: RUNTIME_API_VERSION,
-      componentSchema: COMPONENT_SCHEMA_VERSION,
-      componentRuntime: COMPONENT_RUNTIME_API_VERSION,
-    },
+    protocols: currentProtocols,
     inputs: {
       sourceFiles: await sourceEvidence(projectRoot),
       componentCatalog: {
@@ -1126,6 +1186,11 @@ export async function writeAiCapabilityArtifacts(
     const absolute = path.join(outputRoot, ...relativePath.split('/'))
     await fs.mkdir(path.dirname(absolute), { recursive: true })
     await fs.writeFile(absolute, content, 'utf8')
+  }
+  const expectedPaths = new Set(generated.files.keys())
+  for (const relativePath of await listJsonFiles(outputRoot)) {
+    if (expectedPaths.has(relativePath)) continue
+    await fs.rm(path.join(outputRoot, ...relativePath.split('/')), { force: true })
   }
 }
 

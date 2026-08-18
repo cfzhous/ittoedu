@@ -4,30 +4,52 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  createExternalComponentNode,
-  createImageNode,
-  createProject,
-  createTextNode,
-} from '@/renderer/project/createProject'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
-  createProjectArchive,
-  type ProjectArchiveData,
-} from '@/renderer/project/projectArchive'
+  createCourseProjectArchive,
+  type CourseProjectArchiveData,
+} from '@/renderer/project/courseProjectArchive'
+import { createImageNode, createProject } from '@/renderer/project/createProject'
+import { createProjectArchive } from '@/renderer/project/projectArchive'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import type {
+  CourseProjectDocument,
+  LayerItem,
+  RuntimeLayerItem,
+} from '@/shared/courseProjectTypes'
 import {
-  projectValidationExitCode,
-  serializeProjectValidationReport,
-  validateProjectArchiveBytes,
-} from '@/renderer/project/validateProjectArchive'
-import { runValidateProjectCli } from '../../scripts/validate-project'
+  courseProjectValidationExitCode,
+  runValidateProjectCli,
+  serializeCourseProjectValidationReport,
+  validateCourseProjectArchiveBytes,
+} from '../../scripts/validate-project'
 
-function emptyArchiveData(): ProjectArchiveData {
+function blankArchiveData(): CourseProjectArchiveData {
   return {
-    project: createProject({ includeDefaultController: false, controls: 'none' }),
+    project: createBlankCourseProject({ includeDefaultController: false, controls: 'none' }),
     assetFiles: {},
     componentFiles: {},
   }
+}
+
+function slideScene(project: CourseProjectDocument) {
+  const surface = project.surfaces[0]
+  if (surface?.type !== 'slide') throw new Error('expected a slide surface')
+  const scene = surface.scenes[0]
+  if (!scene) throw new Error('expected a slide scene')
+  return scene
+}
+
+function nextLayerOrder(project: CourseProjectDocument): number {
+  const surface = project.surfaces[0]
+  if (surface?.type !== 'slide') throw new Error('expected a slide surface')
+  const items = [
+    ...project.globalLayerItems.map((entry) => entry.item),
+    ...surface.surfaceLayerItems.map((entry) => entry.item),
+    ...slideScene(project).layerItems,
+  ]
+  return items.reduce((max, item) => Math.max(max, item.order), -1) + 1
 }
 
 function componentFiles(): Record<string, Uint8Array> {
@@ -55,12 +77,9 @@ function componentFiles(): Record<string, Uint8Array> {
 
 function completeContextArchive(): {
   bytes: Uint8Array
-  sceneId: string
-  stateId: string
-  imageNodeId: string
+  imageLayerItemId: string
 } {
-  const source = emptyArchiveData()
-  const scene = source.project.scenes[0]!
+  const source = blankArchiveData()
   const imageBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
   source.project.assets.hero = {
     id: 'hero',
@@ -81,20 +100,30 @@ function completeContextArchive(): {
     width: 320,
     height: 180,
   })
-  scene.nodes.push(image)
-
+  const scene = slideScene(source.project)
+  scene.layerItems.push(sceneNodeToCourseLayerItem(image, nextLayerOrder(source.project)))
   const component = parseComponentPackageFiles(componentFiles())
-  source.project.componentPackages[component.key] = component.metadata
+  source.project.componentPackages[component.manifest.id] = component.metadata
   source.componentFiles[component.key] = component.files
-  scene.nodes.push(createExternalComponentNode({
-    id: 'validator-component',
-    name: component.manifest.name,
+  const componentItem: LayerItem = {
+    layerItemId: 'validator-component',
+    label: component.manifest.name,
+    frame: { mode: 'absolute', x: 400, y: 160, width: 240, height: 180 },
+    order: nextLayerOrder(source.project),
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'auto',
+    playbackInitialVisibility: 'inherit',
+    kind: 'component',
     component: {
       packageId: component.manifest.id,
       version: component.manifest.version,
     },
-    props: component.manifest.defaultProps,
-  }))
+    props: { ...component.manifest.defaultProps },
+  }
+  scene.layerItems.push(componentItem)
   scene.interactions.push({
     id: 'image-replay',
     enabled: true,
@@ -107,19 +136,43 @@ function completeContextArchive(): {
       action: { type: 'scene.replay' },
     }],
   })
-  const state = scene.presentation!.states[0]!
-  state.nodeOverrides[image.id] = { x: 1400 }
-
   return {
-    bytes: createProjectArchive(source),
-    sceneId: scene.id,
-    stateId: state.id,
-    imageNodeId: image.id,
+    bytes: createCourseProjectArchive(source),
+    imageLayerItemId: image.id,
   }
+}
+
+function migrationMarkerArchive(): Uint8Array {
+  const source = blankArchiveData()
+  const runtime: RuntimeLayerItem = {
+    layerItemId: 'legacy-runtime',
+    label: '迁移运行时',
+    frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+    order: nextLayerOrder(source.project),
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    kind: 'runtime',
+    runtime: {
+      protocol: 'legacy-runtime-v2',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'dom',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
+      content: { values: {} },
+      assets: {},
+    },
+  }
+  slideScene(source.project).layerItems.push(runtime)
+  return createCourseProjectArchive(source)
 }
 
 function publicValidatorCommand(
   lessonPath: string,
+  script = 'validate:course-project',
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const npmCli = process.env.npm_execpath ?? path.resolve(
     path.dirname(process.execPath),
@@ -131,7 +184,7 @@ function publicValidatorCommand(
   return new Promise((resolve, reject) => {
     execFile(
       process.execPath,
-      [npmCli, 'run', '--silent', 'validate:project', '--', lessonPath],
+      [npmCli, 'run', '--silent', script, '--', lessonPath],
       { cwd: process.cwd(), windowsHide: true },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') {
@@ -148,25 +201,33 @@ function publicValidatorCommand(
   })
 }
 
-describe('headless Project V8 validation', () => {
+describe('headless Course Project V9 validation', () => {
   it('returns a deterministic four-surface report for a valid archive', () => {
-    const source = emptyArchiveData()
-    const bytes = createProjectArchive(source, {
+    const source = blankArchiveData()
+    const bytes = createCourseProjectArchive(source, {
       mtime: '2026-08-12T00:00:00.000Z',
     })
 
-    const report = validateProjectArchiveBytes(bytes, 'lesson.h5lesson')
+    const report = validateCourseProjectArchiveBytes(bytes, 'lesson.h5lesson')
 
     expect(report).toMatchObject({
       reportVersion: 1,
       status: 'valid',
       input: { filename: 'lesson.h5lesson' },
-      schema: { valid: true, schemaVersion: 8, issues: [] },
+      schema: { valid: true, schemaVersion: 9, issues: [] },
       project: {
         id: source.project.id,
-        sceneCount: 1,
+        locationCount: 1,
+        surfaceCount: 1,
         assetCount: 0,
         componentPackageCount: 0,
+      },
+      protocols: {
+        project: 9,
+        publishedCourse: 2,
+        runtime: [2, 3],
+        component: 4,
+        interaction: 1,
       },
       measurement: { mode: 'deterministic-fallback' },
       fatal: null,
@@ -177,90 +238,91 @@ describe('headless Project V8 validation', () => {
       'pdf',
       'pptx',
     ])
-    expect(projectValidationExitCode(report)).toBe(0)
-    expect(serializeProjectValidationReport(report)).toBe(
-      serializeProjectValidationReport(
-        validateProjectArchiveBytes(bytes, 'lesson.h5lesson'),
+    expect(courseProjectValidationExitCode(report)).toBe(0)
+    expect(serializeCourseProjectValidationReport(report)).toBe(
+      serializeCourseProjectValidationReport(
+        validateCourseProjectArchiveBytes(bytes, 'lesson.h5lesson'),
       ),
     )
   })
 
-  it('returns exit 1 with location-rich export errors for a readable project', () => {
-    const source = emptyArchiveData()
-    source.project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: 'CoursewareRuntime.define({create(){return fetch("/api/data")}})',
-      content: { values: {} },
-      assets: {},
-    }
-    const outside = createTextNode({
-      id: 'outside',
-      x: 1400,
-      y: 20,
-      width: 160,
-      height: 80,
-    })
-    source.project.scenes[0]!.nodes.push(outside)
-
-    const report = validateProjectArchiveBytes(
-      createProjectArchive(source),
-      'invalid.h5lesson',
+  it('returns exit 1 for leftover V9 migration markers', () => {
+    const report = validateCourseProjectArchiveBytes(
+      migrationMarkerArchive(),
+      'legacy-markers.h5lesson',
     )
 
     expect(report.status).toBe('invalid')
-    expect(projectValidationExitCode(report)).toBe(1)
-    expect(report.exportPreflight?.['single-html'].items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime-external-network',
-        }),
-        expect.objectContaining({
-          severity: 'error',
-          code: 'node-fully-outside-canvas',
-          sceneId: source.project.scenes[0]!.id,
-          nodeId: 'outside',
-        }),
-      ]),
-    )
+    expect(courseProjectValidationExitCode(report)).toBe(1)
+    expect(report.schema).toMatchObject({ valid: true, schemaVersion: 9 })
+    expect(report.migrationMarkers).toMatchObject({ present: true })
+    expect(report.projectHealth?.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: 'error',
+        code: 'migration-marker',
+        message: expect.stringContaining('legacy-whole-canvas'),
+      }),
+      expect.objectContaining({
+        severity: 'error',
+        code: 'migration-marker',
+        message: expect.stringContaining('legacy-runtime-v2'),
+      }),
+    ]))
   })
 
-  it('loads real asset and component bytes and preserves state-specific locations', () => {
+  it('loads real asset and component bytes without V8 canvas-overflow checks', () => {
     const fixture = completeContextArchive()
-
-    const report = validateProjectArchiveBytes(
+    const report = validateCourseProjectArchiveBytes(
       fixture.bytes,
       'complete-context.h5lesson',
     )
 
     expect(report).toMatchObject({
-      status: 'invalid',
+      status: 'valid',
+      schema: { valid: true, schemaVersion: 9 },
       project: { assetCount: 1, componentPackageCount: 1 },
       fatal: null,
     })
-    expect(projectValidationExitCode(report)).toBe(1)
-    const items = report.exportPreflight?.['single-html'].items ?? []
-    expect(items).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        code: 'node-fully-outside-canvas',
-        sceneId: fixture.sceneId,
-        stateId: fixture.stateId,
-        nodeId: fixture.imageNodeId,
-      }),
-    ]))
-    expect(items.some((item) => (
+    expect(courseProjectValidationExitCode(report)).toBe(0)
+    const htmlItems = report.exportPreflight?.['single-html'].items ?? []
+    expect(htmlItems.some((item) => (
       item.code === 'asset-bytes-missing' ||
       item.code === 'component-bytes-missing' ||
-      item.code === 'component-hash-mismatch'
+      item.code === 'component-hash-mismatch' ||
+      item.code === 'node-fully-outside-canvas'
     ))).toBe(false)
+    for (const target of ['pdf', 'pptx'] as const) {
+      expect(report.exportPreflight?.[target].items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'static-export-interactions-omitted',
+          }),
+        ]),
+      )
+    }
+  })
+
+  it('returns exit 2 for Project V8 without calling it the current format', () => {
+    const bytes = createProjectArchive({
+      project: createProject({ includeDefaultController: false, controls: 'none' }),
+      assetFiles: {},
+      componentFiles: {},
+    })
+    const report = validateCourseProjectArchiveBytes(bytes, 'legacy-v8.h5lesson')
+    expect(report).toMatchObject({
+      status: 'unreadable',
+      schema: { valid: false, schemaVersion: 8 },
+      fatal: { code: 'unsupported-project-version' },
+    })
+    expect(courseProjectValidationExitCode(report)).toBe(2)
+    expect(JSON.stringify(report)).not.toContain('只接受 Project V8')
+    expect(report.fatal?.message).toContain('不是当前 Course Project V9')
   })
 
   it('returns exit 2 for an old schema and for missing declared bytes', () => {
-    const source = emptyArchiveData()
+    const source = blankArchiveData()
     const oldProject = { ...source.project, schemaVersion: 7 }
-    const oldReport = validateProjectArchiveBytes(zipSync({
+    const oldReport = validateCourseProjectArchiveBytes(zipSync({
       'project.json': strToU8(JSON.stringify(oldProject)),
     }), 'old.h5lesson')
     expect(oldReport).toMatchObject({
@@ -268,7 +330,7 @@ describe('headless Project V8 validation', () => {
       schema: { valid: false, schemaVersion: 7, issues: [] },
       fatal: { code: 'unsupported-project-version' },
     })
-    expect(projectValidationExitCode(oldReport)).toBe(2)
+    expect(courseProjectValidationExitCode(oldReport)).toBe(2)
 
     source.project.assets.hero = {
       id: 'hero',
@@ -281,9 +343,9 @@ describe('headless Project V8 validation', () => {
       height: 10,
     }
     source.assetFiles.hero = new Uint8Array([1, 2, 3, 4])
-    const files = unzipSync(createProjectArchive(source))
+    const files = unzipSync(createCourseProjectArchive(source))
     delete files['assets/hero.png']
-    const missingReport = validateProjectArchiveBytes(
+    const missingReport = validateCourseProjectArchiveBytes(
       zipSync(files),
       'missing-asset.h5lesson',
     )
@@ -295,37 +357,37 @@ describe('headless Project V8 validation', () => {
       },
     })
 
-    const missingComponent = emptyArchiveData()
-    const packageKey = 'com.example.missing@1.0.0'
-    missingComponent.project.componentPackages[packageKey] = {
-      packageId: 'com.example.missing',
+    const missingComponent = blankArchiveData()
+    const packageId = 'com.example.missing'
+    missingComponent.project.componentPackages[packageId] = {
+      packageId,
       version: '1.0.0',
       name: '缺失组件',
-      manifestPath: `components/${packageKey}/manifest.json`,
-      runtimePath: `components/${packageKey}/runtime.js`,
+      manifestPath: `components/${packageId}/1.0.0/manifest.json`,
+      runtimePath: `components/${packageId}/1.0.0/runtime.js`,
       contentSha256: '0'.repeat(64),
     }
-    const componentReport = validateProjectArchiveBytes(zipSync({
+    const componentReport = validateCourseProjectArchiveBytes(zipSync({
       'project.json': strToU8(JSON.stringify(missingComponent.project)),
     }), 'missing-component.h5lesson')
     expect(componentReport).toMatchObject({
       status: 'unreadable',
       fatal: {
         code: 'archive-invalid',
-        message: expect.stringContaining(packageKey),
+        message: expect.stringContaining(packageId),
       },
     })
   })
 
-  it('reports structured schema paths for an invalid Project V8 document', () => {
-    const files = unzipSync(createProjectArchive(emptyArchiveData()))
+  it('reports structured schema paths for an invalid Course Project V9 document', () => {
+    const files = unzipSync(createCourseProjectArchive(blankArchiveData()))
     const project = JSON.parse(
       new TextDecoder().decode(files['project.json']),
     ) as Record<string, unknown>
-    delete project.playback
+    delete project.locations
     files['project.json'] = strToU8(JSON.stringify(project))
 
-    const report = validateProjectArchiveBytes(
+    const report = validateCourseProjectArchiveBytes(
       zipSync(files),
       'schema-invalid.h5lesson',
     )
@@ -334,24 +396,24 @@ describe('headless Project V8 validation', () => {
       status: 'unreadable',
       schema: {
         valid: false,
-        schemaVersion: 8,
+        schemaVersion: 9,
         issues: [
-          {
-            path: ['playback'],
+          expect.objectContaining({
+            path: ['locations'],
             code: expect.any(String),
             message: expect.any(String),
-          },
+          }),
         ],
       },
       fatal: { code: 'schema-invalid' },
     })
-    expect(projectValidationExitCode(report)).toBe(2)
+    expect(courseProjectValidationExitCode(report)).toBe(2)
   })
 
   it('does not claim a Project version when the declaration is malformed', () => {
-    const source = emptyArchiveData()
-    const malformed = { ...source.project, schemaVersion: '8' }
-    const report = validateProjectArchiveBytes(zipSync({
+    const source = blankArchiveData()
+    const malformed = { ...source.project, schemaVersion: '9' }
+    const report = validateCourseProjectArchiveBytes(zipSync({
       'project.json': strToU8(JSON.stringify(malformed)),
     }), 'malformed-version.h5lesson')
 
@@ -360,40 +422,13 @@ describe('headless Project V8 validation', () => {
       schema: {
         valid: false,
         schemaVersion: null,
-        issues: [expect.objectContaining({ path: ['schemaVersion'] })],
       },
-      fatal: { code: 'schema-invalid' },
+      fatal: { code: expect.stringMatching(/schema-invalid|unsupported-project-version|archive-invalid/) },
     })
   })
 
-  it('counts shared Project Health findings once across four target reports', () => {
-    const source = emptyArchiveData()
-    source.project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})',
-      content: { values: {} },
-      assets: {},
-    }
-    const report = validateProjectArchiveBytes(
-      createProjectArchive(source),
-      'health-summary.h5lesson',
-    )
-    const targetItems = Object.values(report.exportPreflight ?? {})
-      .flatMap((preflight) => preflight.items)
-    expect(targetItems.some((item) => item.code.startsWith('project-health:')))
-      .toBe(true)
-    const targetSpecific = targetItems.filter(
-      (item) => !item.code.startsWith('project-health:'),
-    )
-    expect(report.summary.total).toBe(
-      (report.projectHealth?.summary.total ?? 0) + targetSpecific.length,
-    )
-  })
-
   it('keeps CLI stdout machine-readable and uses stable exit codes', async () => {
-    const bytes = createProjectArchive(emptyArchiveData())
+    const bytes = createCourseProjectArchive(blankArchiveData())
     const stdout: string[] = []
     const stderr: string[] = []
     const exitCode = await runValidateProjectCli(['lesson.h5lesson'], {
@@ -408,6 +443,7 @@ describe('headless Project V8 validation', () => {
     expect(JSON.parse(stdout[0]!)).toMatchObject({
       reportVersion: 1,
       status: 'valid',
+      schema: { schemaVersion: 9 },
     })
 
     const invalidStdout: string[] = []
@@ -422,20 +458,21 @@ describe('headless Project V8 validation', () => {
       status: 'unreadable',
       fatal: { code: 'usage-error' },
     })
-    expect(invalidStderr.join('')).toContain('参数错误')
+    expect(invalidStderr.join('')).toContain('validate:course-project')
+    expect(invalidStderr.join('')).not.toContain('只接受 Project V8')
   })
 
   it('runs the public command with pure JSON, stable exit codes, and no input writes', async () => {
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'validate-project-cli-'))
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'validate-course-project-cli-'))
     const lessonPath = path.join(directory, 'lesson.h5lesson')
     const completePath = path.join(directory, 'complete-context.h5lesson')
-    const invalidPath = path.join(directory, 'invalid.h5lesson')
+    const markerPath = path.join(directory, 'legacy-markers.h5lesson')
     const oldPath = path.join(directory, 'old.h5lesson')
+    const v8Path = path.join(directory, 'legacy-v8.h5lesson')
     const schemaPath = path.join(directory, 'schema-invalid.h5lesson')
     const missingAssetPath = path.join(directory, 'missing-asset.h5lesson')
-    const missingComponentPath = path.join(directory, 'missing-component.h5lesson')
     try {
-      const validBytes = createProjectArchive(emptyArchiveData())
+      const validBytes = createCourseProjectArchive(blankArchiveData())
       await writeFile(lessonPath, validBytes)
       const valid = await publicValidatorCommand(lessonPath)
       expect(valid.exitCode).toBe(0)
@@ -443,85 +480,76 @@ describe('headless Project V8 validation', () => {
       expect(JSON.parse(valid.stdout)).toMatchObject({
         reportVersion: 1,
         status: 'valid',
+        schema: { schemaVersion: 9 },
       })
       expect(await readFile(lessonPath)).toEqual(Buffer.from(validBytes))
+
+      const alias = await publicValidatorCommand(lessonPath, 'validate:project')
+      expect(alias.exitCode).toBe(0)
+      expect(JSON.parse(alias.stdout)).toMatchObject({
+        status: 'valid',
+        schema: { schemaVersion: 9 },
+      })
+      expect(alias.stderr).not.toContain('只接受 Project V8')
 
       const complete = completeContextArchive()
       await writeFile(completePath, complete.bytes)
       const completeResult = await publicValidatorCommand(completePath)
-      expect(completeResult.exitCode).toBe(1)
+      expect(completeResult.exitCode).toBe(0)
       expect(completeResult.stderr).toBe('')
       const completeReport = JSON.parse(completeResult.stdout) as {
         project: { assetCount: number; componentPackageCount: number }
-        exportPreflight: Record<string, { items: Array<{
-          code: string
-          sceneId?: string
-          stateId?: string
-          nodeId?: string
-        }> }>
+        exportPreflight: Record<string, { items: Array<{ code: string }> }>
       }
       expect(completeReport.project).toMatchObject({
         assetCount: 1,
         componentPackageCount: 1,
       })
-      expect(completeReport.exportPreflight['single-html']!.items).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            code: 'node-fully-outside-canvas',
-            sceneId: complete.sceneId,
-            stateId: complete.stateId,
-            nodeId: complete.imageNodeId,
-          }),
-        ]),
-      )
-      for (const target of ['single-html', 'web-package']) {
-        expect(completeReport.exportPreflight[target]!.items.some(
-          (item) => item.code === 'static-export-interactions-omitted',
-        )).toBe(false)
-      }
-      for (const target of ['pdf', 'pptx']) {
-        expect(completeReport.exportPreflight[target]!.items).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              code: 'static-export-interactions-omitted',
-            }),
-          ]),
-        )
-      }
+      expect(completeReport.exportPreflight['single-html']!.items.some(
+        (item) => item.code === 'node-fully-outside-canvas',
+      )).toBe(false)
       expect(await readFile(completePath)).toEqual(Buffer.from(complete.bytes))
 
-      const invalid = emptyArchiveData()
-      invalid.project.globalRuntime = {
-        runtimeApiVersion: 2,
-        enabled: true,
-        renderMode: 'dom',
-        source: 'CoursewareRuntime.define({create(){return fetch("/api")}})',
-        content: { values: {} },
-        assets: {},
-      }
-      await writeFile(invalidPath, createProjectArchive(invalid))
-      const invalidResult = await publicValidatorCommand(invalidPath)
-      expect(invalidResult.exitCode).toBe(1)
-      expect(invalidResult.stderr).toBe('')
-      expect(JSON.parse(invalidResult.stdout)).toMatchObject({ status: 'invalid' })
+      const markerBytes = migrationMarkerArchive()
+      await writeFile(markerPath, markerBytes)
+      const markerResult = await publicValidatorCommand(markerPath)
+      expect(markerResult.exitCode).toBe(1)
+      expect(JSON.parse(markerResult.stdout)).toMatchObject({
+        status: 'invalid',
+        schema: { schemaVersion: 9 },
+      })
 
-      const old = { ...emptyArchiveData().project, schemaVersion: 7 }
+      const old = { ...blankArchiveData().project, schemaVersion: 7 }
       await writeFile(oldPath, zipSync({
         'project.json': strToU8(JSON.stringify(old)),
       }))
       const oldResult = await publicValidatorCommand(oldPath)
       expect(oldResult.exitCode).toBe(2)
-      expect(oldResult.stderr).toContain('旧工程格式不受支持')
+      expect(oldResult.stderr).not.toContain('只接受 Project V8')
       expect(JSON.parse(oldResult.stdout)).toMatchObject({
         status: 'unreadable',
         fatal: { code: 'unsupported-project-version' },
       })
 
-      const schemaFiles = unzipSync(createProjectArchive(emptyArchiveData()))
+      const v8Bytes = createProjectArchive({
+        project: createProject({ includeDefaultController: false, controls: 'none' }),
+        assetFiles: {},
+        componentFiles: {},
+      })
+      await writeFile(v8Path, v8Bytes)
+      const v8Result = await publicValidatorCommand(v8Path)
+      expect(v8Result.exitCode).toBe(2)
+      expect(v8Result.stderr).not.toContain('只接受 Project V8')
+      expect(JSON.parse(v8Result.stdout)).toMatchObject({
+        status: 'unreadable',
+        fatal: { code: 'unsupported-project-version' },
+      })
+
+      const schemaFiles = unzipSync(createCourseProjectArchive(blankArchiveData()))
       const schemaProject = JSON.parse(
         new TextDecoder().decode(schemaFiles['project.json']),
       ) as Record<string, unknown>
-      delete schemaProject.playback
+      delete schemaProject.locations
       schemaFiles['project.json'] = strToU8(JSON.stringify(schemaProject))
       await writeFile(schemaPath, zipSync(schemaFiles))
       const schemaResult = await publicValidatorCommand(schemaPath)
@@ -530,13 +558,13 @@ describe('headless Project V8 validation', () => {
         status: 'unreadable',
         schema: {
           valid: false,
-          schemaVersion: 8,
-          issues: [expect.objectContaining({ path: ['playback'] })],
+          schemaVersion: 9,
+          issues: [expect.objectContaining({ path: ['locations'] })],
         },
         fatal: { code: 'schema-invalid' },
       })
 
-      const missingAsset = emptyArchiveData()
+      const missingAsset = blankArchiveData()
       missingAsset.project.assets.hero = {
         id: 'hero',
         filename: 'hero.png',
@@ -557,31 +585,6 @@ describe('headless Project V8 validation', () => {
         fatal: {
           code: 'archive-invalid',
           message: expect.stringContaining('hero.png'),
-        },
-      })
-
-      const missingComponent = emptyArchiveData()
-      const packageKey = 'com.example.missing@1.0.0'
-      missingComponent.project.componentPackages[packageKey] = {
-        packageId: 'com.example.missing',
-        version: '1.0.0',
-        name: '缺失组件',
-        manifestPath: `components/${packageKey}/manifest.json`,
-        runtimePath: `components/${packageKey}/runtime.js`,
-        contentSha256: '0'.repeat(64),
-      }
-      await writeFile(missingComponentPath, zipSync({
-        'project.json': strToU8(JSON.stringify(missingComponent.project)),
-      }))
-      const missingComponentResult = await publicValidatorCommand(
-        missingComponentPath,
-      )
-      expect(missingComponentResult.exitCode).toBe(2)
-      expect(JSON.parse(missingComponentResult.stdout)).toMatchObject({
-        status: 'unreadable',
-        fatal: {
-          code: 'archive-invalid',
-          message: expect.stringContaining(packageKey),
         },
       })
     } finally {

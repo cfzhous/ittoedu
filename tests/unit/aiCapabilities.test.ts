@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { unzipSync } from 'fflate'
@@ -8,7 +9,9 @@ import {
   assertIndexWithinLimit,
   canonicalJsonByteLength,
   checkAiCapabilityArtifacts,
+  COURSE_NATIVE_TYPES,
   generateAiCapabilityArtifacts,
+  INTERACTION_PROTOCOL_VERSION,
   writeAiCapabilityArtifacts,
 } from '../../scripts/generate-ai-capabilities'
 import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../../src/shared/builtInComponentCatalog'
@@ -16,17 +19,28 @@ import { componentManifestSchema } from '../../src/shared/componentSchema'
 import {
   COMPONENT_RUNTIME_API_VERSION,
   COMPONENT_SCHEMA_VERSION,
-  PROJECT_SCHEMA_VERSION,
   RUNTIME_API_VERSION,
 } from '../../src/shared/constants'
+import { COURSE_PROJECT_SCHEMA_VERSION } from '../../src/shared/courseProjectTypes'
 import {
   INTERACTION_ACTION_TYPES,
   INTERACTION_CONDITION_TYPES,
   INTERACTION_TRIGGER_TYPES,
 } from '../../src/shared/interactionTypes'
-import { SCENE_NODE_TYPES } from '../../src/shared/projectTypes'
+import { PUBLISHED_COURSE_VERSION } from '../../src/shared/publishedCourseTypes'
+import { SURFACE_RUNTIME_API_VERSION } from '../../src/shared/surfaceRuntimeTypes'
 
 const expectedCatalogPackageCount = 4
+const siblingCatalogAvailable = existsSync(
+  path.join(process.cwd(), '..', 'courseware-components', 'catalog.json'),
+)
+const expectedCurrentProtocols = {
+  project: COURSE_PROJECT_SCHEMA_VERSION,
+  publishedCourse: PUBLISHED_COURSE_VERSION,
+  runtime: [RUNTIME_API_VERSION, SURFACE_RUNTIME_API_VERSION],
+  component: COMPONENT_SCHEMA_VERSION,
+  interaction: INTERACTION_PROTOCOL_VERSION,
+} as const
 
 function parseFile<T>(
   files: ReadonlyMap<string, string>,
@@ -100,9 +114,10 @@ describe('AI capability manifest generation', () => {
     }>(first.files, 'index.json')
     expect(first.indexBytes).toBeLessThanOrEqual(AI_CAPABILITY_INDEX_MAX_BYTES)
     expect(first.indexBytes).toBe(canonicalJsonByteLength(index))
-    expect(index.nodes.map((entry) => entry.type)).toEqual(
-      SCENE_NODE_TYPES,
-    )
+    expect(index.nodes.map((entry) => entry.type)).toEqual([
+      ...COURSE_NATIVE_TYPES,
+    ])
+    expect(index.nodes.map((entry) => entry.type)).not.toContain('external-component')
     expect(index.interactions.triggerTypes).toEqual(INTERACTION_TRIGGER_TYPES)
     expect(index.interactions.conditionTypes).toEqual(INTERACTION_CONDITION_TYPES)
     expect(index.interactions.actionTypes).toEqual(INTERACTION_ACTION_TYPES)
@@ -131,7 +146,8 @@ describe('AI capability manifest generation', () => {
       }),
     ])
     expect(index.validation).toMatchObject({
-      command: 'npm run --silent validate:project -- <project.h5lesson>',
+      command: 'npm run --silent validate:course-project -- <project.h5lesson>',
+      input: 'Course Project V9 .h5lesson',
       output: 'stable-json',
       reportVersion: 1,
       exitCodes: {
@@ -153,12 +169,12 @@ describe('AI capability manifest generation', () => {
       language: 'typescript',
       runner: 'npx tsx --tsconfig <editor-root>/tsconfig.json <case-dir>/implementation/build.ts',
       entrypoints: {
-        createProject: 'src/renderer/project/createProject.ts',
-        projectArchive: 'src/renderer/project/projectArchive.ts',
+        createCourseProject: 'src/renderer/project/createCourseProject.ts',
+        courseProjectArchive: 'src/renderer/project/courseProjectArchive.ts',
         importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
-        projectSchema: 'src/shared/projectSchema.ts',
+        courseProjectSchema: 'src/shared/courseProjectSchema.ts',
       },
-      output: 'Project V8 .h5lesson',
+      output: 'Course Project V9 .h5lesson',
       constraints: [
         'use-real-repository-apis',
         'no-shadow-project-dsl',
@@ -183,7 +199,7 @@ describe('AI capability manifest generation', () => {
     expect(catalog.issues[0]?.code).toBe('catalog-unavailable')
   }, 30_000)
 
-  it('verifies the reviewed sibling catalog packages, manifests, and blockers', async () => {
+  it.skipIf(!siblingCatalogAvailable)('verifies the reviewed sibling catalog packages, manifests, and blockers', async () => {
     const generated = await generateAiCapabilityArtifacts()
     const catalogRoot = path.resolve(process.cwd(), '..', 'courseware-components')
     const sourceCatalog = JSON.parse(
@@ -278,7 +294,7 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it('marks a catalog hash mismatch unavailable without hiding package metadata', async () => {
+  it.skipIf(!siblingCatalogAvailable)('marks a catalog hash mismatch unavailable without hiding package metadata', async () => {
     const sourceRoot = path.resolve(process.cwd(), '..', 'courseware-components')
     const fixtureRoot = await createTemporaryDirectory('ai-capability-catalog-mismatch')
     try {
@@ -338,7 +354,7 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it('marks package bytes with a mismatched catalog hash unavailable', async () => {
+  it.skipIf(!siblingCatalogAvailable)('marks package bytes with a mismatched catalog hash unavailable', async () => {
     const sourceRoot = path.resolve(process.cwd(), '..', 'courseware-components')
     const fixtureRoot = await createTemporaryDirectory('ai-capability-package-mismatch')
     try {
@@ -500,7 +516,7 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it('keeps every verified manifest version and hash tied to package bytes', async () => {
+  it.skipIf(!siblingCatalogAvailable)('keeps every verified manifest version and hash tied to package bytes', async () => {
     const catalogRoot = path.resolve(process.cwd(), '..', 'courseware-components')
     const catalog = JSON.parse(
       await fs.readFile(path.join(catalogRoot, 'catalog.json'), 'utf8'),
@@ -545,19 +561,48 @@ describe('AI capability manifest generation', () => {
       componentCatalogLabel: 'test-fixture/missing-catalog',
     })
     const index = parseFile<{
-      protocols: Record<string, number>
+      protocols: {
+        project: number
+        publishedCourse: number
+        runtime: number[]
+        component: number
+        interaction: number
+      }
     }>(generated.files, 'index.json')
-    expect(index.protocols).toMatchObject({
-      project: PROJECT_SCHEMA_VERSION,
-      runtime: RUNTIME_API_VERSION,
-      componentSchema: COMPONENT_SCHEMA_VERSION,
-      componentRuntime: COMPONENT_RUNTIME_API_VERSION,
-    })
+    expect(index.protocols).toEqual(expectedCurrentProtocols)
+    expect(generated.files.has('schemas/project-v8.json')).toBe(false)
 
     const project = parseFile<{
+      contract: string
+      protocolVersion: number
       root: { properties: { schemaVersion: { const: number } } }
-    }>(generated.files, 'schemas/project-v8.json')
-    expect(project.root.properties.schemaVersion.const).toBe(PROJECT_SCHEMA_VERSION)
+      nativeTypes: string[]
+    }>(generated.files, 'schemas/course-project-v9.json')
+    expect(project.contract).toBe('Course Project V9')
+    expect(project.protocolVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
+    expect(project.root.properties.schemaVersion.const).toBe(COURSE_PROJECT_SCHEMA_VERSION)
+    expect(project.nativeTypes).toEqual([...COURSE_NATIVE_TYPES])
+    expect(project.nativeTypes).not.toContain('external-component')
+    const published = parseFile<{
+      formatVersion: number
+    }>(generated.files, 'schemas/published-course-v2.json')
+    expect(published.formatVersion).toBe(PUBLISHED_COURSE_VERSION)
+    const surfaceRuntime = parseFile<{
+      runtimeApiVersion: number
+      protocol: string
+    }>(generated.files, 'schemas/runtime-api3.json')
+    expect(surfaceRuntime).toMatchObject({
+      protocol: 'surface-v1',
+      runtimeApiVersion: SURFACE_RUNTIME_API_VERSION,
+    })
+    const interactions = parseFile<{
+      contract: string
+      protocolVersion: number
+    }>(generated.files, 'schemas/interactions.json')
+    expect(interactions).toMatchObject({
+      contract: 'Interaction Protocol V1',
+      protocolVersion: INTERACTION_PROTOCOL_VERSION,
+    })
     const runtime = parseFile<{
       documentSchema: { properties: { runtimeApiVersion: { const: number } } }
       hostContract: {
@@ -646,9 +691,11 @@ describe('AI capability manifest generation', () => {
       'diagnostics.json',
       'limits.json',
       'schemas/component-api4.json',
+      'schemas/course-project-v9.json',
       'schemas/interactions.json',
-      'schemas/project-v8.json',
+      'schemas/published-course-v2.json',
       'schemas/runtime-api2.json',
+      'schemas/runtime-api3.json',
     ])
     expect(index.artifacts).not.toHaveProperty('index.json')
     expect(index.artifacts).not.toHaveProperty('generation-evidence.json')
@@ -668,7 +715,11 @@ describe('AI capability manifest generation', () => {
     expect(evidence.hashScope).toContain('不记录 generation-evidence.json 自身哈希')
     const tracedSources = evidence.inputs.sourceFiles.map((entry) => entry.path)
     expect(tracedSources).toEqual(expect.arrayContaining([
-      'src/shared/projectSchema.ts',
+      'src/shared/courseProjectSchema.ts',
+      'src/shared/courseProjectTypes.ts',
+      'src/shared/publishedCourseSchema.ts',
+      'src/shared/publishedCourseTypes.ts',
+      'src/shared/surfaceRuntimeTypes.ts',
       'src/shared/interactionSchema.ts',
       'src/shared/interactionTypes.ts',
       'src/shared/runtimeSchema.ts',
@@ -676,23 +727,27 @@ describe('AI capability manifest generation', () => {
       'src/shared/diagnosticCodes.ts',
       'src/shared/constants.ts',
       'src/renderer/export/exportSize.ts',
+      'src/renderer/export/course/buildCoursePackages.ts',
+      'src/renderer/export/course/buildCoursePrintArtifacts.ts',
+      'src/renderer/export/course/buildPublishedCourse.ts',
       'scripts/validate-project.ts',
       'src/renderer/components/componentPackageStore.ts',
-      'src/renderer/project/createProject.ts',
-      'src/renderer/project/projectArchive.ts',
-      'src/renderer/project/validateProjectArchive.ts',
-      'src/renderer/export/exportPreflight.ts',
-      'src/shared/projectHealth.ts',
+      'src/renderer/project/createCourseProject.ts',
+      'src/renderer/project/courseProjectArchive.ts',
       'src/shared/layoutMeasure.ts',
       'src/shared/componentContentIntegrity.ts',
       'src/shared/textLayout.ts',
       'src/shared/formulaRenderer.ts',
       'src/shared/stableOrder.ts',
     ]))
+    expect(tracedSources).not.toContain('src/shared/projectSchema.ts')
+    expect(tracedSources).not.toContain('src/renderer/project/createProject.ts')
+    expect(tracedSources).not.toContain('src/renderer/project/projectArchive.ts')
+    expect(tracedSources).not.toContain('src/renderer/project/validateProjectArchive.ts')
 
     const project = parseFile<{ sourceOfTruth: string }>(
       generated.files,
-      'schemas/project-v8.json',
+      'schemas/course-project-v9.json',
     )
     const interactions = parseFile<{ sourceOfTruth: string[] }>(
       generated.files,
@@ -714,7 +769,7 @@ describe('AI capability manifest generation', () => {
       generated.files,
       'limits.json',
     )
-    expect(project.sourceOfTruth).toBe('src/shared/projectSchema.ts')
+    expect(project.sourceOfTruth).toBe('src/shared/courseProjectSchema.ts')
     expect(interactions.sourceOfTruth).toEqual([
       'src/shared/interactionTypes.ts',
       'src/shared/interactionSchema.ts',
