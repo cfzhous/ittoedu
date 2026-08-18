@@ -498,7 +498,7 @@ describe('V9 Slide domain', () => {
   it('exposes an injectable candidate backend without touching store or V8 project', () => {
     const project = v9SlideFixture()
     const backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
-    expect(backend.kind).toBe('v9-slide-candidate')
+    expect(backend.kind).toBe('slide-authoring')
     const added = backend.addScene({ now: NOW, expectedRevision: backend.getSnapshot().revision })
     expect(added.ok).toBe(true)
     expect(backend.getSnapshot().sceneId).not.toBe('scene-1')

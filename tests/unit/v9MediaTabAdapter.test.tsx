@@ -110,8 +110,8 @@ afterEach(() => {
 })
 
 describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
-  it('defaults MediaTab to the V9 slide candidate backend', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+  it('defaults MediaTab to the V9 slide authoring backend', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     const imported = createImageAssetImport(
       { name: 'v9-photo.png', mimeType: 'image/png', bytes: Uint8Array.from([1, 2, 3, 4]) },
       { dimensions: { width: 8, height: 8 } },

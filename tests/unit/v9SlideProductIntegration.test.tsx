@@ -151,8 +151,8 @@ function slideSceneLayerItems() {
 }
 
 describe('V9 slide product integration on the real V8 UI', () => {
-  it('defaults to the V9 slide candidate backend and writes inserted text into the candidate document', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+  it('defaults to the V9 slide authoring backend and writes inserted text into the candidate document', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())).not.toBeNull()
     expect(selectSlideCandidateDocument(useEditorStore.getState())?.schemaVersion).toBe(

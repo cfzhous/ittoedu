@@ -41,7 +41,7 @@ import {
 const MARQUEE_MIN_SIZE = 3
 const HANDLE_HIT_RADIUS = 10
 
-export type SlideWorkspaceBackendKind = 'v8' | 'v9-slide-candidate'
+export type SlideWorkspaceBackendKind = 'v8' | 'slide-authoring'
 
 export interface SlideAuthoringPointer {
   readonly x: number
@@ -57,7 +57,7 @@ export type SlideWorkspaceAuthoringResult =
       readonly reason: typeof SLIDE_BACKEND_NOT_CANDIDATE
     }
   | {
-      readonly kind: 'v9-slide-candidate'
+      readonly kind: 'slide-authoring'
       readonly command?: SlideCommandResult
       readonly preview?: readonly SlideEditorNodeTransform[]
       readonly overlay?: StageSelectionOverlayGeometry | null
@@ -229,10 +229,10 @@ function overlayForSelection(
 function v9Result(
   backend: SlideAuthoringBackend,
   options: StageViewportTransformOptions,
-  extra: Omit<Extract<SlideWorkspaceAuthoringResult, { kind: 'v9-slide-candidate' }>, 'kind' | 'overlay' | 'targets'> = {},
+  extra: Omit<Extract<SlideWorkspaceAuthoringResult, { kind: 'slide-authoring' }>, 'kind' | 'overlay' | 'targets'> = {},
 ): SlideWorkspaceAuthoringResult {
   return {
-    kind: 'v9-slide-candidate',
+    kind: 'slide-authoring',
     overlay: overlayForSelection(backend, options, extra.preview),
     targets: makeTargets(backend),
     ...extra,
@@ -395,7 +395,7 @@ export function createSlideWorkspaceAuthoringController() {
   let preview: SlideEditorNodeTransform[] | null = null
 
   const resolveKind = (): SlideWorkspaceBackendKind =>
-    readCandidate() ? 'v9-slide-candidate' : 'v8'
+    readCandidate() ? 'slide-authoring' : 'v8'
 
   const currentTargets = (): SlideAuthoringTarget[] => {
     const backend = readCandidate()
@@ -605,7 +605,7 @@ export function createSlideWorkspaceAuthoringController() {
 }
 
 export function resolveSlideWorkspaceAuthoringKind(): SlideWorkspaceBackendKind {
-  return readCandidate() ? 'v9-slide-candidate' : 'v8'
+  return readCandidate() ? 'slide-authoring' : 'v8'
 }
 
 export function listSlideWorkspaceHitTargets(): V9SlideHitTarget[] {

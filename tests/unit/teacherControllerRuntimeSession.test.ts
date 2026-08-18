@@ -341,6 +341,7 @@ describe('v9 teacher controller authoring bridge', () => {
   })
 
   it('leaves the default V8 path when no candidate is injected', () => {
+    useEditorStore.setState({ slideBackend: undefined as any })
     const controller = createV9TeacherControllerAuthoringController()
     expect(resolveTeacherControllerAuthoringKind()).toBe('v8')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()

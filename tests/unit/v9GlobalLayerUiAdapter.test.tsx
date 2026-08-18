@@ -293,7 +293,7 @@ afterEach(() => {
 
 describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
   it('defaults the store backend to V9 and paints candidate source labels', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     expect(selectSlideCandidateBackend(useEditorStore.getState())).not.toBeNull()
     render(<NodesTab />)
     expect(screen.getByTestId('nodes-tab')).toBeTruthy()

@@ -1476,7 +1476,7 @@ function SlideLocationWorkspace({
   }, [view.x, view.y, view.zoom])
 
   useEffect(() => {
-    if (slideBackendKind !== 'v9-slide-candidate' || canvasMode !== 'edit') {
+    if (slideBackendKind !== 'slide-authoring' || canvasMode !== 'edit') {
       setControllerOverlay(null)
       return
     }
@@ -3252,7 +3252,7 @@ function SlideLocationWorkspace({
           return
         }
         if (
-          slideBackendKind !== 'v9-slide-candidate' ||
+          slideBackendKind !== 'slide-authoring' ||
           canvasMode !== 'edit' ||
           event.button !== 0
         ) return
@@ -3313,7 +3313,7 @@ function SlideLocationWorkspace({
         const pan = panRef.current
         if (!pan || pan.pointerId !== event.pointerId) {
           if (
-            slideBackendKind === 'v9-slide-candidate' &&
+            slideBackendKind === 'slide-authoring' &&
             controllerPointerActiveRef.current
           ) {
             const viewport = readCandidateViewport()
@@ -3331,7 +3331,7 @@ function SlideLocationWorkspace({
             }
           }
           if (
-            slideBackendKind === 'v9-slide-candidate' &&
+            slideBackendKind === 'slide-authoring' &&
             candidatePointerActiveRef.current
           ) {
             const viewport = readCandidateViewport()
@@ -3364,7 +3364,7 @@ function SlideLocationWorkspace({
       }}
       onPointerUpCapture={(event) => {
         if (
-          slideBackendKind === 'v9-slide-candidate' &&
+          slideBackendKind === 'slide-authoring' &&
           controllerPointerActiveRef.current
         ) {
           const viewport = readCandidateViewport()
@@ -3386,7 +3386,7 @@ function SlideLocationWorkspace({
           return
         }
         if (
-          slideBackendKind === 'v9-slide-candidate' &&
+          slideBackendKind === 'slide-authoring' &&
           candidatePointerActiveRef.current
         ) {
           const viewport = readCandidateViewport()
@@ -3425,7 +3425,7 @@ function SlideLocationWorkspace({
         ) {
           return
         }
-        if (slideBackendKind === 'v9-slide-candidate') {
+        if (slideBackendKind === 'slide-authoring') {
           const viewport = readCandidateViewport()
           if (!viewport) return
           const world = clientToWorld(createStageViewportTransform(viewport), {

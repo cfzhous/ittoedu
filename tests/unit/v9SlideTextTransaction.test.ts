@@ -259,16 +259,14 @@ describe('V9 Slide text/formula transactions', () => {
     useEditorStore.getState().clearV9SlideCandidateBackend()
   })
 
-  it('defaults to the V9 slide candidate backend', () => {
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('v9-slide-candidate')
-    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('v9-slide-candidate')
+  it('defaults to the V9 slide authoring backend', () => {
+    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
+    expect(selectSlideCandidateBackend(useEditorStore.getState())?.kind).toBe('slide-authoring')
   })
 
-  it('does not hijack the V8 text path when the V8 backend is explicitly selected', () => {
-    useEditorStore.getState().clearV9SlideCandidateBackend()
-    expect(selectSlideCandidateBackend(useEditorStore.getState())).toBeNull()
+  it('rejects text edit when no authoring backend is available', () => {
     expect(beginV9SlideContentEdit({
-      backend: selectSlideCandidateBackend(useEditorStore.getState()),
+      backend: null,
       layerItemId: 'slide-title',
     })).toEqual({
       ok: false,
