@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
@@ -30,14 +31,17 @@ describe('Mixed try-run location mode', () => {
     useEditorStore.getState().activateCourseLocation(flow.id)
     expect(useEditorStore.getState().canvasMode).toBe('run')
     expect(selectActiveCourseLocationId(useEditorStore.getState())).toBe(flow.id)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).toBeNull()
 
     useEditorStore.getState().activateCourseLocation(spatial.id)
     expect(useEditorStore.getState().canvasMode).toBe('run')
     expect(selectActiveCourseLocationId(useEditorStore.getState())).toBe(spatial.id)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).toBeNull()
 
     useEditorStore.getState().activateCourseLocation(slide.id)
     expect(useEditorStore.getState().canvasMode).toBe('run')
     expect(selectActiveCourseLocationId(useEditorStore.getState())).toBe(slide.id)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())).not.toBeNull()
 
     useEditorStore.getState().setCanvasMode('edit')
     useEditorStore.getState().activateCourseLocation(flow.id)

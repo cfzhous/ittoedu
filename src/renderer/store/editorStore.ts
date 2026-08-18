@@ -1422,7 +1422,7 @@ export interface EditorState {
   textEditSession: TextEditSession | null
   statusMessage: string | null
   errorMessage: string | null
-  /** Default product backend is V9 Slide candidate. V8 remains only for tests/explicit import. */
+  /** Product Slide authoring backend. Null while Flow or Spatial session is active. */
   slideBackend: SlideBackend
   /** Cached after successful candidate commands so Zustand subscribers refresh. */
   slideCandidateSnapshot: SlideAuthoringSnapshot | null
@@ -3129,6 +3129,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       spatialPlaybackPathId: null,
       flowSession: null,
       flowTextEdit: null,
+      slideBackend: null,
       slideCandidateSnapshot: null,
       slideCandidateClipboard: null,
       v9ContentEdit: null,
@@ -3335,6 +3336,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       spatialContentEdit: null,
       spatialGraphSelection: null,
       spatialPlaybackPathId: null,
+      slideBackend: null,
       slideCandidateSnapshot: null,
       slideCandidateClipboard: null,
       v9ContentEdit: null,

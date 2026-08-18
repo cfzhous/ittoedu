@@ -8,8 +8,8 @@ import type {
  *
  * Store holds exactly one V9 Course Project document and one Slide authoring backend.
  */
-export type SlideBackend = SlideAuthoringBackend
-export type SlideBackendKind = SlideBackend['kind']
+export type SlideBackend = SlideAuthoringBackend | null
+export type SlideBackendKind = 'slide-authoring'
 
 export function isSlideAuthoringBackend(
   backend: SlideBackend | null | undefined,

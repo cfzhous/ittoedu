@@ -15,4 +15,5 @@
   - `git diff --check` (PASS)
 - **未验证**：全量测试、Typecheck、E2E 测试、Desktop 构建（按 01_SHARED / 00_INDEX 约束留给 T6）。
 - **回滚点**：`cursor/t3-single-backend-de5c` 起点 `origin/cursor/cloud-agent-1787062947578-owgrj`。
+- **合入补丁**：Flow/Spatial `apply*Backend` 补上 `slideBackend: null`（工人漏了，父代理复检补齐）。
 - **下游**：T5 可在正式 `SlideAuthoringBackend` / `slideEditorProjection.ts` 命名上构建 Read Model；T6 全量验证与扫描。

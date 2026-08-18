@@ -1,6 +1,8 @@
 # T3 删除双后端与 candidate
 
-> 状态：**未合入**（可领取）  
+> 状态：**已合入，禁止重做**  
+> HANDOFF：[T3_HANDOFF.md](T3_HANDOFF.md)  
+> Flow/Spatial 激活时 `slideBackend === null`。T5 跟 `slideAuthoringBackend` / `slideEditorProjection` 命名。  
 > 依赖：T1、T2 已合入；**P2 已合入，必须保留**  
 > 并行：可与 T4、P8 分树；禁止与 T5 同时改 `editorStore`  
 > 合同变化：无  
