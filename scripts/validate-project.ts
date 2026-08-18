@@ -622,7 +622,7 @@ export function validateCourseProjectArchiveBytes(
   const declaredVersion = declaredSchemaVersion(rawProject)
   const probe = detectCourseProjectArchiveFormat(bytes)
 
-  if (probe.kind === 'v8' || probe.kind === 'unsupported') {
+  if (probe.kind === 'unsupported') {
     return unreadableCourseProjectValidationReport(filename, unsupportedVersionFatal(
       probe.identity.schemaVersion ?? declaredVersion,
     ), {

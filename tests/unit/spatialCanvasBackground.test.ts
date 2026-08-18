@@ -5,6 +5,7 @@ import { resolveCourseSurfaceBackgroundColor } from '@/shared/courseProjectModel
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { updateSpatialSurfaceBackgroundColor } from '@/renderer/course/spatialEditorCommands'
 import { updateFlowSurfaceBackgroundColor } from '@/renderer/course/flowEditorCommands'
+import type { FlowSurfaceDocument, SpatialSurfaceDocument } from '@/shared/courseProjectTypes'
 
 /**
  * P5 canvas background persistence:
@@ -28,7 +29,7 @@ describe('Canvas background persistence & default', () => {
         return rest
       }),
     }
-    const spatialSurface = spatialDocWithoutBg.surfaces.find((s) => s.type === 'spatial-2d')
+    const spatialSurface = spatialDocWithoutBg.surfaces.find((s): s is SpatialSurfaceDocument => s.type === 'spatial-2d')
     expect(spatialSurface?.type).toBe('spatial-2d')
     expect(spatialSurface?.backgroundColor).toBeUndefined()
     expect(resolveCourseSurfaceBackgroundColor(spatialSurface?.backgroundColor)).toBe('#ffffff')
@@ -36,7 +37,7 @@ describe('Canvas background persistence & default', () => {
     useEditorStore.getState().loadCourseProject(spatialDocWithoutBg as any, null)
     const state = useEditorStore.getState()
     expect(state.spatialSession).not.toBeNull()
-    const loadedSpatialSurface = state.spatialSession?.history.present.surfaces.find((s) => s.type === 'spatial-2d')
+    const loadedSpatialSurface = state.spatialSession?.history.present.surfaces.find((s): s is SpatialSurfaceDocument => s.type === 'spatial-2d')
     expect(loadedSpatialSurface?.backgroundColor).toBeUndefined()
     expect(state.project.scenes[0]!.backgroundColor).toBe('#ffffff')
 
@@ -49,7 +50,7 @@ describe('Canvas background persistence & default', () => {
         return rest
       }),
     }
-    const flowSurface = flowDocWithoutBg.surfaces.find((s) => s.type === 'flow')
+    const flowSurface = flowDocWithoutBg.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')
     expect(flowSurface?.type).toBe('flow')
     expect(flowSurface?.backgroundColor).toBeUndefined()
     expect(resolveCourseSurfaceBackgroundColor(flowSurface?.backgroundColor)).toBe('#ffffff')
@@ -57,7 +58,7 @@ describe('Canvas background persistence & default', () => {
     useEditorStore.getState().loadCourseProject(flowDocWithoutBg as any, null)
     const flowState = useEditorStore.getState()
     expect(flowState.flowSession).not.toBeNull()
-    const loadedFlowSurface = flowState.flowSession?.history.present.surfaces.find((s) => s.type === 'flow')
+    const loadedFlowSurface = flowState.flowSession?.history.present.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')
     expect(loadedFlowSurface?.backgroundColor).toBeUndefined()
   })
 
@@ -70,7 +71,7 @@ describe('Canvas background persistence & default', () => {
     const result = updateSpatialSurfaceBackgroundColor(session, '#223344')
     expect(result.ok).toBe(true)
     expect(result.historyEntry).toBe(true)
-    const updatedSurface = result.nextSession?.history.present.surfaces.find((s) => s.type === 'spatial-2d')
+    const updatedSurface = result.nextSession?.history.present.surfaces.find((s): s is SpatialSurfaceDocument => s.type === 'spatial-2d')
     expect(updatedSurface?.backgroundColor).toBe('#223344')
     expect(resolveCourseSurfaceBackgroundColor(updatedSurface?.backgroundColor)).toBe('#223344')
 
@@ -91,7 +92,7 @@ describe('Canvas background persistence & default', () => {
     const result = updateFlowSurfaceBackgroundColor(doc, surface.id, '#abcdef')
     expect(result.ok).toBe(true)
     expect(result.historyEntry).toBe(true)
-    const updatedSurface = result.nextDocument?.surfaces.find((s) => s.id === surface.id && s.type === 'flow')
+    const updatedSurface = result.nextDocument?.surfaces.find((s): s is FlowSurfaceDocument => s.id === surface.id && s.type === 'flow')
     expect(updatedSurface?.backgroundColor).toBe('#abcdef')
     expect(resolveCourseSurfaceBackgroundColor(updatedSurface?.backgroundColor)).toBe('#abcdef')
 
