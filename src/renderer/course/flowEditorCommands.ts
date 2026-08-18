@@ -884,6 +884,32 @@ export function executeFlowEditorCommand(
   }
 }
 
+export function updateFlowSurfaceBackgroundColor(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  backgroundColor: string,
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
+  const stale = rejectIfStaleDocument(document, options.expectedRevision)
+  if (stale) return failCommand(stale.reason ?? LAYER_REJECT_STALE_REVISION)
+  if (typeof backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(backgroundColor.trim())) {
+    return failCommand('颜色格式无效')
+  }
+  const color = backgroundColor.trim().toLowerCase()
+  try {
+    const surface = flowSurfaceIn(document, surfaceId)
+    if (surface.backgroundColor === color) {
+      return succeedNoop(document, '颜色未变')
+    }
+  } catch (error) {
+    return failCommand(error instanceof Error ? error.message : '无法更新 Flow 页面背景色')
+  }
+  return runMutation(document, (draft) => {
+    const surface = flowSurfaceIn(draft, surfaceId)
+    surface.backgroundColor = color
+  }, '已修改稿纸背景色', options)
+}
+
 export {
   BLANK_FLOW_HEADING_PLACEHOLDER,
   FLOW_GLOBAL_STRUCTURE_REASON,

@@ -270,6 +270,7 @@ import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
 import {
   migrateProjectV8ToCourseProjectV9,
+  resolveCourseSurfaceBackgroundColor,
   sceneNodeToCourseLayerItem,
 } from '../../shared/courseProjectModel'
 import type {
@@ -1142,6 +1143,9 @@ function derivedV8ProjectFromSpatial(
     project: document,
     locationId: session.selection.locationId,
   })
+  const surface = document.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'spatial-2d',
+  ) as SpatialSurfaceDocument | undefined
   const nodes = spatialEditingNodes(session, edit)
   const globalLayer = document.globalLayerItems.flatMap((entry) => {
     const node = courseLayerItemToSceneNode(entry.item)
@@ -1165,7 +1169,7 @@ function derivedV8ProjectFromSpatial(
     scenes: [{
       id: view.camera.activeFrameId,
       name: view.surfaceTitle,
-      backgroundColor: '#ffffff',
+      backgroundColor: resolveCourseSurfaceBackgroundColor(surface?.backgroundColor),
       backgroundAssetId: null,
       nodes: session.scope === 'global' ? [] : nodes,
       presentation: createDefaultScenePresentation(),
