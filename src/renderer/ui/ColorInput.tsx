@@ -5,9 +5,10 @@ interface ColorInputProps {
   label: string
   value: string
   onChange(value: string): void
+  'data-testid'?: string
 }
 
-export function ColorInput({ id, label, value, onChange }: ColorInputProps) {
+export function ColorInput({ id, label, value, onChange, 'data-testid': testId }: ColorInputProps) {
   const [draft, setDraft] = useState(value)
 
   useEffect(() => setDraft(value), [value])
@@ -18,7 +19,7 @@ export function ColorInput({ id, label, value, onChange }: ColorInputProps) {
   }
 
   return (
-    <div className="form-field">
+    <div className="form-field" {...(testId ? { 'data-testid': testId } : {})}>
       <label htmlFor={`${id}-text`}>{label}</label>
       <div className="color-control">
         <input

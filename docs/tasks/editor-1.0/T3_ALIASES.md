@@ -1,7 +1,7 @@
 # T3-aliases 去掉 candidate 别名
 
-> 状态：**必须等待 P5-persist 合入**（抢 `editorStore.ts`）  
-> 并行：否，等 P5-persist  
+> 状态：**可领取**（P5-persist 已合入）  
+> 并行：可与 T6-docs / T6-scan / T1-D / T1-A0 分树；禁止与 T1-B 同时改 `editorStore.ts`  
 > 合同变化：否  
 > 工人先读：[02_WORKER.md](02_WORKER.md)
 
@@ -20,9 +20,9 @@ docs/tasks/editor-1.0/T3_ALIASES_HANDOFF.md
 
 ## 禁止
 
-- 在 P5-persist 未合入时改 `editorStore.ts`。
 - 改 `canvasMode`、手势、`derivedV8ProjectFromSpatial` 颜色。
 - 运行全量验证。
+- 与 T1-B 同时改 `editorStore.ts`。
 
 ## 逐步算法（领取后）
 

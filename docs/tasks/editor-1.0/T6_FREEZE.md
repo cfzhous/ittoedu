@@ -1,6 +1,6 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**全量验证不可领取**，直到 P5-persist 合入  
+> 状态：**全量验证不可领取**，直到 T6-docs / T6-scan / T1-D 合入（P5-persist 已合入）  
 > 预备切片已拆出，可并行：[T6-docs](T6_DOCS.md)、[T6-scan](T6_SCAN.md)、[T1-D](T1_D_CONTRACTS_GEN.md)  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
 > **本包唯一允许跑 typecheck / 全量 test / e2e / build:desktop 的任务**
@@ -8,8 +8,8 @@
 必须已经合入才能跑下方「全量验证」：T0、T1-E、T2、T3、T4、T5、P1、P2、P3、P4、P5-CSS、P5-persist、P6、P7、P8。  
 T1-A/B/C 若仍暂缓：扫描到 `legacy-runtime-v2` 时记入合同白名单（测试夹具与 T6-scan 白名单），**不要在 T6 偷偷删判别器**。
 
-> 依赖：全量验证等 P5-persist；预备切片见 T6-docs / T6-scan / T1-D  
-> 并行：全量验证否；预备切片可与 P5-persist 分树
+> 依赖：P5-persist 已合入；全量验证等 T6-docs / T6-scan / T1-D  
+> 并行：全量验证否；预备切片可分树
 
 ## 目标
 

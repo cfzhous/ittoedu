@@ -9,7 +9,7 @@
 | **E** 可选 `backgroundColor?` | **已合入，禁止重做** | Spatial/Flow 可选字段；`resolveCourseSurfaceBackgroundColor`；夹具 round-trip 已覆盖 omitted/explicit |
 | **A0** 合同桶 re-export | **可领取** [T1-A0](T1_A0_CONTRACTS_BARRELS.md) | 只新建 `src/shared/contracts/**`，不改现有 import |
 | **A** 抽离并改 import | **暂缓** | 等 A0。大范围移动类型。 |
-| **B** 删除 `legacy-runtime-v2` / `legacy-whole-canvas` | **阻塞** | T0 夹具仍持久化旧判别器；生产写入在 `editorStore.ts`，等 P5-persist。未先改夹具 + 写入 + round-trip 前，禁止删判别器。 |
+| **B** 删除 `legacy-runtime-v2` / `legacy-whole-canvas` | **阻塞** | T0 夹具仍持久化旧判别器；生产写入在 `editorStore.ts`，等 T3-aliases。未先改夹具 + 写入 + round-trip 前，禁止删判别器。 |
 | **C** 审计顶层字段 | **暂缓** | 与 A 一起。禁止把 `PROJECT_SCHEMA_VERSION` 改成 9。 |
 | **D** 合同产物脚本 | **可领取** [T1-D](T1_D_CONTRACTS_GEN.md) | 生成快照；哈希门禁仍是 T6 冻结切片。 |
 

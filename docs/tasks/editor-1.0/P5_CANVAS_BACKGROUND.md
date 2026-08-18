@@ -18,11 +18,9 @@
 
 ---
 
-## P5-persist（未合入，可领取）
+## P5-persist（已合入，禁止重做）
 
 > 依赖：T1 E、P8 已合入  
-> 并行：可与 T3 分树；`editorStore` 只许改 `derivedV8ProjectFromSpatial` 颜色来源，禁止改 backend 命名  
-> 合同变化：无  
 > 车道：P
 
 ### 一句话
@@ -97,12 +95,12 @@ npx vitest run tests/unit/spatialCanvasBackground.test.ts
 
 ### 完成判定
 
-- [ ] 属性可改 Spatial/Flow 色并写入 V9 可选字段
-- [ ] 缺省白，旧工程不因打开被存成黑
-- [ ] 编辑与宿主同色
-- [ ] Slide 场景色控件未改语义
-- [ ] 已 push `cursor/p5-canvas-persist-de5c`
-- [ ] 有 `P5_HANDOFF.md`
+- [x] 属性可改 Spatial/Flow 色并写入 V9 可选字段
+- [x] 缺省白，旧工程不因打开被存成黑
+- [x] 编辑与宿主同色
+- [x] Slide 场景色控件未改语义
+- [x] 已 push `cursor/p5-canvas-persist-de5c`
+- [x] 有 `P5_HANDOFF.md`
 
 ### 下游
 
