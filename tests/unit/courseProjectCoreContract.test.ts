@@ -20,6 +20,7 @@ import {
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
+  type CourseRuntimeDefinition,
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { createProject } from '@/renderer/project/createProject'
@@ -460,7 +461,7 @@ describe('Course Project V9 core contract', () => {
   })
 
   it('validates runtime protocol discriminators and versions', () => {
-    const makeRuntimeProject = (runtimeDef: CourseProjectDocument['surfaces'][0] extends { type: 'slide' } ? any : never) => {
+    const makeRuntimeProject = (runtimeDef: CourseRuntimeDefinition) => {
       const project = minimalSlideProject()
       const slideSurface = project.surfaces[0] as Extract<CourseProjectDocument['surfaces'][0], { type: 'slide' }>
       slideSurface.scenes[0]!.layerItems = [{
@@ -516,7 +517,7 @@ describe('Course Project V9 core contract', () => {
       source: 'CoursewareRuntime.define({runtimeApiVersion:3,create(){return {destroy(){}}}})',
       content: { values: { label: 'Bad Canvas Runtime' } },
       assets: {},
-    })
+    } as unknown as CourseRuntimeDefinition)
     expect(courseProjectDocumentSchema.safeParse(invalidCanvasRuntimeWithApi3).success).toBe(false)
 
     const invalidSurfaceRuntimeWithPhaser = makeRuntimeProject({
@@ -527,7 +528,7 @@ describe('Course Project V9 core contract', () => {
       source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-runtime",create(){return {destroy(){}}}})',
       content: { values: { label: 'Bad Surface Runtime' } },
       assets: {},
-    })
+    } as unknown as CourseRuntimeDefinition)
     expect(courseProjectDocumentSchema.safeParse(invalidSurfaceRuntimeWithPhaser).success).toBe(false)
 
     const legacyRuntime = makeRuntimeProject({
@@ -538,7 +539,7 @@ describe('Course Project V9 core contract', () => {
       source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})',
       content: { values: { label: 'Legacy Runtime' } },
       assets: {},
-    })
+    } as unknown as CourseRuntimeDefinition)
     expect(courseProjectDocumentSchema.safeParse(legacyRuntime).success).toBe(false)
 
     const legacySurfaceRuntime = makeRuntimeProject({
@@ -549,7 +550,7 @@ describe('Course Project V9 core contract', () => {
       source: 'CoursewareRuntime.define({runtimeApiVersion:3,protocol:"surface-v1",create(){return {destroy(){}}}})',
       content: { values: { label: 'Legacy Surface Runtime' } },
       assets: {},
-    })
+    } as unknown as CourseRuntimeDefinition)
     expect(courseProjectDocumentSchema.safeParse(legacySurfaceRuntime).success).toBe(false)
   })
 })

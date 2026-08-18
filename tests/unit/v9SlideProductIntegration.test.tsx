@@ -231,13 +231,13 @@ describe('V9 slide product integration on the real V8 UI', () => {
       'w',
     )
     const down = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
-    expect(down.kind).toBe('v9-slide-candidate')
+    expect(down.kind).toBe('slide-authoring')
     const revisionAfterDown = selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision
     controller.pointerMove({ x: west.x - 40, y: west.y }, VIEW)
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionAfterDown)
     const up = controller.pointerUp({ x: west.x - 40, y: west.y }, VIEW)
-    expect(up.kind).toBe('v9-slide-candidate')
-    if (up.kind !== 'v9-slide-candidate') throw new Error('expected v9-slide-candidate')
+    expect(up.kind).toBe('slide-authoring')
+    if (up.kind !== 'slide-authoring') throw new Error('expected slide-authoring')
     expect(up.command?.ok).toBe(true)
     expect(up.command?.historyEntry).toBe(true)
     expect(nativeFrame(firstId)).toMatchObject({
@@ -312,8 +312,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
 
     const controller = createSlideWorkspaceAuthoringController()
     const selected = controller.selectFromLayerIds([imageId!], VIEW)
-    expect(selected.kind).toBe('v9-slide-candidate')
-    if (selected.kind !== 'v9-slide-candidate') throw new Error('expected v9-slide-candidate')
+    expect(selected.kind).toBe('slide-authoring')
+    if (selected.kind !== 'slide-authoring') throw new Error('expected slide-authoring')
     expect(selected.targets?.[0]?.layerItemId).toBe(imageId)
     expect(JSON.stringify(selected.targets?.[0])).not.toMatch(/hitId/)
   })

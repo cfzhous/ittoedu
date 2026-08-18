@@ -128,14 +128,9 @@ describe('default Course Project V9 persistence', () => {
       assetFiles: {},
       componentFiles: {},
     })
-    expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('v8')
-    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/显式迁移|旧版工程/)
-    const opened = openDefaultCourseProject(v8Bytes)
-    expect(opened.kind).toBe('v8')
-    if (opened.kind !== 'v8') return
-    expect(opened.pending.report.sourceFormat).toBe('legacy-course')
-    expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
-    expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
+    expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
+    expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/格式版本|版本不支持/)
+    expect(() => openDefaultCourseProject(v8Bytes)).toThrow(/格式版本|版本不支持/)
   })
 })
 
