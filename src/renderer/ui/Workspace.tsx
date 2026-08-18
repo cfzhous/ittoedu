@@ -457,6 +457,50 @@ function hitSpatialGraphAtWorld(
   return null
 }
 
+const SPATIAL_MEDIA_FILL = {
+  display: 'block',
+  width: '100%',
+  height: '100%',
+  objectFit: 'contain' as const,
+  pointerEvents: 'none' as const,
+}
+
+function spatialAuthoringMedia(
+  node: SceneNode,
+  assetUrls: Readonly<Record<string, string>>,
+) {
+  if (node.type === 'image') {
+    const src = assetUrls[node.assetId]
+    return src
+      ? <img src={src} alt="" draggable={false} style={SPATIAL_MEDIA_FILL} />
+      : (node.name || node.type)
+  }
+  if (node.type === 'video') {
+    const src = assetUrls[node.assetId]
+    const poster = node.poster.mode === 'image' && node.poster.assetId
+      ? assetUrls[node.poster.assetId]
+      : undefined
+    if (src) {
+      return (
+        <video
+          src={src}
+          poster={poster}
+          muted
+          playsInline
+          preload="metadata"
+          draggable={false}
+          style={SPATIAL_MEDIA_FILL}
+        />
+      )
+    }
+    if (poster) {
+      return <img src={poster} alt="" draggable={false} style={SPATIAL_MEDIA_FILL} />
+    }
+    return node.name || node.type
+  }
+  return null
+}
+
 function SpatialSelectionOverlay({
   overlay,
   locked,
@@ -469,7 +513,14 @@ function SpatialSelectionOverlay({
     <div className="spatial-selection-overlay" data-testid="spatial-selection-overlay" aria-hidden="true">
       <div
         className={`spatial-selection-overlay__box${locked ? ' spatial-selection-overlay__box--locked' : ''}`}
-        style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
+        style={{
+          left: box.x,
+          top: box.y,
+          width: box.width,
+          height: box.height,
+          transform: `rotate(${overlay.rotation}deg)`,
+          transformOrigin: 'center center',
+        }}
       />
       {STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
         const point = overlay.handles[direction]
@@ -950,10 +1001,8 @@ function SpatialLocationWorkspace({
                   >
                     {node.type === 'text' ? node.text
                       : node.type === 'formula' ? node.accessibleText
-                      : node.type === 'image' && assetUrls[node.assetId]
-                        ? <img src={assetUrls[node.assetId]} alt="" />
-                        : node.type === 'external-component' ? node.name || '组件'
-                        : node.name || node.type}
+                      : spatialAuthoringMedia(node, assetUrls)
+                        ?? (node.type === 'external-component' ? node.name || '组件' : node.name || node.type)}
                   </div>
                 )
               })}
@@ -976,17 +1025,24 @@ function SpatialLocationWorkspace({
                 const node = courseLayerItemToSceneNode(layer.item as LayerItem)
                 if (!node) return null
                 const controller = isTeacherControllerLayerItem(layer.item as LayerItem)
+                const rotation = preview?.rotation ?? layer.item.rotation
+                const media = controller ? null : spatialAuthoringMedia(node, assetUrls)
                 return (
                   <div
                     key={layer.selectionId}
-                    className="spatial-world-item"
+                    className={`spatial-world-item spatial-world-item--${node.type}`}
                     data-hud-id={layer.selectionId}
                     style={{
                       left: preview?.x ?? frame.x,
                       top: preview?.y ?? frame.y,
                       width: preview?.width ?? frame.width,
                       height: preview?.height ?? frame.height,
-                      background: controller ? 'transparent' : 'rgba(23,32,51,0.88)',
+                      transform: !controller && rotation ? `rotate(${rotation}deg)` : undefined,
+                      background: controller
+                        ? 'transparent'
+                        : media
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(23,32,51,0.88)',
                       color: '#f8fafc',
                       borderRadius: 12,
                       display: 'flex',
@@ -1005,7 +1061,7 @@ function SpatialLocationWorkspace({
                           width: preview?.width ?? frame.width,
                           height: preview?.height ?? frame.height,
                         }}
-                        rotation={preview?.rotation ?? layer.item.rotation}
+                        rotation={rotation}
                         canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
                         getRenderedStageBounds={() => {
                           const bounds = viewportRef.current?.getBoundingClientRect()
@@ -1021,7 +1077,7 @@ function SpatialLocationWorkspace({
                         currentSceneId={session.selection.locationId}
                       />
                     ) : (
-                      node.name || node.type
+                      media ?? (node.name || node.type)
                     )}
                   </div>
                 )

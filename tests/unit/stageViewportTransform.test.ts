@@ -12,9 +12,12 @@ import {
   resizeWorldFrameFromHandle,
   resizeWorldFrameFromHandlePreservingAspect,
   rotatedRectIntersectsStage,
+  rotateWorldPoint,
   stageOverlayCssTransform,
+  stageResizeHandleWorldPoint,
   stageSelectionOverlayGeometry,
   worldDeltaToClient,
+  worldRectCenter,
   worldRectToClient,
   worldToClient,
 } from '../../src/renderer/authoring/stageViewportTransform'
@@ -250,6 +253,54 @@ describe('stage viewport transform', () => {
     expect(geometry?.rotationHandle.y).toBeLessThan(geometry!.handles.n.y)
     expectPointClose(geometry!.handles.w, worldToClient(transform, { x: 100, y: 140 }))
     expectPointClose(geometry!.handles.n, worldToClient(transform, { x: 200, y: 80 }))
+    expect(geometry?.rotation).toBe(0)
+  })
+
+  it('keeps a single-item selection box rotatable around its center', () => {
+    const transform = createStageViewportTransform({
+      viewport: { x: 0, y: 0, width: 1280, height: 720 },
+      zoom: 1,
+    })
+    const item = { x: 100, y: 80, width: 200, height: 120, rotation: 90 }
+    const geometry = stageSelectionOverlayGeometry(transform, [item])
+    const worldBox = { x: item.x, y: item.y, width: item.width, height: item.height }
+    const center = worldRectCenter(worldBox)
+
+    expect(geometry?.rotation).toBe(90)
+    expectRectClose(geometry!.selectionBox, worldRectToClient(transform, worldBox))
+    expectPointClose(
+      geometry!.handles.w,
+      worldToClient(transform, rotateWorldPoint({ x: 100, y: 140 }, center, 90)),
+    )
+    expectPointClose(
+      geometry!.handles.n,
+      worldToClient(transform, rotateWorldPoint({ x: 200, y: 80 }, center, 90)),
+    )
+    expectPointClose(
+      geometry!.handles.w,
+      worldToClient(transform, stageResizeHandleWorldPoint(worldBox, 'w', 90)),
+    )
+    expect(geometry!.rotationHandle).not.toEqual(
+      worldToClient(transform, { x: center.x, y: item.y - 34 }),
+    )
+  })
+
+  it('does not rotate the union box when more than one item is selected', () => {
+    const transform = createStageViewportTransform({
+      viewport: { x: 0, y: 0, width: 1280, height: 720 },
+      zoom: 1,
+    })
+    const geometry = stageSelectionOverlayGeometry(transform, [
+      { x: 100, y: 80, width: 200, height: 120, rotation: 45 },
+      { x: 400, y: 200, width: 80, height: 40, rotation: -20 },
+    ])
+    expect(geometry?.rotation).toBe(0)
+    expectRectClose(geometry!.selectionBox, {
+      x: worldToClient(transform, { x: 100, y: 80 }).x,
+      y: worldToClient(transform, { x: 100, y: 80 }).y,
+      width: 380,
+      height: 160,
+    })
   })
 
   it('moves the stored origin when resizing from west or north, not only east/south', () => {

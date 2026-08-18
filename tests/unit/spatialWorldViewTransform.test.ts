@@ -9,8 +9,11 @@ import {
 } from '@/shared/courseProjectTypes'
 import {
   createStageViewportTransform,
+  rotateWorldPoint,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
+  stageResizeHandleWorldPoint,
+  worldRectCenter,
   worldToClient,
 } from '@/renderer/authoring/stageViewportTransform'
 import {
@@ -66,7 +69,7 @@ function nativeText(
   layerItemId: string,
   order: number,
   text: string,
-  extra: Partial<Pick<NativeLayerItem, 'locked' | 'frame'>> = {},
+  extra: Partial<Pick<NativeLayerItem, 'locked' | 'frame' | 'rotation'>> = {},
 ): NativeLayerItem {
   return {
     layerItemId,
@@ -75,7 +78,7 @@ function nativeText(
     order,
     visible: true,
     locked: extra.locked ?? false,
-    rotation: 0,
+    rotation: extra.rotation ?? 0,
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
@@ -129,7 +132,7 @@ function scoped(item: LayerItem): ScopedLayerItem {
   return { item, visibility: { mode: 'all', locationIds: [] } }
 }
 
-function fixture(): CourseProjectDocument {
+function fixture(worldRotation = 0): CourseProjectDocument {
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
     id: 'r5b-spatial-transform',
@@ -186,6 +189,7 @@ function fixture(): CourseProjectDocument {
         layerItems: [
           nativeText('world-text', 1, '远景', {
             frame: { mode: 'absolute', x: -200, y: 40, width: 220, height: 80 },
+            rotation: worldRotation,
           }),
         ],
       },
@@ -258,6 +262,41 @@ describe('Spatial world vs viewport view transforms', () => {
       'nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w',
     ])
     expect(geometry?.rotationHandle.y).toBeLessThan(geometry!.handles.n.y)
+    expect(geometry?.rotation).toBe(0)
+  })
+
+  it('rotates the world selection overlay with a single selected item', () => {
+    const host = hostOf(openSpatialAuthoringSession(fixture(90), {
+      locationId: LOCATION_ID,
+      sessionId: 'spatial-session-r5b-tf-rotate',
+    }))
+    const controller = createSpatialWorldAuthoringController(host)
+    const zoomed = controller.zoomSession(2, VIEWPORT)
+    expect(zoomed.command?.ok).toBe(true)
+    controller.selectFromLayerIds(['world-text'], VIEWPORT)
+
+    const world = spatialWorldViewTransform(VIEWPORT, host.session().sessionCamera)
+    const geometry = controller.overlayGeometry(VIEWPORT)
+    const shared = spatialWorldSelectionOverlay(VIEWPORT, host.session())
+    const worldBox = { x: -200, y: 40, width: 220, height: 80 }
+    const origin = worldToClient(world, worldBox)
+    const center = worldRectCenter(worldBox)
+
+    expect(geometry?.rotation).toBe(90)
+    expect(shared?.rotation).toBe(90)
+    expect(geometry?.selectionBox).toEqual({
+      x: origin.x,
+      y: origin.y,
+      width: 220 * 2,
+      height: 80 * 2,
+    })
+    expect(geometry?.handles.w).toEqual(
+      worldToClient(world, rotateWorldPoint({ x: -200, y: 80 }, center, 90)),
+    )
+    expect(geometry?.handles.n).toEqual(
+      worldToClient(world, stageResizeHandleWorldPoint(worldBox, 'n', 90)),
+    )
+    expect(geometry?.rotationHandle).toEqual(shared?.rotationHandle)
   })
 
   it('keeps teacher-controller overlay on the viewport matrix and ignores world pan/zoom', () => {
