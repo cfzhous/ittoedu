@@ -1164,7 +1164,7 @@ function derivedV8ProjectFromSpatial(
     scenes: [{
       id: view.camera.activeFrameId,
       name: view.surfaceTitle,
-      backgroundColor: '#111318',
+      backgroundColor: '#ffffff',
       backgroundAssetId: null,
       nodes: session.scope === 'global' ? [] : nodes,
       presentation: createDefaultScenePresentation(),
