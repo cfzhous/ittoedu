@@ -1,6 +1,8 @@
 # P8 Flow / Spatial 互动组件
 
-> 状态：**未合入**（可领取；P1/P3/P4 已合入）  
+> 状态：**已合入，禁止重做**  
+> HANDOFF：[P8_HANDOFF.md](P8_HANDOFF.md)  
+> P5-persist 只许改宿主背景色，禁止回退组件挂载。  
 > 并行：**否**。不要与 P5-persist 同时改宿主 / `FlowWorkspace` / Spatial `Workspace`  
 > 合同变化：无（仍是 Component API 4）  
 > 车道：P  

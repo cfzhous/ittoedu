@@ -20,8 +20,8 @@
 
 ## P5-persist（未合入，可领取）
 
-> 依赖：T1 E 已合入（`backgroundColor?`）；**必须等 P8 合入后再改宿主**（同改 `FlowSurfaceHost` / `SpatialSurfaceHost` / `FlowWorkspace` / Spatial `Workspace`）  
-> 并行：否（相对 P8）  
+> 依赖：T1 E、P8 已合入  
+> 并行：可与 T3 分树；`editorStore` 只许改 `derivedV8ProjectFromSpatial` 颜色来源，禁止改 backend 命名  
 > 合同变化：无  
 > 车道：P
 
