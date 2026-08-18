@@ -12,6 +12,38 @@
 - **校验规则**：`schemaVersion` 缺少或非数字判定为 corrupted；非 `9` 的其他整数判定为 unsupported。不打开、不导入 V8 工程。
 - **空白工程**：直接构造符合 `CourseProjectDocument` 结构的 V9 数据，不再走 V8 迁移链路。
 
+### 1.1 顶层字段
+
+`CourseProjectDocument` 顶层由 `courseProjectDocumentSchema` 进行严格（`.strict()`）校验，无任何自由预埋 JSON（如未受管的 AI handoff、审批流状态、Hash 证据等），且不存在持久化的 `projectMode` 字段。当前工程版本常量为 `COURSE_PROJECT_SCHEMA_VERSION`（9），历史 Project V8 形状常量 `PROJECT_SCHEMA_VERSION`（8）不再代表可打开工程。
+
+顶层字段完整列表：
+
+```text
+schemaVersion, id, revision, title, createdAt, updatedAt,
+assets, componentPackages, designTokens, media, playback,
+courseState, navigationGuards, locations, startLocationId,
+globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
+```
+
+- `schemaVersion`：必须为 `9`（`COURSE_PROJECT_SCHEMA_VERSION`）。
+- `id`：工程稳定唯一标识。
+- `revision`：单调自增作者编辑事务版本号（与审批 hash 无关）。
+- `title`：课程标题。
+- `createdAt` / `updatedAt`：UTC ISO 8601 时间戳字符串。
+- `assets`：工程内嵌资源元数据映射字典（`key === asset.id`）。
+- `componentPackages`：内嵌组件包元数据映射字典（`key === packageId`）。
+- `designTokens`：工程级设计 Token（字体 `fonts`、颜色 `colors`）。
+- `media`：工程级音频与媒体配置。
+- `playback`：全局播放器与演讲者模式配置。
+- `courseState`：全局声明式状态定义列表。
+- `navigationGuards`：全局声明式导航拦截守卫规则列表。
+- `locations`：统一课程结构位置索引列表（`min: 1`）。
+- `startLocationId`：课程起始位置标识（必须指向有效 location）。
+- `globalLayerItems`：跨表面全局共享图层项列表。
+- `globalInteractions`：全局交互规则列表。
+- `surfaces`：课程表面定义列表（`min: 1`）。
+- `mixedPrintPlan`（可选）：多表面工程跨表面导出编排计划。
+
 ---
 
 ## 2. 表面模型（Surfaces）
