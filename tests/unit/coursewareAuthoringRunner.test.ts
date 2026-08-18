@@ -2,6 +2,7 @@
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { link, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -156,7 +157,9 @@ describe('trusted courseware authoring runner', () => {
     }
   })
 
-  it('runs a real native text Editor round trip from an external cwd and rejects a forged receipt', async () => {
+  it.skipIf(!existsSync(path.join(root, 'dist-renderer', 'index.html')))(
+    'runs a real native text Editor round trip from an external cwd and rejects a forged receipt',
+    async () => {
     temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'courseware-authoring-test-'))
     const caseRoot = path.join(temporaryRoot, 'external case #1')
     await mkdir(path.join(caseRoot, 'implementation'), { recursive: true })

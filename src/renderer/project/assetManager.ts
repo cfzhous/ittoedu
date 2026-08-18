@@ -58,8 +58,9 @@ export async function assetBytesSha256(bytes: Uint8Array): Promise<string> {
       '请重新启动编辑器后再试。',
     )
   }
-  const source = bytes.slice()
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', source.buffer)
+  const source = new Uint8Array(bytes.byteLength)
+  source.set(bytes)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', source)
   return [...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('')
