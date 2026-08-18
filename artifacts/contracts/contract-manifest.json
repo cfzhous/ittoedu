@@ -1,0 +1,25 @@
+{
+  "manifestVersion": 1,
+  "generator": "scripts/generate-contracts.ts",
+  "generationCommand": "npm run generate:contracts",
+  "contracts": [
+    {
+      "name": "courseProjectDocumentSchema",
+      "file": "course-project-v9.schema.json",
+      "sourceOfTruth": "src/shared/courseProjectSchema.ts",
+      "sha256": "5f2e94e36a63cfaad670232098d7d157e6156a62e3ff1caad003cd0b57e20769"
+    },
+    {
+      "name": "publishedCourseV2Schema",
+      "file": "published-course-v2.schema.json",
+      "sourceOfTruth": "src/shared/publishedCourseSchema.ts",
+      "sha256": "1ede2020014e3c708e7734ea4ea4f20240612e1d04185f58c0faac5787041293"
+    },
+    {
+      "name": "componentManifestSchema",
+      "file": "component-manifest.schema.json",
+      "sourceOfTruth": "src/shared/componentSchema.ts",
+      "sha256": "2d40ee68253a13455026b0f648028f4a00583fa6e23c9ecedf658238fa7507a9"
+    }
+  ]
+}
