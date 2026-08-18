@@ -25,6 +25,8 @@
     "start": "npm run build:desktop && cross-env VITE_DEV_SERVER_URL= electron .",
     "generate:ai-capabilities": "tsx scripts/generate-ai-capabilities.ts",
     "check:ai-capabilities": "tsx scripts/generate-ai-capabilities.ts --check",
+    "generate:contracts": "tsx scripts/generate-contracts.ts",
+    "check:contracts": "tsx scripts/generate-contracts.ts --check",
     "validate:course-project": "tsx scripts/validate-project.ts",
     "validate:project": "tsx scripts/validate-project.ts",
     "run-courseware-authoring": "tsx scripts/run-courseware-authoring.ts",
