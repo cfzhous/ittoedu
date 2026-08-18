@@ -1,6 +1,6 @@
 # T6 Editor 1.0 冻结与全量验证
 
-> 状态：**Windows 本机已跑 `test:e2e`。editor.spec / render-host / catalog HTML 已绿。剩 catalog 矩阵编辑器打开仍是 V8 `.h5lesson`（T2 残留）。** 不要重跑已绿命令。Vite 500kB chunk 警告不当缺陷。
+> 状态：**Windows 本机 `test:e2e` 27/27 通过。** catalog 矩阵与 authoring runner 夹具已改为 Course Project V9。不要宣称发布。Vite 500kB chunk 警告不当缺陷。
 >
 > 合同变化：否（禁止再改 Schema 判别器）  
 > 工人先读：[02_WORKER.md](02_WORKER.md)  
@@ -21,10 +21,10 @@ T1-A / T1-C 已纳入本轮冻结，必须在重开 T6 全量之前合入。扫�
 | 命令 | 状态 | 重开时 |
 |---|---|---|
 | `npm run check:contracts` | 已绿 | **不要重跑**（除非又改了 `artifacts/contracts/**`） |
-| `npm run typecheck` | 已绿（合入 T1-A 后；并去掉 e2e 重复 `closeCoursePreviewOverlay`） | **不要重跑** |
-| `npm test` | 已绿（1173 passed / 18 skipped；authoring round-trip 在无 `dist-renderer` 时 skip） | **不要重跑** |
-| `npm run build:desktop` | 已绿（player/renderer/electron；500kB chunk 警告忽略） | **不要重跑** |
-| `npm run test:e2e` | Linux 上不能作为 Windows 证据（见 HANDOFF §8） | **不要在 Linux 上为绿而改产品窗口/缩放**；Windows 本机才算 e2e |
+| `npm run typecheck` | 已绿（catalog/authoring V9 转换后 2026-08-19 再跑一次） | 源码/测试再变才重跑 |
+| `npm test` | 已绿（1191 passed；有 `dist-renderer` 时 authoring round-trip 不再 skip） | 测试再变才重跑 |
+| `npm run build:desktop` | 已绿（player/renderer/electron；500kB chunk 警告忽略） | **不要重跑**（本轮未改 `src/` 产品代码） |
+| `npm run test:e2e` | **Windows 27/27 通过**（2026-08-19） | Linux 上不能作为 Windows 证据 |
 
 ## 逐步算法
 
@@ -75,10 +75,10 @@ docs/tasks/editor-1.0/T6_FREEZE_HANDOFF.md
 
 ## 完成判定
 
-- [ ] 五条命令的结果写进 HANDOFF（通过或失败即停）
-- [ ] 未宣称发布 / 未打 tag
-- [ ] 已 push `cursor/t6-freeze-resume-de5c`
-- [ ] 有 `T6_FREEZE_HANDOFF.md`
+- [x] 五条命令的结果写进 HANDOFF（通过或失败即停）
+- [x] 未宣称发布 / 未打 tag
+- [x] 已 push `cursor/t6-freeze-resume-de5c`
+- [x] 有 `T6_FREEZE_HANDOFF.md`
 
 ## 目标
 

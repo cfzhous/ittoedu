@@ -147,7 +147,7 @@ const usage = [
   'Usage: npm run --silent run-courseware-authoring -- --case-dir <dir> [options]',
   '  --editor-root <dir>    editor checkout (default current directory)',
   '  --inventory <path>     case-relative inventory path',
-  '  --project <path>       case-relative Project V8 path',
+  '  --project <path>       case-relative Course Project V9 path',
   '  --report <path>        case-relative receipt path',
   '  --delivery-html <path> case-relative delivered HTML to byte-compare with a fresh UI export',
   '  --delivery-web-package <path> case-relative delivered web-package ZIP',
@@ -477,13 +477,97 @@ async function hashFile(filename: string): Promise<string> {
   return sha256(await readFile(filename))
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function nativeTextNodeFromLayer(item: unknown): ProjectNode | null {
+  const layer = asRecord(item)
+  const content = asRecord(layer?.content)
+  const data = asRecord(content?.data)
+  const frame = asRecord(layer?.frame)
+  if (
+    !layer ||
+    layer.kind !== 'native' ||
+    content?.nativeType !== 'text' ||
+    typeof layer.layerItemId !== 'string' ||
+    typeof data?.text !== 'string' ||
+    !frame
+  ) {
+    return null
+  }
+  return {
+    id: layer.layerItemId,
+    type: 'text',
+    text: data.text,
+    x: Number(frame.x),
+    y: Number(frame.y),
+    width: Number(frame.width),
+    height: Number(frame.height),
+    visible: layer.visible !== false,
+  }
+}
+
+function presentationFromV9Scene(scene: Record<string, unknown>): ProjectScene['presentation'] {
+  const presentation = asRecord(scene.presentation)
+  if (!presentation || typeof presentation.initialStateId !== 'string' || !Array.isArray(presentation.states)) {
+    return undefined
+  }
+  return {
+    initialStateId: presentation.initialStateId,
+    states: presentation.states.flatMap((candidate) => {
+      const state = asRecord(candidate)
+      if (!state || typeof state.id !== 'string') return []
+      const overrides = asRecord(state.layerItemOverrides) ?? {}
+      const nodeOverrides: NonNullable<NonNullable<ProjectScene['presentation']>['states'][number]['nodeOverrides']> = {}
+      for (const [layerItemId, raw] of Object.entries(overrides)) {
+        const override = asRecord(raw)
+        if (!override) continue
+        const mapped: { visible?: boolean, text?: string } = {}
+        if (typeof override.visible === 'boolean') mapped.visible = override.visible
+        const nativeData = asRecord(override.nativeData)
+        if (typeof nativeData?.text === 'string') mapped.text = nativeData.text
+        if (Object.keys(mapped).length > 0) nodeOverrides[layerItemId] = mapped
+      }
+      return [{ id: state.id, nodeOverrides }]
+    }),
+  }
+}
+
+function slideScenesFromCourseProject(value: Record<string, unknown>): ProjectScene[] {
+  const surfaces = Array.isArray(value.surfaces) ? value.surfaces : []
+  const scenes: ProjectScene[] = []
+  for (const surfaceValue of surfaces) {
+    const surface = asRecord(surfaceValue)
+    if (!surface || surface.type !== 'slide' || !Array.isArray(surface.scenes)) continue
+    for (const sceneValue of surface.scenes) {
+      const scene = asRecord(sceneValue)
+      if (!scene || typeof scene.id !== 'string') continue
+      const items = Array.isArray(scene.layerItems) ? scene.layerItems : []
+      scenes.push({
+        id: scene.id,
+        nodes: items.flatMap((item) => {
+          const node = nativeTextNodeFromLayer(item)
+          return node ? [node] : []
+        }),
+        presentation: presentationFromV9Scene(scene),
+      })
+    }
+  }
+  return scenes
+}
+
 function projectFromArchive(bytes: Uint8Array): ProjectDocument {
   const archive = unzipSync(bytes)
   const projectBytes = archive['project.json']
   if (!projectBytes) throw new Error('Project archive has no project.json')
-  const value = JSON.parse(strFromU8(projectBytes)) as ProjectDocument
-  if (value.schemaVersion !== 8 || !Array.isArray(value.scenes)) throw new Error('Project must be V8')
-  return value
+  const value = JSON.parse(strFromU8(projectBytes)) as Record<string, unknown>
+  if (value.schemaVersion !== 9) throw new Error('Project must be Course Project V9')
+  const scenes = slideScenesFromCourseProject(value)
+  if (scenes.length === 0) throw new Error('Course Project V9 has no Slide scenes')
+  return { schemaVersion: 9, scenes }
 }
 
 function observationStateId(scene: ProjectScene, node: ProjectNode): string | null {
@@ -517,12 +601,22 @@ function withInitialState(bytes: Uint8Array, sceneId: string, stateId: string | 
   const archive = unzipSync(bytes)
   const projectBytes = archive['project.json']
   if (!projectBytes) throw new Error('Project archive has no project.json')
-  const project = JSON.parse(strFromU8(projectBytes)) as ProjectDocument
-  const scene = project.scenes.find((candidate) => candidate.id === sceneId)
-  if (!scene?.presentation?.states.some((state) => state.id === stateId)) {
+  const project = JSON.parse(strFromU8(projectBytes)) as Record<string, unknown>
+  if (project.schemaVersion !== 9) throw new Error('Project must be Course Project V9')
+  const surfaces = Array.isArray(project.surfaces) ? project.surfaces : []
+  let scene: Record<string, unknown> | null = null
+  for (const surfaceValue of surfaces) {
+    const surface = asRecord(surfaceValue)
+    if (!surface || surface.type !== 'slide' || !Array.isArray(surface.scenes)) continue
+    scene = surface.scenes.map(asRecord).find((candidate) => candidate?.id === sceneId) ?? null
+    if (scene) break
+  }
+  const presentation = asRecord(scene?.presentation)
+  const states = Array.isArray(presentation?.states) ? presentation.states : []
+  if (!presentation || !states.some((candidate) => asRecord(candidate)?.id === stateId)) {
     throw new Error(`observation state is absent from Project: ${sceneId}/${stateId}`)
   }
-  scene.presentation.initialStateId = stateId
+  presentation.initialStateId = stateId
   archive['project.json'] = strToU8(`${JSON.stringify(project, null, 2)}\n`)
   return zipSync(archive, { level: 6, mtime: new Date('1980-01-01T00:00:00.000Z') })
 }

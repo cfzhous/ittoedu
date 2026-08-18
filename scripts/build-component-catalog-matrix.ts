@@ -2,25 +2,32 @@ import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ComponentEditorProperty, ComponentPackageData } from '../src/shared/componentTypes'
-import { projectDocumentSchema } from '../src/shared/projectSchema'
-import type { ExternalComponentNode, ProjectDocument } from '../src/shared/projectTypes'
+import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
+import { sceneNodeToCourseLayerItem } from '../src/shared/courseProjectModel'
+import type {
+  ComponentLayerItem,
+  CourseProjectDocument,
+  SlideSceneDocument,
+} from '../src/shared/courseProjectTypes'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../src/main/componentCatalogScanner'
 import { componentPackagesToArchiveFiles } from '../src/renderer/components/componentPackageStore'
 import {
   importComponentPackage,
   type ImportedComponentPackage,
 } from '../src/renderer/components/importComponentPackage'
-import { buildExportPayload } from '../src/renderer/export/buildExportPayload'
-import { buildStandaloneHtml } from '../src/renderer/export/buildStandaloneHtml'
-import { buildWebPackage } from '../src/renderer/export/buildWebPackage'
+import {
+  buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseWebPackage,
+} from '../src/renderer/export/course/buildCoursePackages'
+import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
 import {
   createExternalComponentNode,
-  createProject,
-  createScene,
   createTextNode,
 } from '../src/renderer/project/createProject'
-import { createProjectArchive, openProjectArchive } from '../src/renderer/project/projectArchive'
-import { deriveSceneNodeOverride } from '../src/shared/presentation'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '../src/renderer/project/courseProjectArchive'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
@@ -29,11 +36,18 @@ const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
   : path.resolve(projectRoot, '..', 'courseware-components')
 const outputRoot = path.join(projectRoot, 'artifacts', 'component-catalog-matrix')
 const playerBundlePath = path.join(projectRoot, 'dist-player', 'player.iife.js')
-const projectJsonPath = path.join(outputRoot, 'component-catalog-v8-matrix.project.json')
-const lessonPath = path.join(outputRoot, 'component-catalog-v8-matrix.h5lesson')
-const htmlPath = path.join(outputRoot, 'component-catalog-v8-matrix.html')
-const webPackagePath = path.join(outputRoot, 'component-catalog-v8-matrix-web.zip')
+const basename = 'component-catalog-v9-matrix'
+const projectJsonPath = path.join(outputRoot, `${basename}.project.json`)
+const lessonPath = path.join(outputRoot, `${basename}.h5lesson`)
+const htmlPath = path.join(outputRoot, `${basename}.html`)
+const webPackagePath = path.join(outputRoot, `${basename}-web.zip`)
 const evidencePath = path.join(outputRoot, 'matrix-build-evidence.json')
+const staleV8Basenames = [
+  'component-catalog-v8-matrix.project.json',
+  'component-catalog-v8-matrix.h5lesson',
+  'component-catalog-v8-matrix.html',
+  'component-catalog-v8-matrix-web.zip',
+]
 const buildTimestamp = '2026-08-11T00:00:00.000Z'
 const archiveTimestamp = new Date(buildTimestamp)
 const expectedPackageCount = 4
@@ -85,10 +99,15 @@ function matrixProps(
   return { props, textPath: property.key, baseText, stateText }
 }
 
-function componentNode(
+function componentLayer(
   component: ComponentPackageData,
   index: number,
-): { node: ExternalComponentNode; textPath?: string; baseText?: string; stateText?: string } {
+): {
+  item: ComponentLayerItem
+  textPath?: string
+  baseText?: string
+  stateText?: string
+} {
   const authored = matrixProps(component, index)
   const node = createExternalComponentNode({
     id: `matrix_component_${String(index + 1).padStart(2, '0')}`,
@@ -103,31 +122,49 @@ function componentNode(
     height: 500,
     props: authored.props,
   })
-  return { node, ...authored }
+  const item = sceneNodeToCourseLayerItem(node, 1)
+  if (item.kind !== 'component') {
+    throw new Error(`${component.manifest.id} 未能写成 component 图层`)
+  }
+  return { item, ...authored }
 }
 
-function addStateOverride(
-  scene: ProjectDocument['scenes'][number],
-  node: ExternalComponentNode,
+function presentationForComponent(
+  item: ComponentLayerItem,
   textPath: string | undefined,
   stateText: string | undefined,
-): void {
-  if (!textPath || !stateText) return
-  const effective = structuredClone(node)
-  setPath(effective.props, textPath, stateText)
-  const override = deriveSceneNodeOverride(node, effective)
-  scene.presentation = {
+): SlideSceneDocument['presentation'] {
+  const overrideProps = structuredClone(item.props)
+  if (textPath && stateText) setPath(overrideProps, textPath, stateText)
+  return {
     initialStateId: 'state_initial',
     thumbnailStateId: 'state_matrix_override',
     states: [
-      { id: 'state_initial', name: '基础', nodeOverrides: {} },
+      { id: 'state_initial', name: '基础', layerItemOverrides: {} },
       {
         id: 'state_matrix_override',
         name: '矩阵状态覆盖',
-        nodeOverrides: override ? { [node.id]: override } : {},
+        layerItemOverrides: textPath && stateText
+          ? { [item.layerItemId]: { componentProps: overrideProps } }
+          : {},
       },
     ],
   }
+}
+
+function requireSlideSurface(project: CourseProjectDocument) {
+  const surface = project.surfaces[0]
+  if (!surface || surface.type !== 'slide') {
+    throw new Error('空白 Course Project 必须包含 Slide 表面')
+  }
+  return surface
+}
+
+async function removeStaleV8Outputs(): Promise<void> {
+  await Promise.all(staleV8Basenames.map(async (name) => {
+    const stalePath = path.join(outputRoot, name)
+    if (existsSync(stalePath)) await fs.unlink(stalePath)
+  }))
 }
 
 async function main(): Promise<void> {
@@ -165,21 +202,17 @@ async function main(): Promise<void> {
     components[entry.packageId] = imported
   }
 
-  const project = createProject({
-    id: 'project_component_catalog_v8_matrix',
-    title: 'Component Catalog V8 四组件矩阵',
+  const project = createBlankCourseProject({
+    id: 'project_component_catalog_v9_matrix',
+    title: 'Component Catalog V9 四组件矩阵',
     now: buildTimestamp,
     includeDefaultController: false,
     controls: 'none',
   })
-  project.scenes = catalog.packages.map((entry, index) => {
+  const surface = requireSlideSurface(project)
+  const scenes: SlideSceneDocument[] = catalog.packages.map((entry, index) => {
     const component = components[entry.packageId]!
-    const scene = createScene({
-      id: `scene_component_${String(index + 1).padStart(2, '0')}`,
-      name: `${String(index + 1).padStart(2, '0')} · ${entry.name}`,
-      backgroundColor: index % 2 === 0 ? '#f8fafc' : '#eef2ff',
-    })
-    const title = createTextNode({
+    const title = sceneNodeToCourseLayerItem(createTextNode({
       id: `matrix_title_${String(index + 1).padStart(2, '0')}`,
       name: '矩阵场景标题',
       text: `${entry.name} · ${entry.packageId}@${entry.version}`,
@@ -195,12 +228,32 @@ async function main(): Promise<void> {
         backgroundOpacity: 0.86,
         cornerRadius: 14,
       },
-    })
-    const authored = componentNode(component, index)
-    scene.nodes = [title, authored.node]
-    addStateOverride(scene, authored.node, authored.textPath, authored.stateText)
-    return scene
+    }), 0)
+    const authored = componentLayer(component, index)
+    return {
+      id: `scene_component_${String(index + 1).padStart(2, '0')}`,
+      name: `${String(index + 1).padStart(2, '0')} · ${entry.name}`,
+      backgroundColor: index % 2 === 0 ? '#f8fafc' : '#eef2ff',
+      backgroundAssetId: null,
+      layerItems: [title, authored.item],
+      presentation: presentationForComponent(
+        authored.item,
+        authored.textPath,
+        authored.stateText,
+      ),
+      interactions: [],
+    }
   })
+  surface.title = project.title
+  surface.scenes = scenes
+  project.locations = scenes.map((scene) => ({
+    id: scene.id,
+    label: `${surface.title} · ${scene.name}`,
+    kind: 'slide-scene' as const,
+    surfaceId: surface.id,
+    sceneId: scene.id,
+  }))
+  project.startLocationId = scenes[0]!.id
   project.componentPackages = Object.fromEntries(
     catalog.packages.map((entry) => [
       entry.packageId,
@@ -209,16 +262,17 @@ async function main(): Promise<void> {
   )
   project.updatedAt = buildTimestamp
 
-  const parsedProject = projectDocumentSchema.parse(project)
+  const parsedProject = courseProjectDocumentSchema.parse(project)
   const componentFiles = componentPackagesToArchiveFiles(components)
-  const archive = createProjectArchive(
+  const archive = createCourseProjectArchive(
     { project: parsedProject, assetFiles: {}, componentFiles },
     { mtime: archiveTimestamp },
   )
-  const reopened = openProjectArchive(archive)
+  const reopened = openCourseProjectArchive(archive)
+  const reopenedSlide = reopened.project.surfaces.find((candidate) => candidate.type === 'slide')
   if (
-    reopened.project.schemaVersion !== 8 ||
-    reopened.project.scenes.length !== expectedPackageCount ||
+    reopened.project.schemaVersion !== 9 ||
+    (reopenedSlide?.type === 'slide' ? reopenedSlide.scenes.length : 0) !== expectedPackageCount ||
     Object.keys(reopened.project.componentPackages).length !== expectedPackageCount ||
     Object.keys(reopened.componentFiles).length !== expectedPackageCount
   ) {
@@ -231,17 +285,18 @@ async function main(): Promise<void> {
     }
   }
 
-  const payload = buildExportPayload({ project: parsedProject, components })
-  const standaloneHtml = buildStandaloneHtml(payload, { playerBundle, lang: 'zh-CN' })
-  const webPackage = buildWebPackage(payload, { playerBundle, lang: 'zh-CN' })
+  const sources = { project: parsedProject, assetFiles: {}, components }
+  const standaloneHtml = buildPublishedCourseStandaloneHtml(sources, { playerBundle, lang: 'zh-CN' })
+  const webPackage = buildPublishedCourseWebPackage(sources, { playerBundle, lang: 'zh-CN' })
   const evidence = {
     generatedAt: buildTimestamp,
     quality: 'experimental',
     catalogRoot: componentCatalogRoot,
     projectSchemaVersion: parsedProject.schemaVersion,
+    publishedCourseFormat: 'published-course-v2',
     componentSchemaVersion: 4,
     runtimeApiVersion: 4,
-    sceneCount: parsedProject.scenes.length,
+    sceneCount: reopenedSlide && reopenedSlide.type === 'slide' ? reopenedSlide.scenes.length : 0,
     packageCount: catalog.packages.length,
     packages: catalog.packages.map((entry) => ({
       packageId: entry.packageId,
@@ -267,14 +322,15 @@ async function main(): Promise<void> {
     fs.writeFile(webPackagePath, webPackage),
     fs.writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8'),
   ])
+  await removeStaleV8Outputs()
 
-  console.log(`已生成四组件 Project V8 矩阵：${lessonPath}`)
+  console.log(`已生成四组件 Course Project V9 矩阵：${lessonPath}`)
   console.log(`已生成离线单 HTML：${htmlPath}`)
   console.log(`已生成离线网页包：${webPackagePath}`)
   console.log(`已生成矩阵证据：${evidencePath}`)
 }
 
 main().catch((error: unknown) => {
-  console.error('四组件 V8 矩阵生成失败', error)
+  console.error('四组件 V9 矩阵生成失败', error)
   process.exitCode = 1
 })

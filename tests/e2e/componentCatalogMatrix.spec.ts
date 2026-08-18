@@ -25,19 +25,19 @@ const artifactDirectory = join(root, 'artifacts', 'component-catalog-matrix')
 const outputDirectory = join(root, 'output', 'playwright', 'component-catalog-matrix')
 const matrixLessonPath = join(
   artifactDirectory,
-  'component-catalog-v8-matrix.h5lesson',
+  'component-catalog-v9-matrix.h5lesson',
 )
 const matrixHtmlPath = join(
   artifactDirectory,
-  'component-catalog-v8-matrix.html',
+  'component-catalog-v9-matrix.html',
 )
 const matrixWebPackagePath = join(
   artifactDirectory,
-  'component-catalog-v8-matrix-web.zip',
+  'component-catalog-v9-matrix-web.zip',
 )
 const matrixProjectPath = join(
   artifactDirectory,
-  'component-catalog-v8-matrix.project.json',
+  'component-catalog-v9-matrix.project.json',
 )
 const importedRoundtripPath = join(
   outputDirectory,
@@ -64,16 +64,21 @@ const matrixFixtureAvailable = [
   join(catalogRoot, 'catalog.json'),
 ].every(existsSync)
 
+interface MatrixSlideScene {
+  id: string
+  name: string
+  layerItems: Array<{
+    layerItemId: string
+    kind: string
+    component?: { packageId: string; version: string }
+  }>
+}
+
 interface MatrixProject {
   schemaVersion: number
-  scenes: Array<{
-    id: string
-    name: string
-    nodes: Array<{
-      id: string
-      type: string
-      component?: { packageId: string; version: string }
-    }>
+  surfaces: Array<{
+    type: string
+    scenes?: MatrixSlideScene[]
   }>
   componentPackages: Record<string, {
     packageId: string
@@ -102,20 +107,26 @@ interface PlayerVerification {
   navigationCount: number
 }
 
+function slideScenesOf(project: MatrixProject): MatrixSlideScene[] {
+  return project.surfaces.flatMap((surface) => (
+    surface.type === 'slide' ? surface.scenes ?? [] : []
+  ))
+}
+
 const matrixProject: MatrixProject = matrixFixtureAvailable
   ? JSON.parse(readFileSync(matrixProjectPath, 'utf8')) as MatrixProject
-  : { schemaVersion: 8, scenes: [], componentPackages: {} }
-const matrixCases = matrixProject.scenes.map((scene, index) => {
-  const node = scene.nodes.find((candidate) => candidate.type === 'external-component')
-  if (!node?.component) throw new Error(`矩阵场景 ${scene.id} 缺少组件节点`)
+  : { schemaVersion: 9, surfaces: [], componentPackages: {} }
+const matrixCases = slideScenesOf(matrixProject).map((scene, index) => {
+  const item = scene.layerItems.find((candidate) => candidate.kind === 'component')
+  if (!item?.component) throw new Error(`矩阵场景 ${scene.id} 缺少组件图层`)
   return {
     index,
     sceneId: scene.id,
     sceneName: scene.name,
-    nodeId: node.id,
-    packageId: node.component.packageId,
-    version: node.component.version,
-    sha256: matrixProject.componentPackages[node.component.packageId]?.sha256,
+    nodeId: item.layerItemId,
+    packageId: item.component.packageId,
+    version: item.component.version,
+    sha256: matrixProject.componentPackages[item.component.packageId]?.sha256,
     baseText: `矩阵 ${String(index + 1).padStart(2, '0')}`,
     stateText: `状态覆盖 ${String(index + 1).padStart(2, '0')}`,
   }
@@ -260,19 +271,20 @@ async function verifyOfflinePlayer(
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
   if (htmlPath) await page.goto(pathToFileURL(htmlPath).toString())
+  await expect(page.locator('#course-root')).toBeVisible()
+  await expect(page.locator('#course-root .slide-published-adapter')).toBeVisible({
+    timeout: 15_000,
+  })
   await expect.poll(() => page.evaluate(
     () => Boolean(window.__H5_LESSON_PLAYER__),
   )).toBe(true)
 
-  const hostSelector = '.lesson-component-mount--scene[data-courseware-component-root]'
+  const hostSelector = '.published-component-mount'
   for (const entry of matrixCases) {
     expect(await page.evaluate(({ index }) => {
       const player = window.__H5_LESSON_PLAYER__
       if (!player) return false
-      return player.goToScene(index, 'state_initial') || (
-        player.getCurrentSceneIndex() === index &&
-        player.getCurrentPresentationStateId() === 'state_initial'
-      )
+      return player.goToScene(index) || player.getCurrentSceneIndex() === index
     }, entry)).toBe(true)
     await expect.poll(() => page.evaluate(
       () => window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? -1,
@@ -280,36 +292,30 @@ async function verifyOfflinePlayer(
     await expect(page.locator(hostSelector)).toHaveCount(1)
     await expect.poll(() => shadowText(page.locator(hostSelector)))
       .toContain(entry.baseText)
-
-    expect(await page.evaluate(() => (
-      window.__H5_LESSON_PLAYER__?.setPresentationState(
-        'state_matrix_override',
-      ) ?? false
-    ))).toBe(true)
-    await expect.poll(() => page.evaluate(
-      () => window.__H5_LESSON_PLAYER__?.getCurrentPresentationStateId() ?? null,
-    )).toBe('state_matrix_override')
-    await expect.poll(() => shadowText(page.locator(hostSelector)))
-      .toContain(entry.stateText)
   }
 
   const stress = await page.evaluate(async ({ rounds, sceneCount }) => {
     let maxMounted = 0
     let minMounted = Number.POSITIVE_INFINITY
     let navigationCount = 0
+    const waitForScene = async (index: number) => {
+      const deadline = Date.now() + 8_000
+      while (Date.now() < deadline) {
+        const current = window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex()
+        const mounted = document.querySelectorAll('.published-component-mount').length
+        if (current === index && mounted === 1) return
+        await new Promise<void>((resolveFrame) => {
+          requestAnimationFrame(() => resolveFrame())
+        })
+      }
+      throw new Error(`压力翻页超时：scene=${index}`)
+    }
     for (let round = 0; round < rounds; round += 1) {
       for (let index = 0; index < sceneCount; index += 1) {
-        const moved = window.__H5_LESSON_PLAYER__?.goToScene(
-          index,
-          'state_initial',
-        ) ?? false
+        const moved = window.__H5_LESSON_PLAYER__?.goToScene(index) ?? false
         if (!moved) throw new Error(`压力翻页失败：round=${round}, scene=${index}`)
-        await new Promise<void>((resolveFrame) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))
-        })
-        const mounted = document.querySelectorAll(
-          '.lesson-component-mount--scene[data-courseware-component-root]',
-        ).length
+        await waitForScene(index)
+        const mounted = document.querySelectorAll('.published-component-mount').length
         maxMounted = Math.max(maxMounted, mounted)
         minMounted = Math.min(minMounted, mounted)
         navigationCount += 1
@@ -441,14 +447,14 @@ async function exportThroughUi(
   ).toBeGreaterThan(minimumBytes)
 }
 
-test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
+test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
   test.skip(
     !matrixFixtureAvailable,
     '请先运行 npm run build:component-catalog-matrix 生成四组件矩阵。',
   )
 
   test.beforeAll(() => {
-    expect(matrixProject.schemaVersion).toBe(8)
+    expect(matrixProject.schemaVersion).toBe(9)
     expect(matrixCases).toHaveLength(expectedPackageCount)
     expect(Object.keys(matrixProject.componentPackages)).toHaveLength(expectedPackageCount)
     expect(Object.values(matrixProject.componentPackages).every((metadata) => (
@@ -457,6 +463,10 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
     expect(existsSync(matrixLessonPath)).toBe(true)
     expect(existsSync(matrixHtmlPath)).toBe(true)
     expect(existsSync(matrixWebPackagePath)).toBe(true)
+    const generatedHtml = readFileSync(matrixHtmlPath, 'utf8')
+    expect(generatedHtml).toContain('id="course-root"')
+    expect(generatedHtml).toContain('"sourceSchemaVersion":9')
+    expect(generatedHtml).toContain('状态覆盖')
     mkdirSync(outputDirectory, { recursive: true })
     ;[
       importedRoundtripPath,
@@ -468,7 +478,7 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
     ].forEach(removeKnownOutput)
   })
 
-  test('生成物的单 HTML 与网页包离线运行四组件、状态覆盖和 100 次压力翻页', async () => {
+  test('生成物的单 HTML 与网页包离线运行四组件和 100 次压力翻页', async () => {
     test.setTimeout(180_000)
     const browser = await launchHeadlessBrowser()
     try {

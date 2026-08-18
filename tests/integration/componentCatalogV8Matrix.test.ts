@@ -14,8 +14,16 @@ import {
   importComponentPackage,
   type ImportedComponentPackage,
 } from '@/renderer/components/importComponentPackage'
-import { createProjectArchive, openProjectArchive } from '@/renderer/project/projectArchive'
-import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
+import {
+  createCourseProjectArchive,
+  openCourseProjectArchive,
+} from '@/renderer/project/courseProjectArchive'
+import {
+  selectActiveCourseProjectDocument,
+  selectActiveScene,
+  selectMediaAssetFiles,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 
 const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
   ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR)
@@ -121,7 +129,7 @@ async function loadCatalogPackages(): Promise<ImportedComponentPackage[]> {
   }))
 }
 
-catalogDescribe('四组件 Project V8 编辑、归档与生命周期矩阵', () => {
+catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () => {
   let packages: ImportedComponentPackage[] = []
   let originalDecode: typeof HTMLImageElement.prototype.decode | undefined
 
@@ -217,17 +225,20 @@ catalogDescribe('四组件 Project V8 编辑、归档与生命周期矩阵', () 
 
   it('保存重开后保留四个精确包、来源元数据、实例与状态覆盖', () => {
     const state = useEditorStore.getState()
-    const archive = createProjectArchive({
-      project: state.project,
-      assetFiles: state.assetFiles,
+    const project = selectActiveCourseProjectDocument(state)
+    expect(project, '当前会话必须是 Course Project V9').toBeTruthy()
+    const archive = createCourseProjectArchive({
+      project: project!,
+      assetFiles: selectMediaAssetFiles(state),
       componentFiles: componentPackagesToArchiveFiles(state.componentPackages),
     }, { mtime: new Date(importedAt) })
-    const reopened = openProjectArchive(archive)
+    const reopened = openCourseProjectArchive(archive)
     const restoredPackages = componentPackagesFromArchive(
       reopened.project,
       reopened.componentFiles,
     )
 
+    expect(reopened.project.schemaVersion).toBe(9)
     expect(Object.keys(reopened.project.componentPackages)).toHaveLength(expectedPackageCount)
     expect(Object.keys(restoredPackages)).toHaveLength(expectedPackageCount)
     for (const component of packages) {
@@ -243,11 +254,13 @@ catalogDescribe('四组件 Project V8 编辑、归档与生命周期矩阵', () 
       expect(restoredPackages[component.manifest.id]?.runtimeSource)
         .toBe(component.runtimeSource)
     }
-    expect(reopened.project.scenes[0]?.presentation?.states).toHaveLength(2)
+    const slide = reopened.project.surfaces.find((surface) => surface.type === 'slide')
+    expect(slide?.type === 'slide' ? slide.scenes[0]?.presentation?.states : undefined)
+      .toHaveLength(2)
 
-    useEditorStore.getState().loadProject(
+    useEditorStore.getState().loadCourseProject(
       reopened.project,
-      'component-catalog-v8-matrix.h5lesson',
+      'component-catalog-v9-matrix.h5lesson',
       reopened.assetFiles,
       restoredPackages,
     )

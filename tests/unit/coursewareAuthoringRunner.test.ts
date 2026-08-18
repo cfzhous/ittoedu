@@ -9,8 +9,11 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { strToU8, zipSync } from 'fflate'
-import { createProject, createTextNode } from '@/renderer/project/createProject'
-import { createProjectArchive } from '@/renderer/project/projectArchive'
+import { createTextNode } from '@/renderer/project/createProject'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { canonicalDeliveryFingerprint } from '../../scripts/run-courseware-authoring'
 
 const execFileAsync = promisify(execFile)
@@ -172,16 +175,25 @@ describe('trusted courseware authoring runner', () => {
     await writeFile(path.join(caseRoot, '02-presentation-script.md'), presentation)
     await writeFile(path.join(caseRoot, '03-development-plan.md'), plan)
 
-    const project = createProject({
+    const project = createBlankCourseProject({
       id: 'project_authoring_runner',
       title: '可信编辑会话',
       now: '2026-08-13T00:00:00.000Z',
       includeDefaultController: false,
       controls: 'none',
     })
-    const scene = project.scenes[0]!
+    const surface = project.surfaces[0]
+    if (!surface || surface.type !== 'slide') throw new Error('expected a Slide surface')
+    const scene = surface.scenes[0]!
+    const location = project.locations[0]
     scene.id = 'scene_authoring_runner'
     scene.name = '真实编辑'
+    if (location?.kind === 'slide-scene') {
+      location.id = scene.id
+      location.sceneId = scene.id
+      location.label = scene.name
+    }
+    project.startLocationId = scene.id
     const node = createTextNode({
       id: 'node_authoring_title',
       name: '可编辑标题',
@@ -192,8 +204,12 @@ describe('trusted courseware authoring runner', () => {
       height: 160,
       style: { fontSize: 52, color: '#172033', backgroundColor: '#ffffff', backgroundOpacity: 1 },
     })
-    scene.nodes = [node]
-    const archive = createProjectArchive({ project, assetFiles: {}, componentFiles: {} }, {
+    scene.layerItems = [sceneNodeToCourseLayerItem(node, 0)]
+    const archive = createCourseProjectArchive({
+      project: courseProjectDocumentSchema.parse(project),
+      assetFiles: {},
+      componentFiles: {},
+    }, {
       mtime: '2026-08-13T00:00:00.000Z',
     })
     const projectPath = path.join(caseRoot, 'project', 'authoring-runner-case.h5lesson')
@@ -285,15 +301,20 @@ describe('trusted courseware authoring runner', () => {
 
     scene.presentation = {
       initialStateId: 'state_override',
+      thumbnailStateId: 'state_override',
       states: [{
         id: 'state_override',
         name: '状态文本覆盖',
-        nodeOverrides: {
-          [node.id]: { visible: true, text: '覆盖了持久绑定的文本' },
+        layerItemOverrides: {
+          [node.id]: { visible: true, nativeData: { text: '覆盖了持久绑定的文本' } },
         },
       }],
     }
-    const overriddenArchive = createProjectArchive({ project, assetFiles: {}, componentFiles: {} }, {
+    const overriddenArchive = createCourseProjectArchive({
+      project: courseProjectDocumentSchema.parse(project),
+      assetFiles: {},
+      componentFiles: {},
+    }, {
       mtime: '2026-08-13T00:00:00.000Z',
     })
     await writeFile(projectPath, overriddenArchive)
