@@ -34,6 +34,7 @@ export async function mountSpatialLocationTryRun(input: {
       locationId: input.locationId,
       playbackPathId: input.playbackPathId ?? null,
       playbackControls: published.playback.controls === 'none' ? 'none' : 'canvas',
+      resolveAsset: (assetId) => published.assets[assetId]?.url,
       courseProgressSource: {
         getLocations: () => published.locations.map((location) => ({
           id: location.id,
