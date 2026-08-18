@@ -217,8 +217,8 @@ function isSceneFrameTransformableKind(kind: LayerItem['kind']): boolean {
 }
 
 /**
- * Applies one completed Workspace gesture to unlocked scene layers that own a
- * frame (native, component, runtime). Teacher-controller stays on the global
+ * Applies one completed Workspace gesture to unlocked scene or global layers that own a
+ * frame (native, component, runtime). Teacher-controller stays on the controller-specific
  * path. Preview frames never enter this command, so one invocation creates at
  * most one Project revision and one history entry regardless of selection size.
  */
@@ -226,6 +226,7 @@ export function transformSelectedSlideNativeLayers(
   history: SlideAuthoringHistory,
   selection: SlideAuthoringSelection,
   input: SlideEditorTransformInput,
+  scope: SlideEditorLayerScope = 'scene',
   now?: string,
 ): SlideAuthoringHistory {
   if (input.nodes.length === 0) return history
@@ -250,8 +251,14 @@ export function transformSelectedSlideNativeLayers(
   const plans = input.nodes.map((transform) => {
     const layer = layerById.get(transform.nodeId)
     if (!layer) throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
-    if (layer.source !== 'scene') {
-      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '当前选择不属于当前幻灯片场景')
+    if (layer.source !== scope) {
+      throw new SlideCommandError(
+        SLIDE_REJECT_WRONG_OWNER,
+        scope === 'global' ? '当前选择不属于全局层' : '当前选择不属于当前幻灯片场景',
+      )
+    }
+    if (layer.item.kind === 'native' && layer.item.content.nativeType === 'teacher-controller') {
+      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器不由本命令编辑')
     }
     if (!isSceneFrameTransformableKind(layer.item.kind)) {
       throw new SlideCommandError('invalid-target', '当前选择包含暂不可变换的元素')
@@ -273,6 +280,23 @@ export function transformSelectedSlideNativeLayers(
   if (!plans.some((plan) => plan.changed)) return history
 
   const next = commitSlideProjectMutation(history.present, (draft) => {
+    if (scope === 'global') {
+      const globalById = new Map(draft.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item]))
+      for (const { transform, changed } of plans) {
+        if (!changed) continue
+        const item = globalById.get(transform.nodeId)
+        if (!item || !isSceneFrameTransformableKind(item.kind)) {
+          throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+        }
+        item.frame.x = transform.x
+        item.frame.y = transform.y
+        item.frame.width = transform.width
+        item.frame.height = transform.height
+        item.rotation = transform.rotation
+      }
+      return
+    }
+
     const location = draft.locations.find((candidate) => candidate.id === selection.locationId)
     if (!location || location.kind !== 'slide-scene') {
       throw new SlideCommandError('invalid-target', '当前幻灯片位置已失效')

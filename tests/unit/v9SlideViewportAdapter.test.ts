@@ -37,7 +37,11 @@ import {
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
-import { SLIDE_REJECT_LOCKED } from '@/renderer/course/slideEditorCommands'
+import {
+  SLIDE_REJECT_LOCKED,
+  SLIDE_REJECT_WRONG_OWNER,
+} from '@/renderer/course/slideEditorCommands'
+import { updateSlideNativeLayerContent } from '@/renderer/course/v9SlideContentCommands'
 
 /**
  * V9 candidate fixture. Proves canvas hit / selection / transform / viewport.
@@ -189,6 +193,34 @@ function scoped(item: LayerItem): ScopedLayerItem {
   return { item, visibility: { mode: 'all', locationIds: [] } }
 }
 
+function teacherControllerItem(): NativeLayerItem {
+  return {
+    ...layerBase('teacher-ctrl', 99, { mode: 'absolute', x: 190, y: 638, width: 900, height: 64 }),
+    kind: 'native',
+    content: {
+      nativeType: 'teacher-controller',
+      data: {
+        title: '教师控制台',
+        showSceneProgress: true,
+        compact: false,
+        collapsible: true,
+        defaultCollapsed: false,
+        buttons: [
+          { id: 'btn-next', action: { type: 'scene.next' }, label: '下一场景', visible: true },
+        ],
+        style: {
+          backgroundColor: '#172033',
+          backgroundOpacity: 0.94,
+          accentColor: '#e7b85c',
+          textColor: '#f8fafc',
+          cornerRadius: 16,
+        },
+        includeInStaticExports: false,
+      },
+    },
+  }
+}
+
 function v9ViewportFixture(): CourseProjectDocument {
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
@@ -254,7 +286,10 @@ function v9ViewportFixture(): CourseProjectDocument {
     },
     courseState: [],
     navigationGuards: [],
-    globalLayerItems: [scoped(nativeText('global-banner', 50, '全局条'))],
+    globalLayerItems: [
+      scoped(nativeText('global-banner', 50, '全局条')),
+      scoped(teacherControllerItem()),
+    ],
     globalInteractions: [],
     locations: [{
       id: 'location-scene-1',
@@ -601,5 +636,112 @@ describe('V9 Slide viewport adapter', () => {
     expect(painted[0]).toMatchObject({ id: 'slide-title', x: 180, y: 160 })
     expect(nativeFrame('slide-title')).toMatchObject({ x: 120, y: 120, width: 400, height: 80 })
     expect(mergeSlidePreviewIntoNodes(nodes, undefined)).toEqual([])
+  })
+
+  it('transforms global Native layers on global scope without touching scene layerItems and refuses teacher-controller', () => {
+    const backend = injectCandidate()
+    const controller = createSlideWorkspaceAuthoringController()
+
+    // Switch to global scope
+    const scopeResult = backend.setScope('global')
+    expect(scopeResult.ok).toBe(true)
+
+    // Select global-banner
+    const selectBanner = controller.selectFromLayerIds(['global-banner'], VIEW)
+    if (selectBanner.kind !== 'slide-authoring') throw new Error('expected V9')
+    expect(selectBanner.command?.ok).toBe(true)
+    expect(selectBanner.targets?.[0]?.scope).toBe('global')
+
+    // Initial frames: global-banner is at { x: 40, y: 40, width: 220, height: 80 }
+    const initialSceneTitle = nativeFrame('slide-title')
+
+    // Drag global-banner by 20px
+    const down = controller.pointerDown({ x: 150, y: 80 }, VIEW)
+    expect(down.kind).toBe('slide-authoring')
+    const move = controller.pointerMove({ x: 170, y: 100 }, VIEW)
+    if (move.kind !== 'slide-authoring') throw new Error('expected V9')
+    expect(move.preview?.[0]).toMatchObject({ x: 60, y: 60, width: 220, height: 80 })
+
+    const up = controller.pointerUp({ x: 170, y: 100 }, VIEW)
+    if (up.kind !== 'slide-authoring') throw new Error('expected V9')
+    expect(up.command?.ok).toBe(true)
+    expect(up.command?.historyEntry).toBe(true)
+
+    // Verify globalLayerItems is updated
+    const sessionAfterDrag = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const globalBannerAfterDrag = sessionAfterDrag.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )
+    expect(globalBannerAfterDrag?.item.frame).toMatchObject({
+      x: 60,
+      y: 60,
+      width: 220,
+      height: 80,
+    })
+
+    // Verify scene layerItems are unchanged
+    expect(nativeFrame('slide-title')).toEqual(initialSceneTitle)
+
+    // Resize global-banner from east handle
+    const east = stageResizeHandleWorldPoint(
+      { x: 60, y: 60, width: 220, height: 80 },
+      'e',
+    )
+    controller.pointerDown({ x: east.x, y: east.y }, VIEW)
+    controller.pointerMove({ x: east.x + 30, y: east.y }, VIEW)
+    const resizeUp = controller.pointerUp({ x: east.x + 30, y: east.y }, VIEW)
+    if (resizeUp.kind !== 'slide-authoring') throw new Error('expected V9')
+    expect(resizeUp.command?.ok).toBe(true)
+
+    const sessionAfterResize = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const globalBannerAfterResize = sessionAfterResize.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )
+    expect(globalBannerAfterResize?.item.frame).toMatchObject({
+      x: 60,
+      y: 60,
+      width: 250,
+      height: 80,
+    })
+
+    // Direct transform on teacher-controller must fail wrong-owner
+    controller.selectFromLayerIds(['teacher-ctrl'], VIEW)
+    const transformController = controller.transformSelection([{
+      nodeId: 'teacher-ctrl',
+      x: 190,
+      y: 600,
+      width: 900,
+      height: 64,
+      rotation: 0,
+    }], VIEW)
+    if (transformController.kind !== 'slide-authoring') throw new Error('expected V9')
+    expect(transformController.command?.ok).toBe(false)
+    expect(transformController.command?.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+
+    // Content update on global text
+    const currentBackend = selectSlideAuthoringBackend(useEditorStore.getState())!
+    const contentPatchResult = updateSlideNativeLayerContent(
+      currentBackend.getSession(),
+      'global-banner',
+      {
+        nativeData: {
+          style: {
+            bold: true,
+          },
+        },
+      },
+    )
+    expect(contentPatchResult.ok).toBe(true)
+    const sessionAfterContent = contentPatchResult.nextSession!
+    const globalBannerAfterContent = sessionAfterContent.history.present.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === 'global-banner',
+    )
+    expect((globalBannerAfterContent?.item as NativeLayerItem).content.data.style.bold).toBe(true)
+
+    // Assert scene text unaffected
+    const sceneText = sessionAfterContent.history.present.surfaces[0]!.scenes[0]!.layerItems.find(
+      (item) => item.layerItemId === 'slide-title',
+    )
+    expect((sceneText as NativeLayerItem).content.data.style.bold).toBe(false)
   })
 })

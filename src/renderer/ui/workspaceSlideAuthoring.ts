@@ -156,7 +156,8 @@ function nativeFrames(backend: SlideAuthoringBackend): Map<string, SlideEditorNo
   })
   const frames = new Map<string, SlideEditorNodeTransform>()
   for (const layer of view.layers) {
-    if (layer.source !== 'scene') continue
+    if (layer.source !== session.scope) continue
+    if (layer.item.kind === 'native' && layer.item.content.nativeType === 'teacher-controller') continue
     if (
       layer.item.kind !== 'native' &&
       layer.item.kind !== 'component' &&
