@@ -359,14 +359,22 @@ export function NodesTab() {
   const backendKind = useEditorStore(selectSlideBackendKind)
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const flowSession = useEditorStore((state) => state.flowSession)
+  const editingScope = useEditorStore((state) => state.editingScope)
   const candidate = (backendKind === 'slide-authoring' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
   const unifiedRows = candidate ? projection.unifiedRows : null
   const visualRows = unifiedRows ? visualFrontToBackRows(unifiedRows) : null
-  const layerGroups = visualRows ? groupedVisualRows(visualRows) : null
+  const rawLayerGroups = visualRows ? groupedVisualRows(visualRows) : null
+  const layerGroups = rawLayerGroups
+    ? rawLayerGroups.flatMap((group) => {
+        const rows = editingScope === 'global'
+          ? group.rows
+          : group.rows.filter((row) => !row.isTeacherController)
+        return rows.length === 0 ? [] : [{ ...group, rows }]
+      })
+    : null
   const nodes = layerGroups
     ? layerGroups.flatMap((group) => group.rows.map(rowAsNode))
     : [...v8Nodes].reverse()
-  const editingScope = useEditorStore((state) => state.editingScope)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectNode = useEditorStore((state) => state.selectNode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)

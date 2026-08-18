@@ -356,6 +356,7 @@ describe('v9 teacher controller authoring bridge', () => {
 
   it('previews move/resize on pointermove and commits one history entry on pointerup', () => {
     injectCandidate()
+    useEditorStore.getState().setEditingScope('global')
     const controller = createV9TeacherControllerAuthoringController()
     const start = controller.pointerDown({ x: 640, y: 670 }, VIEW)
     if (start.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
@@ -399,6 +400,7 @@ describe('v9 teacher controller authoring bridge', () => {
 
   it('resizes west by moving origin through the same viewport transform', () => {
     injectCandidate()
+    useEditorStore.getState().setEditingScope('global')
     const controller = createV9TeacherControllerAuthoringController()
     const transform = createStageViewportTransform(VIEW)
     const west = worldToClient(transform, { x: 190, y: 670 })
@@ -413,6 +415,27 @@ describe('v9 teacher controller authoring bridge', () => {
     if (committed.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
     expect(committed.command?.historyEntry).toBe(true)
     expect(controllerFrame()).toMatchObject({ x: 150, y: 638, width: 940, height: 64 })
+  })
+
+  it('ignores pointerDown when editing scope is scene', () => {
+    injectCandidate()
+    useEditorStore.getState().setEditingScope('scene')
+    const controller = createV9TeacherControllerAuthoringController()
+    const start = controller.pointerDown({ x: 640, y: 670 }, VIEW)
+    if (start.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(start.target).toBeUndefined()
+    expect(start.preview).toBeUndefined()
+
+    // Move and up should be no-ops
+    const moved = controller.pointerMove({ x: 700, y: 690 }, VIEW)
+    if (moved.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(moved.preview).toBeUndefined()
+    expect(controllerFrame().revision).toBe(1)
+
+    const up = controller.pointerUp({ x: 700, y: 690 }, VIEW)
+    if (up.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
+    expect(up.command).toBeUndefined()
+    expect(controllerFrame().revision).toBe(1)
   })
 
   it('refuses to treat a scene-owned controller as a transform target', () => {

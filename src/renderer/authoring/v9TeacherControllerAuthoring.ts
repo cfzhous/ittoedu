@@ -464,6 +464,11 @@ export function createV9TeacherControllerAuthoringController() {
       preview = null
       return v9Result(backend, options)
     }
+    if (session.scope !== 'global') {
+      gesture = null
+      preview = null
+      return v9Result(backend, options)
+    }
     const target = makeControllerTarget(session, item)
     const frame = teacherControllerCanonicalFrame(item)
     if (item.locked) {

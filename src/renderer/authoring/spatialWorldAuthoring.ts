@@ -693,7 +693,9 @@ export function createSpatialWorldAuthoringController(host: SpatialWorldAuthorin
     }
 
     const hit = hitAtPointer(session, viewport, client)
-    if (hit?.coordinateSpace === 'viewport') {
+    const inertController =
+      hit?.nativeType === 'teacher-controller' && host.getSession().scope !== 'global'
+    if (hit?.coordinateSpace === 'viewport' && !inertController) {
       ensureGlobalScope(host)
       const command = applyCommand(host, (current) =>
         selectSpatialLayers(current, {
