@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -13,6 +14,11 @@ import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
+import {
+  COURSE_PROJECT_V9_FIXTURE_IDS,
+  COURSE_PROJECT_V9_FIXTURE_MTIME,
+  readCourseProjectV9FixtureArchive,
+} from '../fixtures/course-project-v9'
 
 const NOW = '2026-08-17T13:00:00.000Z'
 const ASSET_BYTES = new Uint8Array([137, 80, 78, 71, 1, 2, 3])
@@ -237,5 +243,141 @@ describe('Course Project V9 protocol round-trip', () => {
     expect(Object.keys(published.assets)).toEqual(['badge'])
     expect(published.assets.badge?.mimeType).toBe('image/png')
     expect(published.assets.badge?.url.startsWith('data:image/png;base64,')).toBe(true)
+  })
+
+  it.each([...COURSE_PROJECT_V9_FIXTURE_IDS])(
+    'opens, re-archives and publishes committed V9 fixture %s',
+    (fixtureId) => {
+      const archiveBytes = readCourseProjectV9FixtureArchive(fixtureId)
+      expect(archiveBytes.byteLength).toBeGreaterThan(0)
+      expect(detectCourseProjectArchiveFormat(archiveBytes)).toMatchObject({
+        kind: 'v9',
+        identity: { schemaVersion: 9 },
+      })
+
+      const opened = openCourseProjectArchive(archiveBytes)
+      const parsed = courseProjectDocumentSchema.parse(opened.project)
+      expect(parsed.schemaVersion).toBe(9)
+
+      const rebuilt = createCourseProjectArchive(opened, { mtime: COURSE_PROJECT_V9_FIXTURE_MTIME })
+      const reopened = openCourseProjectArchive(rebuilt)
+      expect(courseProjectDocumentSchema.parse(reopened.project)).toEqual(parsed)
+      expect(Object.keys(reopened.assetFiles).sort()).toEqual(Object.keys(opened.assetFiles).sort())
+      for (const [assetId, bytes] of Object.entries(opened.assetFiles)) {
+        expect([...reopened.assetFiles[assetId]!]).toEqual([...bytes])
+      }
+
+      const components = Object.fromEntries(
+        Object.values(opened.componentFiles).map((files) => {
+          const pkg = parseComponentPackageFiles(files)
+          return [pkg.manifest.id, pkg]
+        }),
+      )
+      const published = buildPublishedCourseV2Payload({
+        project: parsed,
+        assetFiles: opened.assetFiles,
+        components,
+      })
+      expect(publishedCourseV2Schema.parse(published)).toEqual(published)
+      expect(published.sourceSchemaVersion).toBe(9)
+      expect(published.courseId).toBe(parsed.id)
+    },
+  )
+
+  it('covers the T0 V9 fixture matrix from committed archives', () => {
+    const projects = Object.fromEntries(
+      COURSE_PROJECT_V9_FIXTURE_IDS.map((id) => {
+        const opened = openCourseProjectArchive(readCourseProjectV9FixtureArchive(id))
+        return [id, courseProjectDocumentSchema.parse(opened.project)]
+      }),
+    )
+
+    const slideNative = projects['slide-native']!
+    const slideNativeSurface = slideNative.surfaces[0]
+    if (slideNativeSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(slideNativeSurface.scenes[0]?.layerItems.map((item) => item.kind)).toEqual([
+      'native',
+      'native',
+      'native',
+      'native',
+    ])
+    expect(slideNativeSurface.scenes[0]?.layerItems.map((item) => (
+      item.kind === 'native' ? item.content.nativeType : item.kind
+    ))).toEqual(['text', 'formula', 'image', 'shape'])
+
+    const presentation = projects['slide-presentation-state']!
+    const presentationSurface = presentation.surfaces[0]
+    if (presentationSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(presentationSurface.scenes[0]?.presentation?.states.map((state) => state.id))
+      .toEqual(['state-hidden', 'state-success'])
+    expect(presentation.locations.some((location) => location.kind === 'slide-scene' && location.stateId))
+      .toBe(true)
+
+    const globalLayer = projects['global-layer-teacher-controller']!
+    expect(globalLayer.globalLayerItems.map((entry) => (
+      entry.item.kind === 'native' ? entry.item.content.nativeType : entry.item.kind
+    ))).toEqual(['text', 'teacher-controller'])
+    expect(globalLayer.surfaces[0]?.type === 'slide'
+      && globalLayer.surfaces[0].scenes.some((scene) => (
+        scene.layerItems.some((item) => (
+          item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+        ))
+      ))).toBe(false)
+
+    const canvas = projects['canvas-runtime']!
+    const canvasRuntime = canvas.surfaces[0]?.type === 'slide'
+      ? canvas.surfaces[0].scenes[0]?.layerItems.find((item) => item.kind === 'runtime')
+      : undefined
+    if (canvasRuntime?.kind !== 'runtime') throw new Error('expected canvas runtime')
+    expect(canvasRuntime.runtime).toMatchObject({
+      protocol: 'legacy-runtime-v2',
+      runtimeApiVersion: 2,
+    })
+    expect(canvasRuntime.frame.mode).toBe('legacy-whole-canvas')
+
+    const surface = projects['surface-runtime']!
+    const surfaceRuntime = surface.surfaces[0]?.type === 'slide'
+      ? surface.surfaces[0].scenes[0]?.layerItems.find((item) => item.kind === 'runtime')
+      : undefined
+    if (surfaceRuntime?.kind !== 'runtime') throw new Error('expected surface runtime')
+    expect(surfaceRuntime.runtime).toMatchObject({
+      protocol: 'surface-v1',
+      runtimeApiVersion: 3,
+      renderMode: 'dom',
+    })
+    expect(surfaceRuntime.frame.mode).toBe('absolute')
+
+    const component = projects.component!
+    expect(Object.keys(component.componentPackages)).toEqual(['com.example.v9-quiz'])
+    const componentSurface = component.surfaces[0]
+    if (componentSurface?.type !== 'slide') throw new Error('expected slide surface')
+    expect(componentSurface.scenes[0]?.layerItems.some((item) => item.kind === 'component')).toBe(true)
+
+    const flow = projects.flow!
+    expect(flow.surfaces[0]?.type).toBe('flow')
+    expect(flow.locations[0]?.kind).toBe('flow-block')
+
+    const spatial = projects.spatial!
+    expect(spatial.surfaces[0]?.type).toBe('spatial-2d')
+    expect(spatial.locations.map((location) => location.kind)).toEqual([
+      'spatial-camera',
+      'spatial-camera',
+    ])
+
+    const mixed = projects.mixed!
+    expect(mixed.surfaces.map((entry) => entry.type)).toEqual(['slide', 'flow', 'spatial-2d'])
+    expect(mixed.mixedPrintPlan?.entries.map((entry) => entry.kind)).toEqual([
+      'slide-scenes',
+      'flow-document',
+      'spatial-frames',
+    ])
+
+    const multiAsset = projects['multi-asset']!
+    expect(Object.values(multiAsset.assets).map((asset) => asset.kind).sort()).toEqual([
+      'audio',
+      'image',
+      'image',
+      'video',
+    ])
   })
 })
