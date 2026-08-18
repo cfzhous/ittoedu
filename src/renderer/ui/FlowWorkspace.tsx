@@ -1214,7 +1214,10 @@ export function FlowWorkspace({
         break
       case 'media':
         body = (
-          <figure data-flow-media-layout={block.layout}>
+          <figure
+            data-flow-media-layout={block.layout}
+            {...(selected ? { 'data-flow-media-selected': 'true' } : {})}
+          >
             {renderFlowPaperMedia(block, assetUrls)}
             {block.caption ? <figcaption>{block.caption}</figcaption> : null}
           </figure>

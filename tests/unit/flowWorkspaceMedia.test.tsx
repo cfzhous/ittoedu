@@ -14,6 +14,14 @@ import {
 } from '@/renderer/project/createProject'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
+import {
+  replaceFlowMediaBlockAsset,
+  updateFlowEditorBlock,
+} from '@/renderer/course/flowEditorCommands'
+import {
+  flowBlockTargetFromSelection,
+  selectFlowEditorBlock,
+} from '@/renderer/course/flowEditorSlice'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 
 /**
@@ -99,6 +107,16 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         kind: 'audio',
         path: 'media/voice.mp3',
         byteLength: 8,
+      },
+      'asset-image-2': {
+        id: 'asset-image-2',
+        filename: 'cover-b.png',
+        mimeType: 'image/png',
+        kind: 'image',
+        path: 'media/cover-b.png',
+        byteLength: PNG.byteLength,
+        width: 640,
+        height: 360,
       },
     },
     componentPackages: {},
@@ -223,6 +241,7 @@ const SIDECAR_FILES: Record<string, Uint8Array> = {
   'asset-image': PNG,
   'asset-video': MP4,
   'asset-audio': new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+  'asset-image-2': PNG,
 }
 
 function renderMediaPaper(project = createMediaFlowProject()) {
@@ -295,5 +314,58 @@ describe('FlowWorkspace edit media', () => {
     expect(screen.getByTestId('flow-layer-card-overlay-video')).toHaveStyle({ pointerEvents: 'auto' })
     const overlayImage = screen.getByTestId('flow-layer-card-overlay-image').querySelector('img')
     expect(overlayImage).toHaveStyle({ pointerEvents: 'none' })
+  })
+
+  it('marks a selected paper image and writes alt, layout, and a same-kind replacement assetId', () => {
+    const project = createMediaFlowProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'media-image')
+    const view = buildFlowEditorView({ project, locationId: 'h1' })
+    const { rerender } = render(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={project}
+          view={view}
+          selection={selection}
+          assetFiles={SIDECAR_FILES}
+        />
+      </div>,
+    )
+    const selectedFigure = screen.getByTestId('flow-block-media-image').querySelector('figure')
+    expect(selectedFigure).toHaveAttribute('data-flow-media-selected', 'true')
+    expect(selectedFigure).toHaveAttribute('data-flow-media-layout', 'content-width')
+    expect(screen.getByTestId('flow-block-media-video').querySelector('figure'))
+      .not.toHaveAttribute('data-flow-media-selected')
+
+    const target = flowBlockTargetFromSelection(project, selection)
+    const updated = updateFlowEditorBlock(project, target, {
+      altText: '新说明',
+      caption: '新题注',
+      layout: 'wide',
+    })
+    expect(updated.ok).toBe(true)
+    const replaced = replaceFlowMediaBlockAsset(updated.nextDocument!, target, 'asset-image-2')
+    expect(replaced.ok).toBe(true)
+    const next = replaced.nextDocument!
+    const nextView = buildFlowEditorView({ project: next, locationId: 'h1' })
+    rerender(
+      <div style={{ width: 900, height: 640 }}>
+        <FlowWorkspace
+          project={next}
+          view={nextView}
+          selection={selectFlowEditorBlock(next, 'h1', 'media-image')}
+          assetFiles={SIDECAR_FILES}
+        />
+      </div>,
+    )
+    const image = screen.getByTestId('flow-block-media-image').querySelector('img')
+    expect(image).toHaveAttribute('data-flow-asset-id', 'asset-image-2')
+    expect(image).toHaveAttribute('alt', '新说明')
+    expect(image).toHaveAttribute('src')
+    expect(image?.getAttribute('src')).toMatch(/^blob:flow-image\/png-/)
+    expect(screen.getByTestId('flow-block-media-image').querySelector('figure'))
+      .toHaveAttribute('data-flow-media-layout', 'wide')
+    expect(screen.getByTestId('flow-block-media-image').textContent).toContain('新题注')
+    expect(screen.getByTestId('flow-block-media-image').getAttribute('data-flow-layer-kind'))
+      .toBe('document-block')
   })
 })
