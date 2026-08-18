@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
+import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import {
   componentRenderMode,
   componentSupportsScope,
@@ -6,6 +7,7 @@ import {
 } from '@/shared/componentCapabilities'
 import { componentManifestSchema } from '@/shared/componentSchema'
 import {
+  findComponentVariant,
   mergeComponentProps,
   resolveComponentEditorProperties,
   resolveComponentPresetProps,
@@ -42,12 +44,17 @@ const v4: ComponentManifestV4 = {
   editor: {
     properties: [{ key: 'content.title', label: '标题', type: 'text' }],
   },
+  variants: [{
+    id: 'dense',
+    label: '密排',
+    props: { density: 'compact' },
+  }],
   presets: [{
     id: 'compact',
     label: '紧凑',
+    variantId: 'dense',
     props: {
       content: { rows: [{ value: '12' }] },
-      density: 'compact',
     },
   }],
 }
@@ -94,6 +101,7 @@ describe('component protocol V4', () => {
       density: 'comfortable',
     })
 
+    expect(findComponentVariant(v4, { density: 'compact' })?.id).toBe('dense')
     expect(resolveComponentPresetProps(v4, 'compact')).toMatchObject({
       content: {
         title: '默认标题',
@@ -127,6 +135,7 @@ describe('component protocol V4', () => {
       runtimeApiVersion: 4,
       create(context: ComponentCreateContextV4) {
         expectTypeOf(context.runtimeApiVersion).toEqualTypeOf<4>()
+        expectTypeOf(context.emit).toEqualTypeOf<(eventName: string, payload?: unknown) => void>()
         if (context.renderMode === 'dom') {
           expectTypeOf(context.dom.root).toEqualTypeOf<HTMLElement>()
         } else if (context.renderMode === 'phaser') {
@@ -142,5 +151,18 @@ describe('component protocol V4', () => {
     }
 
     expect(definition.runtimeApiVersion).toBe(4)
+
+    const address = makeAuthoringAddress({
+      projectId: 'proj-component',
+      scope: 'scene',
+      surfaceId: 'surface-slide',
+      sceneId: 'scene-one',
+      carrier: 'component',
+      layerItemId: 'component-item',
+      field: 'content.title',
+    })
+    expect(address).toContain('/component/')
+    expect(address).toContain('field=content.title')
+    expect(address).not.toMatch(/hitId/i)
   })
 })

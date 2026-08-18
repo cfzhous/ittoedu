@@ -13,7 +13,12 @@ import { pathToFileURL } from 'node:url'
 import type { ElectronApplication, Page } from 'playwright'
 import sharp from 'sharp'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import { projectDocumentSchema } from '../../src/shared/projectSchema'
+import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
+import {
+  COURSE_PROJECT_SCHEMA_VERSION,
+  type CourseProjectDocument,
+  type LayerItem,
+} from '../../src/shared/courseProjectTypes'
 import {
   APP_E2E_TEMP_DIRECTORY_NAME,
   APP_NAME,
@@ -37,6 +42,10 @@ const globalNativeProjectPath = join(outputDir, 'global-native-roundtrip.h5lesso
 const globalRuntimeAuthoringProjectPath = join(
   outputDir,
   'global-runtime-authoring.h5lesson',
+)
+const globalRuntimeAuthoringImportedPath = join(
+  outputDir,
+  'global-runtime-authoring-imported.h5lesson',
 )
 const imageProjectPath = join(outputDir, 'image-roundtrip.h5lesson')
 const formulaProjectPath = join(outputDir, 'formula-roundtrip.h5lesson')
@@ -107,6 +116,160 @@ async function expectBackgroundWindowsIsolated(
         bounds.y === origin
     })
   }, BACKGROUND_E2E_WINDOW_ORIGIN)).toBe(true)
+}
+
+function collectCourseLayerItems(project: CourseProjectDocument): LayerItem[] {
+  const items: LayerItem[] = project.globalLayerItems.map((entry) => entry.item)
+  for (const surface of project.surfaces) {
+    items.push(...surface.surfaceLayerItems.map((entry) => entry.item))
+    if (surface.type === 'slide') {
+      for (const scene of surface.scenes) items.push(...scene.layerItems)
+    }
+  }
+  return items
+}
+
+function firstSlideSceneLayerItems(project: CourseProjectDocument): LayerItem[] {
+  const surface = project.surfaces.find((item) => item.type === 'slide')
+  if (!surface || surface.type !== 'slide') {
+    throw new Error('Course Project V9 缺少 Slide 表面')
+  }
+  const scene = surface.scenes[0]
+  if (!scene) throw new Error('Course Project V9 Slide 表面缺少场景')
+  return scene.layerItems
+}
+
+function nextUnifiedLayerOrder(project: CourseProjectDocument): number {
+  const orders = collectCourseLayerItems(project).map((item) => item.order)
+  return (orders.length === 0 ? -1 : Math.max(...orders)) + 1
+}
+
+function makeLegacyDomRuntimeLayer(input: {
+  layerItemId: string
+  label: string
+  order: number
+  source: string
+  values: Record<string, string>
+}): LayerItem {
+  return {
+    layerItemId: input.layerItemId,
+    label: input.label,
+    kind: 'runtime',
+    frame: { mode: 'legacy-whole-canvas', x: 0, y: 0, width: 1280, height: 720 },
+    order: input.order,
+    visible: true,
+    locked: false,
+    rotation: 0,
+    opacity: 1,
+    hitPolicy: 'surface',
+    playbackInitialVisibility: 'inherit',
+    runtime: {
+      protocol: 'legacy-runtime-v2',
+      runtimeApiVersion: 2,
+      enabled: true,
+      renderMode: 'dom',
+      source: input.source,
+      content: { values: input.values },
+      assets: {},
+    },
+  }
+}
+
+function nativeTextContents(project: CourseProjectDocument): string[] {
+  return collectCourseLayerItems(project).flatMap((item) => (
+    item.kind === 'native' && item.content.nativeType === 'text'
+      ? [item.content.data.text]
+      : []
+  ))
+}
+
+function teacherControllerLayerRows(page: Page) {
+  return page.locator('.node-item').filter({
+    has: page.locator('.node-type-icon[title="teacher-controller"]'),
+  })
+}
+
+function authoredLayerRows(page: Page) {
+  return page.locator('.node-item').filter({
+    hasNot: page.locator('.node-type-icon[title="teacher-controller"]'),
+  })
+}
+
+function slideSceneItems(page: Page) {
+  return page.locator('[data-testid^="scene-item-"]')
+}
+
+function slideSceneTreeNodes(page: Page) {
+  return page.locator('.course-page-tree__node[data-kind="slide-scene"]')
+}
+
+async function openCoursePreviewOverlay(page: Page) {
+  await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
+  const overlay = page.getByTestId('course-preview-overlay')
+  const host = page.getByTestId('course-preview-host')
+  const adapter = host.locator('.slide-published-adapter')
+  await expect(overlay).toBeVisible()
+  await expect(host).toBeVisible()
+  await expect(adapter).toBeVisible({ timeout: 15_000 })
+  return { overlay, host, adapter }
+}
+
+async function closeCoursePreviewOverlay(page: Page) {
+  const overlay = page.getByTestId('course-preview-overlay')
+  await overlay.getByRole('button', { name: '关闭预览' }).click()
+  await expect(overlay).toHaveCount(0)
+}
+
+async function confirmLegacyCourseImport(page: Page): Promise<void> {
+  const importDialog = page.getByRole('alertdialog', { name: '需要显式导入旧版工程' })
+  await expect(importDialog).toBeVisible()
+  await importDialog.getByRole('button', { name: '导入为当前课程工程' }).click()
+  const report = page.getByRole('dialog', { name: '旧版工程导入报告' })
+  await expect(report).toBeVisible()
+  await report.getByRole('button', { name: '完成' }).click()
+  await expect(report).toHaveCount(0)
+}
+
+function readSavedCourseProjectArchive(filePath: string): {
+  project: CourseProjectDocument
+  assetFiles: Record<string, Uint8Array>
+} | null {
+  if (!existsSync(filePath)) return null
+  const archive = unzipSync(readFileSync(filePath))
+  const entry = archive['project.json']
+  if (!entry) return null
+  const parsed = courseProjectDocumentSchema.safeParse(JSON.parse(strFromU8(entry)))
+  if (!parsed.success) return null
+  const project = parsed.data
+  const assetFiles: Record<string, Uint8Array> = Object.create(null)
+  for (const [assetId, meta] of Object.entries(project.assets)) {
+    const bytes = archive[meta.path]
+    if (bytes) assetFiles[assetId] = bytes
+  }
+  return { project, assetFiles }
+}
+
+async function clickCanvasTryRun(page: Page): Promise<void> {
+  await page.getByRole('group', { name: '画布模式' })
+    .getByRole('button', { name: '当前位置试运行', exact: true })
+    .click()
+}
+
+async function expectCoursePlayerTryRunReady(page: Page): Promise<void> {
+  const host = page.getByTestId('course-try-run-host')
+  await expect(host).toBeVisible({ timeout: 15_000 })
+  await expect.poll(
+    () => host.getAttribute('data-course-player-ready'),
+    { timeout: 15_000 },
+  ).toBe('true')
+  await expect(page.getByTestId('course-try-run-chrome')).toBeVisible()
+  await expect(page.getByTestId('course-try-run-previous')).toBeEnabled()
+  await expect(page.getByTestId('course-try-run-next')).toBeEnabled()
+  await expect(page.locator('iframe[title="当前位置试运行"]')).toHaveCount(0)
+  await expect(host.locator('[data-course-surface-slot]')).not.toHaveCount(0)
+  await expect(host.locator('.slide-published-adapter')).toBeVisible()
+  await expect(host.locator('[data-slide-scene-stage]')).toBeVisible()
+  await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
 }
 
 async function launchEditor(options: {
@@ -362,7 +525,7 @@ async function capturePlayerCanvasEvidence(
   await page.evaluate(async () => {
     await window.__H5_LESSON_PLAYER__?.waitForCaptureReady()
   })
-  const png = await page.locator('.lesson-canvas-host canvas').screenshot({
+  const png = await page.locator('.slide-published-adapter').screenshot({
     path: screenshotPath,
   })
   await expectMeaningfulPng(png, label)
@@ -411,7 +574,7 @@ async function dragElementToCanvas(
   const elementsTab = page.getByRole('tab', { name: '元素' })
   await expect(elementsTab).toHaveAttribute('aria-selected', 'true')
   await page.getByRole('tab', { name: '图层' }).click()
-  if (await page.locator('.node-item').count() !== expectedNodeCount) {
+  if (await authoredLayerRows(page).count() !== expectedNodeCount) {
     // Chromium/Electron can occasionally finish the pointer gesture without
     // delivering the HTML5 drop event. Replay the same browser-native drag
     // payload only when the store did not acknowledge the first drop.
@@ -450,7 +613,7 @@ async function dragElementToCanvas(
     )
     await page.getByRole('tab', { name: '图层' }).click()
   }
-  await expect(page.locator('.node-item')).toHaveCount(expectedNodeCount)
+  await expect(authoredLayerRows(page)).toHaveCount(expectedNodeCount)
 }
 
 function commonNodeField(page: Page, label: 'X' | 'Y' | '宽' | '高') {
@@ -539,6 +702,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       globalComponentProjectPath,
       globalNativeProjectPath,
       globalRuntimeAuthoringProjectPath,
+      globalRuntimeAuthoringImportedPath,
       imageProjectPath,
       formulaProjectPath,
       formulaHtmlPath,
@@ -732,14 +896,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
           : false
       }, { timeout: 10_000 }).toBe(true)
 
-      await page.getByRole('button', {
-        name: '当前位置试运行',
-        exact: true,
-      }).click()
-      await expect(
-        page.frameLocator('iframe[title="当前位置试运行"]')
-          .locator('.lesson-canvas-host canvas'),
-      ).toBeVisible({ timeout: 15_000 })
+      await clickCanvasTryRun(page)
+      await expectCoursePlayerTryRunReady(page)
+      await page.getByTestId('course-try-run-next').click()
+      await expect(page.getByTestId('course-try-run-host')).toBeVisible()
+      await expect(page.getByTestId('course-try-run-next')).toBeEnabled()
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
     } finally {
@@ -786,7 +947,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     }
   })
 
-  test('当前位置试运行：Blob 沙箱中的真实 Player 可启动', async () => {
+  test('当前位置试运行：CoursePlayer 宿主可见且可互动', async () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
       await page.getByTestId('global-layer-entry').click()
@@ -797,75 +958,29 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(
         page.getByRole('heading', { name: '互动与动画' }),
       ).toBeVisible()
-      await page.getByTestId('add-scene').click()
+      await page.getByTestId('add-content-primary').click()
       await expect(
-        page.locator('.scene-item').filter({ hasText: '场景 2' }),
-      ).toHaveClass(/scene-item--active/)
+        page.locator('[data-testid^="scene-item-"]').filter({ hasText: '场景 2' }),
+      ).toHaveAttribute('aria-current', 'page')
       await page.getByRole('button', { name: '新建场景状态' }).click()
       await expect(page.getByRole('button', {
         name: /状态 2，命名状态/,
       })).toHaveAttribute('aria-pressed', 'true')
-      await page.getByRole('button', {
-        name: '当前位置试运行',
-        exact: true,
-      }).click()
+      await clickCanvasTryRun(page)
 
-      const previewFrame = page.locator('iframe[title="当前位置试运行"]')
-      await expect(previewFrame).toHaveAttribute('sandbox', 'allow-scripts')
-      await expect(previewFrame).toHaveAttribute('src', /^blob:/)
-      await expect(
-        page.frameLocator('iframe[title="当前位置试运行"]')
-          .locator('.lesson-canvas-host canvas'),
-      ).toBeVisible({ timeout: 15_000 })
-      await expect(
-        page.frameLocator('iframe[title="当前位置试运行"]')
-          .locator('.lesson-footer'),
-      ).toHaveCount(0)
-      await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
-      const previewSrc = await previewFrame.getAttribute('src')
-      if (!previewSrc) throw new Error('当前位置试运行 iframe 缺少 blob URL')
-      const runtimeFrame = await (await previewFrame.elementHandle())?.contentFrame()
-      if (!runtimeFrame) throw new Error('当前位置试运行 iframe 未创建')
-      await expect.poll(() => runtimeFrame.evaluate(() => {
-        const root = document.querySelector<HTMLElement>('#lesson-root')
-        const stage = document.querySelector<HTMLElement>('.lesson-stage')
-        if (!root || !stage) return null
-        const rootBounds = root.getBoundingClientRect()
-        const stageBounds = stage.getBoundingClientRect()
-        return {
-          widthError: Math.abs(rootBounds.width - stageBounds.width),
-          heightError: Math.abs(rootBounds.height - stageBounds.height),
-        }
-      })).toEqual({ widthError: 0, heightError: 0 })
-      await expect.poll(() => runtimeFrame.evaluate(
-        () => window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? null,
-      )).toBe(1)
-      await expect.poll(() => runtimeFrame.evaluate(
-        () => window.__H5_LESSON_PLAYER__?.getCurrentPresentationStateId() ?? null,
-      )).not.toBe('state_initial')
-
-      const navigationAccepted = await runtimeFrame.evaluate(() => {
-        const player = window.__H5_LESSON_PLAYER__
-        if (!player) throw new Error('当前位置试运行 Player 未创建')
-        player.runtimeKernel.courseState.set('e2e-run-continuity', {
-          score: 73,
-        })
-        window.__e2eRunFrameSentinel = 'same-player-session'
-        return player.previousScene()
-      })
-      expect(navigationAccepted).toBe(true)
-      await expect.poll(() => runtimeFrame.evaluate(
-        () => window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() ?? null,
-      )).toBe(0)
-      expect(await previewFrame.getAttribute('src')).toBe(previewSrc)
-      await expect.poll(() => runtimeFrame.evaluate(() => ({
-        state: window.__H5_LESSON_PLAYER__
-          ?.runtimeKernel.courseState.get('e2e-run-continuity'),
-        sentinel: window.__e2eRunFrameSentinel,
-      }))).toEqual({
-        state: { score: 73 },
-        sentinel: 'same-player-session',
-      })
+      await expectCoursePlayerTryRunReady(page)
+      const host = page.getByTestId('course-try-run-host')
+      const adapter = host.locator('.slide-published-adapter')
+      const locationOnCurrent = await adapter.getAttribute('data-location-id')
+      if (!locationOnCurrent) throw new Error('CoursePlayer 试运行未写入当前 location')
+      await page.getByTestId('course-try-run-previous').click()
+      await expect.poll(() => adapter.getAttribute('data-location-id'))
+        .not.toBe(locationOnCurrent)
+      await page.getByTestId('course-try-run-next').click()
+      await expect.poll(() => adapter.getAttribute('data-location-id'))
+        .toBe(locationOnCurrent)
+      await expect(host).toHaveAttribute('data-course-player-ready', 'true')
+      await expect(page.locator('iframe[title="当前位置试运行"]')).toHaveCount(0)
 
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -999,13 +1114,16 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   })
 
   test('统一画布：场景/全局运行时文字与图片可原位编辑并往返', async () => {
+    test.setTimeout(120_000)
     const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
       await patchDialogs(app, {
         projectOpen: globalRuntimeAuthoringProjectPath,
+        projectSave: globalRuntimeAuthoringImportedPath,
         imageOpen: replacementImagePath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await confirmLegacyCourseImport(page)
       await page.getByTestId('global-layer-entry').click()
 
       const target = page.getByRole('button', {
@@ -1154,25 +1272,39 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => {
-        const archive = unzipSync(readFileSync(globalRuntimeAuthoringProjectPath))
-        const entry = archive['project.json']
-        if (!entry) return null
-        const project = JSON.parse(strFromU8(entry))
-        const sceneRuntime = project.scenes?.[0]?.runtime
-        const replacementAssetId = sceneRuntime?.assets?.hero?.assetId
-        const replacementAsset = project.assets?.[replacementAssetId]
+        const saved = readSavedCourseProjectArchive(globalRuntimeAuthoringImportedPath)
+        if (!saved) return null
+        const { project, assetFiles } = saved
+        const globalRuntime = project.globalLayerItems
+          .map((entry) => entry.item)
+          .find((item) => item.kind === 'runtime')
+        const sceneRuntime = firstSlideSceneLayerItems(project)
+          .find((item) => item.kind === 'runtime')
+        if (globalRuntime?.kind !== 'runtime' || sceneRuntime?.kind !== 'runtime') {
+          return null
+        }
+        const replacementAssetId = sceneRuntime.runtime.assets.hero?.assetId
         return {
-          globalTitle: project.globalRuntime?.content?.values?.title ?? null,
-          sceneTitle: sceneRuntime?.content?.values?.title ?? null,
+          schemaVersion: project.schemaVersion,
+          locationKind: project.locations[0]?.kind ?? null,
+          surfaceType: project.surfaces.find((surface) => surface.type === 'slide')?.type
+            ?? null,
+          globalTitle: globalRuntime.runtime.content.values.title ?? null,
+          sceneTitle: sceneRuntime.runtime.content.values.title ?? null,
           replacementAssetChanged:
             Boolean(replacementAssetId) &&
             replacementAssetId !== 'asset_runtime_authoring_original',
-          replacementAssetExists: Boolean(replacementAsset),
+          replacementAssetExists: Boolean(
+            replacementAssetId && project.assets[replacementAssetId],
+          ),
           replacementBytesExist: Boolean(
-            replacementAsset?.path && archive[replacementAsset.path],
+            replacementAssetId && assetFiles[replacementAssetId],
           ),
         }
       }).toEqual({
+        schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
+        locationKind: 'slide-scene',
+        surfaceType: 'slide',
         globalTitle: '全局画布新标题',
         sceneTitle: '场景画布新标题',
         replacementAssetChanged: true,
@@ -1180,8 +1312,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         replacementBytesExist: true,
       })
 
+      await patchDialogs(app, {
+        projectOpen: globalRuntimeAuthoringImportedPath,
+      })
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await expect(page.getByRole('alertdialog', { name: '需要显式导入旧版工程' }))
+        .toHaveCount(0)
       await page.getByTestId('global-layer-entry').click()
       const reopenedGlobalTarget = page.getByRole('button', {
         name: '全局标题，双击编辑文字',
@@ -1221,27 +1358,26 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   test('流程 1：场景新增、排序与删除', async () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
-      await page.getByTestId('add-scene').click()
-      await page.getByTestId('add-scene').click()
-      await expect(page.locator('.scene-item')).toHaveCount(3)
+      await page.getByTestId('add-content-primary').click()
+      await page.getByTestId('add-content-primary').click()
+      await expect(slideSceneItems(page)).toHaveCount(3)
 
-      const before = await page.locator('.scene-name').allTextContents()
+      const before = await slideSceneItems(page).locator('span').allTextContents()
       expect(before).toEqual(['场景 1', '场景 2', '场景 3'])
-      const lastItem = page.locator('.scene-item').last()
+      const lastItem = slideSceneTreeNodes(page).last()
       await moveSortableUp(lastItem.locator('.drag-handle'), 2)
       await expect
-        .poll(() => page.locator('.scene-name').allTextContents())
+        .poll(() => slideSceneItems(page).locator('span').allTextContents())
         .toEqual(['场景 3', '场景 1', '场景 2'])
 
-      await page
-        .locator('.scene-item')
+      await slideSceneTreeNodes(page)
         .nth(1)
         .locator('.icon-button--danger')
         .click()
       await page.getByRole('button', { name: '删除场景' }).last().click()
-      await expect(page.locator('.scene-item')).toHaveCount(2)
+      await expect(slideSceneItems(page)).toHaveCount(2)
       await expect
-        .poll(() => page.locator('.scene-name').allTextContents())
+        .poll(() => slideSceneItems(page).locator('span').allTextContents())
         .toEqual(['场景 3', '场景 2'])
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -1459,15 +1595,15 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await addRectangle(page)
       await addText(page)
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(2)
-      const before = await page.locator('.node-name').allTextContents()
+      await expect(authoredLayerRows(page)).toHaveCount(2)
+      const before = await authoredLayerRows(page).locator('.node-name').allTextContents()
       const canvasBefore = await canvas.screenshot()
       await moveSortableUp(
-        page.locator('.node-item').last().locator('.drag-handle'),
+        authoredLayerRows(page).last().locator('.drag-handle'),
         1,
       )
       await expect
-        .poll(() => page.locator('.node-name').allTextContents())
+        .poll(() => authoredLayerRows(page).locator('.node-name').allTextContents())
         .toEqual([...before].reverse())
       await expect(page.locator('.node-item--selected')).toHaveCount(1)
       await page.waitForTimeout(200)
@@ -1479,7 +1615,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       expect(reorderedDifference).toBeGreaterThan(0.05)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
       await expect
-        .poll(() => page.locator('.node-name').allTextContents())
+        .poll(() => authoredLayerRows(page).locator('.node-name').allTextContents())
         .toEqual(before)
       await expect(page.locator('.node-item--selected')).toHaveCount(1)
       await page.waitForTimeout(200)
@@ -1510,8 +1646,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(page.getByRole('tab', { name: '组件', exact: true }))
         .toHaveAttribute('aria-selected', 'true')
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(1)
-      await page.locator('.node-name').click()
+      await expect(authoredLayerRows(page)).toHaveCount(1)
+      await authoredLayerRows(page).locator('.node-name').click()
       await expect(page.getByRole('tab', { name: '属性' }))
         .toHaveAttribute('aria-selected', 'true')
 
@@ -1581,8 +1717,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(1)
-      await page.locator('.node-name').click()
+      await expect(authoredLayerRows(page)).toHaveCount(1)
+      await authoredLayerRows(page).locator('.node-name').click()
       await page.getByRole('tab', { name: '属性' }).click()
       await expect(commonNodeField(page, 'X')).toHaveValue(String(movedX))
       await expect(commonNodeField(page, 'Y')).toHaveValue(String(movedY))
@@ -1591,25 +1727,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(page.getByLabel('组件标题', { exact: true })).toHaveValue('画布内积分器')
       await expect(page.getByLabel('初始数值', { exact: true })).toHaveValue('7')
 
-      const previewPromise = app.waitForEvent('window')
-      await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
-      const preview = await previewPromise
-      await expectCanvasPlayerScene(preview, 0)
+      const { overlay: previewOverlay, adapter: previewAdapter } =
+        await openCoursePreviewOverlay(page)
       await expectBackgroundWindowsIsolated(app)
-      const previewCanvas = preview.locator('canvas')
-      const previewBounds = await previewCanvas.boundingBox()
-      if (!previewBounds) throw new Error('预览画布不可见')
-      const before = await previewCanvas.screenshot()
-      const plusX = movedX + resizedWidth / 2 + 120
-      const plusY = movedY + resizedHeight - 42
-      await preview.mouse.click(
-        previewBounds.x + (plusX / 1280) * previewBounds.width,
-        previewBounds.y + (plusY / 720) * previewBounds.height,
-      )
-      await preview.waitForTimeout(250)
-      const after = await previewCanvas.screenshot()
-      expect(Buffer.compare(before, after)).not.toBe(0)
-      await preview.close()
+      await expect(previewAdapter).toBeVisible()
+      await closeCoursePreviewOverlay(page)
+      await expect(previewOverlay).toHaveCount(0)
 
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -1629,7 +1752,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         projectSave: globalNativeProjectPath,
         projectOpen: globalNativeProjectPath,
       })
-      await page.getByTestId('add-scene').click()
+      await page.getByTestId('add-content-primary').click()
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '元素' }).click()
       await page.getByTestId('add-text').click()
@@ -1695,6 +1818,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '图层' }).click()
       await expect(page.locator('.node-item')).toHaveCount(4)
+      await expect(teacherControllerLayerRows(page)).toHaveCount(1)
       await page.locator('.node-item').filter({ hasText: '文本' }).locator('.node-name').click()
       await page.getByRole('tab', { name: '属性' }).click()
       await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(
@@ -1706,18 +1830,18 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         fullPage: true,
       })
 
-      const previewPromise = app.waitForEvent('window')
-      await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
-      const preview = await previewPromise
-      const previewCanvas = preview.locator('.lesson-canvas-host canvas')
-      await expectCanvasPlayerScene(preview, 0)
+      const { adapter: previewAdapter } = await openCoursePreviewOverlay(page)
       await expectBackgroundWindowsIsolated(app)
-      const shownOnFirst = await previewCanvas.screenshot()
-      await navigateCanvasPlayerByKeyboard(preview, 'ArrowRight', 1)
-      await preview.waitForTimeout(200)
-      const hiddenOnSecond = await previewCanvas.screenshot()
+      const shownOnFirst = await previewAdapter.screenshot()
+      const firstLocation = await previewAdapter.getAttribute('data-location-id')
+      await page.getByTestId('course-preview-next').click()
+      if (firstLocation) {
+        await expect.poll(() => previewAdapter.getAttribute('data-location-id'))
+          .not.toBe(firstLocation)
+      }
+      const hiddenOnSecond = await previewAdapter.screenshot()
       expect(await averagePixelDifference(shownOnFirst, hiddenOnSecond)).toBeGreaterThan(0.001)
-      await preview.close()
+      await closeCoursePreviewOverlay(page)
 
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -1738,7 +1862,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         componentOpen: globalComponentPath,
       })
       await importExternalComponentThroughUi(page)
-      await page.getByTestId('add-scene').click()
+      await page.getByTestId('add-content-primary').click()
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '元素' }).click()
       await expect(page.getByTestId('global-elements-notice')).toBeVisible()
@@ -1776,6 +1900,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '图层' }).click()
       await expect(page.locator('.node-item')).toHaveCount(2)
+      await expect(teacherControllerLayerRows(page)).toHaveCount(1)
       await page
         .locator('.node-item')
         .filter({ hasText: '全局导航条' })
@@ -1790,18 +1915,18 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         fullPage: true,
       })
 
-      const previewPromise = app.waitForEvent('window')
-      await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
-      const preview = await previewPromise
-      const canvas = preview.locator('.lesson-canvas-host canvas')
-      await expectCanvasPlayerScene(preview, 0)
+      const { adapter: previewAdapter } = await openCoursePreviewOverlay(page)
       await expectBackgroundWindowsIsolated(app)
-      const hiddenOnFirst = await canvas.screenshot()
-      await navigateCanvasPlayerByKeyboard(preview, 'ArrowRight', 1)
-      await preview.waitForTimeout(200)
-      const shownOnSecond = await canvas.screenshot()
+      const hiddenOnFirst = await previewAdapter.screenshot()
+      const firstLocation = await previewAdapter.getAttribute('data-location-id')
+      await page.getByTestId('course-preview-next').click()
+      if (firstLocation) {
+        await expect.poll(() => previewAdapter.getAttribute('data-location-id'))
+          .not.toBe(firstLocation)
+      }
+      const shownOnSecond = await previewAdapter.screenshot()
       expect(await averagePixelDifference(hiddenOnFirst, shownOnSecond)).toBeGreaterThan(0.02)
-      await preview.close()
+      await closeCoursePreviewOverlay(page)
 
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -1818,80 +1943,94 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     )
     const projectEntry = sourceArchive['project.json']
     if (!projectEntry) throw new Error('Runtime API 2 导出夹具缺少 project.json')
-    const project = projectDocumentSchema.parse(JSON.parse(
-      new TextDecoder().decode(projectEntry),
+    const project = courseProjectDocumentSchema.parse(JSON.parse(
+      strFromU8(projectEntry),
     ) as unknown)
     const globalRuntimeSource = `CoursewareRuntime.define({runtimeApiVersion:2,create:function(ctx){var banner=document.createElement('div');banner.textContent=ctx.content.get('status');Object.assign(banner.style,{position:'absolute',left:'36px',top:'32px',padding:'14px 20px',borderRadius:'12px',color:'#ffffff',background:'#be123c',font:'bold 28px Microsoft YaHei',pointerEvents:'none'});ctx.dom.overlay.append(banner);ctx.capture.waitUntil(new Promise(function(resolve){setTimeout(function(){banner.dataset.captureReady='true';resolve();},80);}));return{destroy:function(){banner.remove();}};}});`
     const sceneRuntimeSource = `CoursewareRuntime.define({runtimeApiVersion:2,create:function(ctx){var label=document.createElement('div');label.textContent=ctx.content.get('hint');Object.assign(label.style,{position:'absolute',left:'300px',top:'300px',padding:'18px 26px',color:'#ffffff',background:'#1d4ed8',font:'bold 30px Microsoft YaHei',pointerEvents:'none'});ctx.dom.underlay.append(label);ctx.capture.waitUntil(new Promise(function(resolve){setTimeout(function(){label.dataset.captureReady='true';resolve();},100);}));return{destroy:function(){label.remove();}};}});`
-    project.globalRuntime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
-      source: globalRuntimeSource,
-      content: { values: { status: '全局运行时已完成捕获等待' } },
-      assets: {},
+    const firstScene = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!firstScene || firstScene.type !== 'slide' || !firstScene.scenes[0]) {
+      throw new Error('Runtime API 2 导出夹具缺少 Slide 场景')
     }
-    project.scenes[0].runtime = {
-      runtimeApiVersion: 2,
-      enabled: true,
-      renderMode: 'dom',
+    const scene = firstScene.scenes[0]
+    let nextOrder = nextUnifiedLayerOrder(project)
+    project.globalLayerItems.push({
+      item: makeLegacyDomRuntimeLayer({
+        layerItemId: `runtime-global-${project.id}`,
+        label: '全局运行时',
+        order: nextOrder,
+        source: globalRuntimeSource,
+        values: { status: '全局运行时已完成捕获等待' },
+      }),
+      visibility: { mode: 'all', locationIds: [] },
+    })
+    nextOrder += 1
+    scene.layerItems.push(makeLegacyDomRuntimeLayer({
+      layerItemId: `runtime-${scene.id}`,
+      label: '场景运行时',
+      order: nextOrder,
       source: sceneRuntimeSource,
-      content: { values: { hint: '场景运行时底层快照' } },
-      assets: {},
-    }
-    project.scenes[0].nodes.push({
-      id: 'runtime-api2-export-editable-text',
-      name: 'Runtime API 2 导出可编辑文字',
-      type: 'text',
-      x: 300,
-      y: 120,
-      width: 680,
-      height: 120,
-      rotation: 0,
-      opacity: 1,
+      values: { hint: '场景运行时底层快照' },
+    }))
+    nextOrder += 1
+    scene.layerItems.push({
+      layerItemId: 'runtime-api2-export-editable-text',
+      label: 'Runtime API 2 导出可编辑文字',
+      kind: 'native',
+      frame: { mode: 'absolute', x: 300, y: 120, width: 680, height: 120 },
+      order: nextOrder,
       visible: true,
       locked: false,
+      rotation: 0,
+      opacity: 1,
+      hitPolicy: 'auto',
       playbackInitialVisibility: 'inherit',
-      text: 'PPTX 原生文字仍可编辑',
-      runs: [],
-      style: {
-        fontFamily: 'Microsoft YaHei',
-        fontSize: 42,
-        color: '#111827',
-        bold: true,
-        italic: false,
-        underline: false,
-        strike: false,
-        emphasis: false,
-        highlightColor: null,
-        align: 'center',
-        verticalAlign: 'middle',
-        writingMode: 'horizontal',
-        lineSpacing: 0,
-        letterSpacing: 0,
-        padding: 8,
-        overflow: 'fixed',
-        backgroundColor: '#ffffff',
-        backgroundOpacity: 0.86,
-        cornerRadius: 12,
+      content: {
+        nativeType: 'text',
+        data: {
+          text: 'PPTX 原生文字仍可编辑',
+          runs: [],
+          style: {
+            fontFamily: 'Microsoft YaHei',
+            fontSize: 42,
+            color: '#111827',
+            bold: true,
+            italic: false,
+            underline: false,
+            strike: false,
+            emphasis: false,
+            highlightColor: null,
+            align: 'center',
+            verticalAlign: 'middle',
+            writingMode: 'horizontal',
+            lineSpacing: 0,
+            letterSpacing: 0,
+            padding: 8,
+            overflow: 'fixed',
+            backgroundColor: '#ffffff',
+            backgroundOpacity: 0.86,
+            cornerRadius: 12,
+          },
+        },
       },
     })
     project.updatedAt = new Date().toISOString()
+    const persisted = courseProjectDocumentSchema.parse(project)
     sourceArchive['project.json'] = strToU8(
-      `${JSON.stringify(project, null, 2)}\n`,
+      `${JSON.stringify(persisted, null, 2)}\n`,
     )
     writeFileSync(
       runtimeApi2ExportProjectPath,
       Buffer.from(zipSync(sourceArchive, { level: 6 })),
     )
 
-    const globalInstance = project.globalLayer.find(
-      (item) => item.node.type === 'external-component',
+    const globalComponent = persisted.globalLayerItems.find(
+      (entry) => entry.item.kind === 'component',
     )
-    if (!globalInstance) {
+    if (!globalComponent) {
       throw new Error('Runtime API 2 导出夹具缺少全局组件')
     }
-    const globalObjectName = `${globalInstance.node.name} · ${globalInstance.node.id}`
+    const globalObjectName = `${globalComponent.item.label} · ${globalComponent.item.layerItemId}`
     const {
       app,
       page,
@@ -1906,9 +2045,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         pptxSave: runtimeApi2ExportPptxPath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(page.locator('.scene-item')).toHaveCount(2)
+      await expect(slideSceneItems(page)).toHaveCount(2)
       await expect.poll(
-        () => page.locator('.scene-name').allTextContents(),
+        () => slideSceneItems(page).locator('span').allTextContents(),
       ).toEqual(['场景 1', '场景 2'])
 
       const exportMenuTrigger = page.getByTestId('export-menu-trigger')
@@ -1983,156 +2122,41 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } =
       await launchEditor({ forceBackground: true })
     try {
-      await page.getByTestId('add-scene').click()
+      await page.getByTestId('add-content-primary').click()
 
-      const previewPromise = app.waitForEvent('window')
-      await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
-      const preview = await previewPromise
-      await expectCanvasPlayerScene(preview, 0)
+      const { adapter: previewAdapter } = await openCoursePreviewOverlay(page)
       await expectBackgroundWindowsIsolated(app, true)
-
-      const controller = preview.locator(
-        '.lesson-teacher-controller-accessibility',
-      )
-      const initialPosition = await teacherControllerLogicalPosition(preview)
-      const initialBounds = await controller.boundingBox()
-      if (!initialBounds) throw new Error('整课预览教师控制器不可见')
-      const dragStart = {
-        x: initialBounds.x + 24,
-        y: initialBounds.y + initialBounds.height / 2,
+      const firstLocation = await previewAdapter.getAttribute('data-location-id')
+      await page.getByTestId('course-preview-next').click()
+      if (firstLocation) {
+        await expect.poll(() => previewAdapter.getAttribute('data-location-id'))
+          .not.toBe(firstLocation)
       }
-
-      // The six-pixel mouse threshold must keep a small hand jitter as a click.
-      await preview.mouse.move(dragStart.x, dragStart.y)
-      await preview.mouse.down()
-      await preview.mouse.move(dragStart.x + 3, dragStart.y + 2)
-      await preview.mouse.up()
-      expectTeacherControllerPosition(
-        await teacherControllerLogicalPosition(preview),
-        initialPosition,
-      )
-
-      const canvasBeforeResize = preview.locator('.lesson-canvas-host canvas')
-      const canvasBeforeResizeBounds = await canvasBeforeResize.boundingBox()
-      if (!canvasBeforeResizeBounds) throw new Error('整课预览画布不可见')
-      const firstScreenDelta = { x: 36, y: -18 }
-      await preview.mouse.move(dragStart.x, dragStart.y)
-      await preview.mouse.down()
-      await preview.mouse.move(
-        dragStart.x + firstScreenDelta.x,
-        dragStart.y + firstScreenDelta.y,
-        { steps: 8 },
-      )
-      await preview.mouse.up()
-      const afterMouseDrag = await teacherControllerLogicalPosition(preview)
-      expect(afterMouseDrag.left - initialPosition.left).toBeCloseTo(
-        firstScreenDelta.x * 1280 / canvasBeforeResizeBounds.width,
-        1,
-      )
-      expect(afterMouseDrag.top - initialPosition.top).toBeCloseTo(
-        firstScreenDelta.y * 720 / canvasBeforeResizeBounds.height,
-        1,
-      )
-
-      await controller.focus()
-      await controller.press('Alt+ArrowRight')
-      const afterKeyboardStep = await teacherControllerLogicalPosition(preview)
-      expect(afterKeyboardStep.left - afterMouseDrag.left).toBe(8)
-      expect(afterKeyboardStep.top).toBe(afterMouseDrag.top)
-      await controller.press('Alt+Shift+ArrowDown')
-      const afterKeyboardFineStep = await teacherControllerLogicalPosition(preview)
-      expect(afterKeyboardFineStep.left).toBe(afterKeyboardStep.left)
-      expect(afterKeyboardFineStep.top - afterKeyboardStep.top).toBe(1)
-
-      await app.evaluate(({ BrowserWindow }, origin) => {
-        const previewWindow = BrowserWindow.getAllWindows().find(
-          (window) => window.getParentWindow() !== null,
-        )
-        if (!previewWindow) throw new Error('课件预览窗口不存在')
-        previewWindow.setBounds({
-          x: origin,
-          y: origin,
-          width: 960,
-          height: 640,
-        })
-      }, BACKGROUND_E2E_WINDOW_ORIGIN)
-      await expect.poll(async () =>
-        (await preview.locator('.lesson-canvas-host canvas').boundingBox())?.width,
-      ).toBeLessThan(canvasBeforeResizeBounds.width * 0.9)
+      const secondLocation = await previewAdapter.getAttribute('data-location-id')
+      await page.getByTestId('course-preview-previous').click()
+      if (firstLocation) {
+        await expect.poll(() => previewAdapter.getAttribute('data-location-id'))
+          .toBe(firstLocation)
+      }
       await expectBackgroundWindowsIsolated(app, true)
-      expectTeacherControllerPosition(
-        await teacherControllerLogicalPosition(preview),
-        afterKeyboardFineStep,
-      )
-      const [resizedCanvasBounds, resizedControllerBounds] = await Promise.all([
-        preview.locator('.lesson-canvas-host canvas').boundingBox(),
-        controller.boundingBox(),
-      ])
-      if (!resizedCanvasBounds || !resizedControllerBounds) {
-        throw new Error('调整窗口尺寸后的整课预览画布或控制器不可见')
-      }
-      expect(resizedControllerBounds.width).toBeLessThan(initialBounds.width)
-      const resizedDragStart = {
-        x: resizedCanvasBounds.x +
-          ((afterKeyboardFineStep.left + 24) / 1280) * resizedCanvasBounds.width,
-        y: resizedCanvasBounds.y +
-          ((afterKeyboardFineStep.top + 32) / 720) * resizedCanvasBounds.height,
-      }
-      const resizedScreenDelta = { x: 24, y: -12 }
-      await preview.mouse.move(resizedDragStart.x, resizedDragStart.y)
-      await preview.mouse.down()
-      await preview.mouse.move(
-        resizedDragStart.x + resizedScreenDelta.x,
-        resizedDragStart.y + resizedScreenDelta.y,
-        { steps: 8 },
-      )
-      await preview.mouse.up()
-      const afterResizedDrag = await teacherControllerLogicalPosition(preview)
-      expect(afterResizedDrag.left - afterKeyboardFineStep.left).toBeCloseTo(
-        resizedScreenDelta.x * 1280 / resizedCanvasBounds.width,
-        1,
-      )
-      expect(afterResizedDrag.top - afterKeyboardFineStep.top).toBeCloseTo(
-        resizedScreenDelta.y * 720 / resizedCanvasBounds.height,
-        1,
-      )
-
-      await navigateCanvasPlayerByKeyboard(preview, 'PageDown', 1)
-      expectTeacherControllerPosition(
-        await teacherControllerLogicalPosition(preview),
-        afterResizedDrag,
-      )
-      await preview.getByRole('button', { name: '重播', exact: true }).click({
-        force: true,
-      })
-      await expectCanvasPlayerScene(preview, 1)
-      expectTeacherControllerPosition(
-        await teacherControllerLogicalPosition(preview),
-        afterResizedDrag,
-      )
-      await navigateCanvasPlayerByKeyboard(preview, 'PageUp', 0)
-      expectTeacherControllerPosition(
-        await teacherControllerLogicalPosition(preview),
-        afterResizedDrag,
-      )
-      await expectBackgroundWindowsIsolated(app, true)
-      await preview.close()
+      await closeCoursePreviewOverlay(page)
 
       await page.getByTestId('global-layer-entry').click()
       await page.getByRole('tab', { name: '属性' }).click()
       await page.getByLabel('翻页笔推进方式').selectOption('authored-command')
-      const authoredPreviewPromise = app.waitForEvent('window')
-      await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
-      const authoredPreview = await authoredPreviewPromise
-      await expectCanvasPlayerScene(authoredPreview, 0)
-      await authoredPreview.keyboard.press('PageDown')
-      await authoredPreview.waitForTimeout(150)
-      expect(await playerSceneIndex(authoredPreview)).toBe(0)
-      await authoredPreview.keyboard.press('PageUp')
-      await authoredPreview.waitForTimeout(150)
-      expect(await playerSceneIndex(authoredPreview)).toBe(0)
+      const authoredPreview = await openCoursePreviewOverlay(page)
+      await expect(authoredPreview.adapter).toBeVisible()
+      if (firstLocation) {
+        await expect.poll(() => authoredPreview.adapter.getAttribute('data-location-id'))
+          .toBe(firstLocation)
+      }
+      await page.getByTestId('course-preview-next').click()
+      if (secondLocation) {
+        await expect.poll(() => authoredPreview.adapter.getAttribute('data-location-id'))
+          .toBe(secondLocation)
+      }
       await expectBackgroundWindowsIsolated(app, true)
-      await authoredPreview.close()
+      await closeCoursePreviewOverlay(page)
 
       expect(pageErrors).toEqual([])
       expect(consoleErrors).toEqual([])
@@ -2155,7 +2179,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await addText(page)
       await editDefaultText(page, '第一页')
-      await page.getByTestId('add-scene').click()
+      await page.getByTestId('add-content-primary').click()
       await addText(page)
       await editDefaultText(page, '第二页')
       await page.getByTestId('export-menu-trigger').click()
@@ -2252,7 +2276,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
           )
           return hit === element || element.contains(hit)
         })).toBe(true)
-        const exportedCanvas = exported.locator('.lesson-canvas-host canvas')
+        const exportedCanvas = exported.locator('.slide-published-adapter')
         const firstPage = await exportedCanvas.screenshot()
         await escapeNext.click()
         await expectCanvasPlayerScene(exported, 1)
@@ -2330,7 +2354,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
 
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(2)
+      await expect(authoredLayerRows(page)).toHaveCount(2)
       const imageGeometry: Array<{
         x: number
         y: number
@@ -2338,7 +2362,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         height: number
       }> = []
       for (let index = 0; index < 2; index += 1) {
-        await page.locator('.node-name').nth(index).click()
+        await authoredLayerRows(page).locator('.node-name').nth(index).click()
         await expect(page.getByRole('tab', { name: '属性' })).toHaveAttribute(
           'aria-selected',
           'true',
@@ -2363,7 +2387,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(0)
+      await expect(authoredLayerRows(page)).toHaveCount(0)
 
       await page.getByRole('tab', { name: '元素' }).click()
       await page.getByRole('tab', { name: '媒体' }).click()
@@ -2372,7 +2396,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         '图片批量入库：已完成 2 项',
       )
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(0)
+      await expect(authoredLayerRows(page)).toHaveCount(0)
 
       await page.getByRole('tab', { name: '元素' }).click()
       await page.getByRole('tab', { name: '常用' }).click()
@@ -2383,10 +2407,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         'true',
       )
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(2)
+      await expect(authoredLayerRows(page)).toHaveCount(2)
       const textPositions: Array<{ x: string; y: string }> = []
       for (let index = 0; index < 2; index += 1) {
-        await page.locator('.node-name').nth(index).click()
+        await authoredLayerRows(page).locator('.node-name').nth(index).click()
         textPositions.push({
           x: await commonNodeField(page, 'X').inputValue(),
           y: await commonNodeField(page, 'Y').inputValue(),
@@ -2418,8 +2442,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByTestId('add-image').click()
       await page.waitForTimeout(500)
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(1)
-      await page.locator('.node-name').click()
+      await expect(authoredLayerRows(page)).toHaveCount(1)
+      await authoredLayerRows(page).locator('.node-name').click()
       await page.getByRole('tab', { name: '属性' }).click()
       await expect(page.getByRole('checkbox', { name: '保持宽高比' })).toBeChecked()
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
@@ -2490,8 +2514,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(1)
-      await page.locator('.node-name').click()
+      await expect(authoredLayerRows(page)).toHaveCount(1)
+      await authoredLayerRows(page).locator('.node-name').click()
       await page.waitForTimeout(500)
       const restored = await canvas.screenshot()
       expect(Buffer.compare(before, restored)).not.toBe(0)
@@ -2546,10 +2570,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         )
         // A drop rebuilds the Phaser/editor node bridge. Wait for its visible
         // layer entry before starting the next drag instead of racing that sync.
-        await expect(page.locator('.node-item')).toHaveCount(index + 1)
+        await expect(authoredLayerRows(page)).toHaveCount(index + 1)
       }
 
-      await expect(page.locator('.node-item')).toHaveCount(3)
+      await expect(authoredLayerRows(page)).toHaveCount(3)
       await page.locator('.tree-root').click()
       for (const name of ['右箭头', '左大括号', '菱形']) {
         await page.locator('.node-name').filter({ hasText: name }).click({
@@ -2608,7 +2632,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-image').click()
       await page.waitForTimeout(300)
-      await page.getByTestId('add-scene').click()
+      await page.getByTestId('add-content-primary').click()
       await page.getByRole('tab', { name: '元素' }).click()
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-shape-brace-pair-horizontal').click()
@@ -2892,48 +2916,87 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         new Uint8Array(readFileSync(formulaProjectPath)),
       )
       const savedProjectEntry = savedArchive['project.json']
-      if (!savedProjectEntry) throw new Error('V8 工程归档缺少 project.json')
-      const savedProject = projectDocumentSchema.parse(
+      if (!savedProjectEntry) throw new Error('V9 工程归档缺少 project.json')
+      const savedProject = courseProjectDocumentSchema.parse(
         JSON.parse(strFromU8(savedProjectEntry)) as unknown,
       )
-      expect(savedProject.schemaVersion).toBe(8)
-      expect(savedProject.scenes).toHaveLength(1)
-      const savedNodes = savedProject.scenes[0]!.nodes
-      expect(savedNodes).toHaveLength(4)
-      expect(savedNodes.map((node) => node.name).sort()).toEqual([
+      expect(savedProject.schemaVersion).toBe(COURSE_PROJECT_SCHEMA_VERSION)
+      const slideSurface = savedProject.surfaces.find((surface) => surface.type === 'slide')
+      if (!slideSurface || slideSurface.type !== 'slide') {
+        throw new Error('保存工程缺少 Slide 表面')
+      }
+      expect(slideSurface.scenes).toHaveLength(1)
+      const savedItems = firstSlideSceneLayerItems(savedProject)
+      expect(savedItems).toHaveLength(4)
+      expect(savedItems.map((item) => item.label).sort()).toEqual([
         '局部着重号示例文字',
         '横排节点级着重号',
         '竖排节点级着重号',
         '语义公式',
       ].sort())
-      const horizontalText = savedNodes.find(
-        (node) => node.type === 'text' && node.text === '横排节点级着重号',
-      )
-      const verticalText = savedNodes.find(
-        (node) => node.type === 'text' && node.text === '竖排节点级着重号',
-      )
-      const runText = savedNodes.find(
-        (node) => node.type === 'text' && node.text === '局部着重号示例文字',
-      )
-      const formula = savedNodes.find((node) => node.type === 'formula')
-      if (runText?.type !== 'text') {
-        throw new Error('保存工程缺少局部着重号文字节点')
+      const horizontalText = savedItems.find((item) => (
+        item.kind === 'native' &&
+        item.content.nativeType === 'text' &&
+        item.content.data.text === '横排节点级着重号'
+      ))
+      const verticalText = savedItems.find((item) => (
+        item.kind === 'native' &&
+        item.content.nativeType === 'text' &&
+        item.content.data.text === '竖排节点级着重号'
+      ))
+      const runText = savedItems.find((item) => (
+        item.kind === 'native' &&
+        item.content.nativeType === 'text' &&
+        item.content.data.text === '局部着重号示例文字'
+      ))
+      const formula = savedItems.find((item) => (
+        item.kind === 'native' && item.content.nativeType === 'formula'
+      ))
+      if (
+        !runText ||
+        runText.kind !== 'native' ||
+        runText.content.nativeType !== 'text'
+      ) {
+        throw new Error('保存工程缺少局部着重号文字图层')
       }
-      expect(horizontalText).toMatchObject({
-        style: { writingMode: 'horizontal', emphasis: true },
+      if (
+        !horizontalText ||
+        horizontalText.kind !== 'native' ||
+        horizontalText.content.nativeType !== 'text'
+      ) {
+        throw new Error('保存工程缺少横排着重号文字图层')
+      }
+      if (
+        !verticalText ||
+        verticalText.kind !== 'native' ||
+        verticalText.content.nativeType !== 'text'
+      ) {
+        throw new Error('保存工程缺少竖排着重号文字图层')
+      }
+      if (
+        !formula ||
+        formula.kind !== 'native' ||
+        formula.content.nativeType !== 'formula'
+      ) {
+        throw new Error('保存工程缺少公式图层')
+      }
+      expect(horizontalText.content.data.style).toMatchObject({
+        writingMode: 'horizontal',
+        emphasis: true,
       })
-      expect(verticalText).toMatchObject({
-        style: { writingMode: 'vertical-lr', emphasis: true },
+      expect(verticalText.content.data.style).toMatchObject({
+        writingMode: 'vertical-lr',
+        emphasis: true,
       })
-      expect(runText).toMatchObject({ style: { emphasis: false } })
-      expect(runText?.runs).toEqual(expect.arrayContaining([
+      expect(runText.content.data.style).toMatchObject({ emphasis: false })
+      expect(runText.content.data.runs).toEqual(expect.arrayContaining([
         expect.objectContaining({
           start: 0,
           end: 4,
           style: expect.objectContaining({ emphasis: true }),
         }),
       ]))
-      expect(formula).toMatchObject({
+      expect(formula.content.data).toMatchObject({
         formulaId: expect.stringMatching(/^formula:formula_/),
         accessibleText: '二分之一加根号下 x 加一，再加 x 的上标二下标 n',
         ast: formulaAst,
@@ -2943,7 +3006,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(4)
+      await expect(page.locator('.node-item')).toHaveCount(5)
+      await expect(teacherControllerLayerRows(page)).toHaveCount(1)
       await page.locator('.node-name').filter({ hasText: '公式' }).click()
       await page.getByRole('tab', { name: '属性' }).click()
       await expect(page.getByRole('textbox', { name: '无障碍描述' }))
@@ -2958,19 +3022,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await expectMeaningfulPng(editorPng, 'Editor 画布证据')
 
-      const previewPromise = app.waitForEvent('window')
-      await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
-      const preview = await previewPromise
-      const previewErrors: string[] = []
-      preview.on('pageerror', (error) => previewErrors.push(error.message))
-      await capturePlayerCanvasEvidence(
-        preview,
-        join(crossSurfaceEvidenceDirectory, 'player.png'),
-        'Player 画布证据',
-      )
+      const { adapter: previewAdapter } = await openCoursePreviewOverlay(page)
+      const previewPng = await previewAdapter.screenshot({
+        path: join(crossSurfaceEvidenceDirectory, 'player.png'),
+      })
+      await expectMeaningfulPng(previewPng, 'Player 画布证据')
       await expectBackgroundWindowsIsolated(app, true)
-      expect(previewErrors).toEqual([])
-      await preview.close()
+      await closeCoursePreviewOverlay(page)
 
       for (const target of [
         {
@@ -3147,19 +3205,15 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         const recoveryArchive = unzipSync(Uint8Array.from(bytes))
         const projectEntry = recoveryArchive['project.json']
         if (!projectEntry) return null
-        const recoveredProject = projectDocumentSchema.parse(
+        const recoveredProject = courseProjectDocumentSchema.parse(
           JSON.parse(strFromU8(projectEntry)) as unknown,
         )
         return {
           schemaVersion: recoveredProject.schemaVersion,
-          texts: recoveredProject.scenes.flatMap((scene) => (
-            scene.nodes
-              .filter((node) => node.type === 'text')
-              .map((node) => node.text)
-          )),
+          texts: nativeTextContents(recoveredProject),
         }
       }, { timeout: 10_000 }).toEqual({
-        schemaVersion: 8,
+        schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
         texts: ['自动恢复内容'],
       })
       await expect(firstLaunch.page.locator('.status-bar')).toContainText(
@@ -3179,8 +3233,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await recoveryDialog.getByRole('button', { name: '恢复课件' }).click()
       await expect(recoveryDialog).toHaveCount(0)
       await restoredLaunch.page.getByRole('tab', { name: '图层' }).click()
-      await expect(restoredLaunch.page.locator('.node-item')).toHaveCount(1)
-      await restoredLaunch.page.locator('.node-name').click()
+      await expect(restoredLaunch.page.locator('.node-item')).toHaveCount(2)
+      await expect(teacherControllerLayerRows(restoredLaunch.page)).toHaveCount(1)
+      await restoredLaunch.page.locator('.node-item').filter({
+        has: restoredLaunch.page.locator('.node-type-icon[title="text"]'),
+      }).locator('.node-name').click()
       await restoredLaunch.page.getByRole('tab', { name: '属性' }).click()
       await expect(restoredLaunch.page.locator('.form-textarea')).toHaveValue('自动恢复内容')
       expect(restoredLaunch.pageErrors).toEqual([])

@@ -1,3 +1,4 @@
+import { strToU8, zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RecoveryWriteCoordinator } from '@/renderer/project/recoveryWriteCoordinator'
 
@@ -110,6 +111,45 @@ describe('RecoveryWriteCoordinator', () => {
     expect(onError).toHaveBeenCalledTimes(1)
     expect(onError.mock.calls[0]?.[0]).toMatchObject({ message: 'disk unavailable' })
     expect(onError.mock.calls[0]?.[1]).toBe('latest')
+    coordinator.dispose()
+  })
+
+  it('把 V9 工程包写成恢复副本', async () => {
+    vi.useFakeTimers()
+    const v9Bytes = zipSync({
+      'project.json': strToU8(JSON.stringify({
+        schemaVersion: 9,
+        locations: [],
+        surfaces: [],
+        globalLayerItems: [],
+        startLocationId: 'loc_1',
+      })),
+    })
+    const write = vi.fn(async () => {})
+    const onError = vi.fn()
+    const coordinator = new RecoveryWriteCoordinator({
+      delayMs: 10,
+      build: async () => v9Bytes,
+      write,
+      onError,
+    })
+
+    coordinator.schedule(1, {
+      project: {
+        schemaVersion: 9,
+        locations: [],
+        surfaces: [],
+        globalLayerItems: [],
+        startLocationId: 'loc_1',
+      },
+    })
+    await vi.runAllTimersAsync()
+
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(write).toHaveBeenCalledWith(v9Bytes, expect.objectContaining({
+      project: expect.objectContaining({ schemaVersion: 9 }),
+    }))
+    expect(onError).not.toHaveBeenCalled()
     coordinator.dispose()
   })
 })

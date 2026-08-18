@@ -12,6 +12,7 @@ import {
   RECOMMENDED_SCENE_NODES,
 } from '../shared/constants'
 import { toUserMessage, UserFacingError } from '../shared/errors'
+import type { CourseProjectDocument } from '../shared/courseProjectTypes'
 import type {
   BatchFileRejection,
   RecentProjectEntry,
@@ -19,10 +20,20 @@ import type {
   SelectedImageBatchFile,
   SelectedMediaBatchFile,
 } from '../shared/ipcTypes'
-import type { AssetKind, ProjectDocument } from '../shared/projectTypes'
+import type { AssetKind } from '../shared/projectTypes'
 import { collectProjectHealth, summarizeProjectHealth } from '../shared/projectHealth'
 import { buildExportPayload } from './export/buildExportPayload'
 import { buildStandaloneHtml } from './export/buildStandaloneHtml'
+import { buildPublishedCourseV2Payload } from './export/course/buildPublishedCourse'
+import {
+  buildPublishedCourseStandaloneHtml,
+  buildPublishedCourseWebPackageAsync,
+  collectCoursePackageExportPreflight,
+  type CoursePackagePreflightReport,
+} from './export/course/buildCoursePackages'
+import { buildCoursePptx } from './export/course/buildCoursePptx'
+import { buildCoursePrintArtifacts } from './export/course/buildCoursePrintArtifacts'
+import { buildFlowDocx, uniqueFlowDocxFilename } from './export/course/flowDocx'
 import { buildWebPackageFromProjectAsync } from './export/buildWebPackage'
 import { buildPdfPrintHtml, buildPptx } from './export/buildPptx'
 import {
@@ -36,7 +47,7 @@ import {
   type ExportPreflightReport,
 } from './export/exportPreflight'
 import { loadPlayerBundle } from './export/loadPlayerBundle'
-import { renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
+import { renderProjectSceneImages, renderProjectSceneImagesWithRuntime } from './export/renderSceneImages'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -58,17 +69,31 @@ import {
   planMediaBatchImport,
   type MediaBatchLibraryFallback,
 } from './project/mediaBatch'
-import { openProjectArchiveAsync } from './project/projectArchive'
-import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
-import { saveProjectAsync } from './project/saveProject'
+import { openDefaultCourseProjectAsync, formatCourseProjectV8ImportReport, saveCourseProjectDocumentAsync } from './project/courseProjectIo'
 import {
+  inspectCourseProjectArchiveIdentity,
+  type CourseProjectArchiveData,
+  type CourseProjectV8ImportResult,
+} from './project/courseProjectArchive'
+import { shouldOfferCourseProjectRecovery } from './project/courseProjectLifecycle'
+import {
+  dedupeCourseMediaImports,
+  emptyCourseAssetSidecar,
+} from './project/v9AssetAdapter'
+import { RecoveryWriteCoordinator } from './project/recoveryWriteCoordinator'
+import {
+  projectCandidatePreviewDocument,
+  selectActiveCourseProjectDocument,
   selectActiveScene,
   selectEditingNodes,
+  selectMediaAssetFiles,
   selectSelectedNode,
+  selectSlideCandidateBackend,
   useEditorStore,
   MAX_BATCH_CANVAS_ITEMS,
   type ImportedAssetBatchItem,
 } from './store/editorStore'
+import { shouldIgnoreSlideLayerDeleteForFocus } from './course/v9SlideActionCommands'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { CopyableSummaryDialog } from './ui/CopyableSummaryDialog'
 import { ExportSizeWarningDialog } from './ui/ExportSizeWarningDialog'
@@ -78,6 +103,8 @@ import { ScenePanel } from './ui/ScenePanel'
 import { SceneStateStrip } from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
+import { mountPublishedCourseTryRun } from './ui/coursePlayerTryRun'
+import type { PublishedCourseSession } from '../player/surfaces/publishedDynamicHosts'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
 import { planCatalogBatchJoin } from './components/componentLibraryModel'
@@ -97,6 +124,61 @@ function desktopApi() {
     )
   }
   return window.desktopAPI
+}
+
+function activeCoursePublishSources() {
+  const state = useEditorStore.getState()
+  const document = selectActiveCourseProjectDocument(state)
+  if (!document) return null
+  return {
+    project: document,
+    assetFiles: selectMediaAssetFiles(state),
+    components: state.componentPackages,
+  }
+}
+
+function isSlideOnlyCourseProject(project: CourseProjectDocument): boolean {
+  return project.locations.every((location) => location.kind === 'slide-scene')
+    && project.surfaces.every((surface) => surface.type === 'slide')
+}
+
+function mergeCoursePackagePreflight(
+  base: ExportPreflightReport,
+  extra: CoursePackagePreflightReport,
+): ExportPreflightReport {
+  const mapped: ExportPreflightItem[] = extra.items.map((item) => ({
+    severity: item.severity,
+    code: item.code as ExportPreflightItem['code'],
+    message: item.message,
+    target: base.target,
+    ...(item.path ? { path: item.path } : {}),
+  }))
+  const items = [...base.items]
+  for (const item of mapped) {
+    if (items.some((existing) => existing.code === item.code && existing.message === item.message)) {
+      continue
+    }
+    items.push(item)
+  }
+  if (
+    (base.target === 'pptx' || base.target === 'pdf') &&
+    !items.some((item) => item.message.includes('全局图层与教师控制器'))
+  ) {
+    items.push({
+      severity: 'info',
+      code: 'static-export-controller-omitted',
+      message: '全局图层与教师控制器默认不写入 PPTX/PDF/DOCX 文件。',
+      target: base.target,
+    })
+  }
+  const summary = { error: 0, warning: 0, info: 0, total: items.length, canExport: true }
+  for (const item of items) summary[item.severity] += 1
+  summary.canExport = summary.error === 0
+  return { ...base, items, summary }
+}
+
+function decodeUtf8(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes)
 }
 
 function readableError(error: unknown, fallback: string): string {
@@ -143,10 +225,13 @@ async function prepareAssetBatch<T extends {
   build: (file: T) => Promise<ImportedAssetBatchItem>,
 ): Promise<PreparedAssetBatch> {
   const state = useEditorStore.getState()
+  const backend = selectSlideCandidateBackend(state)
   const hashes = await buildAssetContentHashIndex(
     kind,
-    state.project.assets,
-    state.assetFiles,
+    backend ? backend.getSession().history.present.assets : state.project.assets,
+    backend
+      ? (state.slideCandidateSidecar?.files ?? {})
+      : state.assetFiles,
   )
   const placements: ImportedAssetBatchItem[] = []
   const additions: ImportedAssetBatchItem[] = []
@@ -175,6 +260,35 @@ async function prepareAssetBatch<T extends {
   return { placements, additions, duplicateCount, issues }
 }
 
+async function importCandidateMediaIfInjected(input: {
+  kind: AssetKind
+  items: ImportedAssetBatchItem[]
+  nativeType?: 'image' | 'video' | 'audio'
+  mode?: 'add' | 'library'
+  position?: { x?: number; y?: number }
+}): Promise<boolean> {
+  const state = useEditorStore.getState()
+  const backend = selectSlideCandidateBackend(state)
+  if (!backend) return false
+  const document = backend.getSession().history.present
+  const sidecar = state.slideCandidateSidecar ?? emptyCourseAssetSidecar()
+  const deduped = await dedupeCourseMediaImports(
+    input.kind,
+    document.assets,
+    sidecar,
+    input.items,
+  )
+  const items = input.mode === 'add' ? deduped.placements : deduped.additions
+  state.importV9CandidateMedia({
+    items,
+    nativeType: input.nativeType,
+    mode: input.mode,
+    ...(typeof input.position?.x === 'number' ? { x: input.position.x } : {}),
+    ...(typeof input.position?.y === 'number' ? { y: input.position.y } : {}),
+  })
+  return true
+}
+
 function formatBatchIssueSummary(issues: BatchImportIssue[]): string {
   const shown = issues.slice(0, 5).map((issue) => `• ${issue.name}：${issue.message}`)
   if (issues.length > shown.length) {
@@ -200,10 +314,28 @@ function isInteractiveControlTarget(target: EventTarget | null): boolean {
 }
 
 interface RecoverySnapshot {
-  project: ProjectDocument
+  project: CourseProjectDocument
   assetFiles: Record<string, Uint8Array>
   componentPackages: Record<string, ComponentPackageData>
   projectPath: string | null
+  title: string
+}
+
+function currentCourseArchiveData(): CourseProjectArchiveData {
+  const state = useEditorStore.getState()
+  const document = selectActiveCourseProjectDocument(state)
+  if (!document) {
+    throw new UserFacingError(
+      '无法使用课程工程',
+      '当前会话没有课程工程。',
+      '请新建或打开课程工程后再保存。',
+    )
+  }
+  return {
+    project: document,
+    assetFiles: { ...selectMediaAssetFiles(state) },
+    componentFiles: componentPackagesToArchiveFiles(state.componentPackages),
+  }
 }
 
 function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
@@ -213,19 +345,18 @@ function createRecoveryWriteCoordinator(): RecoveryWriteCoordinator<
   return new RecoveryWriteCoordinator({
     delayMs: 1800,
     async build(snapshot, signal) {
-      const archive = await saveProjectAsync({
+      return saveCourseProjectDocumentAsync({
         project: snapshot.project,
         assetFiles: snapshot.assetFiles,
         componentFiles: componentPackagesToArchiveFiles(
           snapshot.componentPackages,
         ),
-      }, new Date(), { signal })
-      return archive.bytes
+      }, { signal })
     },
     async write(bytes, snapshot) {
       if (!window.desktopAPI) throw new Error('桌面恢复服务不可用。')
       await window.desktopAPI.writeRecoveryProject({
-        projectName: snapshot.project.title,
+        projectName: snapshot.title,
         projectPath: snapshot.projectPath ?? undefined,
         bytes,
       })
@@ -265,6 +396,14 @@ export default function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
   const [recoveryProject, setRecoveryProject] = useState<RecoveryProjectResult | null>(null)
   const [recoveryDecisionComplete, setRecoveryDecisionComplete] = useState(false)
+  const [coursePreviewOpen, setCoursePreviewOpen] = useState(false)
+  const [coursePreviewHost, setCoursePreviewHost] = useState<HTMLDivElement | null>(null)
+  const coursePreviewSessionRef = useRef<PublishedCourseSession | null>(null)
+  const [v8ImportPending, setV8ImportPending] = useState<{
+    result: CourseProjectV8ImportResult
+    afterLoad?: { dirty: boolean; statusMessage: string }
+  } | null>(null)
+  const [v8ImportReport, setV8ImportReport] = useState<string | null>(null)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [exportPreflightReport, setExportPreflightReport] =
@@ -283,7 +422,7 @@ export default function App() {
   const dirty = useEditorStore((state) => state.dirty)
   const project = useEditorStore((state) => state.project)
   const projectPath = useEditorStore((state) => state.projectPath)
-  const assetFiles = useEditorStore((state) => state.assetFiles)
+  const sidecarFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore(
     (state) => state.componentPackages,
   )
@@ -308,7 +447,11 @@ export default function App() {
   const setError = useEditorStore((state) => state.setError)
   const setStatus = useEditorStore((state) => state.setStatus)
   const createNewProject = useEditorStore((state) => state.createNewProject)
-  const loadProject = useEditorStore((state) => state.loadProject)
+  const createNewSpatialProject = useEditorStore((state) => state.createNewSpatialProject)
+  const createNewFlowProject = useEditorStore((state) => state.createNewFlowProject)
+  const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  const loadCourseProject = useEditorStore((state) => state.loadCourseProject)
   const markSaved = useEditorStore((state) => state.markSaved)
   const importPackagesIntoStore = useEditorStore(
     (state) => state.importComponentPackages,
@@ -384,6 +527,50 @@ export default function App() {
     return (await desktopApi().confirmDiscardChanges()) === 'discard'
   }, [])
 
+  const applyCourseArchive = useCallback((
+    archive: CourseProjectArchiveData,
+    path: string | null,
+    extra?: { dirty?: boolean; statusMessage?: string },
+  ) => {
+    const packages = componentPackagesFromArchive(
+      archive.project,
+      archive.componentFiles,
+    )
+    loadCourseProject(archive.project, path, archive.assetFiles, packages)
+    if (extra?.dirty || extra?.statusMessage) {
+      useEditorStore.setState({
+        ...(extra.dirty ? { dirty: true } : {}),
+        ...(extra.statusMessage ? { statusMessage: extra.statusMessage } : {}),
+      })
+    }
+  }, [loadCourseProject])
+
+  const ingestOpenedCourseBytes = useCallback(async (
+    bytes: Uint8Array,
+    path: string | null,
+    extra?: { dirty?: boolean; statusMessage?: string },
+  ): Promise<'loaded' | 'pending-import'> => {
+    const opened = await openDefaultCourseProjectAsync(bytes)
+    if (opened.kind === 'v9') {
+      applyCourseArchive(opened.archive, path, extra)
+      return 'loaded'
+    }
+    setV8ImportPending({
+      result: opened.pending,
+      afterLoad: extra?.dirty || extra?.statusMessage
+        ? {
+            dirty: Boolean(extra.dirty),
+            statusMessage: extra.statusMessage
+              ?? '已导入旧版工程。原文件未改写，请另存为当前课程工程。',
+          }
+        : {
+            dirty: true,
+            statusMessage: '已导入旧版工程。原文件未改写，请另存为当前课程工程。',
+          },
+    })
+    return 'pending-import'
+  }, [applyCourseArchive])
+
   const handleNew = useCallback(() => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
@@ -394,40 +581,52 @@ export default function App() {
     }, '新建课件失败，请重试。')
   }, [confirmDiscardIfNeeded, createNewProject, run])
 
+  const handleNewSpatial = useCallback(() => {
+    void run(async () => {
+      if (!(await confirmDiscardIfNeeded())) return
+      await desktopApi().clearRecoveryProject().catch((error) => {
+        console.error('清理恢复数据失败', error)
+      })
+      createNewSpatialProject()
+    }, '新建无限画布课件失败，请重试。')
+  }, [confirmDiscardIfNeeded, createNewSpatialProject, run])
+
+  const handleNewFlow = useCallback(() => {
+    void run(async () => {
+      if (!(await confirmDiscardIfNeeded())) return
+      await desktopApi().clearRecoveryProject().catch((error) => {
+        console.error('清理恢复数据失败', error)
+      })
+      createNewFlowProject()
+    }, '新建流式讲义课件失败，请重试。')
+  }, [confirmDiscardIfNeeded, createNewFlowProject, run])
+
   const handleOpen = useCallback(() => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openProject()
       if (!file) return
-      const archive = await openProjectArchiveAsync(file.bytes)
-      const packages = componentPackagesFromArchive(
-        archive.project,
-        archive.componentFiles,
-      )
-      loadProject(archive.project, file.path, archive.assetFiles, packages)
+      const outcome = await ingestOpenedCourseBytes(file.bytes, file.path)
+      if (outcome === 'pending-import') return
       await desktopApi().clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
     }, '打开工程失败。请检查文件是否损坏后重试。')
-  }, [confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run])
+  }, [confirmDiscardIfNeeded, ingestOpenedCourseBytes, refreshRecentProjects, run])
 
   const handleOpenRecent = useCallback((path: string) => {
     void run(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const file = await desktopApi().openRecentProject({ path })
-      const archive = await openProjectArchiveAsync(file.bytes)
-      const packages = componentPackagesFromArchive(
-        archive.project,
-        archive.componentFiles,
-      )
-      loadProject(archive.project, file.path, archive.assetFiles, packages)
+      const outcome = await ingestOpenedCourseBytes(file.bytes, file.path)
+      if (outcome === 'pending-import') return
       await desktopApi().clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
     }, '最近工程打开失败。文件可能已被移动，请使用“打开工程”重新选择。')
-  }, [confirmDiscardIfNeeded, loadProject, refreshRecentProjects, run])
+  }, [confirmDiscardIfNeeded, ingestOpenedCourseBytes, refreshRecentProjects, run])
 
   const handleSave = useCallback(
     async (saveAs = false) => {
@@ -437,29 +636,24 @@ export default function App() {
       try {
         await run(async () => {
           const state = useEditorStore.getState()
-          const savedProjectRevision = state.project
-          const savedAssetRevision = state.assetFiles
+          const archive = currentCourseArchiveData()
+          const savedDocument = archive.project
+          const savedSidecar = state.slideCandidateSidecar
           const savedComponentRevision = state.componentPackages
-          const saved = await saveProjectAsync({
-            project: state.project,
-            assetFiles: state.assetFiles,
-            componentFiles: componentPackagesToArchiveFiles(
-              state.componentPackages,
-            ),
-          })
+          const bytes = await saveCourseProjectDocumentAsync(archive)
           const result = await desktopApi().saveProject({
             path: saveAs ? undefined : (state.projectPath ?? undefined),
-            suggestedName: `${state.project.title}.h5lesson`,
-            bytes: saved.bytes,
+            suggestedName: `${archive.project.title}.h5lesson`,
+            bytes,
           })
           if (result) {
             const current = useEditorStore.getState()
             const revisionStillCurrent =
-              current.project === savedProjectRevision &&
-              current.assetFiles === savedAssetRevision &&
+              selectActiveCourseProjectDocument(current) === savedDocument &&
+              current.slideCandidateSidecar === savedSidecar &&
               current.componentPackages === savedComponentRevision
             if (revisionStillCurrent) {
-              markSaved(result.path, saved.project)
+              markSaved(result.path)
               savedCurrentRevision = true
               await desktopApi().clearRecoveryProject().catch((error) => {
                 console.error('清理恢复数据失败', error)
@@ -517,6 +711,23 @@ export default function App() {
           },
         )
         const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+        if (await importCandidateMediaIfInjected({
+          kind: 'image',
+          items: mode === 'library' ? prepared.additions : prepared.placements,
+          nativeType: 'image',
+          mode,
+          position,
+        })) {
+          reportBatchOutcome({
+            label: mode === 'library' ? '图片批量入库' : '图片批量添加',
+            completedCount: mode === 'library'
+              ? prepared.additions.length
+              : prepared.placements.length,
+            duplicateCount: prepared.duplicateCount,
+            issues,
+          })
+          return
+        }
         const importPlan = planMediaBatchImport(
           mode,
           prepared.placements.length,
@@ -564,6 +775,20 @@ export default function App() {
           return { meta: imported.meta, bytes: imported.bytes }
         },
       )
+      if (await importCandidateMediaIfInjected({
+        kind: 'audio',
+        items: prepared.additions,
+        nativeType: 'audio',
+        mode: 'library',
+      })) {
+        reportBatchOutcome({
+          label: '声音批量入库',
+          completedCount: prepared.additions.length,
+          duplicateCount: prepared.duplicateCount,
+          issues: [...desktopRejections(batch.rejected), ...prepared.issues],
+        })
+        return
+      }
       importSounds(prepared.additions)
       reportBatchOutcome({
         label: '声音批量入库',
@@ -590,6 +815,24 @@ export default function App() {
           return { meta: imported.meta, bytes: imported.bytes }
         },
       )
+      const issues = [...desktopRejections(batch.rejected), ...prepared.issues]
+      if (await importCandidateMediaIfInjected({
+        kind: 'video',
+        items: mode === 'library' ? prepared.additions : prepared.placements,
+        nativeType: 'video',
+        mode,
+        position,
+      })) {
+        reportBatchOutcome({
+          label: mode === 'add' ? '视频批量添加' : '视频批量入库',
+          completedCount: mode === 'add'
+            ? prepared.placements.length
+            : prepared.additions.length,
+          duplicateCount: prepared.duplicateCount,
+          issues,
+        })
+        return
+      }
       const importPlan = planMediaBatchImport(
         mode,
         prepared.placements.length,
@@ -824,10 +1067,15 @@ export default function App() {
   }, [run])
 
   const buildHtml = useCallback(() => {
+    const sources = activeCoursePublishSources()
+    if (sources) {
+      return buildPublishedCourseStandaloneHtml(sources, loadPlayerBundle())
+    }
     const state = useEditorStore.getState()
+    const preview = projectCandidatePreviewDocument(state)
     const payload = buildExportPayload({
-      project: state.project,
-      assetFiles: state.assetFiles,
+      project: preview?.project ?? state.project,
+      assetFiles: preview?.assetFiles ?? selectMediaAssetFiles(state),
       components: state.componentPackages,
     })
     return buildStandaloneHtml(payload, loadPlayerBundle())
@@ -835,14 +1083,19 @@ export default function App() {
 
   const handlePreview = useCallback(() => {
     void run(async () => {
+      if (activeCoursePublishSources()) {
+        setCoursePreviewOpen(true)
+        return
+      }
       await desktopApi().openPreview({ html: buildHtml() })
     }, '预览窗口创建失败。请关闭其他预览窗口后重试。')
   }, [buildHtml, run])
 
   const writeSingleHtml = useCallback(async (html: string) => {
     const state = useEditorStore.getState()
+    const title = selectActiveCourseProjectDocument(state)?.title ?? state.project.title
     const result = await desktopApi().exportHtml({
-      suggestedName: `${state.project.title}.html`,
+      suggestedName: `${title}.html`,
       html,
     })
     if (result) state.setStatus(`单 HTML 已导出到 ${result.path}`)
@@ -865,13 +1118,18 @@ export default function App() {
     void run(async () => {
       const state = useEditorStore.getState()
       state.setStatus('正在生成网页包…')
-      const bytes = await buildWebPackageFromProjectAsync({
-        project: state.project,
-        assetFiles: state.assetFiles,
-        components: state.componentPackages,
-      }, loadPlayerBundle())
+      const sources = activeCoursePublishSources()
+      const bytes = sources
+        ? await buildPublishedCourseWebPackageAsync(sources, loadPlayerBundle())
+        : await buildWebPackageFromProjectAsync({
+          project: projectCandidatePreviewDocument(state)?.project ?? state.project,
+          assetFiles: projectCandidatePreviewDocument(state)?.assetFiles
+            ?? selectMediaAssetFiles(state),
+          components: state.componentPackages,
+        }, loadPlayerBundle())
+      const title = sources?.project.title ?? state.project.title
       const result = await desktopApi().exportWebPackage({
-        suggestedName: `${state.project.title}-网页包.zip`,
+        suggestedName: `${title}-网页包.zip`,
         bytes,
       })
       if (result) state.setStatus(`网页包已导出到 ${result.path}`)
@@ -882,12 +1140,39 @@ export default function App() {
     void run(async () => {
       const state = useEditorStore.getState()
       state.setStatus('正在生成可编辑 PPTX 对象…')
+      const sources = activeCoursePublishSources()
+      const preview = projectCandidatePreviewDocument(state)
+      const slideOnlyCourse = Boolean(
+        sources
+        && preview
+        && isSlideOnlyCourseProject(sources.project),
+      )
+      if (sources && !slideOnlyCourse) {
+        const published = buildPublishedCourseV2Payload(sources)
+        const built = await buildCoursePptx(published)
+        if (built.bytes.byteLength === 0) {
+          throw new Error(built.report.map((item) => item.message).join('\n') || '未能生成 PPTX')
+        }
+        const result = await desktopApi().exportBinary({
+          suggestedName: `${sources.project.title}.pptx`,
+          extension: 'pptx',
+          bytes: built.bytes,
+        })
+        if (result) {
+          const notes = built.warnings.length > 0
+            ? `；${built.warnings.length} 项内容已按导出说明处理`
+            : ''
+          state.setStatus(`PPTX 已导出 ${built.slideCount} 页到 ${result.path}${notes}`)
+        }
+        return
+      }
+      const assetFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
       const payload = buildExportPayload({
-        project: state.project,
-        assetFiles: state.assetFiles,
+        project: preview?.project ?? state.project,
+        assetFiles,
         components: state.componentPackages,
       })
-      const bytes = await buildPptx(payload, state.assetFiles)
+      const bytes = await buildPptx(payload, assetFiles)
       const result = await desktopApi().exportBinary({
         suggestedName: `${state.project.title}.pptx`,
         extension: 'pptx',
@@ -905,12 +1190,56 @@ export default function App() {
     void run(async () => {
       const state = useEditorStore.getState()
       state.setStatus('正在渲染 PDF 页面…')
+      const sources = activeCoursePublishSources()
+      if (sources) {
+        const published = buildPublishedCourseV2Payload(sources)
+        const artifacts = await buildCoursePrintArtifacts(published, {
+          resolveAssetBytes: (assetId) => {
+            const meta = sources.project.assets[assetId]
+            const bytes = sources.assetFiles[assetId]
+            return meta && bytes
+              ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
+              : undefined
+          },
+        })
+        const pdfFile = artifacts.files.find((file) => file.kind === 'pdf-html')
+        if (pdfFile) {
+          const result = await desktopApi().exportPdf({
+            suggestedName: `${sources.project.title}.pdf`,
+            html: decodeUtf8(pdfFile.bytes),
+          })
+          if (result) {
+            const notes = artifacts.warnings.length > 0
+              ? `；${artifacts.warnings.length} 项内容已按导出说明处理`
+              : ''
+            state.setStatus(`PDF 已导出到 ${result.path}${notes}`)
+          }
+          return
+        }
+        const preview = projectCandidatePreviewDocument(state)
+        const rasterFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
+        const rasterProject = preview?.project ?? state.project
+        const images = await renderProjectSceneImages(rasterProject, rasterFiles, 1.5)
+        const result = await desktopApi().exportPdf({
+          suggestedName: `${sources.project.title}.pdf`,
+          html: buildPdfPrintHtml(sources.project.title, images),
+        })
+        if (result) {
+          const notes = artifacts.warnings.length > 0
+            ? `；${artifacts.warnings.length} 项内容已按导出说明处理`
+            : ''
+          state.setStatus(`PDF 已导出到 ${result.path}${notes}`)
+        }
+        return
+      }
+      const preview = projectCandidatePreviewDocument(state)
+      const assetFiles = preview?.assetFiles ?? selectMediaAssetFiles(state)
       const payload = buildExportPayload({
-        project: state.project,
-        assetFiles: state.assetFiles,
+        project: preview?.project ?? state.project,
+        assetFiles,
         components: state.componentPackages,
       })
-      const images = await renderProjectSceneImagesWithRuntime(payload, state.assetFiles)
+      const images = await renderProjectSceneImagesWithRuntime(payload, assetFiles)
       const result = await desktopApi().exportPdf({
         suggestedName: `${state.project.title}.pdf`,
         html: buildPdfPrintHtml(state.project.title, images),
@@ -919,17 +1248,71 @@ export default function App() {
     }, 'PDF 导出失败。请减少大图片数量后重试。')
   }, [run])
 
+  const handleExportDocx = useCallback(() => {
+    void run(async () => {
+      const sources = activeCoursePublishSources()
+      if (!sources) {
+        throw new Error('DOCX 讲义仅适用于当前课程工程中的流式讲义')
+      }
+      const published = buildPublishedCourseV2Payload(sources)
+      const flowSurface = published.surfaces.find((surface) => surface.type === 'flow')
+      if (!flowSurface) {
+        throw new Error('当前课程没有流式讲义，无法导出 DOCX')
+      }
+      const built = buildFlowDocx(flowSurface, {
+        resolveAsset: (assetId) => {
+          const meta = sources.project.assets[assetId]
+          const bytes = sources.assetFiles[assetId]
+          return meta && bytes
+            ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
+            : undefined
+        },
+      })
+      const result = await desktopApi().exportBinary({
+        suggestedName: uniqueFlowDocxFilename(flowSurface.title),
+        extension: 'docx',
+        bytes: built.bytes,
+      })
+      if (result) {
+        const notes = built.warnings.length > 0
+          ? `；${built.warnings.length} 项内容已按导出说明处理`
+          : ''
+        useEditorStore.getState().setStatus(`DOCX 讲义已导出到 ${result.path}${notes}`)
+      }
+    }, 'DOCX 导出失败。请先新增流式讲义页面后重试。')
+  }, [run])
+
   const handleExport = useCallback((format: ExportFormat) => {
+    if (format === 'docx') {
+      handleExportDocx()
+      return
+    }
     const state = useEditorStore.getState()
-    setExportPreflightReport(collectExportPreflight(
+    const sources = activeCoursePublishSources()
+    const base = collectExportPreflight(
       state.project,
       format,
       {
-        assetFiles: state.assetFiles,
+        assetFiles: selectMediaAssetFiles(state),
         components: state.componentPackages,
       },
-    ))
-  }, [])
+    )
+    if (!sources) {
+      setExportPreflightReport(base)
+      return
+    }
+    const delivery = format === 'web-package' ? 'web-package' : 'standalone-html'
+    const v9 = collectCoursePackageExportPreflight(
+      sources.project,
+      delivery,
+      {
+        assetFiles: sources.assetFiles,
+        components: sources.components,
+      },
+      loadPlayerBundle(),
+    )
+    setExportPreflightReport(mergeCoursePackagePreflight(base, v9))
+  }, [handleExportDocx])
 
   const continuePreflightExport = useCallback(() => {
     const report = exportPreflightReport
@@ -1008,11 +1391,39 @@ export default function App() {
     void Promise.all([
       window.desktopAPI.listRecentProjects(),
       window.desktopAPI.readRecoveryProject(),
-    ]).then(([recent, recovery]) => {
+    ]).then(async ([recent, recovery]) => {
       if (cancelled) return
       setRecentProjects(recent)
-      if (recovery) setRecoveryProject(recovery)
-      else setRecoveryDecisionComplete(true)
+      if (!recovery) {
+        setRecoveryDecisionComplete(true)
+        return
+      }
+      let official = null as ReturnType<typeof inspectCourseProjectArchiveIdentity> | null
+      if (recovery.projectPath && typeof window.desktopAPI.peekProjectArchive === 'function') {
+        try {
+          const peeked = await window.desktopAPI.peekProjectArchive({
+            path: recovery.projectPath,
+          })
+          if (peeked) official = inspectCourseProjectArchiveIdentity(peeked.bytes)
+        } catch {
+          official = null
+        }
+      }
+      if (cancelled) return
+      const offer = shouldOfferCourseProjectRecovery({
+        recovery: inspectCourseProjectArchiveIdentity(recovery.bytes),
+        official,
+      })
+      if (offer === 'offer') {
+        setRecoveryProject(recovery)
+        return
+      }
+      await window.desktopAPI.clearRecoveryProject().catch((error) => {
+        console.error('静默清理不可恢复副本失败', error)
+      })
+      if (cancelled) return
+      setRecoveryProject(null)
+      setRecoveryDecisionComplete(true)
     }).catch((error) => {
       if (cancelled) return
       console.error('读取本地恢复状态失败', error)
@@ -1021,6 +1432,38 @@ export default function App() {
     })
     return () => { cancelled = true }
   }, [setError])
+
+  useEffect(() => {
+    if (!coursePreviewOpen || !coursePreviewHost) return
+    const sources = activeCoursePublishSources()
+    if (!sources) {
+      setCoursePreviewOpen(false)
+      return
+    }
+    let cancelled = false
+    void mountPublishedCourseTryRun({
+      container: coursePreviewHost,
+      project: sources.project,
+      assetFiles: sources.assetFiles,
+      components: sources.components,
+    }).then((session) => {
+      if (cancelled) {
+        void session.destroy()
+        return
+      }
+      coursePreviewSessionRef.current = session
+    }).catch((error) => {
+      if (cancelled) return
+      setCoursePreviewOpen(false)
+      setError(readableError(error, '整课预览启动失败。'))
+    })
+    return () => {
+      cancelled = true
+      const session = coursePreviewSessionRef.current
+      coursePreviewSessionRef.current = null
+      if (session) void session.destroy()
+    }
+  }, [coursePreviewHost, coursePreviewOpen, setError])
 
   useEffect(() => {
     if (!window.desktopAPI) return
@@ -1043,14 +1486,20 @@ export default function App() {
       return
     }
     const state = useEditorStore.getState()
+    const document = selectActiveCourseProjectDocument(state)
+    if (!document) {
+      coordinator.cancel()
+      return
+    }
     recoveryRevisionRef.current += 1
     coordinator.schedule(recoveryRevisionRef.current, {
-      project: state.project,
-      assetFiles: state.assetFiles,
+      project: document,
+      assetFiles: { ...selectMediaAssetFiles(state) },
       componentPackages: state.componentPackages,
       projectPath: state.projectPath,
+      title: document.title,
     })
-  }, [assetFiles, componentPackages, dirty, project, projectPath, recoveryDecisionComplete])
+  }, [sidecarFiles, componentPackages, dirty, project, projectPath, recoveryDecisionComplete])
 
   useEffect(() => () => {
     recoveryCoordinatorRef.current?.dispose()
@@ -1103,6 +1552,53 @@ export default function App() {
         useEditorStore.getState().duplicateSelectedNodes()
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         const state = useEditorStore.getState()
+        if (selectActiveCourseProjectDocument(state)) {
+          const snapshot = state.createLiveEditorSelectionSnapshot(event.target)
+          if (!snapshot) return
+          if (
+            snapshot.focus === 'text' &&
+            event.target instanceof HTMLElement &&
+            event.target.isContentEditable
+          ) return
+          const result = state.routeEditorAction('delete', snapshot)
+          if (result.ok || result.reason) {
+            event.preventDefault()
+          }
+          return
+        }
+        if (state.flowSession) {
+          if (
+            state.flowTextEdit?.composing
+            || state.flowSession.selection.focus === 'text'
+            || (event.target instanceof HTMLElement && event.target.isContentEditable)
+          ) return
+          if (
+            state.selectedNodeIds.length > 0
+            || state.flowSession.selection.selectedBlockIds.length > 0
+            || state.flowSession.selection.selectedOverlayIds.length > 0
+          ) {
+            event.preventDefault()
+            state.deleteSelectedNodes()
+          }
+          return
+        }
+        if (selectSlideCandidateBackend(state)) {
+          if (shouldIgnoreSlideLayerDeleteForFocus({
+            textEditSession: Boolean(
+              state.editingTextNodeId || state.v9ContentEdit?.kind === 'text',
+            ),
+            formulaEditSession: state.v9ContentEdit?.kind === 'formula',
+            tagName: event.target instanceof HTMLElement ? event.target.tagName : undefined,
+            isContentEditable: event.target instanceof HTMLElement
+              ? event.target.isContentEditable
+              : false,
+          })) return
+          if (state.selectedNodeIds.length > 0) {
+            event.preventDefault()
+            state.deleteSelectedNodes()
+          }
+          return
+        }
         if (state.selectedNodeIds.length > 0 && !state.editingTextNodeId) {
           event.preventDefault()
           state.deleteSelectedNodes()
@@ -1135,6 +1631,8 @@ export default function App() {
       <TopToolbar
         busy={busy}
         onNew={handleNew}
+        onNewSpatial={handleNewSpatial}
+        onNewFlow={handleNewFlow}
         onOpen={handleOpen}
         recentProjects={recentProjects}
         onOpenRecent={handleOpenRecent}
@@ -1162,7 +1660,7 @@ export default function App() {
             }
             onSelectImageAsset={selectImageAsset}
           />
-          <SceneStateStrip />
+          {spatialSession || flowSession ? null : <SceneStateStrip />}
         </div>
         <RightSidebar
           onAddImage={(x, y) =>
@@ -1305,19 +1803,108 @@ export default function App() {
         onConfirm={() => {
           if (!recoveryProject) return
           void run(async () => {
-            const archive = await openProjectArchiveAsync(recoveryProject.bytes)
-            const packages = componentPackagesFromArchive(archive.project, archive.componentFiles)
-            loadProject(archive.project, null, archive.assetFiles, packages)
-            useEditorStore.setState({
-              dirty: true,
-              statusMessage: '已恢复未保存的课件，请尽快另存为工程文件',
-            })
+            const outcome = await ingestOpenedCourseBytes(
+              recoveryProject.bytes,
+              null,
+              {
+                dirty: true,
+                statusMessage: '已恢复未保存的课件，请尽快另存为工程文件',
+              },
+            )
             await desktopApi().clearRecoveryProject()
             setRecoveryProject(null)
             setRecoveryDecisionComplete(true)
+            if (outcome === 'pending-import') return
           }, '恢复课件失败。恢复副本可能已经损坏。')
         }}
       />
+      <ConfirmDialog
+        open={v8ImportPending !== null}
+        title="需要显式导入旧版工程"
+        message={v8ImportPending
+          ? `${formatCourseProjectV8ImportReport(v8ImportPending.result.report)}\n\n不会静默转换成当前课程工程。确认导入后请另存为新文件，原文件保持不变。`
+          : ''}
+        confirmLabel="导入为当前课程工程"
+        cancelLabel="取消"
+        onCancel={() => setV8ImportPending(null)}
+        onConfirm={() => {
+          const pending = v8ImportPending
+          if (!pending) return
+          applyCourseArchive(pending.result, null, pending.afterLoad)
+          setV8ImportReport(formatCourseProjectV8ImportReport(pending.result.report))
+          setV8ImportPending(null)
+          void desktopApi().clearRecoveryProject().catch((error) => {
+            console.error('清理恢复数据失败', error)
+          })
+          void refreshRecentProjects()
+        }}
+      />
+      <CopyableSummaryDialog
+        open={v8ImportReport !== null}
+        title="旧版工程导入报告"
+        summary={v8ImportReport ?? ''}
+        onClose={() => setV8ImportReport(null)}
+      />
+      {coursePreviewOpen ? (
+        <div
+          className="modal-backdrop"
+          data-testid="course-preview-overlay"
+          role="presentation"
+          onMouseDown={() => setCoursePreviewOpen(false)}
+        >
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-preview-title"
+            style={{
+              width: 'min(1280px, 92vw)',
+              height: 'min(820px, 90vh)',
+              maxWidth: '92vw',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="modal__body" style={{ flex: 'none', alignItems: 'center' }}>
+              <div>
+                <h2 className="modal__title" id="course-preview-title">整课预览</h2>
+                <p className="modal__message">Published Course V2 · CoursePlayer</p>
+              </div>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  data-testid="course-preview-previous"
+                  onClick={() => void coursePreviewSessionRef.current?.previous()}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  data-testid="course-preview-next"
+                  onClick={() => void coursePreviewSessionRef.current?.next()}
+                >
+                  下一页
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => setCoursePreviewOpen(false)}
+                >
+                  关闭预览
+                </button>
+              </div>
+            </header>
+            <div
+              ref={setCoursePreviewHost}
+              data-testid="course-preview-host"
+              style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}
+            />
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }

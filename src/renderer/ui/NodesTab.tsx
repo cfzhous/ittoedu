@@ -5,7 +5,9 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
+  type KeyboardCoordinateGetter,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -15,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   ChevronDown,
@@ -35,9 +37,17 @@ import {
   Sigma,
 } from 'lucide-react'
 import type { SceneNode } from '../../shared/projectTypes'
+import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
+import {
+  describeLayerImpact,
+  visualFrontToBackRows,
+  type EffectiveLayerProjectionRow,
+} from '../course/effectiveLayerProjection'
 import {
   selectActiveScene,
   selectEditingNodes,
+  selectEffectiveLayerProjection,
+  selectSlideBackendKind,
   useEditorStore,
 } from '../store/editorStore'
 
@@ -51,9 +61,13 @@ const nodeIcon = {
   'external-component': Box,
 } as const
 
+type NodesTabRowNode = Pick<SceneNode, 'id' | 'name' | 'type' | 'visible' | 'locked'>
+
 interface SortableNodeProps {
-  node: SceneNode
+  node: NodesTabRowNode
   selected: boolean
+  sourceLabel?: string
+  impactLabel?: string
   onSelect(additive: boolean): void
   onDelete(): void
   onDuplicate(): void
@@ -65,6 +79,8 @@ interface SortableNodeProps {
 function SortableNode({
   node,
   selected,
+  sourceLabel,
+  impactLabel,
   onSelect,
   onDelete,
   onDuplicate,
@@ -72,7 +88,9 @@ function SortableNode({
   onToggleVisible,
   onToggleLocked,
 }: SortableNodeProps) {
-  const Icon = nodeIcon[node.type]
+  const Icon = node.type in nodeIcon
+    ? nodeIcon[node.type as keyof typeof nodeIcon]
+    : Box
   const [editing, setEditing] = useState(false)
   const [draftName, setDraftName] = useState(node.name)
   const selectTimerRef = useRef<number | null>(null)
@@ -134,39 +152,47 @@ function SortableNode({
           }}
         />
       ) : (
-        <span
-          className="node-name"
-          title={`${node.name}（双击改名，Ctrl / Shift 单击可多选）`}
-          onClick={(event) => {
-            const additive = event.ctrlKey || event.metaKey || event.shiftKey
-            // Synthetic/keyboard activation and additive selection cannot be
-            // mistaken for rename, so keep those paths immediate. A real
-            // primary click is briefly deferred so the second click can claim
-            // the gesture for in-place rename before selecting the layer opens
-            // the Properties tab and unmounts this list.
-            if (event.detail === 0 || additive) {
-              onSelect(additive)
-              return
-            }
-            if (selectTimerRef.current !== null) {
-              window.clearTimeout(selectTimerRef.current)
-            }
-            selectTimerRef.current = window.setTimeout(() => {
-              selectTimerRef.current = null
-              onSelect(false)
-            }, 250)
-          }}
-          onDoubleClick={(event) => {
-            event.preventDefault()
-            if (selectTimerRef.current !== null) {
-              window.clearTimeout(selectTimerRef.current)
-              selectTimerRef.current = null
-            }
-            setEditing(true)
-          }}
-        >
-          {node.name}
-        </span>
+        <div className={`node-label${sourceLabel ? ' node-label--with-source' : ''}`}>
+          <span
+            className="node-name"
+            title={`${node.name}（双击改名，Ctrl / Shift 单击可多选）`}
+            onClick={(event) => {
+              const additive = event.ctrlKey || event.metaKey || event.shiftKey
+              // Synthetic/keyboard activation and additive selection cannot be
+              // mistaken for rename, so keep those paths immediate. A real
+              // primary click is briefly deferred so the second click can claim
+              // the gesture for in-place rename before selecting the layer opens
+              // the Properties tab and unmounts this list.
+              if (event.detail === 0 || additive) {
+                onSelect(additive)
+                return
+              }
+              if (selectTimerRef.current !== null) {
+                window.clearTimeout(selectTimerRef.current)
+              }
+              selectTimerRef.current = window.setTimeout(() => {
+                selectTimerRef.current = null
+                onSelect(false)
+              }, 250)
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault()
+              if (selectTimerRef.current !== null) {
+                window.clearTimeout(selectTimerRef.current)
+                selectTimerRef.current = null
+              }
+              setEditing(true)
+            }}
+          >
+            {node.name}
+          </span>
+          {sourceLabel ? (
+            <small className="node-source" data-testid={`node-source-${node.id}`}>
+              {sourceLabel}
+              {impactLabel ? ` · ${impactLabel}` : ''}
+            </small>
+          ) : null}
+        </div>
       )}
       <button
         type="button"
@@ -208,9 +234,103 @@ function SortableNode({
   )
 }
 
+function rowAsNode(row: EffectiveLayerProjectionRow): NodesTabRowNode {
+  const projected = courseLayerItemToSceneNode(row.item)
+  if (projected) return projected
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.isTeacherController ? 'teacher-controller' : 'shape',
+    visible: !row.hidden,
+    locked: row.locked,
+  }
+}
+
+function isForeignTeacherControllerDrop(
+  from: EffectiveLayerProjectionRow,
+  to: EffectiveLayerProjectionRow,
+): boolean {
+  return (from.isTeacherController || to.isTeacherController) && from.ownerKey !== to.ownerKey
+}
+
+function sameOwnerDropRow(
+  visualRows: readonly EffectiveLayerProjectionRow[],
+  fromIndex: number,
+  overIndex: number,
+): EffectiveLayerProjectionRow | null {
+  const from = visualRows[fromIndex]
+  const over = visualRows[overIndex]
+  if (!from || !over) return null
+  if (from.ownerKey === over.ownerKey) return over
+  if (!isForeignTeacherControllerDrop(from, over)) return null
+  const direction = overIndex > fromIndex ? 1 : -1
+  for (let index = overIndex; index >= 0 && index < visualRows.length; index += direction) {
+    const candidate = visualRows[index]
+    if (!candidate || candidate.id === from.id) continue
+    if (candidate.ownerKey === from.ownerKey) return candidate
+  }
+  return null
+}
+
+function layerKeyboardCoordinates(
+  rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
+): KeyboardCoordinateGetter {
+  return (event, args) => {
+    const rows = rowsRef.current
+    const activeId = String(args.context.active?.id ?? args.active)
+    const activeRow = rows?.find((row) => row.id === activeId)
+    if (!rows || !activeRow) return sortableKeyboardCoordinates(event, args)
+    const droppableContainers = args.context.droppableContainers
+    return sortableKeyboardCoordinates(event, {
+      ...args,
+      context: {
+        ...args.context,
+        droppableContainers: {
+          get: (id) => droppableContainers.get(id),
+          getEnabled: () => droppableContainers.getEnabled().filter((entry) => {
+            const row = rows.find((candidate) => candidate.id === String(entry.id))
+            if (!row) return true
+            return !isForeignTeacherControllerDrop(activeRow, row)
+          }),
+          toArray: () => droppableContainers.toArray(),
+          getNodeFor: (id) => droppableContainers.getNodeFor(id),
+        } as typeof droppableContainers,
+      },
+    })
+  }
+}
+
+function layerCollisionDetection(
+  rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
+): CollisionDetection {
+  return (args) => {
+    const rows = rowsRef.current
+    const activeRow = rows?.find((row) => row.id === String(args.active.id))
+    if (!rows || !activeRow) return closestCenter(args)
+    return closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((container) => {
+        const row = rows.find((candidate) => candidate.id === String(container.id))
+        if (!row) return true
+        return !isForeignTeacherControllerDrop(activeRow, row)
+      }),
+    })
+  }
+}
+
 export function NodesTab() {
   const scene = useEditorStore(selectActiveScene)
-  const nodes = useEditorStore(selectEditingNodes)
+  const v8Nodes = useEditorStore(selectEditingNodes)
+  const projection = useEditorStore(selectEffectiveLayerProjection)
+  const backendKind = useEditorStore(selectSlideBackendKind)
+  const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  const candidate = (backendKind === 'v9-slide-candidate' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
+  const unifiedRows = candidate ? projection.unifiedRows : null
+  const visualRows = unifiedRows ? visualFrontToBackRows(unifiedRows) : null
+  const nodes = visualRows
+    ? visualRows.map(rowAsNode)
+    : [...v8Nodes].reverse()
   const editingScope = useEditorStore((state) => state.editingScope)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectNode = useEditorStore((state) => state.selectNode)
@@ -219,14 +339,53 @@ export function NodesTab() {
   const duplicateNode = useEditorStore((state) => state.duplicateNode)
   const updateNode = useEditorStore((state) => state.updateNode)
   const reorderNodes = useEditorStore((state) => state.reorderNodes)
+  const moveCandidateLayerOwner = useEditorStore((state) => state.moveCandidateLayerOwner)
+  const visualRowsRef = useRef(visualRows)
+  visualRowsRef.current = visualRows
+  const skipControllerCoordinates = useMemo(
+    () => layerKeyboardCoordinates(visualRowsRef),
+    [],
+  )
+  const skipControllerCollision = useMemo(
+    () => layerCollisionDetection(visualRowsRef),
+    [],
+  )
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, { coordinateGetter: skipControllerCoordinates }),
   )
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return
-    const visualNodes = [...nodes].reverse()
+    if (visualRows && unifiedRows) {
+      const oldIndex = visualRows.findIndex((row) => row.id === active.id)
+      const newIndex = visualRows.findIndex((row) => row.id === over.id)
+      if (oldIndex < 0 || newIndex < 0) return
+      const from = visualRows[oldIndex]!
+      const overRow = visualRows[newIndex]!
+      let to = overRow
+      if (from.ownerKey !== overRow.ownerKey) {
+        if (isForeignTeacherControllerDrop(from, overRow)) {
+          const snapped = sameOwnerDropRow(visualRows, oldIndex, newIndex)
+          if (!snapped) return
+          to = snapped
+        } else {
+          moveCandidateLayerOwner(from.id, overRow.id)
+          return
+        }
+      }
+      const ownerVisual = visualRows.filter((row) => row.ownerKey === from.ownerKey)
+      const ownerOld = ownerVisual.findIndex((row) => row.id === from.id)
+      const ownerNew = ownerVisual.findIndex((row) => row.id === to.id)
+      if (ownerOld < 0 || ownerNew < 0) return
+      reorderNodes(
+        arrayMove(ownerVisual, ownerOld, ownerNew)
+          .reverse()
+          .map((row) => row.id),
+      )
+      return
+    }
+    const visualNodes = [...v8Nodes].reverse()
     const oldIndex = visualNodes.findIndex((node) => node.id === active.id)
     const newIndex = visualNodes.findIndex((node) => node.id === over.id)
     if (oldIndex < 0 || newIndex < 0) return
@@ -237,45 +396,55 @@ export function NodesTab() {
     )
   }
 
-  const visualNodes = [...nodes].reverse()
+  const rowById = new Map((visualRows ?? []).map((row) => [row.id, row]))
 
   return (
     <div className="nodes-tree" data-testid="nodes-tab">
       <div className="tree-root" onClick={() => selectNode(null)}>
         <ChevronDown size={14} />
         <Layers3 size={15} />
-        <span>{editingScope === 'global' ? '全局元素' : scene.name}</span>
+        <span>
+          {candidate
+            ? '有效图层'
+            : editingScope === 'global' ? '全局元素' : scene.name}
+        </span>
         {selectedNodeIds.length > 0 && <span className="tree-selection-count">已选 {selectedNodeIds.length}</span>}
       </div>
       {nodes.length === 0 ? (
         <div className="empty-state">
-          {editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
-          <br />
-          从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
+          {flowSession
+            ? '本页没有浮层。标题和段落在稿纸里编辑，不出现在图层。'
+            : editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
+          {flowSession ? null : (
+            <>
+              <br />
+              从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
+            </>
+          )}
         </div>
       ) : (
         <>
           <DndContext
             sensors={sensors}
-            collisionDetection={closestCenter}
+            collisionDetection={skipControllerCollision}
             onDragEnd={onDragEnd}
           >
             <SortableContext
-              items={visualNodes.map((node) => node.id)}
+              items={nodes.map((node) => node.id)}
               strategy={verticalListSortingStrategy}
             >
               <div className="nodes-list">
-                {visualNodes.map((node) => (
+                {nodes.map((node) => {
+                  const row = rowById.get(node.id)
+                  return (
                   <SortableNode
                     key={node.id}
                     node={node}
                     selected={selectedNodeIds.includes(node.id)}
+                    sourceLabel={row?.sourceLabel}
+                    impactLabel={row ? describeLayerImpact(row.impact) : undefined}
                     onSelect={(additive) => {
                       selectNode(node.id, additive)
-                      // Ctrl/Shift selection is an in-progress layer-list
-                      // operation. Keep the list visible until the author has
-                      // assembled the set, then let an explicit Properties
-                      // click open the multi-selection controls.
                       if (additive) setActiveTab('layers')
                     }}
                     onDelete={() => deleteNode(node.id)}
@@ -284,14 +453,17 @@ export function NodesTab() {
                     onToggleVisible={() => updateNode(node.id, { visible: !node.visible })}
                     onToggleLocked={() => updateNode(node.id, { locked: !node.locked })}
                   />
-                ))}
+                  )
+                })}
               </div>
             </SortableContext>
           </DndContext>
           <div className="tree-order-note">
-            {editingScope === 'global'
-              ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
-              : '列表最上方就是画面最上层；拖动条目可改变层级。'}
+            {candidate
+              ? '同一来源内可拖动排序；跨来源放置会改存储范围。教师控制器必须留在全课。'
+              : editingScope === 'global'
+                ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
+                : '列表最上方就是画面最上层；拖动条目可改变层级。'}
           </div>
         </>
       )}

@@ -1,0 +1,361 @@
+import { isGlobalLayerItemVisible } from '../../globalLayerVisibility'
+import type {
+  CourseLocation,
+  NativeElementContent,
+} from '../../../shared/courseProjectTypes'
+import type {
+  PublishedCourseV2Payload,
+  PublishedLayerItem,
+  PublishedScopedLayerItem,
+  PublishedSlideScene,
+  PublishedSlideSurface,
+} from '../../../shared/publishedCourseTypes'
+import type {
+  SurfaceCapture,
+  SurfaceCaptureRequest,
+  SurfaceHost,
+  SurfaceMountContext,
+  SurfaceResetScope,
+} from '../SurfaceHost'
+
+function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
+  return structuredClone(payload)
+}
+
+function isScopedVisible(entry: PublishedScopedLayerItem, locationId: string): boolean {
+  return isGlobalLayerItemVisible(
+    { visibility: { mode: entry.visibility.mode, sceneIds: entry.visibility.locationIds } },
+    locationId,
+  )
+}
+
+function findSlideSurface(
+  payload: PublishedCourseV2Payload,
+  surfaceId: string,
+): PublishedSlideSurface {
+  const surface = payload.surfaces.find((candidate) => candidate.id === surfaceId)
+  if (!surface || surface.type !== 'slide') {
+    throw new Error(`找不到 Slide 表面：${surfaceId}`)
+  }
+  return surface
+}
+
+function firstSlideLocationId(payload: PublishedCourseV2Payload, surfaceId: string): string {
+  const match = payload.locations.find((location) => (
+    location.kind === 'slide-scene' && location.surfaceId === surfaceId
+  ))
+  if (match) return match.id
+  const surface = findSlideSurface(payload, surfaceId)
+  const scene = surface.scenes[0]
+  if (!scene) throw new Error(`Slide 表面没有场景：${surfaceId}`)
+  return scene.id
+}
+
+function resolveSlideLocation(
+  payload: PublishedCourseV2Payload,
+  surfaceId: string,
+  locationId: string,
+): Extract<CourseLocation, { kind: 'slide-scene' }> {
+  const location = payload.locations.find((candidate) => candidate.id === locationId)
+  if (location?.kind === 'slide-scene' && location.surfaceId === surfaceId) return location
+  const surface = findSlideSurface(payload, surfaceId)
+  const scene = surface.scenes.find((candidate) => candidate.id === locationId)
+  if (scene) {
+    return {
+      id: locationId,
+      label: scene.name,
+      kind: 'slide-scene',
+      surfaceId,
+      sceneId: scene.id,
+    }
+  }
+  throw new Error(`找不到 Slide 位置：${locationId}`)
+}
+
+function firstKeyedString(value: unknown, keys: readonly string[]): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  for (const key of keys) {
+    const direct = record[key]
+    if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  }
+  for (const nested of Object.values(record)) {
+    const found = firstKeyedString(nested, keys)
+    if (found) return found
+  }
+  return undefined
+}
+
+function firstAnyString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || undefined
+  }
+  if (!value || typeof value !== 'object') return undefined
+  const nestedValues = Array.isArray(value) ? value : Object.values(value)
+  for (const nested of nestedValues) {
+    const found = firstAnyString(nested)
+    if (found) return found
+  }
+  return undefined
+}
+
+function firstVisibleText(value: unknown): string | undefined {
+  return firstKeyedString(value, ['title', 'label', 'text', 'heading', 'name'])
+    ?? firstAnyString(value)
+}
+
+function appendFallbackImage(wrap: HTMLElement, url: string, alt: string): void {
+  const image = wrap.ownerDocument.createElement('img')
+  image.src = url
+  image.alt = alt
+  image.style.width = '100%'
+  image.style.height = '100%'
+  image.style.objectFit = 'contain'
+  wrap.appendChild(image)
+}
+
+function applyNativeTextStyle(
+  wrap: HTMLElement,
+  data: Extract<NativeElementContent, { nativeType: 'text' }>['data'],
+): void {
+  const style = data.style
+  const decorations: string[] = []
+  if (style.underline) decorations.push('underline')
+  if (style.strike) decorations.push('line-through')
+  wrap.style.boxSizing = 'border-box'
+  wrap.style.overflow = 'hidden'
+  wrap.style.whiteSpace = 'pre-wrap'
+  wrap.style.fontFamily = style.fontFamily || '"Microsoft YaHei", sans-serif'
+  wrap.style.fontSize = `${Math.max(1, style.fontSize)}px`
+  wrap.style.fontWeight = style.bold ? '700' : '400'
+  wrap.style.fontStyle = style.italic ? 'italic' : 'normal'
+  wrap.style.color = style.color || '#1f2937'
+  wrap.style.textAlign = style.align
+  wrap.style.lineHeight = `${Math.max(1, style.fontSize + style.lineSpacing)}px`
+  wrap.style.letterSpacing = `${style.letterSpacing}px`
+  wrap.style.padding = `${Math.max(0, style.padding)}px`
+  wrap.style.textDecoration = decorations.join(' ') || 'none'
+  wrap.style.writingMode = style.writingMode === 'horizontal' ? 'horizontal-tb' : style.writingMode
+  wrap.textContent = data.text
+}
+
+function applyVisibleTextFallback(wrap: HTMLElement, text: string): void {
+  wrap.style.boxSizing = 'border-box'
+  wrap.style.display = 'flex'
+  wrap.style.alignItems = 'center'
+  wrap.style.justifyContent = 'center'
+  wrap.style.padding = '12px 16px'
+  wrap.style.overflow = 'hidden'
+  wrap.style.background = '#0f766e'
+  wrap.style.color = '#ffffff'
+  wrap.style.font = 'bold 22px "Microsoft YaHei", sans-serif'
+  wrap.textContent = text
+}
+
+function appendLayerNode(
+  dom: Document,
+  parent: HTMLElement,
+  item: PublishedLayerItem,
+  source: 'scene' | 'surface' | 'global',
+  resolveAsset: (assetId: string) => string | undefined,
+): void {
+  if (!item.visible || item.playbackInitialVisibility === 'hidden') return
+  if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') return
+  const wrap = dom.createElement('div')
+  wrap.dataset.slideLayerItem = item.layerItemId
+  wrap.dataset.layerSource = source
+  if (source === 'global') wrap.dataset.globalLayerItem = item.layerItemId
+  if (source !== 'scene') wrap.dataset.slideOverlayItem = item.layerItemId
+  wrap.style.position = 'absolute'
+  wrap.style.left = `${item.frame.x}px`
+  wrap.style.top = `${item.frame.y}px`
+  wrap.style.width = `${item.frame.width}px`
+  wrap.style.height = `${item.frame.height}px`
+  wrap.style.opacity = String(item.opacity)
+  wrap.style.pointerEvents = 'none'
+  wrap.style.zIndex = String(item.order)
+  if (item.kind === 'native') wrap.dataset.nativeType = item.content.nativeType
+  if (item.kind === 'native' && item.content.nativeType === 'text') {
+    applyNativeTextStyle(wrap, item.content.data)
+  } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
+    const data = item.content.data
+    wrap.style.boxSizing = 'border-box'
+    wrap.style.overflow = 'hidden'
+    wrap.style.whiteSpace = 'pre-wrap'
+    wrap.style.fontFamily = '"Times New Roman", serif'
+    wrap.style.fontSize = `${Math.max(1, data.style.fontSize)}px`
+    wrap.style.color = data.style.color || '#1f2937'
+    wrap.style.textAlign = data.style.align
+    wrap.textContent = data.accessibleText || '公式'
+  } else if (item.kind === 'native' && item.content.nativeType === 'image') {
+    const url = resolveAsset(item.content.data.assetId)
+    if (url) {
+      const image = dom.createElement('img')
+      image.src = url
+      image.alt = ''
+      image.style.width = '100%'
+      image.style.height = '100%'
+      image.style.objectFit = 'contain'
+      wrap.appendChild(image)
+    }
+  } else if (item.kind === 'component') {
+    wrap.dataset.slideFallbackKind = 'component'
+    const url = item.staticFallbackAssetId
+      ? resolveAsset(item.staticFallbackAssetId)
+      : undefined
+    if (url) {
+      appendFallbackImage(wrap, url, `${item.component.packageId} 后备`)
+    } else {
+      applyVisibleTextFallback(
+        wrap,
+        firstVisibleText(item.props) ?? item.component.packageId,
+      )
+    }
+  } else if (item.kind === 'runtime') {
+    wrap.dataset.slideFallbackKind = 'runtime'
+    const url = item.runtime.staticFallback
+      ? resolveAsset(item.runtime.staticFallback.assetId)
+      : undefined
+    if (url) {
+      appendFallbackImage(wrap, url, 'runtime 后备')
+    } else {
+      applyVisibleTextFallback(
+        wrap,
+        firstVisibleText(item.runtime.content.values) ?? item.runtime.protocol,
+      )
+    }
+  } else {
+    wrap.dataset.slideFallbackKind = item.kind
+  }
+  parent.appendChild(wrap)
+}
+
+/**
+ * Minimal Published Course V2 Slide adapter. It is not PlayerApp and does not
+ * project Flow/Spatial through buildStandaloneHtml.
+ */
+export class SlidePublishedAdapter implements SurfaceHost {
+  readonly kind = 'slide' as const
+  readonly id: string
+  readonly #payload: PublishedCourseV2Payload
+  readonly #startLocationId: string
+  readonly #resolveAsset: (assetId: string) => string | undefined
+  #locationId: string
+  #root: HTMLElement | null = null
+  #active = false
+
+  constructor(
+    payload: PublishedCourseV2Payload,
+    surfaceId: string,
+    options: {
+      locationId?: string
+      resolveAsset?: (assetId: string) => string | undefined
+    } = {},
+  ) {
+    this.#payload = clonePayload(payload)
+    this.id = surfaceId
+    findSlideSurface(this.#payload, surfaceId)
+    this.#startLocationId = options.locationId
+      ?? firstSlideLocationId(this.#payload, surfaceId)
+    this.#locationId = this.#startLocationId
+    this.#resolveAsset = options.resolveAsset
+      ?? ((assetId: string) => this.#payload.assets[assetId]?.url)
+  }
+
+  getLocationId(): string {
+    return this.#locationId
+  }
+
+  async mount(context: SurfaceMountContext): Promise<void> {
+    if (this.#root) throw new Error('Slide surface is already mounted')
+    const root = context.container.ownerDocument.createElement('section')
+    root.className = 'slide-published-adapter'
+    root.dataset.surfaceId = this.id
+    root.style.position = 'relative'
+    root.style.width = '1280px'
+    root.style.height = '720px'
+    root.style.overflow = 'hidden'
+    root.hidden = !this.#active
+    context.container.appendChild(root)
+    this.#root = root
+    this.#render()
+  }
+
+  async activate(): Promise<void> {
+    this.#active = true
+    if (this.#root) this.#root.hidden = false
+  }
+
+  async suspend(): Promise<void> {
+    this.#active = false
+    if (this.#root) this.#root.hidden = true
+  }
+
+  async resume(): Promise<void> {
+    return this.activate()
+  }
+
+  async reset(_scope: SurfaceResetScope): Promise<void> {
+    await this.setLocationId(this.#startLocationId)
+  }
+
+  async capture(_request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    return {
+      format: 'json',
+      content: JSON.stringify({
+        surfaceId: this.id,
+        locationId: this.#locationId,
+      }),
+    }
+  }
+
+  async setLocationId(locationId: string): Promise<void> {
+    resolveSlideLocation(this.#payload, this.id, locationId)
+    this.#locationId = locationId
+    this.#render()
+  }
+
+  async destroy(): Promise<void> {
+    this.#root?.remove()
+    this.#root = null
+    this.#active = false
+  }
+
+  #render(): void {
+    const root = this.#root
+    if (!root) return
+    const surface = findSlideSurface(this.#payload, this.id)
+    const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
+    const scene = sceneOf(surface, location)
+    root.dataset.locationId = location.id
+    root.dataset.sceneId = scene.id
+    root.style.background = scene.backgroundColor
+    root.replaceChildren()
+    const stage = root.ownerDocument.createElement('div')
+    stage.dataset.slideSceneStage = 'true'
+    stage.style.position = 'absolute'
+    stage.style.inset = '0'
+    root.appendChild(stage)
+    for (const item of scene.layerItems) {
+      appendLayerNode(root.ownerDocument, stage, item, 'scene', this.#resolveAsset)
+    }
+    for (const entry of this.#payload.globalLayerItems) {
+      if (!isScopedVisible(entry, location.id)) continue
+      appendLayerNode(root.ownerDocument, stage, entry.item, 'global', this.#resolveAsset)
+    }
+    for (const entry of surface.surfaceLayerItems) {
+      if (!isScopedVisible(entry, location.id)) continue
+      appendLayerNode(root.ownerDocument, stage, entry.item, 'surface', this.#resolveAsset)
+    }
+  }
+}
+
+function sceneOf(
+  surface: PublishedSlideSurface,
+  location: Extract<CourseLocation, { kind: 'slide-scene' }>,
+): PublishedSlideScene {
+  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
+  if (!scene) throw new Error(`找不到 Slide 场景：${location.sceneId}`)
+  return scene
+}

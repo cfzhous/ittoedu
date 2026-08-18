@@ -21,6 +21,7 @@ import {
   selectVideoFile,
   selectVideoFiles,
   writeHtmlFile,
+  peekProjectArchiveFile,
   writeBinaryExportFile,
   writeWebPackageFile,
 } from './fileDialogs'
@@ -105,7 +106,7 @@ const htmlSchema = z
 
 const binaryExportSchema = z.object({
   suggestedName: z.string().trim().min(1).max(160),
-  extension: z.enum(['pptx', 'json']),
+  extension: z.enum(['pptx', 'json', 'docx']),
   bytes: bytesSchema.refine((bytes) => bytes.byteLength <= 512 * 1024 * 1024, '导出文件过大'),
 }).strict()
 
@@ -296,6 +297,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, args) => {
       requireNoArguments(args)
       return readRecoveryProject()
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.peekProjectArchive,
+    context,
+    {
+      code: 'PROJECT_PEEK_FAILED',
+      title: '工程预检失败',
+      message: '无法读取官方工程文件以判断恢复副本。',
+      suggestion: '请打开最近一次手动保存的工程。',
+    },
+    async (_event, args) => {
+      const input = openRecentProjectSchema.parse(requireSingleArgument(args))
+      return peekProjectArchiveFile(input.path)
     },
   )
 

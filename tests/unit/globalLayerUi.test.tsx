@@ -7,7 +7,10 @@ import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import {
+  selectSlideCandidateDocument,
+  useEditorStore,
+} from '@/renderer/store/editorStore'
 
 function componentPackage(
   id: string,
@@ -128,15 +131,8 @@ describe('Project V8 global-layer editor UI', () => {
     const [firstScene, secondScene] = useEditorStore.getState().project.scenes
     const sceneRuntime = runtime('场景运行时标题', '场景原文')
     const globalRuntime = runtime('全局运行时标题', '全局原文')
-    useEditorStore.setState((state) => ({
-      project: {
-        ...state.project,
-        globalRuntime,
-        scenes: state.project.scenes.map((scene) =>
-          scene.id === firstScene!.id ? { ...scene, runtime: sceneRuntime } : scene,
-        ),
-      },
-    }))
+    store.setSceneRuntime(firstScene!.id, sceneRuntime)
+    store.setGlobalRuntime(globalRuntime)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(globalPackage.manifest.id)
     const globalNode = useEditorStore.getState().project.globalLayer.find(
@@ -146,9 +142,6 @@ describe('Project V8 global-layer editor UI', () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
     expect(screen.getByTestId('global-layer-settings')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('图层位置'), {
-      target: { value: 'underlay' },
-    })
     fireEvent.change(screen.getByLabelText('场景可见范围'), {
       target: { value: 'include' },
     })
@@ -157,7 +150,7 @@ describe('Project V8 global-layer editor UI', () => {
     )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
     expect(screen.getByText('选择至少一个场景后，可见范围才会生效。'))
       .toHaveAttribute('role', 'status')
-    fireEvent.click(screen.getByLabelText(secondScene!.name))
+    fireEvent.click(screen.getByLabelText(new RegExp(secondScene!.name)))
     fireEvent.change(screen.getByLabelText('导航标题'), {
       target: { value: '教师全局导航' },
     })
@@ -172,7 +165,7 @@ describe('Project V8 global-layer editor UI', () => {
       (item) => item.node.id === globalNode.id,
     )!
     expect(placement).toMatchObject({
-      layer: 'underlay',
+      layer: 'overlay',
       visibility: { mode: 'include', sceneIds: [secondScene!.id] },
       node: {
         id: globalNode.id,
@@ -272,5 +265,50 @@ describe('Project V8 global-layer editor UI', () => {
     })
     expect(updated.buttons).toHaveLength(8)
     expect(new Set(updated.buttons.map((button) => button.id)).size).toBe(8)
+  })
+
+  it('maps 图层位置 onto global order without leaving the global owner', () => {
+    const store = useEditorStore.getState()
+    store.setEditingScope('global')
+    store.addTextNode()
+    const before = selectSlideCandidateDocument(useEditorStore.getState())!
+    const text = before.globalLayerItems.find(
+      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'text',
+    )
+    if (!text) throw new Error('missing global text')
+    store.selectNode(text.item.layerItemId)
+
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+    expect(screen.getByTestId('global-layer-settings')).toBeInTheDocument()
+    expect(screen.getByLabelText('图层位置')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('图层位置'), {
+      target: { value: 'underlay' },
+    })
+
+    const after = selectSlideCandidateDocument(useEditorStore.getState())!
+    const sceneOrders = after.surfaces.flatMap((surface) => (
+      surface.type === 'slide'
+        ? surface.scenes.flatMap((scene) => scene.layerItems.map((item) => item.order))
+        : []
+    ))
+    const updated = after.globalLayerItems.find(
+      (entry) => entry.item.layerItemId === text.item.layerItemId,
+    )
+    expect(updated).toBeTruthy()
+    expect(after.surfaces.some((surface) => (
+      surface.type === 'slide'
+      && surface.scenes.some((scene) => (
+        scene.layerItems.some((item) => item.layerItemId === text.item.layerItemId)
+      ))
+    ))).toBe(false)
+    if (sceneOrders.length > 0) {
+      expect(updated!.item.order).toBeLessThan(Math.min(...sceneOrders))
+    } else {
+      const others = after.globalLayerItems
+        .filter((entry) => entry.item.layerItemId !== text.item.layerItemId)
+        .map((entry) => entry.item.order)
+      expect(updated!.item.order).toBeLessThan(Math.min(...others))
+    }
+    expect(useEditorStore.getState().errorMessage).toBeNull()
   })
 })

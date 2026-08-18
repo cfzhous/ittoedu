@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_V9_CANDIDATE_SMOKE?: string
+}
+
 import type { DesktopAPI } from '../shared/ipcTypes'
 
 declare global {

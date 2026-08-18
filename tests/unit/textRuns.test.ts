@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TextRun } from '@/shared/projectTypes'
-import { remapTextRuns, toggleTextRunEmphasis } from '@/shared/textRuns'
+import { applyTextRunStyle, remapTextRuns, toggleTextRunBoolean, toggleTextRunEmphasis } from '@/shared/textRuns'
 
 describe('remapTextRuns', () => {
   it('moves formatting with an unchanged suffix after deleting text before it', () => {
@@ -96,5 +96,35 @@ describe('remapTextRuns', () => {
     ])
 
     expect(toggleTextRunEmphasis('重点', disabled, 0, 1, true)).toEqual([])
+  })
+
+  it('applies bold, italic and color to a Unicode range without formatting the whole string', () => {
+    const text = '春⭐风'
+    const empty: TextRun[] = []
+
+    expect(applyTextRunStyle(text, empty, 1, 1, { bold: true })).toEqual([])
+    expect(applyTextRunStyle(text, empty, 0, 0, { italic: true, color: '#ef4444' })).toEqual([])
+
+    const bold = applyTextRunStyle(text, empty, 1, 2, { bold: true })
+    expect(bold).toEqual([{ start: 1, end: 2, style: { bold: true } }])
+
+    const italic = applyTextRunStyle(text, bold, 0, 1, { italic: true })
+    expect(italic).toEqual([
+      { start: 0, end: 1, style: { italic: true } },
+      { start: 1, end: 2, style: { bold: true } },
+    ])
+
+    const colored = applyTextRunStyle(text, italic, 2, 3, { color: '#2563eb' })
+    expect(colored).toEqual([
+      { start: 0, end: 1, style: { italic: true } },
+      { start: 1, end: 2, style: { bold: true } },
+      { start: 2, end: 3, style: { color: '#2563eb' } },
+    ])
+  })
+
+  it('toggles bold off against a bold node default', () => {
+    expect(toggleTextRunBoolean('双击编辑', [], 0, 2, 'bold', true)).toEqual([
+      { start: 0, end: 2, style: { bold: false } },
+    ])
   })
 })

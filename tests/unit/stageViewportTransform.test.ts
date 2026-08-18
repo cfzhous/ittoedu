@@ -9,7 +9,11 @@ import {
   clientRectToWorld,
   clientToWorld,
   createStageViewportTransform,
+  resizeWorldFrameFromHandle,
+  resizeWorldFrameFromHandlePreservingAspect,
   rotatedRectIntersectsStage,
+  stageOverlayCssTransform,
+  stageSelectionOverlayGeometry,
   worldDeltaToClient,
   worldRectToClient,
   worldToClient,
@@ -229,6 +233,47 @@ describe('stage viewport transform', () => {
     { viewport: { x: 0, y: 0, width: 1280, height: -1 } },
   ])('rejects non-positive viewport dimensions: $viewport', (options) => {
     expect(() => createStageViewportTransform(options)).toThrow(RangeError)
+  })
+
+  it('maps objects, selection box, rotation handle and eight handles through one viewport transform', () => {
+    const transform = createStageViewportTransform({
+      viewport: { x: 0, y: 0, width: 1280, height: 720 },
+      zoom: 2,
+    })
+    const geometry = stageSelectionOverlayGeometry(transform, [
+      { x: 100, y: 80, width: 200, height: 120 },
+    ])
+    expect(stageOverlayCssTransform(transform)).toContain('scale(2)')
+    expect(geometry?.selectionBox).toEqual(geometry?.objects[0])
+    expect(geometry?.handles.e.x).toBeGreaterThan(geometry!.handles.w.x)
+    expect(geometry?.handles.s.y).toBeGreaterThan(geometry!.handles.n.y)
+    expect(geometry?.rotationHandle.y).toBeLessThan(geometry!.handles.n.y)
+    expectPointClose(geometry!.handles.w, worldToClient(transform, { x: 100, y: 140 }))
+    expectPointClose(geometry!.handles.n, worldToClient(transform, { x: 200, y: 80 }))
+  })
+
+  it('moves the stored origin when resizing from west or north, not only east/south', () => {
+    const start = { x: 100, y: 80, width: 200, height: 120 }
+    const west = resizeWorldFrameFromHandle(start, 'w', { x: 60, y: 140 })
+    expect(west).toEqual({ x: 60, y: 80, width: 240, height: 120 })
+    const north = resizeWorldFrameFromHandle(start, 'n', { x: 200, y: 40 })
+    expect(north).toEqual({ x: 100, y: 40, width: 200, height: 160 })
+    const east = resizeWorldFrameFromHandle(start, 'e', { x: 360, y: 140 })
+    expect(east).toEqual({ x: 100, y: 80, width: 260, height: 120 })
+    const south = resizeWorldFrameFromHandle(start, 's', { x: 200, y: 260 })
+    expect(south).toEqual({ x: 100, y: 80, width: 200, height: 180 })
+    const nw = resizeWorldFrameFromHandle(start, 'nw', { x: 60, y: 40 })
+    expect(nw).toEqual({ x: 60, y: 40, width: 240, height: 160 })
+  })
+
+  it('keeps image aspect when stretching from the east handle', () => {
+    const start = { x: 100, y: 80, width: 200, height: 200 }
+    const east = resizeWorldFrameFromHandlePreservingAspect(
+      start,
+      'e',
+      { x: 370, y: 180 },
+    )
+    expect(east).toEqual({ x: 100, y: 45, width: 270, height: 270 })
   })
 
   it('rejects non-finite viewport, zoom, and pan values', () => {

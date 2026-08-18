@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { selectActiveScene, useEditorStore } from '@/renderer/store/editorStore'
+import { selectActiveScene, selectSlideCandidateBackend, useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { AutomationTab } from '@/renderer/ui/AutomationTab'
 import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { SceneStateStrip } from '@/renderer/ui/SceneStateStrip'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { VideoNode } from '@/shared/projectTypes'
 
 function videoNode(id: string, name: string): VideoNode {
@@ -141,47 +142,40 @@ describe('scene presentation state UI', () => {
     store.addScene()
     const [firstScene, secondScene] = useEditorStore.getState().project.scenes
     const sharedVideoId = 'legacy_shared_video'
-
-    useEditorStore.setState((state) => ({
-      ...state,
-      project: {
-        ...state.project,
-        scenes: state.project.scenes.map((scene) => {
+    const backend = selectSlideCandidateBackend(useEditorStore.getState())
+    const document = backend?.getSession().history.present
+    if (document) {
+      for (const surface of document.surfaces) {
+        if (surface.type !== 'slide') continue
+        for (const scene of surface.scenes) {
           if (scene.id === firstScene!.id) {
-            return {
-              ...scene,
-              nodes: [videoNode(sharedVideoId, '第一场景视频')],
-              interactions: [{
-                id: 'legacy_click',
-                name: '旧视频点击规则',
-                enabled: true,
-                trigger: { type: 'node.click', nodeId: sharedVideoId },
-                conditions: [],
-                actions: [{
-                  id: 'legacy_click_step',
-                  start: 'after-previous',
-                  delayMs: 0,
-                  action: { type: 'scene.next' },
-                }],
+            scene.layerItems = [sceneNodeToCourseLayerItem(videoNode(sharedVideoId, '第一场景视频'))]
+            scene.interactions = [{
+              id: 'legacy_click',
+              name: '旧视频点击规则',
+              enabled: true,
+              trigger: { type: 'node.click', nodeId: sharedVideoId },
+              conditions: [],
+              actions: [{
+                id: 'legacy_click_step',
+                start: 'after-previous',
+                delayMs: 0,
+                action: { type: 'scene.next' },
               }],
-            }
+            }]
           }
           if (scene.id === secondScene!.id) {
-            return {
-              ...scene,
-              nodes: [videoNode(sharedVideoId, '第二场景视频')],
-              interactions: [],
-            }
+            scene.layerItems = [sceneNodeToCourseLayerItem(videoNode(sharedVideoId, '第二场景视频'))]
+            scene.interactions = []
           }
-          return scene
-        }),
-      },
-      activeSceneId: secondScene!.id,
-      activePresentationStateId: null,
-      editingScope: 'scene',
-      selectedNodeId: sharedVideoId,
-      selectedNodeIds: [sharedVideoId],
-    }))
+        }
+      }
+    }
+
+    act(() => {
+      useEditorStore.getState().setActiveScene(secondScene!.id)
+      useEditorStore.getState().selectNode(sharedVideoId)
+    })
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.queryByText(/会覆盖该视频/)).not.toBeInTheDocument()

@@ -732,10 +732,32 @@ export async function writeWebPackageFile(
   }
 }
 
+export async function peekProjectArchiveFile(
+  filePath: string,
+): Promise<OpenBinaryFileResult | null> {
+  const resolved = path.resolve(filePath)
+  if (
+    !path.isAbsolute(resolved) ||
+    path.extname(resolved).toLocaleLowerCase('en-US') !== '.h5lesson'
+  ) return null
+  try {
+    const bytes = await readFileWithLimit(
+      resolved,
+      MAX_PROJECT_BYTES,
+      '工程预检失败',
+      'PROJECT_PEEK_FAILED',
+    )
+    if (!hasZipSignature(bytes)) return null
+    return { path: resolved, name: path.basename(resolved), bytes }
+  } catch {
+    return null
+  }
+}
+
 export async function writeBinaryExportFile(
   window: BrowserWindow,
   suggestedName: string,
-  extension: 'pptx' | 'pdf' | 'json',
+  extension: 'pptx' | 'pdf' | 'json' | 'docx',
   bytes: Uint8Array,
 ): Promise<{ path: string } | null> {
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_EXPORT_BYTES) {
@@ -750,6 +772,7 @@ export async function writeBinaryExportFile(
     pptx: 'PowerPoint 演示文稿',
     pdf: 'PDF 文档',
     json: 'JSON 报告',
+    docx: 'Word 讲义',
   } as const
   const result = await dialog.showSaveDialog(window, {
     title: `导出${labels[extension]}`,

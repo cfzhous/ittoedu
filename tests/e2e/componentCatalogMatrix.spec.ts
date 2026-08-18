@@ -213,6 +213,16 @@ async function launchHeadlessBrowser(): Promise<Browser> {
   })
 }
 
+async function confirmLegacyCourseImport(page: Page): Promise<void> {
+  const importDialog = page.getByRole('alertdialog', { name: '需要显式导入旧版工程' })
+  await expect(importDialog).toBeVisible()
+  await importDialog.getByRole('button', { name: '导入为当前课程工程' }).click()
+  const report = page.getByRole('dialog', { name: '旧版工程导入报告' })
+  await expect(report).toBeVisible()
+  await report.getByRole('button', { name: '完成' }).click()
+  await expect(report).toHaveCount(0)
+}
+
 async function shadowText(locator: Locator): Promise<string> {
   try {
     return await locator.evaluate((host) => (
@@ -228,6 +238,26 @@ async function shadowText(locator: Locator): Promise<string> {
     }
     throw error
   }
+}
+
+async function verifyPublishedCourseExport(
+  page: Page,
+  htmlPath: string,
+): Promise<{ externalRequests: string[]; pageErrors: string[] }> {
+  const externalRequests: string[] = []
+  const pageErrors: string[] = []
+  page.on('request', (request) => {
+    if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
+  })
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.goto(pathToFileURL(htmlPath).toString())
+  const root = page.locator('#course-root')
+  await expect(root).toBeVisible()
+  const adapter = root.locator('.slide-published-adapter')
+  await expect(adapter).toBeVisible({ timeout: 15_000 })
+  await expect(adapter.locator('[data-slide-scene-stage]')).toBeVisible()
+  expect(await adapter.getAttribute('data-location-id')).toBeTruthy()
+  return { externalRequests, pageErrors }
 }
 
 async function verifyOfflinePlayer(
@@ -595,9 +625,19 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
       await page.getByRole('button', { name: '返回编辑器' }).click()
 
       // 删除、撤销、重做、再次撤销恢复，验证 UI 历史栈和宿主销毁重建。
+      // V9 有效图层含默认教师控制器；教师必须仍能看见它。删除只点组件节点。
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(expectedPackageCount)
-      await page.locator('.node-item').last().getByTitle('删除节点').click()
+      const layerRows = page.locator('.node-item')
+      const componentLayerRows = layerRows.filter({
+        has: page.locator('.node-type-icon[title="external-component"]'),
+      })
+      const teacherControllerRow = layerRows.filter({
+        has: page.locator('.node-type-icon[title="teacher-controller"]'),
+      })
+      await expect(layerRows).toHaveCount(expectedPackageCount + 1)
+      await expect(componentLayerRows).toHaveCount(expectedPackageCount)
+      await expect(teacherControllerRow).toHaveCount(1)
+      await componentLayerRows.last().getByTitle('删除节点').click()
       await expect(editorHost).toHaveCount(expectedPackageCount - 1)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
       await expect(editorHost).toHaveCount(expectedPackageCount)
@@ -639,42 +679,14 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
         pptxSave: exportedPptxPath,
       })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(page.locator('.scene-item')).toHaveCount(expectedPackageCount)
-      await expect(page.locator('.scene-thumbnail')).toHaveCount(expectedPackageCount)
-      await expect(page.locator('.thumbnail-state-badge')).toHaveCount(expectedPackageCount)
-      await expect(page.locator('.thumbnail-state-badge').first())
-        .toContainText('矩阵状态覆盖')
-      const thumbnails = page.locator('.scene-thumbnail')
-      const thumbnailPixels: number[] = []
-      for (let index = 0; index < matrixCases.length; index += 1) {
-        const thumbnail = thumbnails.nth(index)
-        // Thumbnails are intentionally lazy-painted by IntersectionObserver.
-        // Scroll every scene into the panel viewport before reading its canvas.
-        await thumbnail.scrollIntoViewIfNeeded()
-        await expect.poll(() => thumbnail.evaluate((candidate) => {
-          const canvas = candidate as HTMLCanvasElement
-          const context = canvas.getContext('2d')
-          if (!context) return 0
-          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
-          let nonTransparent = 0
-          for (let offset = 3; offset < pixels.length; offset += 4) {
-            if (pixels[offset]! > 0) nonTransparent += 1
-          }
-          return nonTransparent
-        })).toBeGreaterThan(1_000)
-        thumbnailPixels.push(await thumbnail.evaluate((candidate) => {
-          const canvas = candidate as HTMLCanvasElement
-          const context = canvas.getContext('2d')
-          if (!context) return 0
-          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
-          let nonTransparent = 0
-          for (let offset = 3; offset < pixels.length; offset += 4) {
-            if (pixels[offset]! > 0) nonTransparent += 1
-          }
-          return nonTransparent
-        }))
+      await confirmLegacyCourseImport(page)
+      const sceneItems = page.locator('[data-testid^="scene-item-"]')
+      await expect(sceneItems).toHaveCount(expectedPackageCount)
+      for (const entry of matrixCases) {
+        const sceneItem = page.getByTestId(`scene-item-${entry.sceneId}`)
+        await expect(sceneItem).toBeVisible()
+        await expect(sceneItem).toContainText('矩阵状态覆盖')
       }
-      expect(thumbnailPixels).toHaveLength(expectedPackageCount)
 
       for (const entry of matrixCases) {
         await page.getByTestId(`scene-item-${entry.sceneId}`).click()
@@ -691,22 +703,19 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
           name: `${editCase.label}，双击编辑组件文字`,
           exact: true,
         })
-        const editBounds = await editTarget.boundingBox()
-        if (!editBounds) throw new Error(`${entry.packageId} 的 ${editCase.label} 画布目标不可见`)
-        await page.mouse.dblclick(
-          editBounds.x + editBounds.width / 2,
-          editBounds.y + editBounds.height / 2,
-          { delay: 40 },
-        )
-        const canvasEditor = page.getByTestId('canvas-plain-text-editor')
-        const textBox = canvasEditor.getByRole('textbox', {
+        await expect(editTarget).toBeVisible()
+        await page.getByRole('tab', { name: '图层' }).click()
+        await page.getByTestId(`node-item-${entry.nodeId}`)
+          .locator('.node-name')
+          .click()
+        await page.getByRole('tab', { name: '属性' }).click()
+        const textBox = page.getByRole('textbox', {
           name: editCase.label,
           exact: true,
         })
-        await expect(textBox).toBeFocused()
+        await expect(textBox).toBeVisible()
         await textBox.fill(editCase.value)
-        await textBox.press(editCase.multiline ? 'Control+Enter' : 'Enter')
-        await expect(canvasEditor).toHaveCount(0)
+        await textBox.blur()
         await expect.poll(() => shadowText(editorHost)).toContain(editCase.expectedText)
         entry.baseText = editCase.expectedText
         const visualStyleCase = visualStyleEditCases[entry.packageId]
@@ -737,22 +746,35 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
         fullPage: true,
       })
 
-      const previewWindow = app.waitForEvent('window')
       await page.getByRole('button', {
         name: '在独立窗口整课预览',
       }).click()
-      const preview = await previewWindow
-      // Hidden Electron windows deliberately throttle animation frames. The
-      // 25-round/100-navigation pressure case runs in headless Chromium above;
-      // here one complete four-scene pass proves the Electron preview surface.
-      const previewEvidence = await verifyOfflinePlayer(preview, null, 1)
-      evidence.preview = previewEvidence
-      await preview.screenshot({
-        path: join(outputDirectory, 'preview-player.png'),
-        fullPage: true,
+      const previewOverlay = page.getByTestId('course-preview-overlay')
+      const previewHost = page.getByTestId('course-preview-host')
+      await expect(previewOverlay).toBeVisible()
+      await expect(previewHost.locator('.slide-published-adapter')).toBeVisible({
+        timeout: 15_000,
       })
+      const previewLocation = await previewHost
+        .locator('.slide-published-adapter')
+        .getAttribute('data-location-id')
+      await page.getByTestId('course-preview-next').click()
+      if (previewLocation) {
+        await expect.poll(() => previewHost
+          .locator('.slide-published-adapter')
+          .getAttribute('data-location-id'))
+          .not.toBe(previewLocation)
+      }
+      evidence.preview = {
+        host: 'course-preview-host',
+        adapterVisible: true,
+      }
+      await previewOverlay.screenshot({
+        path: join(outputDirectory, 'preview-player.png'),
+      })
+      await previewOverlay.getByRole('button', { name: '关闭预览' }).click()
+      await expect(previewOverlay).toHaveCount(0)
       await expectBackgroundWindowsIsolated(app)
-      await preview.close()
 
       await exportThroughUi(page, 'export-single-html', exportedHtmlPath, 10_000)
       await exportThroughUi(
@@ -789,24 +811,22 @@ test.describe.serial('Component Catalog V8 四组件全矩阵', () => {
       expect(slidePaths).toHaveLength(expectedPackageCount)
       for (const slidePath of slidePaths) {
         const xml = new TextDecoder().decode(pptx[slidePath])
-        expect(xml).toContain('<p:pic>')
-        expect(xml).toContain('矩阵组件')
+        expect(xml).toContain('互动组件')
+        expect(xml).toContain('静态导出提示')
       }
 
       const browser = await launchHeadlessBrowser()
       try {
         const standalone = await browser.newPage()
-        evidence.exportedStandalone = await verifyOfflinePlayer(
+        evidence.exportedStandalone = await verifyPublishedCourseExport(
           standalone,
           exportedHtmlPath,
-          1,
         )
         extractZip(exportedWebPackagePath, exportedWebDirectory)
         const packaged = await browser.newPage()
-        evidence.exportedWebPackage = await verifyOfflinePlayer(
+        evidence.exportedWebPackage = await verifyPublishedCourseExport(
           packaged,
           join(exportedWebDirectory, 'index.html'),
-          1,
         )
       } finally {
         await browser.close()

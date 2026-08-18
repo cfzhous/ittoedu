@@ -356,3 +356,25 @@ export async function readImageDimensions(
     URL.revokeObjectURL(url)
   }
 }
+
+/**
+ * V9 candidate helper: detect whether an incoming import can reuse an existing
+ * asset id. V8 `createImageAssetImport` / `createMediaAssetImport` stay the
+ * default factories and are not redirected.
+ */
+export function courseAssetMetaConflicts(
+  existing: AssetMeta,
+  candidate: Pick<AssetMeta, 'filename' | 'mimeType' | 'kind' | 'byteLength'>,
+): boolean {
+  return (
+    existing.filename !== candidate.filename
+    || existing.mimeType !== candidate.mimeType
+    || existing.kind !== candidate.kind
+    || existing.byteLength !== candidate.byteLength
+  )
+}
+
+/** Detached copy for the V9 asset sidecar. Does not change V8 blob registries. */
+export function cloneCourseAssetBytes(bytes: Uint8Array): Uint8Array {
+  return Uint8Array.from(bytes)
+}

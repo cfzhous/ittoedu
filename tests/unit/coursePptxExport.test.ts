@@ -1,0 +1,99 @@
+import { describe, expect, it } from 'vitest'
+import { unzipSync } from 'fflate'
+import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import {
+  addCourseFlowPage,
+  addCourseSpatialPage,
+} from '@/renderer/course/courseLocationCommands'
+import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+import {
+  buildCourseExportPageList,
+  buildCoursePrintArtifacts,
+} from '@/renderer/export/course/buildCoursePrintArtifacts'
+import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+
+const NOW = '2026-08-17T12:00:00.000Z'
+const ASSET_BYTES = new Uint8Array([1, 2, 3, 4])
+
+function mixedPublishedFixture() {
+  let project = createBlankCourseProject({ now: NOW, includeDefaultController: true })
+  const flowAdded = addCourseFlowPage(project, {
+    now: NOW,
+    expectedRevision: project.revision,
+    title: '讲义',
+  })
+  expect(flowAdded.ok).toBe(true)
+  if (!flowAdded.ok) throw new Error(flowAdded.reason)
+  project = flowAdded.project
+
+  const spatialAdded = addCourseSpatialPage(project, {
+    now: NOW,
+    expectedRevision: project.revision,
+    title: '空间',
+  })
+  expect(spatialAdded.ok).toBe(true)
+  if (!spatialAdded.ok) throw new Error(spatialAdded.reason)
+  project = spatialAdded.project as CourseProjectDocument
+
+  const assetFiles = Object.fromEntries(
+    Object.keys(project.assets).map((id) => [id, ASSET_BYTES]),
+  )
+  const published = buildPublishedCourseV2Payload({
+    project,
+    assetFiles,
+    components: {},
+  })
+  return { project, published }
+}
+
+describe('buildCourseExportPageList', () => {
+  it('derives Slide scene, Spatial camera-frame, and Flow print-plan pages from Published V2', () => {
+    const { published } = mixedPublishedFixture()
+    const pages = buildCourseExportPageList(published)
+    expect(pages.some((page) => page.kind === 'slide-scene')).toBe(true)
+    expect(pages.some((page) => page.kind === 'flow-document')).toBe(true)
+    expect(pages.filter((page) => page.kind === 'spatial-frame').length).toBeGreaterThan(0)
+    expect(pages.map((page) => page.kind)).not.toContain('global-layer')
+  })
+})
+
+describe('buildCoursePptx', () => {
+  it('returns PPTX bytes, excludes global HUD text, and keeps Spatial frames off 1280×720 crop', async () => {
+    const { project, published } = mixedPublishedFixture()
+    const globalBanner = project.globalLayerItems[0]?.item.layerItemId
+    expect(globalBanner).toBeTruthy()
+
+    const pages = buildCourseExportPageList(published)
+    const spatialPage = pages.find((page) => page.kind === 'spatial-frame')
+    expect(spatialPage).toBeTruthy()
+
+    const result = await buildCoursePptx(published)
+    expect(result.bytes.byteLength).toBeGreaterThan(100)
+    expect(result.bytes[0]).toBe(0x50)
+    expect(result.bytes[1]).toBe(0x4b)
+    expect(result.slideCount).toBeGreaterThan(0)
+    expect(result.report.some((item) => item.message.includes('全局图层'))).toBe(true)
+
+    const archive = unzipSync(result.bytes)
+    const slideXml = Object.entries(archive)
+      .filter(([name]) => name.startsWith('ppt/slides/slide') && name.endsWith('.xml'))
+      .map(([, bytes]) => new TextDecoder().decode(bytes))
+      .join('\n')
+    expect(slideXml).not.toContain('全局')
+    expect(slideXml).not.toContain(globalBanner!)
+    expect(result.pages.find((page) => page.id === spatialPage!.id)).toBeTruthy()
+  })
+
+  it('reports missing asset bytes in Chinese without throwing', async () => {
+    const { published } = mixedPublishedFixture()
+    const broken = structuredClone(published)
+    broken.assets['missing-slide-image'] = { mimeType: 'image/png', url: '' }
+
+    const result = await buildCoursePptx(broken)
+    expect(result.bytes.byteLength).toBeGreaterThan(0)
+    expect(result.report.some((item) => (
+      item.severity === 'error' && item.message.includes('缺少可离线引用')
+    ))).toBe(true)
+  })
+})

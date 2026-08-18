@@ -12,6 +12,7 @@ import type {
   SceneNode,
 } from '../../shared/projectTypes'
 import type { EditorPhaserBridge } from './EditorPhaserBridge'
+import { resizeWorldFrameFromHandle } from '../authoring/stageViewportTransform'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
 import { ProxyNodeAdapter } from './adapters/ProxyNodeAdapter'
 import type { AdapterBounds, NodeAdapter } from './adapters/NodeAdapter'
@@ -611,14 +612,16 @@ export class EditorScene extends Phaser.Scene {
     dragY: number,
   ): void {
     const start = startState.group
-    let left = start.left
-    let right = start.right
-    let top = start.top
-    let bottom = start.bottom
-    if (startState.direction.includes('w')) left = Math.min(dragX, right - MIN_NODE_SIZE)
-    if (startState.direction.includes('e')) right = Math.max(dragX, left + MIN_NODE_SIZE)
-    if (startState.direction.includes('n')) top = Math.min(dragY, bottom - MIN_NODE_SIZE)
-    if (startState.direction.includes('s')) bottom = Math.max(dragY, top + MIN_NODE_SIZE)
+    const resized = resizeWorldFrameFromHandle(
+      { x: start.left, y: start.top, width: start.width, height: start.height },
+      startState.direction,
+      { x: dragX, y: dragY },
+      MIN_NODE_SIZE,
+    )
+    let left = resized.x
+    let right = resized.x + resized.width
+    let top = resized.y
+    let bottom = resized.y + resized.height
     if ((pointer.event as MouseEvent)?.shiftKey && startState.direction.length === 2) {
       const ratio = start.width / start.height
       let width = right - left

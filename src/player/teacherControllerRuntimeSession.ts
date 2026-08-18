@@ -1,6 +1,6 @@
-import type { TeacherControllerNode } from '../shared/projectTypes'
 import {
   createTeacherControllerLayout,
+  type TeacherControllerLayoutSource,
   type TeacherControllerRect,
 } from '../shared/teacherControllerLayout'
 
@@ -22,6 +22,20 @@ export interface TeacherControllerLogicalSize {
 
 export type TeacherControllerGestureOutcome = 'activate' | 'moved' | 'cancelled'
 
+/**
+ * Structural node view shared by the Phaser renderer and the DOM surface
+ * adapter: the authoring frame plus the layout source fields. `TeacherControllerNode`
+ * satisfies it, and DOM hosts compose it from a layer item's frame + content.
+ */
+export type TeacherControllerRuntimeNode = TeacherControllerLayoutSource & {
+  title: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+}
+
 /** Keeps Phaser callback payloads out of the click-versus-drag decision. */
 export function teacherControllerGestureOutcome(
   dragging: boolean,
@@ -39,7 +53,7 @@ interface AxisAlignedBounds {
 }
 
 function visibleLocalRect(
-  node: TeacherControllerNode,
+  node: TeacherControllerRuntimeNode,
   collapsed: boolean,
 ): TeacherControllerRect {
   if (collapsed) {
@@ -51,7 +65,7 @@ function visibleLocalRect(
 }
 
 function rotatedBounds(
-  node: TeacherControllerNode,
+  node: TeacherControllerRuntimeNode,
   offset: TeacherControllerSessionOffset,
   collapsed: boolean,
 ): AxisAlignedBounds {
@@ -100,7 +114,7 @@ function moveInsideCanvas(
 
 /** Keeps the currently visible controller geometry on the logical canvas. */
 export function constrainTeacherControllerOffset(
-  node: TeacherControllerNode,
+  node: TeacherControllerRuntimeNode,
   proposed: TeacherControllerSessionOffset,
   collapsed: boolean,
   canvas: TeacherControllerLogicalSize,
@@ -152,4 +166,72 @@ export function logicalDragDelta(
     dx: (current.x - start.x) * logicalCanvas.width / width,
     dy: (current.y - start.y) * logicalCanvas.height / height,
   }
+}
+
+/**
+ * Same mapping as `logicalDragDelta`, but the rendered bounds MUST be the
+ * stage/viewport CSS size (the 1280×720 surface), never the controller frame.
+ * That is the Player equivalent of `clientDeltaToWorld` from
+ * `stageViewportTransform` — do not introduce a second coordinate system.
+ */
+export function teacherControllerStagePointerDelta(
+  start: { x: number; y: number },
+  current: { x: number; y: number },
+  stageCss: TeacherControllerLogicalSize,
+  logicalCanvas: TeacherControllerLogicalSize,
+): TeacherControllerSessionOffset {
+  return logicalDragDelta(start, current, stageCss, logicalCanvas)
+}
+
+/**
+ * Converts a client point on the compositor-positioned controller frame into
+ * layout-local coordinates, accounting for CSS scale of the stage.
+ */
+export function teacherControllerLocalPointFromClient(
+  client: { x: number; y: number },
+  frameClient: { left: number; top: number; width: number; height: number },
+  node: Pick<TeacherControllerRuntimeNode, 'width' | 'height' | 'rotation'>,
+): { x: number; y: number } {
+  const width = Math.max(1, frameClient.width)
+  const height = Math.max(1, frameClient.height)
+  const radians = -node.rotation * Math.PI / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const dx = client.x - (frameClient.left + width / 2)
+  const dy = client.y - (frameClient.top + height / 2)
+  return {
+    x: (dx * cosine - dy * sine) * node.width / width + node.width / 2,
+    y: (dx * sine + dy * cosine) * node.height / height + node.height / 2,
+  }
+}
+
+/**
+ * World-space axis-aligned bounds of the currently visible controller surface
+ * (full panel when expanded, only the collapse pill when collapsed).
+ */
+export function teacherControllerHitBounds(
+  node: TeacherControllerRuntimeNode,
+  offset: TeacherControllerSessionOffset,
+  collapsed: boolean,
+): { left: number; top: number; right: number; bottom: number } {
+  return rotatedBounds(node, offset, collapsed)
+}
+
+/**
+ * Runtime consoles keep the authored action set minus authoring-only labels.
+ * “定位” and in-console “试运行” belong to the editor shell, not playback.
+ */
+export function isRuntimeTeacherControllerButton(button: {
+  label: string
+  visible?: boolean
+}): boolean {
+  if (button.visible === false) return false
+  const label = button.label.trim()
+  return label !== '定位' && !label.includes('试运行')
+}
+
+export function runtimeTeacherControllerButtons<T extends { label: string; visible: boolean }>(
+  buttons: readonly T[],
+): T[] {
+  return buttons.filter((button) => isRuntimeTeacherControllerButton(button))
 }

@@ -13,6 +13,8 @@ import {
   loadExportPayloadFromUrl,
   normalizePlayerPayload,
 } from './payload'
+import { createPublishedCourseSession } from './surfaces/publishedDynamicHosts'
+import { attachPublishedCoursePresenter } from './publishedCoursePresenter'
 
 let authoringTargetsMessageRevision = 0
 
@@ -407,10 +409,33 @@ async function bootstrapPlayerFromUrl(
   }
 }
 
+function bootstrapPublishedCourse(): boolean {
+  const payload = window.__H5_COURSE_PAYLOAD__
+  const root = document.getElementById('course-root')
+  if (!payload || !root) return false
+  const session = createPublishedCourseSession(payload, {
+    viewport: {
+      width: Math.max(1, root.clientWidth || 1280),
+      height: Math.max(1, root.clientHeight || 720),
+    },
+  })
+  void session.mount(root).then(() => {
+    attachPublishedCoursePresenter(root, session, payload)
+  }).catch((error) => {
+    console.error('课程播放器启动失败', error)
+    const message = document.createElement('div')
+    message.className = 'course-player-error'
+    message.textContent = '课件加载失败。请重新导出课件后再试。'
+    root.replaceChildren(message)
+  })
+  return true
+}
+
 export function bootstrapPlayer(): PlayerApp | null {
   if (window.__H5_LESSON_PLAYER__) {
     return window.__H5_LESSON_PLAYER__
   }
+  if (bootstrapPublishedCourse()) return null
 
   const payloadUrl = configuredPayloadUrl()
   const fallbackPayload = window.__H5_LESSON_PAYLOAD_FALLBACK__

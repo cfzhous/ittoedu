@@ -201,7 +201,7 @@ describe('Project V8 global-layer editor store', () => {
     expect(useEditorStore.getState().project.globalLayer.find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
-      layer: 'underlay',
+      layer: 'overlay',
       visibility: { mode: 'include', sceneIds: [sceneIds[1]] },
       node: {
         x: 80,
@@ -228,7 +228,7 @@ describe('Project V8 global-layer editor store', () => {
     expect(useEditorStore.getState().project.globalLayer.find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
-      layer: 'underlay',
+      layer: 'overlay',
       visibility: { mode: 'include', sceneIds: [sceneIds[1]] },
     })
   })
@@ -316,7 +316,7 @@ describe('Project V8 global-layer editor store', () => {
 
     layer = useEditorStore.getState().project.globalLayer
     expect(layer.find((item) => item.node.id === text.id)).toMatchObject({
-      layer: 'underlay',
+      layer: 'overlay',
       visibility: { mode: 'exclude', sceneIds: [secondSceneId] },
       node: { type: 'text', text: '跨场景课程标题', height: 64 },
     })

@@ -1,0 +1,64 @@
+import { nanoid } from 'nanoid'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
+import { createBlankCourseProject } from './createCourseProject'
+import type { CreateProjectOptions } from './createProject'
+
+export function courseProjectStartsAsSpatial(
+  project: CourseProjectDocument,
+): boolean {
+  const start = project.locations.find((location) => location.id === project.startLocationId)
+  return start?.kind === 'spatial-camera'
+}
+
+/**
+ * Blank infinite Spatial Course Project V9. Default `createBlankCourseProject`
+ * remains Slide; callers must opt into this factory.
+ */
+export function createBlankSpatialCourseProject(
+  options: CreateProjectOptions = {},
+): CourseProjectDocument {
+  const slide = createBlankCourseProject(options)
+  const idFactory = options.idFactory ?? nanoid
+  const surfaceId = `surface-spatial-${idFactory()}`
+  const frameId = `camera-home-${idFactory()}`
+  const pose = { x: 0, y: 0, zoom: 1 }
+  // World insert assigns order 0,1,2… from world items only. Unified schema
+  // also counts global HUD, so keep inherited overlay/controller orders high.
+  const globalLayerItems = slide.globalLayerItems.map((entry, index) => ({
+    ...entry,
+    item: {
+      ...entry.item,
+      order: 100_000 + index,
+    },
+  }))
+  return courseProjectDocumentSchema.parse({
+    ...slide,
+    globalLayerItems,
+    locations: [{
+      id: frameId,
+      label: `${slide.title} · 全景`,
+      kind: 'spatial-camera',
+      surfaceId,
+      cameraFrameId: frameId,
+    }],
+    startLocationId: frameId,
+    surfaces: [{
+      id: surfaceId,
+      title: '无限画布',
+      type: 'spatial-2d',
+      surfaceLayerItems: [],
+      world: {
+        bounds: { mode: 'infinite' },
+        layerItems: [],
+        paths: [],
+        relations: [],
+      },
+      camera: {
+        home: pose,
+        frames: [{ id: frameId, name: '全景', ...pose }],
+      },
+      semanticZoom: [],
+    }],
+  })
+}

@@ -38,10 +38,30 @@ import {
 } from '../../shared/playerAuthoringProtocol'
 import { createEditorGame, type EditorGameHandle } from '../phaser/createEditorGame'
 import { onElementAnimationPreviewRequested } from '../phaser/elementAnimationPreviewBus'
+import { hitTestV9SlideLayerItems } from '../phaser/v9SlideHitAdapter'
 import {
+  commitV9SlideContentEdit,
+  updateV9SlideContentFormulaDraft,
+} from '../authoring/v9SlideContentEdit'
+import {
+  createSlideWorkspaceAuthoringController,
+  listSlideWorkspaceHitTargets,
+} from './workspaceSlideAuthoring'
+import {
+  buildSlidePreviewRebuildKey,
+  sidecarFileIdsFrom,
+} from './workspaceSlidePreviewRebuild'
+import {
+  projectCandidatePreviewDocument,
   selectActiveScene,
   selectEditingNodes,
+  selectMediaAssetFiles,
   selectSelectedNode,
+  selectSlideBackendKind,
+  selectSlideCandidateBackend,
+  selectSlideCandidateDocument,
+  selectActiveCourseProjectDocument,
+  selectActiveCourseLocationId,
   useEditorStore,
 } from '../store/editorStore'
 import { TextEditOverlay } from './TextEditOverlay'
@@ -77,9 +97,35 @@ import {
   clientToWorld,
   createStageViewportTransform,
   rotatedRectIntersectsStage,
+  STAGE_RESIZE_HANDLE_DIRECTIONS,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
+  type StageSelectionOverlayGeometry,
 } from '../authoring/stageViewportTransform'
+import { createV9TeacherControllerAuthoringController } from '../authoring/v9TeacherControllerAuthoring'
+import {
+  commitSpatialWorldContentEdit,
+  createSpatialWorldAuthoringController,
+  updateSpatialWorldContentFormulaDraft,
+} from '../authoring/spatialWorldAuthoring'
+import {
+  buildSpatialEditorView,
+  createSpatialViewportOverlayTransform,
+  createSpatialWorldViewTransform,
+  type SpatialSessionCamera,
+} from '../course/spatialEditorView'
+import { type SpatialEditorWorldTransform } from '../course/spatialEditorCommands'
+import { fitSpatialSessionToHomeCamera } from '../course/spatialCameraCommands'
+import { SpatialSurfaceHost } from '../../player/surfaces/spatial/SpatialSurfaceHost'
+import { mountSpatialLocationTryRun } from './spatialLocationTryRun'
+import { mountFlowLocationTryRun } from './flowLocationTryRun'
+import { mountPublishedCourseTryRun } from './coursePlayerTryRun'
+import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
+import { FlowWorkspace } from './FlowWorkspace'
+import { buildFlowEditorView } from '../course/flowEditorView'
+import { courseLayerItemToSceneNode } from '../store/v9SlideUiProjection'
+import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../phaser/v9SpatialHitAdapter'
+import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
 import { runtimeTargetMatchesEditingContext } from '../authoring/runtimeAuthoringContext'
 import {
   beginComponentTextEditSession,
@@ -311,7 +357,875 @@ type CanvasAuthoringHit =
   | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
   | { kind: 'component'; target: Readonly<ComponentAuthoringTextTarget> }
 
+function controllerGestureConsumed(
+  overlay: StageSelectionOverlayGeometry | null | undefined,
+  preview: unknown,
+  target: unknown,
+): boolean {
+  return Boolean(overlay && (preview || target))
+}
+
+function TeacherControllerAuthoringOverlay({
+  overlay,
+}: {
+  overlay: StageSelectionOverlayGeometry
+}) {
+  const box = overlay.selectionBox
+  return (
+    <div
+      className="teacher-controller-overlay"
+      data-testid="teacher-controller-overlay"
+      aria-hidden="true"
+    >
+      <div
+        className="teacher-controller-overlay__box"
+        style={{
+          left: box.x,
+          top: box.y,
+          width: box.width,
+          height: box.height,
+        }}
+      />
+      {STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
+        const point = overlay.handles[direction]
+        return (
+          <div
+            key={direction}
+            className="teacher-controller-overlay__handle"
+            data-handle={direction}
+            style={{ left: point.x - 4, top: point.y - 4 }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function distanceToSegment(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const length = dx * dx + dy * dy
+  if (length === 0) return Math.hypot(point.x - start.x, point.y - start.y)
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / length))
+  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy))
+}
+
+function spatialWorldItemCenter(item: LayerItem) {
+  return {
+    x: item.frame.x + item.frame.width / 2,
+    y: item.frame.y + item.frame.height / 2,
+  }
+}
+
+function hitSpatialGraphAtWorld(
+  session: { history: { present: CourseProjectDocument }; selection: { surfaceId: string } },
+  world: { x: number; y: number },
+  threshold: number,
+) {
+  const surface = session.history.present.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'spatial-2d',
+  )
+  if (!surface || surface.type !== 'spatial-2d') return null
+  const items = new Map(surface.world.layerItems.map((item) => [item.layerItemId, item]))
+  for (const relation of [...(surface.world.relations ?? [])].reverse()) {
+    const source = items.get(relation.sourceLayerItemId)
+    const target = items.get(relation.targetLayerItemId)
+    if (!source || !target) continue
+    if (distanceToSegment(world, spatialWorldItemCenter(source), spatialWorldItemCenter(target)) <= threshold) {
+      return { kind: 'relation' as const, id: relation.id }
+    }
+  }
+  for (const path of [...(surface.world.paths ?? [])].reverse()) {
+    const points = path.layerItemIds.flatMap((id) => {
+      const item = items.get(id)
+      return item ? [spatialWorldItemCenter(item)] : []
+    })
+    for (let index = 1; index < points.length; index += 1) {
+      if (distanceToSegment(world, points[index - 1]!, points[index]!) <= threshold) {
+        return { kind: 'path' as const, id: path.id }
+      }
+    }
+  }
+  return null
+}
+
+function SpatialSelectionOverlay({
+  overlay,
+  locked,
+}: {
+  overlay: StageSelectionOverlayGeometry
+  locked?: boolean
+}) {
+  const box = overlay.selectionBox
+  return (
+    <div className="spatial-selection-overlay" data-testid="spatial-selection-overlay" aria-hidden="true">
+      <div
+        className={`spatial-selection-overlay__box${locked ? ' spatial-selection-overlay__box--locked' : ''}`}
+        style={{ left: box.x, top: box.y, width: box.width, height: box.height }}
+      />
+      {STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
+        const point = overlay.handles[direction]
+        return (
+          <div
+            key={direction}
+            className={`spatial-selection-overlay__handle${locked ? ' spatial-selection-overlay__handle--locked' : ''}`}
+            data-handle={direction}
+            style={{ left: point.x - 5.5, top: point.y - 5.5 }}
+          />
+        )
+      })}
+      <div
+        className="spatial-selection-overlay__rotate"
+        data-handle="rotate"
+        style={{
+          left: overlay.rotationHandle.x - 5.5,
+          top: overlay.rotationHandle.y - 5.5,
+        }}
+      />
+    </div>
+  )
+}
+
+function SpatialLocationWorkspace({
+  onAddImage,
+  onAddVideo,
+}: WorkspaceProps) {
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const tryRunRef = useRef<HTMLDivElement>(null)
+  const textProxyCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const hostRef = useRef<SpatialSurfaceHost | null>(null)
+  const pointerActiveRef = useRef(false)
+  const session = useEditorStore((state) => state.spatialSession)
+  const canvasMode = useEditorStore((state) => state.canvasMode)
+  const editingScope = useEditorStore((state) => state.editingScope)
+  const selectedNode = useEditorStore(selectSelectedNode)
+  const editingTextNodeId = useEditorStore((state) => state.editingTextNodeId)
+  const spatialContentEdit = useEditorStore((state) => state.spatialContentEdit)
+  const playbackPathId = useEditorStore((state) => state.spatialPlaybackPathId)
+  const sidecarFiles = useEditorStore(selectMediaAssetFiles)
+  const componentPackages = useEditorStore((state) => state.componentPackages)
+  const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 450 })
+  const [previewFrames, setPreviewFrames] = useState<readonly SpatialEditorWorldTransform[] | null>(null)
+  const [previewCamera, setPreviewCamera] = useState<SpatialSessionCamera | null>(null)
+  const [worldOverlay, setWorldOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
+  const [hudOverlay, setHudOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
+  const [textCanvas, setTextCanvas] = useState<HTMLCanvasElement | null>(null)
+
+  const authoringRef = useRef(createSpatialWorldAuthoringController({
+    getSession: () => {
+      const current = useEditorStore.getState().spatialSession
+      if (!current) throw new Error('not-spatial-session')
+      return current
+    },
+    setSession: (next) => {
+      const previous = useEditorStore.getState().spatialSession
+      useEditorStore.getState().applySpatialAuthoringSession(next, {
+        historyEntry: Boolean(
+          previous && next.history.present.revision !== previous.history.present.revision,
+        ),
+      })
+    },
+  }))
+
+  useLayoutEffect(() => {
+    const node = viewportRef.current
+    if (!node) return
+    const update = () => {
+      const rect = node.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setViewportSize({ width: rect.width, height: rect.height })
+      }
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  const readViewport = useCallback(() => {
+    const node = viewportRef.current
+    if (!node) return null
+    const rect = node.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    return {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    }
+  }, [])
+
+  const liveCamera = previewCamera ?? session?.sessionCamera ?? { x: 0, y: 0, zoom: 1 }
+  const worldTransform = useMemo(() => createSpatialWorldViewTransform({
+    x: 0,
+    y: 0,
+    width: viewportSize.width,
+    height: viewportSize.height,
+  }, liveCamera), [liveCamera, viewportSize.height, viewportSize.width])
+  const hudTransform = useMemo(() => createSpatialViewportOverlayTransform({
+    x: 0,
+    y: 0,
+    width: viewportSize.width,
+    height: viewportSize.height,
+  }), [viewportSize.height, viewportSize.width])
+
+  const view = session
+    ? buildSpatialEditorView({
+      project: session.history.present,
+      locationId: session.selection.locationId,
+    })
+    : null
+  const surface = session?.history.present.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'spatial-2d',
+  )
+  const worldItems = view?.layers.filter((layer) => layer.coordinateSpace === 'world') ?? []
+  const hudItems = view?.layers.filter((layer) => layer.coordinateSpace === 'viewport') ?? []
+  const previewById = new Map((previewFrames ?? []).map((frame) => [frame.layerItemId, frame]))
+
+  useEffect(() => {
+    if (!session || canvasMode !== 'edit') {
+      setWorldOverlay(null)
+      setHudOverlay(null)
+      return
+    }
+    const viewport = readViewport()
+    if (!viewport) return
+    const authoring = authoringRef.current
+    setWorldOverlay(authoring.overlayGeometry(viewport))
+    setHudOverlay(
+      selectedNode?.type === 'teacher-controller' || editingScope === 'global'
+        ? authoring.viewportOverlayGeometry(viewport)
+        : null,
+    )
+  }, [canvasMode, editingScope, readViewport, selectedNode, session, session?.selection.selectionIds, session?.sessionCamera, session?.history.present.revision])
+
+  const publishedKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const container = tryRunRef.current
+    if (!session || !container) return
+    const key = `${session.history.present.revision}:${session.selection.locationId}:${playbackPathId ?? ''}`
+    if (canvasMode !== 'run') {
+      void hostRef.current?.suspend()
+      return
+    }
+    let cancelled = false
+    const start = async () => {
+      if (hostRef.current && publishedKeyRef.current === key) {
+        await hostRef.current.resume()
+        return
+      }
+      if (hostRef.current) {
+        await hostRef.current.destroy()
+        hostRef.current = null
+      }
+      const rect = container.getBoundingClientRect()
+      const host = await mountSpatialLocationTryRun({
+        container,
+        project: session.history.present,
+        assetFiles: sidecarFiles,
+        components: componentPackages,
+        locationId: session.selection.locationId,
+        playbackPathId,
+        width: Math.max(1, rect.width),
+        height: Math.max(1, rect.height),
+      })
+      if (cancelled) {
+        await host.destroy()
+        return
+      }
+      publishedKeyRef.current = key
+      hostRef.current = host
+    }
+    void start()
+    return () => {
+      cancelled = true
+    }
+  }, [canvasMode, componentPackages, playbackPathId, session, sidecarFiles])
+
+  useEffect(() => () => {
+    void hostRef.current?.destroy()
+    hostRef.current = null
+  }, [])
+
+  const assetUrls = useMemo(() => {
+    const urls: Record<string, string> = {}
+    if (!session) return urls
+    for (const [assetId, bytes] of Object.entries(sidecarFiles)) {
+      const meta = session.history.present.assets[assetId]
+      urls[assetId] = URL.createObjectURL(
+        new Blob([Uint8Array.from(bytes)], { type: meta?.mimeType ?? 'application/octet-stream' }),
+      )
+    }
+    return urls
+  }, [session, sidecarFiles])
+
+  useEffect(() => () => {
+    for (const url of Object.values(assetUrls)) URL.revokeObjectURL(url)
+  }, [assetUrls])
+
+  if (!session || !view || !surface || surface.type !== 'spatial-2d') return null
+
+  const editingNode = editingTextNodeId
+    ? selectEditingNodes(useEditorStore.getState()).find((node) => node.id === editingTextNodeId)
+    : null
+  const formulaNode = spatialContentEdit?.kind === 'formula'
+    ? selectEditingNodes(useEditorStore.getState()).find((node) => node.id === spatialContentEdit.target.layerItemId)
+    : null
+  const selectedLocked = Boolean(selectedNode?.locked)
+
+  const syncOverlays = (viewport: { x: number; y: number; width: number; height: number }) => {
+    const authoring = authoringRef.current
+    setWorldOverlay(authoring.overlayGeometry(viewport))
+    setHudOverlay(authoring.viewportOverlayGeometry(viewport))
+  }
+
+  return (
+    <main
+      ref={workspaceRef}
+      className={`workspace workspace--${canvasMode} workspace--spatial`}
+      data-testid="spatial-workspace"
+    >
+      <div className="canvas-mode-switch" role="group" aria-label="画布模式">
+        <button
+          type="button"
+          className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
+          aria-pressed={canvasMode === 'edit'}
+          onClick={() => setCanvasMode('edit')}
+        >
+          <MousePointer2 size={13} />编辑状态
+        </button>
+        <button
+          type="button"
+          className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
+          aria-pressed={canvasMode === 'run'}
+          onClick={() => setCanvasMode('run')}
+        >
+          <Play size={13} />当前位置试运行
+        </button>
+      </div>
+      {canvasMode === 'edit' && (
+        <div className="canvas-view-controls" role="group" aria-label="画布视图">
+          <button
+            type="button"
+            aria-label="缩小画布"
+            onClick={() => {
+              const viewport = readViewport()
+              if (!viewport) return
+              authoringRef.current.zoomSession(session.sessionCamera.zoom - 0.1, viewport)
+            }}
+          >
+            <Minus size={14} />
+          </button>
+          <output aria-label="画布缩放比例">{Math.round(liveCamera.zoom * 100)}%</output>
+          <button
+            type="button"
+            aria-label="放大画布"
+            onClick={() => {
+              const viewport = readViewport()
+              if (!viewport) return
+              authoringRef.current.zoomSession(session.sessionCamera.zoom + 0.1, viewport)
+            }}
+          >
+            <Plus size={14} />
+          </button>
+          <button
+            type="button"
+            aria-label="适合窗口"
+            title="回到首页镜头"
+            onClick={() => useEditorStore.getState().runSpatialCommand((current) => fitSpatialSessionToHomeCamera(current))}
+          >
+            <Maximize2 size={14} />
+          </button>
+          <span title="Ctrl+滚轮缩放；拖动空白处平移画布">
+            <Hand size={13} />
+          </span>
+        </div>
+      )}
+      <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
+        {editingScope === 'global'
+          ? `全局层 · ${hudItems.length} 个元素`
+          : `${view.surfaceTitle} · ${view.camera.frames.find((frame) => frame.id === view.camera.activeFrameId)?.name ?? '镜头'}`}
+      </div>
+      <div
+        ref={viewportRef}
+        className="canvas-viewport"
+        data-testid="spatial-world-stage"
+        onWheel={(event) => {
+          if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
+          event.preventDefault()
+          const viewport = readViewport()
+          if (!viewport) return
+          authoringRef.current.zoomSession(
+            session.sessionCamera.zoom + (event.deltaY > 0 ? -0.1 : 0.1),
+            viewport,
+          )
+        }}
+        onPointerDown={(event) => {
+          if (canvasMode !== 'edit' || event.button === 2) return
+          const viewport = readViewport()
+          if (!viewport) return
+          const pointer = { x: event.clientX, y: event.clientY, additive: event.shiftKey }
+          const world = clientToWorld(createSpatialWorldViewTransform(viewport, session.sessionCamera), pointer)
+          const hudPoint = clientToWorld(createSpatialViewportOverlayTransform(viewport), pointer)
+          const layerHit = hitTestV9SpatialLayerItems(
+            adaptV9SpatialEditorLayers(view.layers),
+            { viewport: hudPoint, world },
+          )
+          if (!layerHit) {
+            const graph = hitSpatialGraphAtWorld(session, world, 8 / session.sessionCamera.zoom)
+            if (graph) {
+              useEditorStore.getState().setSpatialGraphSelection(graph)
+              setWorldOverlay(null)
+              return
+            }
+          }
+          pointerActiveRef.current = true
+          event.currentTarget.setPointerCapture(event.pointerId)
+          const result = authoringRef.current.pointerDown(pointer, viewport)
+          setPreviewFrames(result.preview ?? null)
+          setPreviewCamera(result.previewCamera ?? null)
+          syncOverlays(viewport)
+        }}
+        onPointerMove={(event) => {
+          if (!pointerActiveRef.current || canvasMode !== 'edit') return
+          const viewport = readViewport()
+          if (!viewport) return
+          const result = authoringRef.current.pointerMove({
+            x: event.clientX,
+            y: event.clientY,
+            additive: event.shiftKey,
+          }, viewport)
+          setPreviewFrames(result.preview ?? null)
+          setPreviewCamera(result.previewCamera ?? null)
+          syncOverlays(viewport)
+        }}
+        onPointerUp={(event) => {
+          if (!pointerActiveRef.current) return
+          pointerActiveRef.current = false
+          const viewport = readViewport()
+          if (!viewport) return
+          authoringRef.current.pointerUp({
+            x: event.clientX,
+            y: event.clientY,
+            additive: event.shiftKey,
+          }, viewport)
+          setPreviewFrames(null)
+          setPreviewCamera(null)
+          syncOverlays(viewport)
+        }}
+        onDoubleClick={(event) => {
+          if (canvasMode !== 'edit') return
+          const viewport = readViewport()
+          if (!viewport) return
+          const result = authoringRef.current.doubleClick({
+            x: event.clientX,
+            y: event.clientY,
+          }, viewport)
+          if (result.contentEdit?.ok && result.hit) {
+            useEditorStore.getState().beginTextEdit(result.hit.layerItemId, 'canvas')
+          }
+        }}
+      >
+        {canvasMode === 'edit' && (
+          <>
+            <div
+              className="spatial-world-layer"
+              data-testid="spatial-world-layer"
+              style={{
+                left: worldTransform.stageRect.x,
+                top: worldTransform.stageRect.y,
+                transform: `scale(${worldTransform.scale})`,
+              }}
+            >
+              <canvas
+                ref={(node) => {
+                  textProxyCanvasRef.current = node
+                  setTextCanvas(node)
+                }}
+                width={1280}
+                height={720}
+                data-testid="spatial-text-proxy-canvas"
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  width: 1280,
+                  height: 720,
+                  opacity: 0,
+                  pointerEvents: 'none',
+                }}
+              />
+              {session.showCameraFrames && view.camera.frames.map((frame) => {
+                const width = viewportSize.width / frame.zoom
+                const height = viewportSize.height / frame.zoom
+                return (
+                  <div
+                    key={frame.id}
+                    className={`spatial-camera-frame${frame.id === view.camera.activeFrameId ? ' spatial-camera-frame--active' : ''}`}
+                    style={{
+                      left: frame.x - width / 2,
+                      top: frame.y - height / 2,
+                      width,
+                      height,
+                    }}
+                  />
+                )
+              })}
+              <svg className="spatial-graph-svg" aria-hidden="true">
+                {(surface.world.paths ?? []).map((path) => {
+                  const points = path.layerItemIds.flatMap((id) => {
+                    const item = surface.world.layerItems.find((candidate) => candidate.layerItemId === id)
+                    if (!item) return []
+                    const center = spatialWorldItemCenter(item)
+                    return [`${center.x},${center.y}`]
+                  })
+                  return (
+                    <polyline
+                      key={path.id}
+                      points={points.join(' ')}
+                      fill="none"
+                      stroke={path.style?.color ?? '#3388ff'}
+                      strokeWidth={path.style?.width ?? 2}
+                      strokeDasharray={path.style?.dash === 'dashed' ? '8 6' : path.style?.dash === 'dotted' ? '2 6' : undefined}
+                    />
+                  )
+                })}
+                {(surface.world.relations ?? []).map((relation) => {
+                  const source = surface.world.layerItems.find((item) => item.layerItemId === relation.sourceLayerItemId)
+                  const target = surface.world.layerItems.find((item) => item.layerItemId === relation.targetLayerItemId)
+                  if (!source || !target) return null
+                  const from = spatialWorldItemCenter(source)
+                  const to = spatialWorldItemCenter(target)
+                  return (
+                    <line
+                      key={relation.id}
+                      x1={from.x}
+                      y1={from.y}
+                      x2={to.x}
+                      y2={to.y}
+                      stroke="#94a3b8"
+                      strokeWidth={2}
+                    />
+                  )
+                })}
+              </svg>
+              {worldItems.map((layer) => {
+                const preview = previewById.get(layer.selectionId)
+                const frame = preview ?? layer.item.frame
+                const node = courseLayerItemToSceneNode(layer.item as LayerItem)
+                if (!node) return null
+                const rotation = preview?.rotation ?? layer.item.rotation
+                return (
+                  <div
+                    key={layer.selectionId}
+                    className={`spatial-world-item spatial-world-item--${node.type}`}
+                    data-layer-id={layer.selectionId}
+                    style={{
+                      left: preview?.x ?? frame.x,
+                      top: preview?.y ?? frame.y,
+                      width: preview?.width ?? frame.width,
+                      height: preview?.height ?? frame.height,
+                      transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                      opacity: layer.item.opacity,
+                      background: node.type === 'shape'
+                        ? node.style.fillColor
+                        : node.type === 'text'
+                          ? 'transparent'
+                          : 'rgba(255,255,255,0.04)',
+                      color: node.type === 'text' ? node.style.color : '#e2e8f0',
+                      fontSize: node.type === 'text' ? node.style.fontSize : 14,
+                      fontFamily: node.type === 'text' ? node.style.fontFamily : undefined,
+                    }}
+                  >
+                    {node.type === 'text' ? node.text
+                      : node.type === 'formula' ? node.accessibleText
+                      : node.type === 'image' && assetUrls[node.assetId]
+                        ? <img src={assetUrls[node.assetId]} alt="" />
+                        : node.type === 'external-component' ? node.name || '组件'
+                        : node.name || node.type}
+                  </div>
+                )
+              })}
+            </div>
+            <div
+              className="spatial-hud-layer"
+              data-testid="spatial-hud-layer"
+              style={{
+                left: hudTransform.stageRect.x,
+                top: hudTransform.stageRect.y,
+                width: 1280,
+                height: 720,
+                transform: `scale(${hudTransform.scale})`,
+                pointerEvents: 'none',
+              }}
+            >
+              {hudItems.map((layer) => {
+                const node = courseLayerItemToSceneNode(layer.item as LayerItem)
+                if (!node) return null
+                return (
+                  <div
+                    key={layer.selectionId}
+                    className="spatial-world-item"
+                    data-hud-id={layer.selectionId}
+                    style={{
+                      left: layer.item.frame.x,
+                      top: layer.item.frame.y,
+                      width: layer.item.frame.width,
+                      height: layer.item.frame.height,
+                      background: node.type === 'teacher-controller' ? '#172033' : 'rgba(23,32,51,0.88)',
+                      color: '#f8fafc',
+                      borderRadius: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 13,
+                    }}
+                  >
+                    {node.name || (node.type === 'teacher-controller' ? '教师控制台' : node.type)}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+        <div
+          ref={tryRunRef}
+          className="spatial-try-run-host"
+          data-testid="spatial-try-run-host"
+          hidden={canvasMode !== 'run'}
+        />
+      </div>
+      {canvasMode === 'edit' && worldOverlay && editingScope !== 'global' ? (
+        <SpatialSelectionOverlay overlay={worldOverlay} locked={selectedLocked} />
+      ) : null}
+      {canvasMode === 'edit' && hudOverlay && (editingScope === 'global' || selectedNode?.type === 'teacher-controller') ? (
+        <SpatialSelectionOverlay overlay={hudOverlay} locked={selectedLocked} />
+      ) : null}
+      {canvasMode === 'edit' && formulaNode?.type === 'formula' && (
+        <FormulaEditDialog
+          key={formulaNode.id}
+          node={formulaNode}
+          onCancel={() => useEditorStore.getState().cancelTextEdit()}
+          onCommit={(ast, accessibleText) => {
+            const store = useEditorStore.getState()
+            if (store.spatialContentEdit?.kind === 'formula') {
+              const edited = updateSpatialWorldContentFormulaDraft(store.spatialContentEdit, {
+                ast,
+                accessibleText,
+              })
+              store.runSpatialCommand(
+                (current) => commitSpatialWorldContentEdit(current, edited),
+                { clearContentEdit: true },
+              )
+              return
+            }
+            store.updateNode(formulaNode.id, { ast, accessibleText })
+          }}
+        />
+      )}
+      {canvasMode === 'edit' && editingNode?.type === 'text' && textCanvas && workspaceRef.current && (
+        <TextEditOverlay
+          key={editingNode.id}
+          node={editingNode}
+          workspace={workspaceRef.current}
+          canvas={textCanvas}
+          onPreview={(text, runs) => {
+            const draftNode = { ...editingNode, text, runs }
+            const rendered = editingNode.style.overflow === 'auto-height'
+              ? renderTextNodeCanvas(draftNode)
+              : null
+            useEditorStore.getState().updateTextEditDraft(
+              editingNode.id,
+              text,
+              runs,
+              rendered?.height ?? editingNode.height,
+              rendered?.width ?? editingNode.width,
+            )
+          }}
+          onCommit={(text, runs) => {
+            const draftNode = { ...editingNode, text, runs }
+            const rendered = editingNode.style.overflow === 'auto-height'
+              ? renderTextNodeCanvas(draftNode)
+              : null
+            const store = useEditorStore.getState()
+            store.updateTextEditDraft(
+              editingNode.id,
+              text,
+              runs,
+              rendered?.height ?? editingNode.height,
+              rendered?.width ?? editingNode.width,
+            )
+            store.commitTextEdit()
+          }}
+          onCancel={() => useEditorStore.getState().cancelTextEdit()}
+        />
+      )}
+    </main>
+  )
+}
+
+function FlowLocationWorkspace(_props: WorkspaceProps) {
+  const tryRunRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<Awaited<ReturnType<typeof mountFlowLocationTryRun>> | null>(null)
+  const publishedKeyRef = useRef<string | null>(null)
+  const session = useEditorStore((state) => state.flowSession)
+  const canvasMode = useEditorStore((state) => state.canvasMode)
+  const editingScope = useEditorStore((state) => state.editingScope)
+  const sidecarFiles = useEditorStore(selectMediaAssetFiles)
+  const componentPackages = useEditorStore((state) => state.componentPackages)
+  const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
+  const view = session
+    ? buildFlowEditorView({
+      project: session.history.present,
+      locationId: session.selection.locationId,
+    })
+    : null
+
+  useEffect(() => {
+    const container = tryRunRef.current
+    if (!session || !container) return
+    const key = `${session.history.present.revision}:${session.selection.locationId}`
+    if (canvasMode !== 'run') {
+      void hostRef.current?.suspend()
+      return
+    }
+    let cancelled = false
+    const start = async () => {
+      if (hostRef.current && publishedKeyRef.current === key) {
+        await hostRef.current.resume()
+        return
+      }
+      if (hostRef.current) {
+        await hostRef.current.destroy()
+        hostRef.current = null
+      }
+      const host = await mountFlowLocationTryRun({
+        container,
+        project: session.history.present,
+        assetFiles: sidecarFiles,
+        components: componentPackages,
+        locationId: session.selection.locationId,
+      })
+      if (cancelled) {
+        await host.destroy()
+        return
+      }
+      publishedKeyRef.current = key
+      hostRef.current = host
+    }
+    void start()
+    return () => {
+      cancelled = true
+    }
+  }, [canvasMode, componentPackages, session, sidecarFiles])
+
+  useEffect(() => () => {
+    void hostRef.current?.destroy()
+    hostRef.current = null
+  }, [])
+
+  if (!session || !view) return null
+
+  return (
+    <main
+      className={`workspace workspace--${canvasMode} workspace--flow`}
+      data-testid="flow-workspace-shell"
+      data-flow-not-slide-stage="true"
+    >
+      <div className="canvas-mode-switch" role="group" aria-label="画布模式">
+        <button
+          type="button"
+          className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
+          aria-pressed={canvasMode === 'edit'}
+          onClick={() => setCanvasMode('edit')}
+        >
+          <MousePointer2 size={13} />编辑状态
+        </button>
+        <button
+          type="button"
+          className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
+          aria-pressed={canvasMode === 'run'}
+          onClick={() => setCanvasMode('run')}
+        >
+          <Play size={13} />当前位置试运行
+        </button>
+      </div>
+      <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
+        {editingScope === 'global' ? '全局层 · 视口浮层' : view.surfaceTitle}
+      </div>
+      {canvasMode === 'edit' ? (
+        <FlowWorkspace
+          project={session.history.present}
+          view={view}
+          selection={session.selection}
+          onProjectChange={(result) => {
+            useEditorStore.getState().applyFlowCommand(result)
+          }}
+          onSelectionChange={(next) => {
+            useEditorStore.getState().applyFlowSelection(next)
+          }}
+          onTextEditChange={(edit) => {
+            useEditorStore.getState().setFlowTextEdit(edit)
+          }}
+        />
+      ) : null}
+      <div
+        ref={tryRunRef}
+        className="flow-try-run-host"
+        data-testid="flow-try-run-host"
+        hidden={canvasMode !== 'run'}
+      />
+    </main>
+  )
+}
+
 export function Workspace({
+  onAddImage,
+  onAddVideo,
+  onSelectImageAsset,
+}: WorkspaceProps) {
+  const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  // Do not key these hosts by locationId/generation. R6-Z did, and every tree
+  // click (including the current page) remounted Phaser + the isolated Player,
+  // flashing the "隔离页面已连接，正在启动 Player…" overlay in edit mode.
+  // Surface kind already switches the component type; same-surface scene
+  // changes go through activateScene / host subscriptions.
+  if (spatialSession) {
+    return (
+      <SpatialLocationWorkspace
+        onAddImage={onAddImage}
+        onAddVideo={onAddVideo}
+        onSelectImageAsset={onSelectImageAsset}
+      />
+    )
+  }
+  if (flowSession) {
+    return (
+      <FlowLocationWorkspace
+        onAddImage={onAddImage}
+        onAddVideo={onAddVideo}
+        onSelectImageAsset={onSelectImageAsset}
+      />
+    )
+  }
+  return (
+    <SlideLocationWorkspace
+      onAddImage={onAddImage}
+      onAddVideo={onAddVideo}
+      onSelectImageAsset={onSelectImageAsset}
+    />
+  )
+}
+
+function SlideLocationWorkspace({
   onAddImage,
   onAddVideo,
   onSelectImageAsset,
@@ -392,6 +1306,17 @@ export function Workspace({
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 })
   const [panning, setPanning] = useState(false)
   const spacePressedRef = useRef(false)
+  const slideAuthoringRef = useRef(createSlideWorkspaceAuthoringController())
+  const controllerAuthoringRef = useRef(createV9TeacherControllerAuthoringController())
+  const candidatePointerActiveRef = useRef(false)
+  const controllerPointerActiveRef = useRef(false)
+  const courseTryRunRef = useRef<HTMLDivElement>(null)
+  const courseTryRunSessionRef = useRef<PublishedCourseSession | null>(null)
+  const [controllerOverlay, setControllerOverlay] =
+    useState<StageSelectionOverlayGeometry | null>(null)
+  const slideBackendKind = useEditorStore(selectSlideBackendKind)
+  const candidateDocument = useEditorStore(selectSlideCandidateDocument)
+  const candidateSidecar = useEditorStore((state) => state.slideCandidateSidecar)
   const panRef = useRef<{
     pointerId: number
     clientX: number
@@ -403,13 +1328,21 @@ export function Workspace({
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
   const canvasMode = useEditorStore((state) => state.canvasMode)
+  const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
+  const courseLocationId = useEditorStore(selectActiveCourseLocationId)
+  const courseSidecarFiles = useEditorStore(selectMediaAssetFiles)
+  const useCoursePlayerTryRun = Boolean(courseDocument && canvasMode === 'run')
   const activePresentationStateId = useEditorStore(
     (state) => state.activePresentationStateId,
   )
   const editingNodes = useEditorStore(selectEditingNodes)
-  const globalLayer = useEditorStore(
+  const v8GlobalLayer = useEditorStore(
     (state) => state.project.globalLayer,
   )
+  const globalLayer = useMemo(() => {
+    const preview = projectCandidatePreviewDocument(useEditorStore.getState())
+    return preview?.project.globalLayer ?? v8GlobalLayer
+  }, [candidateDocument, candidateSidecar, v8GlobalLayer])
   const selectedNode = useEditorStore(selectSelectedNode)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const editingTextNodeId = useEditorStore(
@@ -421,6 +1354,43 @@ export function Workspace({
     (state) => state.componentPackages,
   )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
+  const readCandidateViewport = useCallback(() => {
+    const viewport = stageViewportRef.current
+    if (!viewport) return null
+    const rect = viewport.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    return {
+      viewport: {
+        x: rect.left,
+        y: rect.top,
+        width: rect.width,
+        height: rect.height,
+      },
+      zoom: view.zoom,
+      pan: { x: view.x, y: view.y },
+    }
+  }, [view.x, view.y, view.zoom])
+
+  useEffect(() => {
+    if (slideBackendKind !== 'v9-slide-candidate' || canvasMode !== 'edit') {
+      setControllerOverlay(null)
+      return
+    }
+    if (controllerPointerActiveRef.current) return
+    const viewport = readCandidateViewport()
+    if (!viewport) return
+    if (selectedNode?.type === 'teacher-controller') {
+      setControllerOverlay(controllerAuthoringRef.current.overlayGeometry(viewport))
+      return
+    }
+    setControllerOverlay(null)
+  }, [
+    canvasMode,
+    candidateDocument,
+    readCandidateViewport,
+    selectedNode,
+    slideBackendKind,
+  ])
 
   const stageTransform = useMemo(() => createStageViewportTransform({
     viewport: {
@@ -432,47 +1402,35 @@ export function Workspace({
     zoom: view.zoom,
     pan: { x: view.x, y: view.y },
   }), [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
-  const previewRebuildKey = useMemo(() => {
-    const nodeIdentity = (node: SceneNode) => ({
-      id: node.id,
-      type: node.type,
-      ...(node.type === 'external-component'
-        ? {
-            componentId: node.component.packageId,
-            componentVersion: node.component.version,
-          }
-        : {}),
-    })
-    // A playback Player is a continuous course session. Its own scene/state
-    // telemetry updates the editor's active context, but must not recreate the
-    // iframe (which would reset global components, audio and courseState).
-    // Project changes still rebuild the session because the complete Project
-    // V7 document participates in this mode-specific key.
-    if (canvasMode === 'run') {
-      return JSON.stringify({ mode: canvasMode, project })
-    }
-    return JSON.stringify({
-      mode: canvasMode,
-      authoringContext: [editingScope, scene.id, activePresentationStateId],
-      sceneStructure: {
-        id: scene.id,
-        nodes: scene.nodes.map(nodeIdentity),
-        stateIds: ensureScenePresentation(scene).states.map((state) => state.id),
-        runtime: scene.runtime ?? null,
-      },
-      globalStructure: project.globalLayer.map((item) => ({
-        ...nodeIdentity(item.node),
-        layer: item.layer,
-        visibility: item.visibility,
-      })),
+  const previewRebuildKey = useMemo(
+    () => buildSlidePreviewRebuildKey({
+      canvasMode,
+      editingScope,
+      activePresentationStateId,
+      scene,
+      scenes: project.scenes,
+      globalLayer: project.globalLayer,
       globalRuntime: project.globalRuntime ?? null,
       assets: project.assets,
-    })
-  }, [activePresentationStateId, canvasMode, editingScope, project, scene])
+      candidateGlobals: candidateDocument?.globalLayerItems ?? null,
+      candidateAssets: candidateDocument?.assets ?? null,
+      sidecarFileIds: sidecarFileIdsFrom(candidateSidecar?.files, assetFiles),
+      componentPackages,
+    }),
+    [
+      activePresentationStateId,
+      assetFiles,
+      candidateDocument,
+      candidateSidecar,
+      canvasMode,
+      componentPackages,
+      editingScope,
+      project,
+      scene,
+    ],
+  )
   const previewGeneration = useMemo<object>(() => ({}), [
-    assetFiles,
     canvasMode,
-    componentPackages,
     previewRebuildKey,
     previewRetryRevision,
   ])
@@ -794,13 +1752,15 @@ export function Workspace({
       authoringFrameRef.current = null
     }
     pendingAuthoringNodesRef.current.clear()
+    const preview = projectCandidatePreviewDocument(editorState)
+    const globalItems = preview?.project.globalLayer ?? editorState.project.globalLayer
     const patches: PlayerAuthoringPatch[] = [
       ...materialized.nodes.map((node): PlayerAuthoringPatch => ({
         kind: 'native-node',
         target: { kind: 'native-node', scope: 'scene', nodeId: node.id },
         node,
       })),
-      ...editorState.project.globalLayer.map((item): PlayerAuthoringPatch => ({
+      ...globalItems.map((item): PlayerAuthoringPatch => ({
         kind: 'native-node',
         target: {
           kind: 'native-node',
@@ -838,6 +1798,52 @@ export function Workspace({
   }, [])
 
   useEffect(() => {
+    const container = courseTryRunRef.current
+    if (!useCoursePlayerTryRun || !courseDocument || !container) {
+      void courseTryRunSessionRef.current?.destroy()
+      courseTryRunSessionRef.current = null
+      return
+    }
+    let cancelled = false
+    void mountPublishedCourseTryRun({
+      container,
+      project: courseDocument,
+      assetFiles: courseSidecarFiles,
+      components: componentPackages,
+      locationId: courseLocationId,
+      width: container.getBoundingClientRect().width,
+      height: container.getBoundingClientRect().height,
+    }).then((session) => {
+      if (cancelled) {
+        void session.destroy()
+        return
+      }
+      courseTryRunSessionRef.current = session
+      container.dataset.coursePlayerReady = 'true'
+    }).catch((error) => {
+      if (!cancelled) console.error('CoursePlayer 试运行启动失败', error)
+    })
+    return () => {
+      cancelled = true
+      container.dataset.coursePlayerReady = 'false'
+      const session = courseTryRunSessionRef.current
+      courseTryRunSessionRef.current = null
+      if (session) void session.destroy()
+    }
+  }, [
+    componentPackages,
+    courseDocument,
+    courseLocationId,
+    courseSidecarFiles,
+    useCoursePlayerTryRun,
+  ])
+
+  useEffect(() => {
+    if (useCoursePlayerTryRun) {
+      setPreviewUrl(null)
+      setPreviewFeedback(null)
+      return
+    }
     clearRuntimePreviewStartupTimer()
     authoringReadyRef.current = false
     authoringRevisionRef.current = 0
@@ -870,10 +1876,11 @@ export function Workspace({
         ? editorState.activePresentationStateId
         : editorState.activePresentationStateId ??
           ensureScenePresentation(initialScene).initialStateId
+      const previewSource = projectCandidatePreviewDocument(editorState)
       payloadResources = createRuntimePreviewPayloadResources({
-        project,
-        assetFiles,
-        components: componentPackages,
+        project: previewSource?.project ?? editorState.project,
+        assetFiles: previewSource?.assetFiles ?? editorState.assetFiles,
+        components: editorState.componentPackages,
       })
       const payload = payloadResources.payload
       const playerBundle = loadPlayerBundle()
@@ -950,14 +1957,13 @@ export function Workspace({
       payloadResources = null
     }
   }, [
-    assetFiles,
     canvasMode,
     clearRuntimePreviewStartupTimer,
-    componentPackages,
     failRuntimePreview,
     previewRebuildKey,
     previewRetryRevision,
     retirePreviewResources,
+    useCoursePlayerTryRun,
   ])
 
   useEffect(() => () => revokeRetiredPreviewResources(), [
@@ -965,8 +1971,8 @@ export function Workspace({
   ])
 
   useEffect(() => {
-    if (canvasMode === 'run') syncRuntimePreview()
-  }, [canvasMode, syncRuntimePreview])
+    if (canvasMode === 'run' && !useCoursePlayerTryRun) syncRuntimePreview()
+  }, [canvasMode, syncRuntimePreview, useCoursePlayerTryRun])
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -1771,16 +2777,19 @@ export function Workspace({
           )
         }
       }),
-      handle.bridge.onNodeMoveEnd(({ nodeId, x, y }) =>
-        useEditorStore.getState().updateNode(nodeId, { x, y }),
-      ),
-      handle.bridge.onNodesMoveEnd(({ nodes }) =>
+      handle.bridge.onNodeMoveEnd(({ nodeId, x, y }) => {
+        if (selectSlideCandidateBackend(useEditorStore.getState())) return
+        useEditorStore.getState().updateNode(nodeId, { x, y })
+      }),
+      handle.bridge.onNodesMoveEnd(({ nodes }) => {
+        if (selectSlideCandidateBackend(useEditorStore.getState())) return
         useEditorStore.getState().updateNodes(
           nodes.map(({ nodeId, x, y }) => ({ nodeId, patch: { x, y } })),
-        ),
-      ),
+        )
+      }),
       handle.bridge.onNodeResizeEnd(({ nodeId, x, y, width, height }) => {
         const store = useEditorStore.getState()
+        if (selectSlideCandidateBackend(store)) return
         const node = selectEditingNodes(store).find(
           (item) => item.id === nodeId,
         )
@@ -1792,11 +2801,13 @@ export function Workspace({
           ),
         )
       }),
-      handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) =>
-        useEditorStore.getState().updateNode(nodeId, { rotation }),
-      ),
+      handle.bridge.onNodeRotateEnd(({ nodeId, rotation }) => {
+        if (selectSlideCandidateBackend(useEditorStore.getState())) return
+        useEditorStore.getState().updateNode(nodeId, { rotation })
+      }),
       handle.bridge.onNodesTransformEnd(({ nodes }) => {
         const store = useEditorStore.getState()
+        if (selectSlideCandidateBackend(store)) return
         const currentById = new Map(
           selectEditingNodes(store).map((node) => [node.id, node]),
         )
@@ -2029,24 +3040,99 @@ export function Workspace({
       }}
       onPointerDownCapture={(event) => {
         if (
+          canvasMode === 'edit' &&
+          (event.button === 1 || (event.button === 0 && spacePressedRef.current))
+        ) {
+          event.preventDefault()
+          event.stopPropagation()
+          event.currentTarget.setPointerCapture(event.pointerId)
+          panRef.current = {
+            pointerId: event.pointerId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            originX: view.x,
+            originY: view.y,
+          }
+          setPanning(true)
+          return
+        }
+        if (
+          slideBackendKind !== 'v9-slide-candidate' ||
           canvasMode !== 'edit' ||
-          (event.button !== 1 && !(event.button === 0 && spacePressedRef.current))
+          event.button !== 0
         ) return
+        if (
+          event.target instanceof HTMLElement &&
+          event.target.closest(
+            '.canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls',
+          )
+        ) return
+        const viewport = readCandidateViewport()
+        if (!viewport) return
+        const controllerResult = controllerAuthoringRef.current.pointerDown({
+          x: event.clientX,
+          y: event.clientY,
+        }, viewport)
+        if (
+          controllerResult.kind !== 'v8' &&
+          controllerGestureConsumed(
+            controllerResult.overlay,
+            controllerResult.preview,
+            controllerResult.target,
+          )
+        ) {
+          controllerPointerActiveRef.current = true
+          setControllerOverlay(controllerResult.overlay)
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        const result = slideAuthoringRef.current.pointerDown({
+          x: event.clientX,
+          y: event.clientY,
+          additive: event.shiftKey || event.ctrlKey || event.metaKey,
+        }, viewport)
+        if (result.kind === 'v8') return
+        candidatePointerActiveRef.current = true
         event.preventDefault()
         event.stopPropagation()
-        event.currentTarget.setPointerCapture(event.pointerId)
-        panRef.current = {
-          pointerId: event.pointerId,
-          clientX: event.clientX,
-          clientY: event.clientY,
-          originX: view.x,
-          originY: view.y,
-        }
-        setPanning(true)
       }}
       onPointerMoveCapture={(event) => {
         const pan = panRef.current
         if (!pan || pan.pointerId !== event.pointerId) {
+          if (
+            slideBackendKind === 'v9-slide-candidate' &&
+            controllerPointerActiveRef.current
+          ) {
+            const viewport = readCandidateViewport()
+            if (viewport) {
+              const controllerResult = controllerAuthoringRef.current.pointerMove({
+                x: event.clientX,
+                y: event.clientY,
+              }, viewport)
+              if (controllerResult.kind !== 'v8') {
+                setControllerOverlay(controllerResult.overlay)
+              }
+              event.preventDefault()
+              event.stopPropagation()
+              return
+            }
+          }
+          if (
+            slideBackendKind === 'v9-slide-candidate' &&
+            candidatePointerActiveRef.current
+          ) {
+            const viewport = readCandidateViewport()
+            if (viewport) {
+              slideAuthoringRef.current.pointerMove({
+                x: event.clientX,
+                y: event.clientY,
+              }, viewport)
+              event.preventDefault()
+              event.stopPropagation()
+              return
+            }
+          }
           const hit = canvasAuthoringHitAtClientPoint(event.clientX, event.clientY)
           setHoveredAuthoringTargetId((current) => (
             current === hit?.target.targetId
@@ -2064,6 +3150,41 @@ export function Workspace({
         }))
       }}
       onPointerUpCapture={(event) => {
+        if (
+          slideBackendKind === 'v9-slide-candidate' &&
+          controllerPointerActiveRef.current
+        ) {
+          const viewport = readCandidateViewport()
+          if (viewport) {
+            const controllerResult = controllerAuthoringRef.current.pointerUp({
+              x: event.clientX,
+              y: event.clientY,
+            }, viewport)
+            if (controllerResult.kind !== 'v8') {
+              setControllerOverlay(controllerResult.overlay)
+            }
+          }
+          controllerPointerActiveRef.current = false
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
+        if (
+          slideBackendKind === 'v9-slide-candidate' &&
+          candidatePointerActiveRef.current
+        ) {
+          const viewport = readCandidateViewport()
+          if (viewport) {
+            slideAuthoringRef.current.pointerUp({
+              x: event.clientX,
+              y: event.clientY,
+            }, viewport)
+          }
+          candidatePointerActiveRef.current = false
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         if (panRef.current?.pointerId !== event.pointerId) return
         event.preventDefault()
         event.stopPropagation()
@@ -2083,6 +3204,40 @@ export function Workspace({
             ))
         ) {
           return
+        }
+        if (slideBackendKind === 'v9-slide-candidate') {
+          const viewport = readCandidateViewport()
+          if (!viewport) return
+          const world = clientToWorld(createStageViewportTransform(viewport), {
+            x: event.clientX,
+            y: event.clientY,
+          })
+          const layerHit = hitTestV9SlideLayerItems(
+            listSlideWorkspaceHitTargets(),
+            world,
+          )
+          if (layerHit) {
+            const selected = selectEditingNodes(useEditorStore.getState()).find(
+              (node) => node.id === layerHit.layerItemId,
+            )
+            if (selected?.type === 'text' || selected?.type === 'formula') {
+              event.preventDefault()
+              event.stopPropagation()
+              const store = useEditorStore.getState()
+              store.selectNode(layerHit.layerItemId)
+              useEditorStore.getState().beginTextEdit(layerHit.layerItemId, 'canvas')
+              if (selected.type === 'formula') {
+                setActiveFormulaEditSession({
+                  projectId: store.project.id,
+                  scope: store.editingScope,
+                  sceneId: store.slideCandidateSnapshot?.sceneId ?? store.activeSceneId,
+                  stateId: store.slideCandidateSnapshot?.stateId ?? store.activePresentationStateId,
+                  nodeId: layerHit.layerItemId,
+                })
+              }
+              return
+            }
+          }
         }
         const hit = canvasAuthoringHitAtClientPoint(event.clientX, event.clientY)
         if (!hit) return
@@ -2114,6 +3269,29 @@ export function Workspace({
         >
           <Play size={13} />当前位置试运行
         </button>
+        {useCoursePlayerTryRun ? (
+          <div
+            role="group"
+            aria-label="试运行翻页"
+            data-testid="course-try-run-chrome"
+            style={{ display: 'flex', gap: 6, marginLeft: 8 }}
+          >
+            <button
+              type="button"
+              data-testid="course-try-run-previous"
+              onClick={() => void courseTryRunSessionRef.current?.previous()}
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              data-testid="course-try-run-next"
+              onClick={() => void courseTryRunSessionRef.current?.next()}
+            >
+              下一页
+            </button>
+          </div>
+        ) : null}
       </div>
       {canvasMode === 'edit' && (
         <div className="canvas-view-controls" role="group" aria-label="画布视图">
@@ -2154,7 +3332,7 @@ export function Workspace({
             transition: 'none',
           }}
         >
-          {previewUrl && (
+          {previewUrl && !useCoursePlayerTryRun && (
             <iframe
               ref={runtimeFrameRef}
               className="runtime-preview-frame"
@@ -2191,6 +3369,7 @@ export function Workspace({
             className="canvas-stage canvas-stage--authoring"
             data-testid="canvas-stage"
             aria-hidden={canvasMode === 'run'}
+            style={useCoursePlayerTryRun ? { pointerEvents: 'none' } : undefined}
           />
           {authoringCanvasInteractive && (
             visibleRuntimeTargets.length > 0 ||
@@ -2299,7 +3478,7 @@ export function Workspace({
               )}
             </div>
           )}
-          {previewFeedback && (
+          {previewFeedback && !useCoursePlayerTryRun && (
             <div
               className={`runtime-preview-loading runtime-preview-loading--${previewFeedback.kind}`}
               role={previewFeedback.kind === 'error' ? 'alert' : 'status'}
@@ -2323,7 +3502,7 @@ export function Workspace({
               </div>
             </div>
           )}
-          {!previewUrl && !previewFeedback && (
+          {!previewUrl && !previewFeedback && !useCoursePlayerTryRun && (
             <div className="runtime-preview-loading" role="status" aria-live="polite">
               <div className="runtime-preview-loading__panel">
                 <LoaderCircle
@@ -2336,14 +3515,44 @@ export function Workspace({
             </div>
           )}
         </div>
+        <div
+          ref={courseTryRunRef}
+          className="course-try-run-host"
+          data-testid="course-try-run-host"
+          hidden={!useCoursePlayerTryRun}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            overflow: 'hidden',
+            background: '#f8fafc',
+            zIndex: 5,
+          }}
+        />
       </div>
+      {canvasMode === 'edit' && controllerOverlay ? (
+        <TeacherControllerAuthoringOverlay overlay={controllerOverlay} />
+      ) : null}
       {canvasMode === 'edit' && editingFormulaNode && (
         <FormulaEditDialog
           key={`${editingFormulaNode.id}:${activePresentationStateId ?? 'base'}`}
           node={editingFormulaNode}
           onCancel={() => setActiveFormulaEditSession(null)}
           onCommit={(ast, accessibleText) => {
-            useEditorStore.getState().updateNode(editingFormulaNode.id, {
+            const store = useEditorStore.getState()
+            const backend = selectSlideCandidateBackend(store)
+            if (backend && store.v9ContentEdit?.kind === 'formula') {
+              const edited = updateV9SlideContentFormulaDraft(store.v9ContentEdit, {
+                ast,
+                accessibleText,
+              })
+              store.applySlideCandidateCommand(
+                (session) => commitV9SlideContentEdit(session, edited),
+                { clearContentEdit: true },
+              )
+              setActiveFormulaEditSession(null)
+              return
+            }
+            store.updateNode(editingFormulaNode.id, {
               ast,
               accessibleText,
             })
@@ -2414,3 +3623,5 @@ export function Workspace({
     </main>
   )
 }
+
+export { mountSpatialLocationTryRun, mountFlowLocationTryRun }

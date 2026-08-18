@@ -86,13 +86,34 @@ import {
   transparencyPercentToOpacity,
 } from '../../shared/opacity'
 import { collectProjectDiagnostics } from '../../shared/projectDiagnostics'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
+import type {
+  CourseLocation,
+  CourseProjectDocument,
+  LocationVisibility,
+} from '../../shared/courseProjectTypes'
 import {
+  collectAllCourseLayerOrders,
+  collectSlideSurfaceSceneOrders,
+  readGlobalLayerScenePlane,
+} from '../course/globalLayerCommands'
+import {
+  selectActiveCourseProjectDocument,
   selectActiveScene,
+  selectCandidateGlobalLayerItems,
   selectEditingNodes,
   selectSelectedNode,
+  selectSlideAuthoringSnapshot,
+  selectSlideCandidateBackend,
+  selectSlideCandidateDocument,
   type AlignmentMode,
   useEditorStore,
 } from '../store/editorStore'
+import {
+  findGlobalTeacherController,
+  teacherControllerPropertiesPreview,
+} from '../authoring/v9TeacherControllerAuthoring'
 import { ColorInput } from './ColorInput'
 import { ComponentPropertiesEditor } from './ComponentPropertiesEditor'
 import { RuntimeContentEditor } from './RuntimeContentEditor'
@@ -101,6 +122,40 @@ import { PresenterSettingsEditor } from './PresenterSettingsEditor'
 import { DesignTokensEditor } from './DesignTokensEditor'
 import { SimpleEntranceAnimationEditor } from './SimpleEntranceAnimationEditor'
 import { FormulaAuthoringEditor } from './FormulaAuthoringEditor'
+import { SpatialCameraPanel } from './SpatialCameraPanel'
+import { SpatialPathEditor } from './SpatialPathEditor'
+import type { SpatialAuthoringSession } from '../course/spatialEditorCommands'
+import { buildSpatialEditorView } from '../course/spatialEditorView'
+import {
+  addSpatialCameraFrameFromSession,
+  deleteSpatialCameraFrameInSession,
+  fitSpatialSessionToWorldContent,
+  renameSpatialCameraFrameInSession,
+  reorderSpatialCameraFramesInSession,
+  setSpatialCameraHomeFromSession,
+  updateActiveSpatialCameraFrameFromSession,
+} from '../course/spatialCameraCommands'
+import {
+  addSpatialPathInSession,
+  deleteSpatialPathInSession,
+  reorderSpatialPathWaypointsInSession,
+  setSpatialShowCameraFrames,
+  updateSpatialPathInSession,
+} from '../course/spatialPathCommands'
+import {
+  addSpatialRelationInSession,
+  deleteSpatialRelationInSession,
+  updateSpatialRelationInSession,
+} from '../course/spatialRelationCommands'
+import {
+  addSpatialSemanticZoomRuleInSession,
+  deleteSpatialSemanticZoomRuleInSession,
+  updateSpatialSemanticZoomRuleInSession,
+} from '../course/spatialSemanticZoom'
+import type { SpatialGraphSelection } from '../store/editorStore'
+import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
+import type { FlowBlock } from '../../shared/courseProjectTypes'
 
 interface BufferedInputProps {
   label: string
@@ -703,11 +758,41 @@ function TextProperties({ node, update }: {
   const beginTextEdit = useEditorStore((state) => state.beginTextEdit)
   const commitTextEdit = useEditorStore((state) => state.commitTextEdit)
   const cancelTextEdit = useEditorStore((state) => state.cancelTextEdit)
-  const toggleStyle = (key: 'bold' | 'italic' | 'underline' | 'strike') =>
+  const selectionRef = useRef({ start: 0, end: 0 })
+  const captureSelection = () => {
+    const active = document.activeElement
+    if (active instanceof HTMLTextAreaElement) {
+      selectionRef.current = {
+        start: active.selectionStart,
+        end: active.selectionEnd,
+      }
+    }
+  }
+  const toggleStyle = (key: 'bold' | 'italic' | 'underline' | 'strike') => {
+    const state = useEditorStore.getState()
+    const start = selectionRef.current.start
+    const end = selectionRef.current.end
+    if (selectSlideCandidateBackend(state) && end > start) {
+      state.commitSlideCandidateTextRunStyle({
+        layerItemId: node.id,
+        selectionStart: start,
+        selectionEnd: end,
+        patch: { [key]: true },
+        source: 'properties',
+      })
+      return
+    }
     update({ style: { [key]: !style[key] } } as DeepPartial<SceneNode>)
+  }
   const updateTextDraft = (text: string) => {
     let state = useEditorStore.getState()
-    if (state.textEditSession?.nodeId !== node.id) {
+    const candidate = selectSlideCandidateBackend(state)
+    if (candidate) {
+      if (state.v9ContentEdit?.target.layerItemId !== node.id) {
+        state.beginTextEdit(node.id, 'properties')
+        state = useEditorStore.getState()
+      }
+    } else if (state.textEditSession?.nodeId !== node.id) {
       state.beginTextEdit(node.id, 'properties')
       state = useEditorStore.getState()
     }
@@ -715,7 +800,12 @@ function TextProperties({ node, update }: {
       (item) => item.id === node.id,
     )
     if (current?.type !== 'text') return
-    const runs = remapTextRuns(current.text, text, current.runs)
+    const original = state.v9ContentEdit?.kind === 'text'
+      ? state.v9ContentEdit.original
+      : state.textEditSession?.original
+    const sourceText = original && 'text' in original ? original.text : current.text
+    const sourceRuns = original && 'runs' in original ? original.runs : current.runs
+    const runs = remapTextRuns(sourceText, text, sourceRuns)
     const draftNode = { ...current, text, runs }
     const rendered = current.style.overflow === 'auto-height'
       ? renderTextNodeCanvas(draftNode, draftNode.width)
@@ -762,7 +852,7 @@ function TextProperties({ node, update }: {
           {[
             ['bold', '加粗', Bold], ['italic', '斜体', Italic], ['underline', '下划线', Underline], ['strike', '删除线', Strikethrough],
           ].map(([key, label, Icon]) => (
-            <button type="button" key={String(key)} title={String(label)} aria-label={String(label)} className={`segment-button${style[key as 'bold'] ? ' segment-button--active' : ''}`} onClick={() => toggleStyle(key as 'bold' | 'italic' | 'underline' | 'strike')}>
+            <button type="button" key={String(key)} title={String(label)} aria-label={String(label)} className={`segment-button${style[key as 'bold'] ? ' segment-button--active' : ''}`} onMouseDown={captureSelection} onClick={() => toggleStyle(key as 'bold' | 'italic' | 'underline' | 'strike')}>
               <Icon size={15} />
             </button>
           ))}
@@ -1115,6 +1205,22 @@ function TeacherControllerProperties({ node, scenes, update }: {
   scenes: readonly SceneDocument[]
   update(patch: DeepPartial<SceneNode>): void
 }) {
+  const snapshotRevision = useEditorStore((state) => state.slideCandidateSnapshot?.revision ?? 0)
+  const layoutPreview = useMemo(() => {
+    const backend = selectSlideCandidateBackend(useEditorStore.getState())
+    if (!backend) return null
+    const item = findGlobalTeacherController(
+      backend.getSession().history.present,
+      node.id,
+    )
+    if (!item || item.content.nativeType !== 'teacher-controller') return null
+    return teacherControllerPropertiesPreview(item.content.data, {
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+    })
+  }, [node.height, node.id, node.width, node.x, node.y, snapshotRevision])
   const replaceButton = (
     index: number,
     patch: Partial<TeacherControllerNode['buttons'][number]>,
@@ -1133,6 +1239,19 @@ function TeacherControllerProperties({ node, scenes, update }: {
   return (
     <section className="property-section">
       <h3 className="property-title"><SlidersHorizontal size={14} />教师控制器</h3>
+      {layoutPreview ? (
+        <div
+          className="controller-layout-preview"
+          data-testid="teacher-controller-layout-preview"
+        >
+          <div className="readonly-value">
+            {layoutPreview.width} × {layoutPreview.height}
+          </div>
+          <p className="property-hint">
+            {layoutPreview.buttons.map((button) => button.label).join(' · ')}
+          </p>
+        </div>
+      ) : null}
       <BufferedInput label="控制器标题" value={node.title} onCommit={(title) => update({ title })} />
       <ToggleRow label="显示场景与状态进度" checked={node.showSceneProgress} onChange={(showSceneProgress) => update({ showSceneProgress })} />
       <ToggleRow label="紧凑布局" checked={node.compact} onChange={(compact) => update({ compact })} />
@@ -1549,7 +1668,183 @@ function RuntimeInspector({
   )
 }
 
+function candidateGlobalVisibilityCopy(kind: string | undefined) {
+  if (kind === 'slide-scene') {
+    return {
+      rangeLabel: '场景可见范围',
+      all: '全部场景',
+      include: '仅所选场景',
+      exclude: '除所选场景外',
+      pendingHint: '选择至少一个场景后，可见范围才会生效。',
+    }
+  }
+  return {
+    rangeLabel: '页面可见范围',
+    all: '全部页面',
+    include: '仅所选页面',
+    exclude: '除所选页面外',
+    pendingHint: '选择至少一个页面后，可见范围才会生效。',
+  }
+}
+
+function candidateLocationVisibilityLabel(
+  location: CourseLocation,
+  surfaces: CourseProjectDocument['surfaces'],
+): string {
+  if (location.kind !== 'slide-scene') return location.label
+  const surface = surfaces.find((item) => item.id === location.surfaceId)
+  if (!surface || surface.type !== 'slide') return location.label
+  const scene = surface.scenes.find((item) => item.id === location.sceneId)
+  return scene?.name ?? location.label
+}
+
+function CandidateGlobalLayerSettings({ nodeId }: { nodeId: string }) {
+  const document = useEditorStore(selectActiveCourseProjectDocument)
+    ?? useEditorStore(selectSlideCandidateDocument)
+  const snapshot = useEditorStore(selectSlideAuthoringSnapshot)
+  const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  const locationId = flowSession?.selection.locationId
+    ?? spatialSession?.selection.locationId
+    ?? snapshot?.locationId
+    ?? null
+  const entry = document?.globalLayerItems.find(
+    (item) => item.item.layerItemId === nodeId,
+  )
+  const setLocationVisibility = useEditorStore(
+    (state) => state.setCandidateGlobalLayerLocationVisibility,
+  )
+  const setVisibleAtLocation = useEditorStore(
+    (state) => state.setCandidateGlobalLayerVisibleAtLocation,
+  )
+  const updateSettings = useEditorStore(
+    (state) => state.updateGlobalLayerSettings,
+  )
+  const [pendingVisibilityMode, setPendingVisibilityMode] = useState<
+    Exclude<LocationVisibility['mode'], 'all'> | null
+  >(null)
+  useEffect(() => {
+    setPendingVisibilityMode(null)
+  }, [nodeId, entry?.visibility.mode])
+  if (!document || !entry || !locationId) return null
+
+  const setVisibility = (visibility: LocationVisibility) => {
+    setLocationVisibility(nodeId, visibility)
+  }
+  const effectiveVisibilityMode = pendingVisibilityMode ?? entry.visibility.mode
+  const selected = new Set(
+    pendingVisibilityMode === null ? entry.visibility.locationIds : [],
+  )
+  const visibleHere = isCourseLayerVisibleAtLocation(entry, locationId)
+  const locationKind = document.locations.find((location) => location.id === locationId)?.kind
+  const visibilityCopy = candidateGlobalVisibilityCopy(locationKind)
+  const scenePlane = readGlobalLayerScenePlane(
+    entry.item.order,
+    collectSlideSurfaceSceneOrders(document, locationId),
+    collectAllCourseLayerOrders(document),
+  )
+
+  return (
+    <section
+      className="property-section global-component-settings"
+      data-testid="global-layer-settings"
+    >
+      <h3 className="property-title"><Globe2 size={14} />全局挂载</h3>
+      <ToggleRow
+        label="当前页显示"
+        checked={visibleHere}
+        onChange={(visible) => setVisibleAtLocation(nodeId, visible)}
+      />
+      <SelectField<RuntimeLayer>
+        label="图层位置"
+        value={scenePlane}
+        options={[
+          { value: 'underlay', label: 'Underlay · 场景内容下方' },
+          { value: 'overlay', label: 'Overlay · 场景内容上方' },
+        ]}
+        onChange={(layer) => updateSettings(nodeId, { layer })}
+      />
+      <SelectField<LocationVisibility['mode']>
+        label={visibilityCopy.rangeLabel}
+        value={effectiveVisibilityMode}
+        options={[
+          { value: 'all', label: visibilityCopy.all },
+          { value: 'include', label: visibilityCopy.include },
+          { value: 'exclude', label: visibilityCopy.exclude },
+        ]}
+        onChange={(mode) => {
+          if (mode === 'all') {
+            setPendingVisibilityMode(null)
+            setVisibility({ mode, locationIds: [] })
+            return
+          }
+          const startsEmpty = entry.visibility.mode === 'all' ||
+            entry.visibility.locationIds.length === 0
+          if (startsEmpty) {
+            setPendingVisibilityMode(mode)
+            return
+          }
+          setPendingVisibilityMode(null)
+          setVisibility({ mode, locationIds: entry.visibility.locationIds })
+        }}
+      />
+      {effectiveVisibilityMode !== 'all' && (
+        <fieldset className="visibility-scene-list">
+          <legend>
+            {effectiveVisibilityMode === 'include' ? '显示于' : '隐藏于'}
+          </legend>
+          {document.locations.map((location) => (
+            <label key={location.id}>
+              <input
+                type="checkbox"
+                data-testid={`location-visibility-${location.id}`}
+                checked={selected.has(location.id)}
+                onChange={(event) => {
+                  const locationIds = new Set(
+                    pendingVisibilityMode === null
+                      ? entry.visibility.locationIds
+                      : [],
+                  )
+                  if (event.target.checked) locationIds.add(location.id)
+                  else locationIds.delete(location.id)
+                  if (locationIds.size === 0) {
+                    if (effectiveVisibilityMode === 'exclude') {
+                      setPendingVisibilityMode(null)
+                      setVisibility({ mode: 'all', locationIds: [] })
+                    } else {
+                      event.currentTarget.checked = true
+                    }
+                    return
+                  }
+                  setPendingVisibilityMode(null)
+                  setVisibility({
+                    mode: effectiveVisibilityMode,
+                    locationIds: [...locationIds],
+                  })
+                }}
+              />
+              <span>{candidateLocationVisibilityLabel(location, document.surfaces)}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {pendingVisibilityMode !== null && (
+        <p className="property-hint" role="status">
+          {visibilityCopy.pendingHint}
+        </p>
+      )}
+      <p className="property-hint">
+        全局元素只创建一次并跨页面持续存在；切换页面只更新显隐，不会改课程顺序或当前页。
+      </p>
+    </section>
+  )
+}
+
 function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
+  const candidate = useEditorStore(selectSlideCandidateBackend)
+  const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  if (candidate || spatialSession || flowSession) return <CandidateGlobalLayerSettings nodeId={nodeId} />
   const placement = useEditorStore((state) =>
     state.project.globalLayer.find((item) => item.node.id === nodeId),
   )
@@ -1605,8 +1900,6 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
           const startsEmpty = placement.visibility.mode === 'all' ||
             placement.visibility.sceneIds.length === 0
           if (startsEmpty) {
-            // A non-all visibility with no scenes is not a project state. Keep
-            // this as local UI intent until the first scene is selected.
             setPendingVisibilityMode(mode)
             return
           }
@@ -1632,8 +1925,6 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
                   )
                   if (event.target.checked) sceneIds.add(scene.id)
                   else sceneIds.delete(scene.id)
-                  // Do not invent a fallback selection in the Store and do
-                  // not persist schema-invalid include/exclude + [].
                   if (sceneIds.size === 0) {
                     if (effectiveVisibilityMode === 'exclude') {
                       setPendingVisibilityMode(null)
@@ -1667,6 +1958,206 @@ function GlobalLayerSettings({ nodeId }: { nodeId: string }) {
   )
 }
 
+function SpatialPathRelationFields({
+  session,
+  pageSection,
+  selectedPathId,
+  selectedRelationId,
+}: {
+  session: SpatialAuthoringSession
+  pageSection?: boolean
+  selectedPathId?: string | null
+  selectedRelationId?: string | null
+}) {
+  const runSpatialCommand = useEditorStore((state) => state.runSpatialCommand)
+  const surface = session.history.present.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'spatial-2d',
+  )
+  if (!surface || surface.type !== 'spatial-2d') return null
+  return (
+    <SpatialPathEditor
+      surfaceTitle={surface.title}
+      worldLayerItems={surface.world.layerItems}
+      paths={surface.world.paths ?? []}
+      relations={surface.world.relations ?? []}
+      pageSection={pageSection}
+      selectedPathId={selectedPathId}
+      selectedRelationId={selectedRelationId}
+      onAddPath={(input) => runSpatialCommand((current) => addSpatialPathInSession(current, input))}
+      onRenamePath={(pathId, name) => runSpatialCommand((current) => updateSpatialPathInSession(current, pathId, { name }))}
+      onUpdatePathStyle={(pathId, style) => runSpatialCommand((current) => updateSpatialPathInSession(current, pathId, { style }))}
+      onReorderPathWaypoints={(pathId, layerItemIds) => runSpatialCommand((current) => reorderSpatialPathWaypointsInSession(current, pathId, layerItemIds))}
+      onDeletePath={(pathId) => runSpatialCommand((current) => deleteSpatialPathInSession(current, pathId))}
+      onAddRelation={(input) => runSpatialCommand((current) => addSpatialRelationInSession(current, input))}
+      onUpdateRelationLabel={(relationId, label) => runSpatialCommand((current) => updateSpatialRelationInSession(current, relationId, { label }))}
+      onUpdateRelationKind={(relationId, kind) => runSpatialCommand((current) => updateSpatialRelationInSession(current, relationId, { kind }))}
+      onDeleteRelation={(relationId) => runSpatialCommand((current) => deleteSpatialRelationInSession(current, relationId))}
+    />
+  )
+}
+
+function SpatialPageProperties({ session }: { session: SpatialAuthoringSession }) {
+  const runSpatialCommand = useEditorStore((state) => state.runSpatialCommand)
+  const setActiveScene = useEditorStore((state) => state.setActiveScene)
+  const playbackPathId = useEditorStore((state) => state.spatialPlaybackPathId)
+  const setSpatialPlaybackPathId = useEditorStore((state) => state.setSpatialPlaybackPathId)
+  const view = buildSpatialEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+  })
+  const surface = session.history.present.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'spatial-2d',
+  )
+  if (!surface || surface.type !== 'spatial-2d') return null
+  return (
+    <>
+      <SpatialCameraPanel
+        surfaceTitle={view.surfaceTitle}
+        frames={[...view.camera.frames]}
+        home={view.camera.home}
+        sessionCamera={session.sessionCamera}
+        activeCameraFrameId={view.camera.activeFrameId}
+        showCameraFrames={session.showCameraFrames}
+        worldLayerItems={surface.world.layerItems}
+        paths={surface.world.paths ?? []}
+        playbackPathId={playbackPathId}
+        semanticZoomRules={surface.semanticZoom}
+        sessionCameraLabel={`${Math.round(session.sessionCamera.zoom * 100)}%`}
+        onShowCameraFramesChange={(show) => {
+          runSpatialCommand((current) => setSpatialShowCameraFrames(current, show))
+        }}
+        onAddFrame={() => runSpatialCommand((current) => addSpatialCameraFrameFromSession(current), {
+          statusMessage: '已添加镜头',
+        })}
+        onRenameFrame={(frameId, name) => runSpatialCommand((current) => renameSpatialCameraFrameInSession(current, frameId, name))}
+        onReorderFrame={(frameId, toIndex) => runSpatialCommand((current) => reorderSpatialCameraFramesInSession(current, frameId, toIndex))}
+        onDeleteFrame={(frameId) => runSpatialCommand((current) => deleteSpatialCameraFrameInSession(current, frameId))}
+        onSetHome={() => runSpatialCommand((current) => setSpatialCameraHomeFromSession(current))}
+        onUpdateActiveFromSession={() => runSpatialCommand((current) => updateActiveSpatialCameraFrameFromSession(current))}
+        onActivateFrame={(frameId) => setActiveScene(frameId)}
+        onFitWorldContent={() => runSpatialCommand((current) => fitSpatialSessionToWorldContent(current, {
+          viewportWidth: CANVAS_WIDTH,
+          viewportHeight: CANVAS_HEIGHT,
+        }))}
+        onPlaybackPathIdChange={setSpatialPlaybackPathId}
+        onAddSemanticZoomRule={(rule) => runSpatialCommand((current) => addSpatialSemanticZoomRuleInSession(current, rule))}
+        onUpdateSemanticZoomRule={(ruleId, patch) => runSpatialCommand((current) => updateSpatialSemanticZoomRuleInSession(current, ruleId, patch))}
+        onDeleteSemanticZoomRule={(ruleId) => runSpatialCommand((current) => deleteSpatialSemanticZoomRuleInSession(current, ruleId))}
+      />
+      <SpatialPathRelationFields session={session} pageSection />
+    </>
+  )
+}
+
+function selectedFlowBlock(session: FlowAuthoringSession): FlowBlock | null {
+  const blockId = session.selection.selectedBlockId
+  if (!blockId) return null
+  try {
+    return findFlowBlockRecursive(
+      flowSurfaceIn(session.history.present, session.selection.surfaceId).blocks,
+      blockId,
+    )?.block ?? null
+  } catch {
+    return null
+  }
+}
+
+function FlowPageProperties({ session }: { session: FlowAuthoringSession }) {
+  const renameFlowPage = useEditorStore((state) => state.renameFlowPage)
+  const surface = session.history.present.surfaces.find(
+    (candidate) => candidate.id === session.selection.surfaceId && candidate.type === 'flow',
+  )
+  if (!surface || surface.type !== 'flow') return null
+  return (
+    <section className="property-section" data-testid="flow-page-properties">
+      <h3 className="property-title"><Type size={14} />流式页面</h3>
+      <BufferedInput
+        label="页面标题"
+        value={surface.title}
+        onCommit={(title) => renameFlowPage(surface.id, title)}
+      />
+      <p className="property-hint">
+        标题和段落在稿纸里编辑。这里只改页面名称，不会出现 1280×720 场景背景。
+      </p>
+    </section>
+  )
+}
+
+function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
+  const block = selectedFlowBlock(session)
+  const formatFlowBlock = useEditorStore((state) => state.formatFlowBlock)
+  const formatFlowTextStyle = useEditorStore((state) => state.formatFlowTextStyle)
+  if (!block) {
+    return (
+      <div className="properties-scroll" data-testid="properties-tab">
+        <FlowPageProperties session={session} />
+      </div>
+    )
+  }
+  return (
+    <div className="properties-scroll" data-testid="properties-tab">
+      <section className="property-section" data-testid="flow-block-properties">
+        <h3 className="property-title"><Type size={14} />块结构</h3>
+        {block.type === 'heading' ? (
+          <SelectField<`${typeof block.level}`>
+            label="标题级别"
+            value={`${block.level}`}
+            options={[
+              { value: '1', label: 'H1' },
+              { value: '2', label: 'H2' },
+              { value: '3', label: 'H3' },
+              { value: '4', label: 'H4' },
+              { value: '5', label: 'H5' },
+              { value: '6', label: 'H6' },
+            ]}
+            onChange={(level) => formatFlowBlock({
+              kind: 'heading-level',
+              level: Number(level) as 1 | 2 | 3 | 4 | 5 | 6,
+            })}
+          />
+        ) : null}
+        {block.type === 'list' ? (
+          <ToggleRow
+            label="有序列表"
+            checked={block.ordered}
+            onChange={(ordered) => formatFlowBlock({ kind: 'list-ordered', ordered })}
+          />
+        ) : null}
+        <p className="property-hint">改正文请在稿纸里双击就地编辑，不要在这里整段替换。</p>
+      </section>
+      {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
+        <section className="property-section">
+          <h3 className="property-title"><Type size={14} />选区格式</h3>
+          <div className="property-button-row">
+            <button
+              type="button"
+              className="secondary-button"
+              data-testid="flow-format-bold"
+              onClick={() => formatFlowTextStyle({ bold: true })}
+            >
+              <Bold size={14} />粗体
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              data-testid="flow-format-italic"
+              onClick={() => formatFlowTextStyle({ italic: true })}
+            >
+              <Italic size={14} />斜体
+            </button>
+          </div>
+          <ColorInput
+            id="flow-text-color"
+            label="文字颜色"
+            value="#1f2937"
+            onChange={(color) => formatFlowTextStyle({ color })}
+          />
+        </section>
+      ) : null}
+    </div>
+  )
+}
+
 export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   const scene = useEditorStore(selectActiveScene)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -1676,10 +2167,15 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   )
   const editingNodes = useEditorStore(selectEditingNodes)
   const node = useEditorStore(selectSelectedNode)
+  const spatialSession = useEditorStore((state) => state.spatialSession)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  const spatialGraphSelection = useEditorStore((state) => state.spatialGraphSelection)
   const selectedNodeIds = useEditorStore((state) => state.selectedNodeIds)
   const selectedNodes = editingNodes.filter((item) => selectedNodeIds.includes(item.id))
   const components = useEditorStore((state) => state.componentPackages)
   const project = useEditorStore((state) => state.project)
+  const candidateGlobalLayerItems = useEditorStore(selectCandidateGlobalLayerItems)
+  const globalLayerCount = candidateGlobalLayerItems?.length ?? project.globalLayer.length
   const projectAssets = project.assets
   const projectDiagnostics = useMemo(
     () => collectProjectDiagnostics(project),
@@ -1717,6 +2213,20 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
       />
     )
   }
+  if (spatialSession && spatialGraphSelection) {
+    return (
+      <div className="properties-scroll" data-testid="properties-tab">
+        <SpatialPathRelationFields
+          session={spatialSession}
+          selectedPathId={spatialGraphSelection.kind === 'path' ? spatialGraphSelection.id : null}
+          selectedRelationId={spatialGraphSelection.kind === 'relation' ? spatialGraphSelection.id : null}
+        />
+      </div>
+    )
+  }
+  if (flowSession && flowSession.selection.focus !== 'overlay' && flowSession.selection.selectedBlockId) {
+    return <FlowBlockProperties session={flowSession} />
+  }
   if (!node) {
     return (
       <div className="properties-scroll" data-testid="properties-tab">
@@ -1725,9 +2235,13 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
             <section className="property-section global-layer-summary">
               <h3 className="property-title"><Globe2 size={14} />全局层</h3>
               <div className="runtime-summary-grid" aria-label="全局层摘要">
-                <span><small>全局元素</small>{project.globalLayer.length}</span>
+                <span><small>全局元素</small>{globalLayerCount}</span>
                 <span><small>Underlay</small>{project.globalLayer.filter((item) => item.layer === 'underlay').length}</span>
-                <span><small>Overlay</small>{project.globalLayer.filter((item) => item.layer === 'overlay').length}</span>
+                <span><small>Overlay</small>{
+                  candidateGlobalLayerItems
+                    ? globalLayerCount
+                    : project.globalLayer.filter((item) => item.layer === 'overlay').length
+                }</span>
                 <span><small>运行时</small>{project.globalRuntime ? '已配置' : '无'}</span>
               </div>
               <p className="property-hint">
@@ -1786,6 +2300,10 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
               />
             )}
           </>
+        ) : flowSession ? (
+          <FlowPageProperties session={flowSession} />
+        ) : spatialSession ? (
+          <SpatialPageProperties session={spatialSession} />
         ) : (
           <>
             <section className={`state-editing-notice${activePresentationState ? ' state-editing-notice--override' : ''}`}>
@@ -1868,7 +2386,7 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
   }
   return (
     <div className="properties-scroll" data-testid="properties-tab">
-      {editingScope === 'scene' && (
+      {editingScope === 'scene' && !spatialSession && !flowSession && (
         <section className={`state-editing-notice${activePresentationState ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
@@ -1902,7 +2420,8 @@ export function PropertiesTab({ onReplaceImage }: { onReplaceImage(): void }) {
           activeStateId={activePresentationStateId}
         />
       )}
-      {editingScope === 'global' && (
+{(editingScope === 'global' ||
+        Boolean(candidateGlobalLayerItems?.some((entry) => entry.item.layerItemId === node.id))) && (
         <GlobalLayerSettings nodeId={node.id} />
       )}
       {node.type === 'text' && <TextProperties node={node} update={update} />}

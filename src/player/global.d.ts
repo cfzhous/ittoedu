@@ -2,11 +2,13 @@ import type {
   ComponentDefinitionV4,
   ExportPayload,
 } from '../shared/componentTypes'
+import type { PublishedCourseV2Payload } from '../shared/publishedCourseTypes'
 import type { PublishedLessonPayload } from '../shared/publishedLessonTypes'
 import type { PlayerApp, PlayerAppOptions } from './PlayerApp'
 
 declare global {
   interface Window {
+    __H5_COURSE_PAYLOAD__?: PublishedCourseV2Payload
     __H5_LESSON_PAYLOAD__?: string | ExportPayload | PublishedLessonPayload
     __H5_LESSON_PAYLOAD_URL__?: string
     __H5_LESSON_PAYLOAD_FALLBACK__?: ExportPayload | PublishedLessonPayload

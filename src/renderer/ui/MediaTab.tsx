@@ -6,7 +6,7 @@ import {
   Upload,
   Video,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type {
   AudioChannel,
   AssetMeta,
@@ -14,6 +14,9 @@ import type {
   SoundDefinition,
 } from '../../shared/projectTypes'
 import {
+  selectAudioSettings,
+  selectMediaAssetFiles,
+  selectMediaAssets,
   useEditorStore,
   type ProjectAudioSettingsPatch,
 } from '../store/editorStore'
@@ -230,13 +233,26 @@ interface AssetEntryProps {
   asset: AssetMeta
   bytes: Uint8Array | undefined
   onDelete(): void
-  onAddToCanvas?(): void
+  onAddToCanvas?(event: ReactMouseEvent<HTMLButtonElement>): void
+  onAddAsOverlay?(): void
+  placeLabel?: string
+  overlayLabel?: string
 }
 
-function AssetEntry({ asset, bytes, onDelete, onAddToCanvas }: AssetEntryProps) {
+function AssetEntry({
+  asset,
+  bytes,
+  onDelete,
+  onAddToCanvas,
+  onAddAsOverlay,
+  placeLabel,
+  overlayLabel,
+}: AssetEntryProps) {
   const isVideo = asset.kind === 'video'
   const isAudio = asset.kind === 'audio'
-  const canPlaceOnCanvas = isVideo || asset.kind === 'image'
+  const canPlaceOnCanvas = Boolean(onAddToCanvas) && (
+    isVideo || asset.kind === 'image' || isAudio
+  )
   const Icon = isVideo ? Video : isAudio ? Music2 : ImageIcon
   const dimensions = asset.width && asset.height
     ? ` · ${asset.width} × ${asset.height}`
@@ -268,15 +284,27 @@ function AssetEntry({ asset, bytes, onDelete, onAddToCanvas }: AssetEntryProps) 
         <button
           type="button"
           className="media-add-to-canvas"
+          data-testid={`insert-flow-media-${asset.id}`}
           disabled={!bytes}
-          aria-label={`将${isVideo ? '视频' : '图片'}“${asset.filename}”添加到画布`}
+          aria-label={placeLabel ?? `将${isVideo ? '视频' : isAudio ? '声音' : '图片'}“${asset.filename}”添加到画布`}
           title={bytes
-            ? `在当前场景中创建可编辑${isVideo ? '视频' : '图片'}元素`
-            : `工程缺少${isVideo ? '视频' : '图片'}数据`}
-          onClick={onAddToCanvas}
+            ? (placeLabel ?? `在当前场景中创建可编辑${isVideo ? '视频' : '图片'}元素`)
+            : `工程缺少${isVideo ? '视频' : isAudio ? '声音' : '图片'}数据`}
+          onClick={(event) => onAddToCanvas(event)}
         >
           <Plus size={15} />
-          添加到画布
+          {placeLabel ?? '添加到画布'}
+        </button>
+      ) : null}
+      {onAddAsOverlay ? (
+        <button
+          type="button"
+          className="media-add-to-canvas"
+          data-testid={`insert-flow-overlay-${asset.id}`}
+          disabled={!bytes}
+          onClick={onAddAsOverlay}
+        >
+          {overlayLabel ?? '作为浮层添加'}
         </button>
       ) : null}
     </article>
@@ -385,9 +413,9 @@ export function MediaTab({
   showAdvancedAudioSettings = true,
   filterQuery = '',
 }: MediaTabProps) {
-  const assets = useEditorStore((state) => state.project.assets)
-  const assetFiles = useEditorStore((state) => state.assetFiles)
-  const audioSettings = useEditorStore((state) => state.project.media.audio)
+  const assets = useEditorStore(selectMediaAssets)
+  const assetFiles = useEditorStore(selectMediaAssetFiles)
+  const audioSettings = useEditorStore(selectAudioSettings)
   const sounds = audioSettings.sounds
   const updateAudioSettings = useEditorStore((state) => state.updateAudioSettings)
   const updateSound = useEditorStore((state) => state.updateSound)
@@ -395,6 +423,17 @@ export function MediaTab({
   const deleteAsset = useEditorStore((state) => state.deleteAsset)
   const addImageNode = useEditorStore((state) => state.addImageNode)
   const addVideoNode = useEditorStore((state) => state.addVideoNode)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  const insertFlowLibraryMedia = useEditorStore((state) => state.insertFlowLibraryMedia)
+  const setError = useEditorStore((state) => state.setError)
+
+  const insertFlowAsset = (
+    assetId: string,
+    request?: { altKey?: boolean; menuAction?: 'insert-document' | 'insert-overlay' },
+  ) => {
+    const result = insertFlowLibraryMedia(assetId, request)
+    if (!result.ok && result.reason) setError(result.reason)
+  }
 
   const normalizedFilter = filterQuery.trim().toLocaleLowerCase()
   const matchesFilter = (value: string): boolean =>
@@ -495,6 +534,9 @@ export function MediaTab({
                 asset={asset}
                 bytes={assetFiles[asset.id]}
                 onDelete={() => deleteAsset(asset.id)}
+                onAddToCanvas={flowSession ? () => insertFlowAsset(asset.id) : undefined}
+                onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                placeLabel={flowSession ? '插入正文' : undefined}
               />
             ))}
           </div>
@@ -517,9 +559,15 @@ export function MediaTab({
                   key={asset.id}
                   asset={asset}
                   bytes={bytes}
-                  onAddToCanvas={() => {
+                  onAddToCanvas={(event) => {
+                    if (flowSession) {
+                      insertFlowAsset(asset.id, { altKey: event.altKey })
+                      return
+                    }
                     if (bytes) addVideoNode(asset, bytes)
                   }}
+                  onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                  placeLabel={flowSession ? '插入正文' : undefined}
                   onDelete={() => deleteAsset(asset.id)}
                 />
               )
@@ -544,9 +592,15 @@ export function MediaTab({
                   key={asset.id}
                   asset={asset}
                   bytes={bytes}
-                  onAddToCanvas={() => {
+                  onAddToCanvas={(event) => {
+                    if (flowSession) {
+                      insertFlowAsset(asset.id, { altKey: event.altKey })
+                      return
+                    }
                     if (bytes) addImageNode(asset, bytes)
                   }}
+                  onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                  placeLabel={flowSession ? '插入正文' : undefined}
                   onDelete={() => deleteAsset(asset.id)}
                 />
               )

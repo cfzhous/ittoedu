@@ -585,6 +585,16 @@ async function patchDialogs(
                 : paths.projectOpen,
       }
     }
+    dialog.showMessageBox = async (...args:
+      | [Electron.MessageBoxOptions]
+      | [Electron.BaseWindow, Electron.MessageBoxOptions]
+    ) => {
+      const options = args.length === 1 ? args[0] : args[1]
+      return {
+        response: options.title === '放弃未保存的修改？' ? 0 : options.defaultId ?? 0,
+        checkboxChecked: false,
+      }
+    }
   }, values)
 }
 
@@ -593,9 +603,29 @@ async function clickBaseState(page: Page): Promise<void> {
   if (await base.count()) await base.click()
 }
 
+async function confirmV8ImportIfPrompted(page: Page): Promise<void> {
+  const importDialog = page.getByRole('alertdialog', { name: '需要显式导入旧版工程' })
+  const namedProject = page.getByText('工程已命名', { exact: true })
+  const alreadyNamed = await namedProject.isVisible()
+  if (alreadyNamed) {
+    await importDialog.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => undefined)
+  } else {
+    await importDialog.or(namedProject).waitFor({ state: 'visible', timeout: 30_000 })
+  }
+  if (!(await importDialog.isVisible())) return
+  await importDialog.getByRole('button', { name: '导入为当前课程工程' }).click()
+  await importDialog.waitFor({ state: 'hidden' })
+  const reportDialog = page.getByRole('dialog', { name: '旧版工程导入报告' })
+  await reportDialog.waitFor({ state: 'visible' })
+  await reportDialog.getByRole('button', { name: '完成' }).click()
+  await reportDialog.waitFor({ state: 'hidden' })
+}
+
 async function openProject(page: Page, app: ElectronApplication, projectPath: string, htmlPath: string): Promise<void> {
+  await page.getByText('正在处理…', { exact: true }).waitFor({ state: 'hidden' })
   await patchDialogs(app, { projectOpen: projectPath, htmlSave: htmlPath })
   await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+  await confirmV8ImportIfPrompted(page)
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
 }
 
@@ -644,12 +674,15 @@ async function exportDelivery(
 }
 
 async function sceneCanvasScreenshot(page: Page, sceneIndex: number): Promise<Buffer> {
-  await page.locator('.lesson-canvas-host canvas').waitFor({ state: 'visible', timeout: 20_000 })
+  const canvas = page.locator('.lesson-canvas-host canvas')
+  const adapter = page.locator('.slide-published-adapter')
+  await canvas.or(adapter).waitFor({ state: 'visible', timeout: 20_000 })
   for (let index = 0; index < sceneIndex; index += 1) {
     await page.keyboard.press('ArrowRight')
     await page.waitForTimeout(150)
   }
-  return page.locator('.lesson-canvas-host canvas').screenshot()
+  if (await adapter.isVisible()) return adapter.screenshot()
+  return canvas.screenshot()
 }
 
 async function previewScreenshot(
@@ -658,8 +691,28 @@ async function previewScreenshot(
   sceneIndex: number,
   networkErrors: string[],
 ): Promise<Buffer> {
+  const overlay = page.getByTestId('course-preview-overlay')
   const previewPromise = app.waitForEvent('window')
   await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
+  const mode = await Promise.race([
+    overlay.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'overlay' as const),
+    previewPromise.then(() => 'window' as const),
+  ])
+  if (mode === 'overlay') {
+    void previewPromise.catch(() => undefined)
+    try {
+      const stage = overlay.locator('.slide-published-adapter')
+      await stage.waitFor({ state: 'visible', timeout: 20_000 })
+      for (let index = 0; index < sceneIndex; index += 1) {
+        await page.getByTestId('course-preview-next').click()
+        await page.waitForTimeout(150)
+      }
+      return await stage.screenshot()
+    } finally {
+      await overlay.getByRole('button', { name: '关闭预览' }).click()
+      await overlay.waitFor({ state: 'hidden' })
+    }
+  }
   const preview = await previewPromise
   try {
     await enforceOffline(preview, networkErrors)

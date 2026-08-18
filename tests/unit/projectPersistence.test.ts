@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
   dialog: {},
 }))
 
+import { REBUILD_USER_DATA_DIRECTORY_NAME } from '../../src/main/applicationIdentity'
 import { openRecentProjectFile } from '../../src/main/fileDialogs'
 import {
   listRecentProjects,
@@ -27,6 +28,22 @@ import {
   recordRecentProject,
   writeRecoveryProject,
 } from '../../src/main/projectPersistence'
+import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import {
+  createCourseProjectArchive,
+  detectCourseProjectArchiveFormat,
+} from '../../src/renderer/project/courseProjectArchive'
+
+function makeV9RecoveryArchive(label: string): Uint8Array {
+  const project = createBlankCourseProject()
+  project.title = label
+  project.id = `recovery-${label}`
+  return createCourseProjectArchive({
+    project,
+    assetFiles: {},
+    componentFiles: {},
+  })
+}
 
 function makeArchive(label: string): Uint8Array {
   return zipSync({
@@ -56,8 +73,8 @@ describe('projectPersistence', () => {
 
   it('原子写入并读取恢复包，覆盖旧快照后不遗留临时文件', async () => {
     const sourcePath = path.join(testRoot, '课堂演示.h5lesson')
-    const first = makeArchive('first')
-    const second = makeArchive('second')
+    const first = makeV9RecoveryArchive('first')
+    const second = makeV9RecoveryArchive('second')
 
     await writeRecoveryProject({
       projectName: '课堂演示.h5lesson',
@@ -93,8 +110,8 @@ describe('projectPersistence', () => {
   })
 
   it('检测哈希不匹配并安全降级，遇到损坏 ZIP 时清除恢复数据', async () => {
-    const original = makeArchive('original')
-    const newerValidPackage = makeArchive('newer')
+    const original = makeV9RecoveryArchive('original')
+    const newerValidPackage = makeV9RecoveryArchive('newer')
     await writeRecoveryProject({
       projectName: '原始工程.h5lesson',
       projectPath: path.join(testRoot, '原始工程.h5lesson'),
@@ -218,5 +235,23 @@ describe('projectPersistence', () => {
     await expect(openRecentProjectFile(approvedPath)).rejects.toMatchObject({
       code: 'PROJECT_ARCHIVE_INVALID',
     })
+  })
+
+  it('rebuild AppData 目录保持隔离，且恢复层接受当前课程工程 zip', async () => {
+    expect(REBUILD_USER_DATA_DIRECTORY_NAME).toBe('ittoedu-courseware-editor-v8-rebuild')
+    const bytes = createCourseProjectArchive({
+      project: createBlankCourseProject(),
+      assetFiles: {},
+      componentFiles: {},
+    })
+    expect(detectCourseProjectArchiveFormat(bytes).kind).toBe('v9')
+
+    await writeRecoveryProject({
+      projectName: '当前课程工程.h5lesson',
+      bytes,
+    })
+    const restored = await readRecoveryProject()
+    expect(restored).not.toBeNull()
+    expect(detectCourseProjectArchiveFormat(restored!.bytes).kind).toBe('v9')
   })
 })

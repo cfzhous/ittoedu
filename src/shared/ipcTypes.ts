@@ -107,9 +107,10 @@ export interface DesktopAPI {
     suggestedName: string
     bytes: Uint8Array
   }): Promise<{ path: string } | null>
+  peekProjectArchive(input: { path: string }): Promise<OpenBinaryFileResult | null>
   exportBinary(input: {
     suggestedName: string
-    extension: 'pptx' | 'json'
+    extension: 'pptx' | 'json' | 'docx'
     bytes: Uint8Array
   }): Promise<{ path: string } | null>
   exportPdf(input: {
@@ -149,6 +150,7 @@ export const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',

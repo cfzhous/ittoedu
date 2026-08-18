@@ -452,6 +452,49 @@ describe('project archive', () => {
     },
   )
 
+  it('rejects Course Project V9 archives with an actionable Chinese error', () => {
+    const v9 = {
+      schemaVersion: 9,
+      id: 'course_v9',
+      title: 'V9 课例',
+      locations: [{ id: 'loc_1' }],
+      surfaces: [{ id: 'surface_1', type: 'slide' }],
+      globalLayerItems: [],
+      startLocationId: 'loc_1',
+    }
+    const bytes = zipSync({
+      'project.json': strToU8(JSON.stringify(v9)),
+    })
+
+    expect(() => openProjectArchive(bytes)).toThrowError(
+      expect.objectContaining({
+        title: '这是 V9 工程，当前无法打开',
+        message: expect.stringContaining('Course Project V9'),
+        suggestion: expect.stringContaining('显式迁移'),
+      }),
+    )
+  })
+
+  it('rejects V9-shaped documents even when schemaVersion is omitted', () => {
+    const v9Shaped = {
+      title: '未声明版本的 V9 结构',
+      locations: [],
+      surfaces: [],
+      globalLayerItems: [],
+      startLocationId: 'loc_start',
+    }
+    const bytes = zipSync({
+      'project.json': strToU8(JSON.stringify(v9Shaped)),
+    })
+
+    expect(() => openProjectArchive(bytes)).toThrowError(
+      expect.objectContaining({
+        title: '这是 V9 工程，当前无法打开',
+        suggestion: expect.stringContaining('显式迁移'),
+      }),
+    )
+  })
+
   it('reports a higher schemaVersion with a dedicated Chinese user error', () => {
     const project = {
       ...makeArchiveData().project,

@@ -3,7 +3,17 @@ import type {
   SceneDocument,
   SceneNode,
 } from '../../shared/projectTypes'
+import type { StagePoint } from '../authoring/stageViewportTransform'
 import type { EditorScene } from './EditorScene'
+import {
+  adaptV9SlideLayerItemHit,
+  editorPhaserPointerToWorld,
+  hitTestV9SlideLayerItems,
+  marqueeHitV9SlideLayerItems,
+  v9SlideLayerItemBounds,
+  v9SlideLayerItemIsHittable,
+  type V9SlideHitTarget,
+} from './v9SlideHitAdapter'
 
 export interface NodeMoveEndEvent {
   nodeId: string
@@ -208,4 +218,22 @@ export class EditorPhaserBridge {
   detach(scene: EditorScene): void {
     if (this.scene === scene) this.scene = null
   }
+
+  /**
+   * Phaser logical 1280×720 is Project world. CSS zoom/pan is applied by
+   * Workspace; do not scale pointer.worldX/Y again here.
+   */
+  pointerToSlideWorld(pointer: { worldX: number; worldY: number }): StagePoint {
+    return editorPhaserPointerToWorld(pointer)
+  }
 }
+
+export {
+  adaptV9SlideLayerItemHit,
+  editorPhaserPointerToWorld,
+  hitTestV9SlideLayerItems,
+  marqueeHitV9SlideLayerItems,
+  v9SlideLayerItemBounds,
+  v9SlideLayerItemIsHittable,
+}
+export type { V9SlideHitTarget }

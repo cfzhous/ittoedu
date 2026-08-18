@@ -155,6 +155,14 @@ describe('asset deletion safety', () => {
     project.scenes[0]!.nodes.push(createExternalComponentNode({
       component: { packageId: 'com.test.missing', version: '4.0.0' },
     }))
+    project.componentPackages['com.test.missing'] = {
+      packageId: 'com.test.missing',
+      version: '4.0.0',
+      name: 'Missing component',
+      manifestPath: 'components/manifest.json',
+      runtimePath: 'components/runtime.js',
+      contentSha256: '0'.repeat(64),
+    }
     useEditorStore.getState().loadProject(project, null, {
       possible: new Uint8Array([1]),
     })

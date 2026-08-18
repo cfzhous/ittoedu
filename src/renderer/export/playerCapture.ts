@@ -3,6 +3,39 @@ import { bytesToBase64 } from './base64'
 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 10_000
 
+function waitUntil(
+  isReady: () => boolean,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (action: () => void) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      action()
+    }
+    const timeout = window.setTimeout(() => {
+      finish(() => reject(new Error(timeoutMessage)))
+    }, timeoutMs)
+    const check = () => {
+      if (settled) return
+      try {
+        if (isReady()) {
+          finish(() => resolve())
+          return
+        }
+      } catch (error) {
+        finish(() => reject(error instanceof Error ? error : new Error(String(error))))
+        return
+      }
+      requestAnimationFrame(check)
+    }
+    check()
+  })
+}
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -28,49 +61,38 @@ export function waitForPlayerScene(
   expectedIndex: number,
   timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const started = performance.now()
-    const check = () => {
-      if (player.getCurrentSceneIndex() === expectedIndex) {
-        resolve()
-        return
-      }
-      if (performance.now() - started > timeoutMs) {
-        reject(new Error(`静态导出播放器切换到第 ${expectedIndex + 1} 页超时`))
-        return
-      }
-      requestAnimationFrame(check)
-    }
-    check()
-  })
+  return waitUntil(
+    () => player.getCurrentSceneIndex() === expectedIndex,
+    timeoutMs,
+    `静态导出播放器切换到第 ${expectedIndex + 1} 页超时`,
+  )
 }
 
 export function waitForPlayerLoaderIdle(
   player: PlayerApp,
   timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const started = performance.now()
-    const check = () => {
+  return waitUntil(
+    () => {
       const scene = player.game.scene.getScene('courseware-player')
-      if (!scene.load.isLoading()) {
-        resolve()
-        return
-      }
-      if (performance.now() - started > timeoutMs) {
-        reject(new Error('静态导出等待场景素材加载超时'))
-        return
-      }
-      requestAnimationFrame(check)
-    }
-    check()
-  })
+      return !scene?.load?.isLoading()
+    },
+    timeoutMs,
+    '静态导出等待场景素材加载超时',
+  )
 }
 
 export function settleCaptureFrames(milliseconds = 120): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    window.setTimeout(finish, milliseconds + 80)
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.setTimeout(resolve, milliseconds))
+      requestAnimationFrame(() => window.setTimeout(finish, milliseconds))
     })
   })
 }

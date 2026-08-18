@@ -30,6 +30,14 @@ export type AudioManagerProjectSettings = ProjectAudioSettings
 export type AudioTarget = AudioActionTarget
 export type { AudioChannel, SoundDefinition }
 
+/**
+ * V8 `ProjectDocument` and V9 `CourseProjectDocument` both carry
+ * `media.audio`. The manager only reads that slice.
+ */
+export type AudioManagerProjectSource = {
+  readonly media?: ProjectDocument['media']
+}
+
 export interface AudioChangeEvent {
   muted: boolean
   masterVolume: number
@@ -151,7 +159,7 @@ function isSoundChannel(value: unknown): value is SoundChannel {
   return value === 'music' || value === 'narration' || value === 'sfx' || value === 'ui'
 }
 
-function normalizedSettings(project: ProjectDocument): AudioManagerProjectSettings {
+function normalizedSettings(project: AudioManagerProjectSource): AudioManagerProjectSettings {
   const raw = project.media?.audio
   const rawChannels = raw?.channelVolumes
   const channelVolumes = Object.fromEntries(
@@ -241,7 +249,7 @@ export class AudioManager implements CourseAudioApi {
   private unlockListenersInstalled = false
 
   constructor(
-    private readonly project: ProjectDocument,
+    private readonly project: AudioManagerProjectSource,
     private readonly resolveAssetUrl: (assetId: string) => string,
     private readonly events: CourseEventBus,
     options: AudioManagerOptions = {},

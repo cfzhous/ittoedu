@@ -1,4 +1,10 @@
 import type {
+  CourseProjectDocument,
+  LayerItem,
+  NativeLayerItem,
+  ScopedLayerItem,
+} from './courseProjectTypes'
+import type {
   GlobalLayerItem,
   GlobalLayerVisibility,
   ProjectDocument,
@@ -111,6 +117,108 @@ export function synchronizeTeacherControllerControls(
   project: Pick<ProjectDocument, 'globalLayer' | 'scenes' | 'playback'>,
 ): void {
   project.playback.controls = hasDeliveryVisibleTeacherController(project)
+    ? 'canvas'
+    : 'none'
+}
+
+function courseControllerIntersectsCanvas(item: LayerItem): boolean {
+  const bounds = rotatedRectangleAabb({
+    x: item.frame.x,
+    y: item.frame.y,
+    width: item.frame.width,
+    height: item.frame.height,
+    rotation: item.rotation,
+  })
+  return bounds.right > 0 &&
+    bounds.bottom > 0 &&
+    bounds.left < CANVAS_WIDTH &&
+    bounds.top < CANVAS_HEIGHT
+}
+
+export function isCourseTeacherControllerLayerItem(
+  item: LayerItem | undefined | null,
+): item is NativeLayerItem & {
+  content: Extract<NativeLayerItem['content'], { nativeType: 'teacher-controller' }>
+} {
+  return item?.kind === 'native' && item.content.nativeType === 'teacher-controller'
+}
+
+export function teacherControllerOwnerIsGlobal(
+  source: 'global' | 'surface' | 'scene',
+): boolean {
+  return source === 'global'
+}
+
+/** Restores one V9 global controller after an explicit author request. */
+export function restoreCourseTeacherControllerLayer(entry: ScopedLayerItem): boolean {
+  if (!isCourseTeacherControllerLayerItem(entry.item)) return false
+  const item = entry.item
+  entry.visibility = { mode: 'all', locationIds: [] }
+  item.visible = true
+  item.playbackInitialVisibility = 'inherit'
+  if (item.opacity <= 0) item.opacity = 1
+  if (!courseControllerIntersectsCanvas(item)) {
+    item.frame.x = (CANVAS_WIDTH - item.frame.width) / 2
+    item.frame.y = (CANVAS_HEIGHT - item.frame.height) / 2
+  }
+  const data = item.content.data
+  const existingNavigation = data.buttons.find((button) =>
+    isTeacherControllerNavigationAction(button.action),
+  )
+  if (existingNavigation) {
+    existingNavigation.visible = true
+  } else if (data.buttons[0]) {
+    data.buttons[0].action = { type: 'scene.next' }
+    data.buttons[0].label = '下一场景'
+    data.buttons[0].visible = true
+  } else {
+    data.buttons.push({
+      id: `${item.layerItemId}_navigation`,
+      action: { type: 'scene.next' },
+      label: '下一场景',
+      visible: true,
+    })
+  }
+  return true
+}
+
+export function isCourseDeliveryVisibleTeacherController(
+  entry: ScopedLayerItem,
+  locationIds: readonly string[],
+): boolean {
+  if (!isCourseTeacherControllerLayerItem(entry.item)) return false
+  const item = entry.item
+  const hasVisibleNavigationAction = item.content.data.buttons.some((button) =>
+    button.visible && isTeacherControllerNavigationAction(button.action),
+  )
+  const visibleHere = locationIds.length === 0
+    ? entry.visibility.mode === 'all'
+    : locationIds.some((locationId) => {
+      if (entry.visibility.mode === 'all') return true
+      const listed = entry.visibility.locationIds.includes(locationId)
+      return entry.visibility.mode === 'include' ? listed : !listed
+    })
+  return item.visible &&
+    item.opacity > 0 &&
+    item.playbackInitialVisibility !== 'hidden' &&
+    courseControllerIntersectsCanvas(item) &&
+    hasVisibleNavigationAction &&
+    visibleHere
+}
+
+export function hasCourseDeliveryVisibleTeacherController(
+  project: Pick<CourseProjectDocument, 'globalLayerItems' | 'locations'>,
+): boolean {
+  const locationIds = project.locations.map((location) => location.id)
+  return project.globalLayerItems.some((entry) =>
+    isCourseDeliveryVisibleTeacherController(entry, locationIds),
+  )
+}
+
+export function synchronizeCourseTeacherControllerControls(
+  project: Pick<CourseProjectDocument, 'globalLayerItems' | 'locations' | 'playback'>,
+): void {
+  project.playback.controls = hasCourseDeliveryVisibleTeacherController(project)
     ? 'canvas'
     : 'none'
 }

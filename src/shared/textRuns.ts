@@ -58,6 +58,35 @@ function runsFromCharacterStyles(styles: TextRunStyle[]): TextRun[] {
  * rich-text overrides. An override equal to the node default is removed so
  * runs continue to encode differences instead of a duplicated base style.
  */
+/**
+ * Toggles a boolean run override against the node default. A value equal to
+ * the default is omitted so runs stay sparse.
+ */
+export function toggleTextRunBoolean(
+  text: string,
+  runs: TextRun[],
+  selectionStart: number,
+  selectionEnd: number,
+  key: 'bold' | 'italic' | 'underline' | 'strike',
+  baseValue: boolean,
+): TextRun[] {
+  const characterCount = Array.from(text).length
+  const start = Math.max(0, Math.min(characterCount, Math.floor(selectionStart)))
+  const end = Math.max(start, Math.min(characterCount, Math.floor(selectionEnd)))
+  if (end <= start) return structuredClone(runs)
+
+  const styles = stylesByCharacter(characterCount, runs)
+  const allOn = styles
+    .slice(start, end)
+    .every((style) => style[key] ?? baseValue)
+  const nextValue = !allOn
+  for (let index = start; index < end; index += 1) {
+    if (nextValue === baseValue) delete styles[index][key]
+    else styles[index][key] = nextValue
+  }
+  return runsFromCharacterStyles(styles)
+}
+
 export function toggleTextRunEmphasis(
   text: string,
   runs: TextRun[],
@@ -78,6 +107,32 @@ export function toggleTextRunEmphasis(
   for (let index = start; index < end; index += 1) {
     if (nextEmphasis === baseEmphasis) delete styles[index].emphasis
     else styles[index].emphasis = nextEmphasis
+  }
+  return runsFromCharacterStyles(styles)
+}
+
+/**
+ * Applies style fields to a Unicode-code-point range only. An empty selection
+ * is a no-op so callers cannot accidentally format the whole string.
+ */
+export function applyTextRunStyle(
+  text: string,
+  runs: TextRun[],
+  selectionStart: number,
+  selectionEnd: number,
+  patch: TextRunStyle,
+): TextRun[] {
+  const characterCount = Array.from(text).length
+  const start = Math.max(0, Math.min(characterCount, Math.floor(selectionStart)))
+  const end = Math.max(start, Math.min(characterCount, Math.floor(selectionEnd)))
+  if (end <= start) return structuredClone(runs)
+
+  const applied = normalizeStyle(patch)
+  if (!hasStyle(applied)) return structuredClone(runs)
+
+  const styles = stylesByCharacter(characterCount, runs)
+  for (let index = start; index < end; index += 1) {
+    Object.assign(styles[index], applied)
   }
   return runsFromCharacterStyles(styles)
 }

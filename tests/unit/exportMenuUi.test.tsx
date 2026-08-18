@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RecentProjectEntry } from '@/shared/ipcTypes'
-import { useEditorStore } from '@/renderer/store/editorStore'
+import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
 import { utf8ByteLength } from '@/renderer/export/exportSize'
+import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
 import { ExportSizeWarningDialog } from '@/renderer/ui/ExportSizeWarningDialog'
 import { TopToolbar, type ExportFormat } from '@/renderer/ui/TopToolbar'
 
@@ -116,7 +117,7 @@ describe('unified export menu', () => {
     expect(useEditorStore.getState().project).toBe(projectBefore)
   })
 
-  it('offers all four formats from one export control', () => {
+  it('offers HTML, web package, PPTX, PDF, and DOCX from one export control', () => {
     const onExport = vi.fn<(format: ExportFormat) => void>()
     renderToolbar(onExport)
 
@@ -125,9 +126,23 @@ describe('unified export menu', () => {
     expect(screen.getByRole('menuitem', { name: /网页包/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /PowerPoint（PPTX）/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /^PDF/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /DOCX 讲义/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('menuitem', { name: /网页包/ }))
     expect(onExport).toHaveBeenCalledWith('web-package')
+  })
+
+  it('routes V9 course HTML through the Published Course V2 producer', () => {
+    const document = selectActiveCourseProjectDocument(useEditorStore.getState())
+    expect(document?.schemaVersion).toBe(9)
+    const html = buildPublishedCourseStandaloneHtml({
+      project: document!,
+      assetFiles: {},
+      components: {},
+    }, '(function(){})();')
+    expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
+    expect(html).not.toContain('.course-nav')
+    expect(html).not.toContain('class="course-nav"')
   })
 
   it('does not open while the editor is busy', () => {
