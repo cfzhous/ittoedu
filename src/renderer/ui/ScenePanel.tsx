@@ -17,6 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { FileText, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
+import { COURSE_LAST_LOCATION_REASON } from '../course/courseLocationCommands'
 import { deriveCourseEditorLayout, type CourseEditorLayoutResult } from '../course/courseEditorLayout'
 import {
   addSpatialCameraFrameFromSession,
@@ -46,6 +47,7 @@ const SORTABLE_PAGE_KINDS = new Set(['slide-page', 'flow-page', 'spatial-page'])
 export type CourseTreeReorderPlan =
   | { readonly kind: 'surfaces'; readonly surfaceIds: string[] }
   | { readonly kind: 'scenes'; readonly sceneIds: string[] }
+  | { readonly kind: 'migrate-scene'; readonly locationId: string; readonly targetSurfaceId: string; readonly toIndex: number }
   | { readonly kind: 'cameras'; readonly surfaceId: string; readonly frameId: string; readonly toIndex: number }
 
 type CourseTreeSortableKind = 'page' | 'slide-scene' | 'spatial-camera'
@@ -97,6 +99,14 @@ function indexCourseTreeSlots(pages: readonly CourseTreeNode[]): Map<string, Cou
   return slots
 }
 
+function slideSceneIdOf(
+  project: Pick<CourseProjectDocument, 'locations'>,
+  locationId: string,
+): string | null {
+  const location = project.locations.find((candidate) => candidate.id === locationId)
+  return location?.kind === 'slide-scene' ? location.sceneId : null
+}
+
 export function planCourseTreeReorder(
   project: Pick<CourseProjectDocument, 'locations' | 'surfaces'>,
   pages: readonly CourseTreeNode[],
@@ -108,6 +118,29 @@ export function planCourseTreeReorder(
   const active = slots.get(activeId)
   const over = slots.get(overId)
   if (!active || !over) return null
+
+  if (active.kind === 'slide-scene' && active.surfaceId !== over.surfaceId) {
+    const targetSurface = project.surfaces.find((candidate) => candidate.id === over.surfaceId)
+    if (!targetSurface || targetSurface.type !== 'slide') return null
+    if (over.kind !== 'page' && over.kind !== 'slide-scene') return null
+    const fromSceneId = slideSceneIdOf(project, activeId)
+    if (!fromSceneId) return null
+    let toIndex = targetSurface.scenes.length
+    if (over.kind === 'slide-scene') {
+      const toSceneId = slideSceneIdOf(project, overId)
+      if (!toSceneId) return null
+      const overIndex = targetSurface.scenes.findIndex((scene) => scene.id === toSceneId)
+      if (overIndex < 0) return null
+      toIndex = overIndex
+    }
+    return {
+      kind: 'migrate-scene',
+      locationId: activeId,
+      targetSurfaceId: over.surfaceId,
+      toIndex,
+    }
+  }
+
   if (active.parentKey !== over.parentKey) return null
   if (active.kind !== over.kind) return null
 
@@ -122,12 +155,8 @@ export function planCourseTreeReorder(
   if (active.kind === 'slide-scene') {
     const surface = project.surfaces.find((candidate) => candidate.id === active.surfaceId)
     if (!surface || surface.type !== 'slide') return null
-    const sceneIdOf = (locationId: string) => {
-      const location = project.locations.find((candidate) => candidate.id === locationId)
-      return location?.kind === 'slide-scene' ? location.sceneId : null
-    }
-    const fromSceneId = sceneIdOf(activeId)
-    const toSceneId = sceneIdOf(overId)
+    const fromSceneId = slideSceneIdOf(project, activeId)
+    const toSceneId = slideSceneIdOf(project, overId)
     if (!fromSceneId || !toSceneId) return null
     const sceneIds = surface.scenes.map((scene) => scene.id)
     const oldIndex = sceneIds.indexOf(fromSceneId)
@@ -270,6 +299,7 @@ function CourseTreeNodeRow({
   onAddSpatialCamera,
   onDeleteSpatialCamera,
   onDeleteSlideScene,
+  onDeleteSurface,
 }: {
   node: CourseTreeNode
   activeLocationId: string | null
@@ -280,6 +310,7 @@ function CourseTreeNodeRow({
   onAddSpatialCamera?(surfaceId: string): void
   onDeleteSpatialCamera?(locationId: string): void
   onDeleteSlideScene?(locationId: string): void
+  onDeleteSurface?(surfaceId: string): void
 }) {
   const editingScope = useEditorStore((state) => state.editingScope)
   const project = useEditorStore(selectActiveCourseProjectDocument)
@@ -293,6 +324,11 @@ function CourseTreeNodeRow({
   const thumbnailStateName = project ? thumbnailStateNameForTreeNode(project, node) : null
   const canDeleteSlideScene = Boolean(
     project && slideSceneCountOnSamePage(project, node) > 1,
+  )
+  const canDeleteSurface = Boolean(
+    project
+    && (node.kind === 'slide-page' || node.kind === 'flow-page' || node.kind === 'spatial-page')
+    && project.locations.some((location) => location.surfaceId !== node.surfaceId),
   )
 
   const commitRename = () => {
@@ -318,6 +354,7 @@ function CourseTreeNodeRow({
       onAddSpatialCamera={onAddSpatialCamera}
       onDeleteSpatialCamera={onDeleteSpatialCamera}
       onDeleteSlideScene={onDeleteSlideScene}
+      onDeleteSurface={onDeleteSurface}
     />
   )
 
@@ -437,6 +474,21 @@ function CourseTreeNodeRow({
           <Trash2 size={14} />
         </button>
       ) : null}
+      {node.kind === 'slide-page' || node.kind === 'flow-page' || node.kind === 'spatial-page' ? (
+        <button
+          type="button"
+          className="icon-button icon-button--danger"
+          title={canDeleteSurface ? '删除页面' : COURSE_LAST_LOCATION_REASON}
+          aria-label={`删除页面“${node.label}”`}
+          disabled={!canDeleteSurface}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (canDeleteSurface) onDeleteSurface?.(node.surfaceId)
+          }}
+        >
+          <Trash2 size={14} />
+        </button>
+      ) : null}
       {node.kind === 'slide-scene' && node.locationId ? (
         <button
           type="button"
@@ -496,6 +548,8 @@ export function ScenePanel() {
   const activateCourseLocation = useEditorStore((state) => state.activateCourseLocation)
   const addCourseContent = useEditorStore((state) => state.addCourseContent)
   const reorderCourseSurfaces = useEditorStore((state) => state.reorderCourseSurfaces)
+  const deleteCourseSurface = useEditorStore((state) => state.deleteCourseSurface)
+  const moveCourseSlideScene = useEditorStore((state) => state.moveCourseSlideScene)
   const reorderScenes = useEditorStore((state) => state.reorderScenes)
   const runSpatialCommand = useEditorStore((state) => state.runSpatialCommand)
   const applyFlowSelection = useEditorStore((state) => state.applyFlowSelection)
@@ -505,6 +559,7 @@ export function ScenePanel() {
   const spatialSession = useEditorStore((state) => state.spatialSession)
   const [pendingDeleteCameraId, setPendingDeleteCameraId] = useState<string | null>(null)
   const [pendingDeleteSceneId, setPendingDeleteSceneId] = useState<string | null>(null)
+  const [pendingDeleteSurfaceId, setPendingDeleteSurfaceId] = useState<string | null>(null)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -538,6 +593,12 @@ export function ScenePanel() {
     }
     return pendingDeleteSceneId
   }, [project, pendingDeleteSceneId])
+
+  const pendingSurfaceName = useMemo(() => {
+    if (!project || !pendingDeleteSurfaceId) return null
+    return project.surfaces.find((surface) => surface.id === pendingDeleteSurfaceId)?.title
+      ?? pendingDeleteSurfaceId
+  }, [project, pendingDeleteSurfaceId])
 
   if (!project || !treeView || !layout) {
     return null
@@ -584,6 +645,10 @@ export function ScenePanel() {
         if (dragged) activateCourseLocation(dragged.id)
       }
       reorderScenes(plan.sceneIds)
+      return
+    }
+    if (plan.kind === 'migrate-scene') {
+      moveCourseSlideScene(plan.locationId, plan.targetSurfaceId, plan.toIndex)
       return
     }
     if (spatialSession?.selection.surfaceId !== plan.surfaceId) {
@@ -672,6 +737,7 @@ export function ScenePanel() {
                     const spatialLocation = project.locations.find((location) => location.id === locationId)
                     if (spatialLocation?.kind === 'spatial-camera') {
                       setPendingDeleteSceneId(null)
+                      setPendingDeleteSurfaceId(null)
                       setPendingDeleteCameraId(spatialLocation.cameraFrameId)
                     }
                   }}
@@ -679,8 +745,14 @@ export function ScenePanel() {
                     const sceneId = slideSceneIdFromLocation(project, locationId)
                     if (sceneId) {
                       setPendingDeleteCameraId(null)
+                      setPendingDeleteSurfaceId(null)
                       setPendingDeleteSceneId(sceneId)
                     }
+                  }}
+                  onDeleteSurface={(surfaceId) => {
+                    setPendingDeleteCameraId(null)
+                    setPendingDeleteSceneId(null)
+                    setPendingDeleteSurfaceId(surfaceId)
                   }}
                 />
               ))}
@@ -716,6 +788,20 @@ export function ScenePanel() {
             useEditorStore.getState().deleteScene(pendingDeleteSceneId)
           }
           setPendingDeleteSceneId(null)
+        }}
+      />
+      <ConfirmDialog
+        open={Boolean(pendingDeleteSurfaceId)}
+        title="删除页面？"
+        message={pendingSurfaceName ? `“${pendingSurfaceName}”整组将被删除。此操作可以撤销。` : ''}
+        confirmLabel="删除页面"
+        danger
+        onCancel={() => setPendingDeleteSurfaceId(null)}
+        onConfirm={() => {
+          if (pendingDeleteSurfaceId) {
+            deleteCourseSurface(pendingDeleteSurfaceId)
+          }
+          setPendingDeleteSurfaceId(null)
         }}
       />
     </aside>

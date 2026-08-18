@@ -4,6 +4,7 @@ import {
   addSpatialCameraFrameFromSession,
   reorderSpatialCameraFramesInSession,
 } from '@/renderer/course/spatialCameraCommands'
+import { COURSE_LAST_LOCATION_REASON } from '@/renderer/course/courseLocationCommands'
 import { buildCourseTreeView } from '@/renderer/course/courseTreeView'
 import {
   selectActiveCourseProjectDocument,
@@ -200,5 +201,115 @@ describe('ScenePanel course tree reorder', () => {
     render(<ScenePanel />)
     fireEvent.click(screen.getByTestId(`spatial-camera-${cameras[1]!.id}`))
     expect(useEditorStore.getState().spatialSession?.selection.locationId).toBe(cameras[1]!.locationId)
+  })
+
+  it('labels flow and spatial primary add actions without 新增页面', () => {
+    const store = useEditorStore.getState()
+    store.createNewFlowProject()
+    render(<ScenePanel />)
+    expect(screen.getByTestId('add-content-primary')).toHaveTextContent('新增流式讲义')
+    expect(screen.getByTestId('add-content-primary').textContent).not.toContain('新增页面')
+    cleanup()
+
+    store.createNewSpatialProject()
+    render(<ScenePanel />)
+    expect(screen.getByTestId('add-content-primary')).toHaveTextContent('新增无限画布')
+    expect(screen.getByTestId('add-content-primary').textContent).not.toContain('新增页面')
+  })
+
+  it('deletes a whole flow group from the tree and disables deleting the last course location', () => {
+    const store = useEditorStore.getState()
+    store.addCourseContent('flow-page')
+    store.addCourseContent('slide-page')
+    store.addCourseContent('spatial-page')
+    render(<ScenePanel />)
+    const first = courseDocument()
+    const flow = first.surfaces.find((surface) => surface.type === 'flow')
+    const extraSlide = first.surfaces.filter((surface) => surface.type === 'slide')[1]
+    const spatial = first.surfaces.find((surface) => surface.type === 'spatial-2d')
+    if (!flow || !extraSlide || !spatial) throw new Error('expected mixed groups')
+
+    fireEvent.click(screen.getByRole('button', { name: `删除页面“${flow.title}”` }))
+    fireEvent.click(screen.getByRole('button', { name: '删除页面' }))
+    expect(courseDocument().surfaces.some((surface) => surface.id === flow.id)).toBe(false)
+
+    cleanup()
+    render(<ScenePanel />)
+    fireEvent.click(screen.getByRole('button', { name: `删除页面“${extraSlide.title}”` }))
+    fireEvent.click(screen.getByRole('button', { name: '删除页面' }))
+    expect(courseDocument().surfaces.some((surface) => surface.id === extraSlide.id)).toBe(false)
+
+    cleanup()
+    render(<ScenePanel />)
+    fireEvent.click(screen.getByRole('button', { name: `删除页面“${spatial.title}”` }))
+    fireEvent.click(screen.getByRole('button', { name: '删除页面' }))
+    expect(courseDocument().surfaces.some((surface) => surface.id === spatial.id)).toBe(false)
+
+    cleanup()
+    render(<ScenePanel />)
+    const slide = courseDocument().surfaces.find((surface) => surface.type === 'slide')
+    if (!slide) throw new Error('expected slide surface')
+    const slideDelete = screen.getByRole('button', { name: `删除页面“${slide.title}”` })
+    expect((slideDelete as HTMLButtonElement).disabled).toBe(true)
+    expect(slideDelete.getAttribute('title')).toBe(COURSE_LAST_LOCATION_REASON)
+  })
+
+  it('plans migrating a slide scene onto a different slide-page group instead of returning null', () => {
+    const store = useEditorStore.getState()
+    store.addCourseContent('slide-page')
+    const secondSurface = courseDocument().surfaces.filter((surface) => surface.type === 'slide')[1]
+    if (!secondSurface || secondSurface.type !== 'slide') throw new Error('expected second slide page')
+    const secondLocation = courseDocument().locations.find((location) =>
+      location.kind === 'slide-scene' && location.surfaceId === secondSurface.id,
+    )
+    if (!secondLocation) throw new Error('expected second-page scene')
+    store.activateCourseLocation(secondLocation.id)
+    store.addCourseContent('scene', { surfaceId: secondSurface.id })
+
+    const before = courseDocument()
+    const tree = buildCourseTreeView(before)
+    const slidePages = tree.pages.filter((page) => page.kind === 'slide-page')
+    expect(slidePages).toHaveLength(2)
+    const fromScene = slidePages[1]!.children[1] ?? slidePages[1]!.children[0]!
+    const ontoPage = slidePages[0]!
+    const ontoScene = slidePages[0]!.children[0]!
+
+    expect(planCourseTreeReorder(
+      before,
+      tree.pages,
+      fromScene.id,
+      ontoPage.id,
+    )).toMatchObject({
+      kind: 'migrate-scene',
+      locationId: fromScene.id,
+      targetSurfaceId: ontoPage.surfaceId,
+      toIndex: ontoPage.children.length,
+    })
+
+    const ontoScenePlan = planCourseTreeReorder(
+      before,
+      tree.pages,
+      fromScene.id,
+      ontoScene.id,
+    )
+    expect(ontoScenePlan?.kind).toBe('migrate-scene')
+    if (ontoScenePlan?.kind !== 'migrate-scene') throw new Error('expected migrate plan')
+    expect(ontoScenePlan.targetSurfaceId).toBe(ontoScene.surfaceId)
+    expect(ontoScenePlan.toIndex).toBe(0)
+
+    store.moveCourseSlideScene(
+      ontoScenePlan.locationId,
+      ontoScenePlan.targetSurfaceId,
+      ontoScenePlan.toIndex,
+    )
+    const after = courseDocument()
+    const relocated = after.locations.find((location) => location.id === fromScene.id)
+    expect(relocated?.kind === 'slide-scene' && relocated.surfaceId).toBe(ontoPage.surfaceId)
+    const target = after.surfaces.find((surface) => surface.id === ontoPage.surfaceId)
+    if (!target || target.type !== 'slide') throw new Error('expected target slide')
+    expect(target.scenes[0]?.id).toBe(
+      relocated && relocated.kind === 'slide-scene' ? relocated.sceneId : undefined,
+    )
+    expect(after.surfaces.some((surface) => surface.id === secondSurface.id)).toBe(true)
   })
 })

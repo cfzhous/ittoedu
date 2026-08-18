@@ -237,6 +237,8 @@ import {
   addCourseScene,
   addCourseSlidePage,
   addCourseSpatialPage,
+  deleteCourseSurface as applyDeleteCourseSurface,
+  moveCourseSlideScene as applyMoveCourseSlideScene,
   reorderCourseSurfaces as applyReorderCourseSurfaces,
   type CourseLocationCommandResult,
 } from '../course/courseLocationCommands'
@@ -1489,6 +1491,8 @@ export interface EditorState {
     options?: { surfaceId?: string },
   ): void
   reorderCourseSurfaces(surfaceIds: string[]): void
+  deleteCourseSurface(surfaceId: string): void
+  moveCourseSlideScene(locationId: string, targetSurfaceId: string, toIndex?: number): void
   activateCourseLocation(locationId: string): void
   createLiveEditorSelectionSnapshot(
     focus?: EditorFocusKind | EventTarget | null,
@@ -4983,6 +4987,46 @@ export const useEditorStore = create<EditorState>((set, get) => {
         expectedRevision: project.revision,
         activeLocationId: selectActiveCourseLocationId(get()) ?? undefined,
       }))
+    },
+
+    deleteCourseSurface(surfaceId) {
+      const project = selectActiveCourseProjectDocument(get())
+      if (!project) return
+      const activeLocationId = selectActiveCourseLocationId(get()) ?? undefined
+      const active = activeLocationId
+        ? project.locations.find((location) => location.id === activeLocationId)
+        : undefined
+      if (active?.surfaceId === surfaceId) {
+        const fallback = project.locations.find((location) => location.surfaceId !== surfaceId)
+        if (fallback) get().activateCourseLocation(fallback.id)
+      }
+      const liveProject = selectActiveCourseProjectDocument(get()) ?? project
+      const result = applyDeleteCourseSurface(liveProject, surfaceId, {
+        expectedRevision: liveProject.revision,
+        activeLocationId: selectActiveCourseLocationId(get()) ?? activeLocationId,
+      })
+      if (!result.ok) {
+        set({ errorMessage: result.reason, statusMessage: null })
+        return
+      }
+      persistCourseProjectCommand(result, { statusMessage: '已删除页面' })
+      if (result.activatedLocationId) get().activateCourseLocation(result.activatedLocationId)
+    },
+
+    moveCourseSlideScene(locationId, targetSurfaceId, toIndex) {
+      const project = selectActiveCourseProjectDocument(get())
+      if (!project) return
+      const result = applyMoveCourseSlideScene(project, locationId, targetSurfaceId, {
+        expectedRevision: project.revision,
+        toIndex,
+        activeLocationId: selectActiveCourseLocationId(get()) ?? undefined,
+      })
+      if (!result.ok) {
+        set({ errorMessage: result.reason, statusMessage: null })
+        return
+      }
+      persistCourseProjectCommand(result, { statusMessage: '已调整演示页面' })
+      if (result.activatedLocationId) get().activateCourseLocation(result.activatedLocationId)
     },
 
     addScene() {

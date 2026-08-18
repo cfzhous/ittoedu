@@ -659,6 +659,94 @@ export function renameCourseLocation(
   }, input)
 }
 
+function regroupLocationsBySurfaces(draft: CourseProjectDocument): void {
+  const grouped = new Map<string, CourseLocation[]>()
+  draft.locations.forEach((location) => {
+    const entries = grouped.get(location.surfaceId) ?? []
+    entries.push(location)
+    grouped.set(location.surfaceId, entries)
+  })
+  draft.locations = draft.surfaces.flatMap((surface) => grouped.get(surface.id) ?? [])
+}
+
+function mutateMoveSlideScene(
+  draft: CourseProjectDocument,
+  locationId: string,
+  targetSurfaceId: string,
+  toIndex?: number,
+): string {
+  const location = requireLocation(draft, locationId)
+  if (location.kind !== 'slide-scene') {
+    throw new Error('只能移动演示场景')
+  }
+  const sourceSurfaceId = location.surfaceId
+  if (sourceSurfaceId === targetSurfaceId) {
+    throw new Error('场景已在该演示页面中')
+  }
+  const source = mutableSlideSurface(draft, sourceSurfaceId)
+  const target = mutableSlideSurface(draft, targetSurfaceId)
+  const sceneIndex = source.scenes.findIndex((scene) => scene.id === location.sceneId)
+  if (sceneIndex < 0) throw new Error(`找不到 Slide 场景：${location.sceneId}`)
+  if (target.scenes.some((scene) => scene.id === location.sceneId)) {
+    throw new Error('目标页面已有该场景')
+  }
+  const [scene] = source.scenes.splice(sceneIndex, 1)
+  if (!scene) throw new Error(`找不到 Slide 场景：${location.sceneId}`)
+  const insertAt = Math.max(0, Math.min(toIndex ?? target.scenes.length, target.scenes.length))
+  target.scenes.splice(insertAt, 0, scene)
+  draft.locations.forEach((candidate) => {
+    if (
+      candidate.kind !== 'slide-scene' ||
+      candidate.sceneId !== scene.id ||
+      candidate.surfaceId !== sourceSurfaceId
+    ) {
+      return
+    }
+    candidate.surfaceId = targetSurfaceId
+    candidate.label = `${target.title} · ${scene.name}`
+  })
+  if (source.scenes.length === 0) {
+    deleteSurfaceFromDraft(draft, sourceSurfaceId, location.id)
+  }
+  regroupLocationsBySurfaces(draft)
+  if (draft.surfaces.some((surface) => surface.id === sourceSurfaceId)) {
+    reorderSlideLocationsForSurface(draft, sourceSurfaceId)
+  }
+  reorderSlideLocationsForSurface(draft, targetSurfaceId)
+  syncMixedPrintPlan(draft)
+  return location.id
+}
+
+export function moveCourseSlideScene(
+  project: CourseProjectDocument,
+  locationId: string,
+  targetSurfaceId: string,
+  input: CourseLocationCommandOptions & {
+    toIndex?: number
+    activeLocationId?: string
+  } = {},
+): CourseLocationCommandResult {
+  let location: CourseLocation
+  try {
+    location = requireLocation(project, locationId)
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '找不到课程位置', project)
+  }
+  if (location.kind !== 'slide-scene') {
+    return fail('只能移动演示场景', project)
+  }
+  const target = project.surfaces.find((candidate) => candidate.id === targetSurfaceId)
+  if (!target || target.type !== 'slide') {
+    return fail('只能把演示场景移到另一演示页面', project)
+  }
+  if (location.surfaceId === targetSurfaceId) {
+    return fail('场景已在该演示页面中', project)
+  }
+  return runMutation(project, (draft) => (
+    mutateMoveSlideScene(draft, locationId, targetSurfaceId, input.toIndex)
+  ), input)
+}
+
 export function reorderCourseSurfaces(
   project: CourseProjectDocument,
   surfaceIds: readonly string[],

@@ -4,11 +4,15 @@ import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import {
   addCourseFlowPage,
   addCourseScene,
+  addCourseSlidePage,
   addCourseSpatialPage,
   COURSE_LAST_LOCATION_REASON,
   deleteCourseLocation,
+  deleteCourseSurface,
+  moveCourseSlideScene,
   reorderCourseSurfaces,
 } from '@/renderer/course/courseLocationCommands'
+import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { appendBlankFlowPage } from '@/renderer/project/createFlowCourseProject'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
@@ -186,5 +190,189 @@ describe('courseLocationCommands', () => {
     expect(unknown.ok).toBe(false)
     if (unknown.ok) throw new Error('expected unknown reorder failure')
     expect(unknown.reason).toBe('页面排序包含未知页面')
+  })
+
+  it('deletes a whole Flow/Slide/Spatial group and refuses the last course location', () => {
+    let project = createBlankCourseProject({ now: NOW })
+    const slideId = slideSurfaceId(project)
+    const flowAdded = addCourseFlowPage(project, { now: NOW, expectedRevision: project.revision })
+    expect(flowAdded.ok).toBe(true)
+    if (!flowAdded.ok) throw new Error(flowAdded.reason)
+    project = flowAdded.project
+    const flowId = project.surfaces.find((surface) => surface.type === 'flow')?.id
+    expect(flowId).toBeTruthy()
+
+    const spatialAdded = addCourseSpatialPage(project, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(spatialAdded.ok).toBe(true)
+    if (!spatialAdded.ok) throw new Error(spatialAdded.reason)
+    project = spatialAdded.project
+    const spatialId = project.surfaces.find((surface) => surface.type === 'spatial-2d')?.id
+    expect(spatialId).toBeTruthy()
+
+    const deletedFlow = deleteCourseSurface(project, flowId!, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(deletedFlow.ok).toBe(true)
+    if (!deletedFlow.ok) throw new Error(deletedFlow.reason)
+    project = deletedFlow.project
+    expect(project.surfaces.some((surface) => surface.id === flowId)).toBe(false)
+    expect(project.locations.some((location) => location.surfaceId === flowId)).toBe(false)
+
+    const deletedSpatial = deleteCourseSurface(project, spatialId!, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(deletedSpatial.ok).toBe(true)
+    if (!deletedSpatial.ok) throw new Error(deletedSpatial.reason)
+    project = deletedSpatial.project
+    expect(project.surfaces.some((surface) => surface.id === spatialId)).toBe(false)
+
+    const last = deleteCourseSurface(project, slideId, { expectedRevision: project.revision })
+    expect(last.ok).toBe(false)
+    if (last.ok) throw new Error('expected last-location failure')
+    expect(last.reason).toBe(COURSE_LAST_LOCATION_REASON)
+    expect(last.project).toBe(project)
+    expect(courseProjectDocumentSchema.parse(project)).toEqual(project)
+  })
+
+  it('does not delete a whole Flow page through deleteCourseLocation on a heading', () => {
+    let project = createBlankFlowCourseProject({ now: NOW })
+    const flow = project.surfaces.find((surface) => surface.type === 'flow')
+    if (!flow || flow.type !== 'flow') throw new Error('expected flow surface')
+    const inserted = insertFlowEditorBlock(project, {
+      surfaceId: flow.id,
+      parentId: null,
+      index: flow.blocks.length,
+      block: { type: 'heading', level: 1, text: '第二节' },
+    }, { now: NOW, expectedRevision: project.revision })
+    expect(inserted.ok).toBe(true)
+    if (!inserted.ok || !inserted.nextDocument) throw new Error(inserted.reason ?? 'insert failed')
+    project = inserted.nextDocument
+    const headings = project.locations.filter((location) =>
+      location.kind === 'flow-block' && location.surfaceId === flow.id,
+    )
+    expect(headings.length).toBeGreaterThan(1)
+
+    const refused = deleteCourseLocation(project, headings[1]!.id, {
+      expectedRevision: project.revision,
+    })
+    expect(refused.ok).toBe(false)
+    if (refused.ok) throw new Error('expected flow-block delete refusal')
+    expect(refused.reason).toBe('请通过 Flow 编辑器删除本页内的标题块')
+    expect(refused.project).toBe(project)
+    expect(project.surfaces.some((surface) => surface.id === flow.id)).toBe(true)
+  })
+
+  it('moves a slide scene onto another slide surface and rewrites print-plan refs', () => {
+    let project = createBlankCourseProject({ now: NOW })
+    const firstSlideId = slideSurfaceId(project)
+    const secondPage = addCourseSlidePage(project, { now: NOW, expectedRevision: project.revision })
+    expect(secondPage.ok).toBe(true)
+    if (!secondPage.ok) throw new Error(secondPage.reason)
+    project = secondPage.project
+    const secondSlide = project.surfaces.find((surface) =>
+      surface.type === 'slide' && surface.id !== firstSlideId,
+    )
+    if (!secondSlide || secondSlide.type !== 'slide') throw new Error('expected second slide surface')
+    const extraScene = addCourseScene(project, {
+      surfaceId: secondSlide.id,
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(extraScene.ok).toBe(true)
+    if (!extraScene.ok) throw new Error(extraScene.reason)
+    project = extraScene.project
+
+    const flowAdded = addCourseFlowPage(project, { now: NOW, expectedRevision: project.revision })
+    expect(flowAdded.ok).toBe(true)
+    if (!flowAdded.ok) throw new Error(flowAdded.reason)
+    project = flowAdded.project
+    const flowId = project.surfaces.find((surface) => surface.type === 'flow')!.id
+    const spatialAdded = addCourseSpatialPage(project, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(spatialAdded.ok).toBe(true)
+    if (!spatialAdded.ok) throw new Error(spatialAdded.reason)
+    project = spatialAdded.project
+    const spatialId = project.surfaces.find((surface) => surface.type === 'spatial-2d')!.id
+
+    const moving = project.locations.find((location) =>
+      location.kind === 'slide-scene' && location.surfaceId === secondSlide.id,
+    )
+    if (!moving || moving.kind !== 'slide-scene') throw new Error('expected scene to move')
+
+    const rejectedFlow = moveCourseSlideScene(project, moving.id, flowId, {
+      expectedRevision: project.revision,
+    })
+    expect(rejectedFlow.ok).toBe(false)
+    if (rejectedFlow.ok) throw new Error('expected flow reject')
+    expect(rejectedFlow.reason).toBe('只能把演示场景移到另一演示页面')
+
+    const rejectedSpatial = moveCourseSlideScene(project, moving.id, spatialId, {
+      expectedRevision: project.revision,
+    })
+    expect(rejectedSpatial.ok).toBe(false)
+    if (rejectedSpatial.ok) throw new Error('expected spatial reject')
+    expect(rejectedSpatial.reason).toBe('只能把演示场景移到另一演示页面')
+
+    const moved = moveCourseSlideScene(project, moving.id, firstSlideId, {
+      now: NOW,
+      expectedRevision: project.revision,
+      toIndex: 0,
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) throw new Error(moved.reason)
+    const relocated = moved.project.locations.find((location) => location.id === moving.id)
+    expect(relocated?.kind === 'slide-scene' && relocated.surfaceId).toBe(firstSlideId)
+    expect(moved.project.surfaces.some((surface) => surface.id === secondSlide.id)).toBe(true)
+    const target = moved.project.surfaces.find((surface) => surface.id === firstSlideId)
+    if (!target || target.type !== 'slide') throw new Error('expected target slide')
+    expect(target.scenes[0]?.id).toBe(moving.sceneId)
+    const source = moved.project.surfaces.find((surface) => surface.id === secondSlide.id)
+    if (!source || source.type !== 'slide') throw new Error('expected source slide')
+    expect(source.scenes.map((scene) => scene.id)).not.toContain(moving.sceneId)
+    const print = moved.project.mixedPrintPlan?.entries.find((entry) =>
+      entry.kind === 'slide-scenes' && entry.surfaceId === firstSlideId,
+    )
+    expect(print?.kind === 'slide-scenes' && print.sceneIds[0]).toBe(moving.sceneId)
+    const sourcePrint = moved.project.mixedPrintPlan?.entries.find((entry) =>
+      entry.kind === 'slide-scenes' && entry.surfaceId === secondSlide.id,
+    )
+    expect(sourcePrint?.kind === 'slide-scenes' && sourcePrint.sceneIds).not.toContain(moving.sceneId)
+    expect(courseProjectDocumentSchema.parse(moved.project)).toEqual(moved.project)
+  })
+
+  it('removes an emptied slide group after its last scene moves into another group', () => {
+    let project = createBlankCourseProject({ now: NOW })
+    const firstSlideId = slideSurfaceId(project)
+    const secondPage = addCourseSlidePage(project, { now: NOW, expectedRevision: project.revision })
+    expect(secondPage.ok).toBe(true)
+    if (!secondPage.ok) throw new Error(secondPage.reason)
+    project = secondPage.project
+    const secondSlideId = project.surfaces.find((surface) =>
+      surface.type === 'slide' && surface.id !== firstSlideId,
+    )?.id
+    expect(secondSlideId).toBeTruthy()
+    const moving = project.locations.find((location) =>
+      location.kind === 'slide-scene' && location.surfaceId === secondSlideId,
+    )
+    if (!moving) throw new Error('expected second-group scene')
+
+    const moved = moveCourseSlideScene(project, moving.id, firstSlideId, {
+      now: NOW,
+      expectedRevision: project.revision,
+    })
+    expect(moved.ok).toBe(true)
+    if (!moved.ok) throw new Error(moved.reason)
+    expect(moved.project.surfaces.some((surface) => surface.id === secondSlideId)).toBe(false)
+    const relocated = moved.project.locations.find((location) => location.id === moving.id)
+    expect(relocated?.kind === 'slide-scene' && relocated.surfaceId).toBe(firstSlideId)
+    expect(moved.project.surfaces.filter((surface) => surface.type === 'slide')).toHaveLength(1)
+    expect(courseProjectDocumentSchema.parse(moved.project)).toEqual(moved.project)
   })
 })
