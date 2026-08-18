@@ -1557,7 +1557,10 @@ export function FlowWorkspace({
             margin: '0 auto',
             padding: '28px 36px 64px',
             background: resolveCourseSurfaceBackgroundColor(
-              project.surfaces.find((candidate) => candidate.id === view.surfaceId && candidate.type === 'flow')?.backgroundColor,
+              (() => {
+                const surface = project.surfaces.find((candidate) => candidate.id === view.surfaceId)
+                return surface?.type === 'flow' ? surface.backgroundColor : undefined
+              })(),
             ),
             color: FLOW_PAPER_TEXT_COLOR,
             boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',

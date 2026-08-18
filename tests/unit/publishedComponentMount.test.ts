@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   ComponentPackageData,
-  PublishedCourseComponent,
 } from '../../src/shared/componentTypes'
+import type {
+  PublishedCourseComponent,
+} from '../../src/shared/publishedCourseTypes'
 import {
   findComponentPackageSource,
   mountPublishedComponent,
@@ -125,17 +127,22 @@ describe('publishedComponentMount helper', () => {
 
     const packageData: ComponentPackageData = {
       manifest: {
+        schemaVersion: 4,
+        runtimeApiVersion: 4,
         id: 'counter-component',
         name: '计数器',
         version: '1.0.0',
-        runtimeApiVersion: 4,
-        scopes: ['scene', 'global'],
+        entry: 'runtime.js',
+        defaultSize: { width: 200, height: 60 },
+        minSize: { width: 100, height: 40 },
+        preserveAspectRatio: false,
+        supportedScopes: ['scene', 'global'],
         renderMode: 'dom',
         defaultProps: { label: '默认', count: 0 },
         assets: {},
       },
       runtimeSource: RUNTIME_CODE,
-      assets: {},
+      files: {},
       metadata: {
         packageId: 'counter-component',
         version: '1.0.0',
@@ -143,7 +150,7 @@ describe('publishedComponentMount helper', () => {
         embeddedAt: '2026-08-18',
         sourceTrust: 'built-in',
       },
-    }
+    } as unknown as ComponentPackageData
 
     const registry = new ComponentRegistry()
     const handle = mountPublishedComponent(container, {

@@ -6,19 +6,19 @@
     {
       "name": "courseProjectDocumentSchema",
       "file": "course-project-v9.schema.json",
-      "sourceOfTruth": "src/shared/courseProjectSchema.ts",
+      "sourceOfTruth": "src/shared/contracts/course-project-v9/schema.ts",
       "sha256": "00ce23320b554da7b7f82d7cd889a92ad61cce450b632b0a4b370b9256b155af"
     },
     {
       "name": "publishedCourseV2Schema",
       "file": "published-course-v2.schema.json",
-      "sourceOfTruth": "src/shared/publishedCourseSchema.ts",
-      "sha256": "dff184c184e98fa5400b1ec7968c4e7c928ed49cb78ca77cb17976db4409754f"
+      "sourceOfTruth": "src/shared/contracts/published-course-v2/schema.ts",
+      "sha256": "358673a46104cc109fbcb08d17c9cab6d71c1a80356afb6024b7339d50f1d4e9"
     },
     {
       "name": "componentManifestSchema",
       "file": "component-manifest.schema.json",
-      "sourceOfTruth": "src/shared/componentSchema.ts",
+      "sourceOfTruth": "src/shared/contracts/component-v4/schema.ts",
       "sha256": "2d40ee68253a13455026b0f648028f4a00583fa6e23c9ecedf658238fa7507a9"
     }
   ]

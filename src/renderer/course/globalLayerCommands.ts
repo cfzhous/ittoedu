@@ -16,6 +16,7 @@ import type {
   NativeLayerItem,
   ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
+import type { DeepReadonly } from './slideEditorView'
 import { createTeacherControllerNode } from '../project/createProject'
 import {
   synchronizeCourseTeacherControllerControls,
@@ -87,7 +88,7 @@ export function crossOwnerReorderReason(): string {
 }
 
 export function isTeacherControllerLayerItem(
-  item: LayerItem | undefined,
+  item: LayerItem | DeepReadonly<LayerItem> | undefined,
 ): item is NativeLayerItem & {
   content: Extract<NativeLayerItem['content'], { nativeType: 'teacher-controller' }>
 } {

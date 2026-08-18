@@ -1,2 +1,2 @@
-export * from '../../interactionTypes'
-export * from '../../interactionSchema'
+export * from './types'
+export * from './schema'

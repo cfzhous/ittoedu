@@ -1,7 +1,7 @@
 # Course Project V9 兼容性与演进策略
 
 > 本文档规范 Course Project V9 的版本演进规则、格式兼容边界与向后兼容承诺。
-> 权威类型定义以 `src/shared/courseProjectTypes.ts` 与 `src/shared/publishedCourseTypes.ts` 为准。
+> 权威类型定义以 `src/shared/contracts/course-project-v9/` 与 `src/shared/contracts/published-course-v2/`（旧路径保留 re-export 桩）为准。
 
 ---
 

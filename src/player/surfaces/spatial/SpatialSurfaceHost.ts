@@ -227,7 +227,7 @@ function createWorldItem(
     rect.setAttribute('y', String(frame.y))
     rect.setAttribute('width', String(frame.width))
     rect.setAttribute('height', String(frame.height))
-    rect.setAttribute('fill', item.kind === 'component' ? '#eff6ff' : '#f8fafc')
+    rect.setAttribute('fill', '#f8fafc')
     rect.setAttribute('stroke', '#64748b')
     group.appendChild(rect)
     const text = dom.createElementNS(SVG_NS, 'text')
