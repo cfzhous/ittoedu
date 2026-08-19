@@ -77,7 +77,7 @@ npm test
 - 场景缩略图按 `thumbnailStateId` 绘制背景、原生元素和组件缩略图，并按层合成已启用场景/全局运行时登记的静态后备；组件未提供图片时显示带名称的后备框，已启用运行时未提供后备时显示“运行时”提示角标；
 - 大型课件缩略图延迟渲染、图片按场景加载和增量撤销历史。
 
-详细操作见 [用户指南](docs/USER_GUIDE.md)，当前路线见 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)。AI 制作课件先使用 [`orchestrate-courseware`](.agents/skills/orchestrate-courseware/SKILL.md) 写出教师可审阅的 `01-teaching-plan.md` 与 `02-presentation-script.md`；确认后再交给 [`build-courseware-project`](.agents/skills/build-courseware-project/SKILL.md) 用真实产品 API 构建 Course Project V9。教师工作流不使用 Hash、审批状态机或 Evidence 清单。聊天记录不充当唯一真相，自动管线最多给出 `engineering candidate`，`accepted` 必须来自明确的人类验收。协议背景见 [自由运行时指南](docs/RUNTIME_AUTHORING.md) 与 [组件开发指南](docs/COMPONENT_AUTHORING.md)。
+详细操作见 [用户指南](docs/USER_GUIDE.md)，当前路线见 [COURSEWARE_DEVELOPMENT_PLAN.md](COURSEWARE_DEVELOPMENT_PLAN.md)。AI 制作课件先使用 [`orchestrate-courseware`](.agents/skills/orchestrate-courseware/SKILL.md) 写出并确认中等详细的 `01-teaching-plan.md`，再写带表面与逐步操作的 `02-presentation-script.md`；确认后再交给 [`build-courseware-project`](.agents/skills/build-courseware-project/SKILL.md) 盘点资产并用真实产品 API 增量构建 Course Project V9。教师工作流不使用 Hash、审批状态机或 Evidence 清单。聊天记录不充当唯一真相，自动管线最多给出 `engineering candidate`，`accepted` 必须来自明确的人类验收。协议背景见 [自由运行时指南](docs/RUNTIME_AUTHORING.md) 与 [组件开发指南](docs/COMPONENT_AUTHORING.md)。
 
 ## 历史课例边界
 

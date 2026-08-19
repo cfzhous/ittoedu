@@ -14,6 +14,7 @@ import {
   normalizePlayerPayload,
 } from './payload'
 import { createPublishedCourseSession } from './surfaces/publishedDynamicHosts'
+import { attachPublishedCourseStageFit } from './surfaces/publishedStageFit'
 import { attachPublishedCoursePresenter } from './publishedCoursePresenter'
 
 let authoringTargetsMessageRevision = 0
@@ -422,13 +423,9 @@ function bootstrapPublishedCourse(): boolean {
   const payload = window.__H5_COURSE_PAYLOAD__
   const root = document.getElementById('course-root')
   if (!payload || !root) return false
-  const session = createPublishedCourseSession(payload, {
-    viewport: {
-      width: Math.max(1, root.clientWidth || 1280),
-      height: Math.max(1, root.clientHeight || 720),
-    },
-  })
+  const session = createPublishedCourseSession(payload)
   void session.mount(root).then(() => {
+    attachPublishedCourseStageFit(root)
     attachPublishedCoursePresenter(root, session, payload)
   }).catch((error) => {
     reportPlayerBootstrapFailure(error, 'course-root', 'course-player-error')

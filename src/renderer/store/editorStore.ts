@@ -237,6 +237,7 @@ import {
   addCourseScene,
   addCourseSlidePage,
   addCourseSpatialPage,
+  deleteCourseLocation as applyDeleteCourseLocation,
   deleteCourseSurface as applyDeleteCourseSurface,
   moveCourseSlideScene as applyMoveCourseSlideScene,
   reorderCourseSurfaces as applyReorderCourseSurfaces,
@@ -5260,35 +5261,79 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
     deleteScene(sceneId) {
       const state = get()
+      const project = selectActiveCourseProjectDocument(state)
+      const location = project?.locations.find((candidate) =>
+        candidate.kind === 'slide-scene' &&
+        candidate.sceneId === sceneId &&
+        candidate.stateId === undefined,
+      )
+      if (project && location) {
+        const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
+        const lastSceneOnSurface = surface?.type === 'slide' && surface.scenes.length <= 1
+        const remainingElsewhere = project.locations.some(
+          (candidate) => candidate.surfaceId !== location.surfaceId,
+        )
+        if (lastSceneOnSurface) {
+          if (!remainingElsewhere) return false
+          const activeLocationId = selectActiveCourseLocationId(get())
+          const active = activeLocationId
+            ? project.locations.find((candidate) => candidate.id === activeLocationId)
+            : undefined
+          if (active?.surfaceId === location.surfaceId) {
+            const fallbackLocation = project.locations.find(
+              (candidate) => candidate.surfaceId !== location.surfaceId,
+            )
+            if (fallbackLocation) get().activateCourseLocation(fallbackLocation.id)
+          }
+          const liveProject = selectActiveCourseProjectDocument(get()) ?? project
+          const liveLocation = liveProject.locations.find((candidate) =>
+            candidate.kind === 'slide-scene' &&
+            candidate.sceneId === sceneId &&
+            candidate.stateId === undefined,
+          )
+          if (!liveLocation) return false
+          const result = applyDeleteCourseLocation(liveProject, liveLocation.id, {
+            expectedRevision: liveProject.revision,
+            activeLocationId: selectActiveCourseLocationId(get()) ?? undefined,
+          })
+          if (!result.ok) {
+            set({ errorMessage: result.reason, statusMessage: null })
+            return false
+          }
+          persistCourseProjectCommand(result, { statusMessage: '场景已删除' })
+          if (result.activatedLocationId) get().activateCourseLocation(result.activatedLocationId)
+          return true
+        }
+        const backend = selectSlideAuthoringBackend(get())
+        if (backend) {
+          runV9DocumentMutation((draft) => {
+            const removing = new Set(
+              draft.locations
+                .filter((candidate) => candidate.kind === 'slide-scene' && candidate.sceneId === sceneId)
+                .map((candidate) => candidate.id),
+            )
+            const remaining = draft.locations
+              .filter((candidate) => candidate.kind === 'slide-scene' && candidate.sceneId !== sceneId)
+              .map((candidate) => candidate.id)
+            for (const entry of draft.globalLayerItems) {
+              if (entry.visibility.mode !== 'include') continue
+              const nextIds = entry.visibility.locationIds.filter((id) => !removing.has(id))
+              if (nextIds.length === 0 && remaining[0]) {
+                entry.visibility = { mode: 'include', locationIds: [remaining[0]] }
+              }
+            }
+          })
+          const live = selectSlideAuthoringBackend(get())
+          if (!live) return false
+          const result = persistCandidateResult(live.deleteScene(sceneId, {
+            expectedRevision: live.getSnapshot().revision,
+          }))
+          return result.ok
+        }
+      }
       if (state.project.scenes.length <= 1) return false
       const index = state.project.scenes.findIndex((scene) => scene.id === sceneId)
       if (index < 0) return false
-      const backend = selectSlideAuthoringBackend(get())
-      if (backend) {
-        runV9DocumentMutation((draft) => {
-          const removing = new Set(
-            draft.locations
-              .filter((location) => location.kind === 'slide-scene' && location.sceneId === sceneId)
-              .map((location) => location.id),
-          )
-          const remaining = draft.locations
-            .filter((location) => location.kind === 'slide-scene' && location.sceneId !== sceneId)
-            .map((location) => location.id)
-          for (const entry of draft.globalLayerItems) {
-            if (entry.visibility.mode !== 'include') continue
-            const nextIds = entry.visibility.locationIds.filter((id) => !removing.has(id))
-            if (nextIds.length === 0 && remaining[0]) {
-              entry.visibility = { mode: 'include', locationIds: [remaining[0]] }
-            }
-          }
-        })
-        const live = selectSlideAuthoringBackend(get())
-        if (!live) return false
-        const result = persistCandidateResult(live.deleteScene(sceneId, {
-          expectedRevision: live.getSnapshot().revision,
-        }))
-        return result.ok
-      }
       const fallback =
         state.project.scenes[index - 1] ?? state.project.scenes[index + 1]
       commit((draft) => {

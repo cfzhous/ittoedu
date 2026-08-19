@@ -238,9 +238,9 @@ export function spatialSessionCameraFromPose(pose: SpatialCameraPose): SpatialSe
 }
 
 /**
- * Spatial world view: sessionCamera *is* the view. Does not stack a 1280×720
- * page fit on top of the camera. Reuses R2 `worldToClient` by filling the
- * same `StageViewportTransform` shape.
+ * Spatial world view: sessionCamera *is* the view inside `viewport`.
+ * Editor chrome letterboxes a 1280×720 hole and should pass that logical
+ * viewport; this helper does not apply a second page-fit on the camera.
  */
 export function createSpatialWorldViewTransform(
   viewport: StageRect,

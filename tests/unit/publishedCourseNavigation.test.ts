@@ -1,8 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { CourseProjectDocument, NativeLayerItem, ScopedLayerItem } from '@/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { addCourseFlowPage, addCourseScene, addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createFormulaNode } from '@/renderer/project/createProject'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
   createPublishedCourseSession,
@@ -226,6 +228,40 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
+  it('keeps the global teacher controller on Flow and Spatial in whole-course preview', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const flowLocation = payload.locations.find((location) => location.kind === 'flow-block')
+    const spatialLocation = payload.locations.find((location) => location.kind === 'spatial-camera')
+    expect(flowLocation && spatialLocation).toBeTruthy()
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    await session.goToLocation(flowLocation!.id)
+    const flowRoot = container.querySelector<HTMLElement>('.flow-surface-host')
+    const flowController = flowRoot?.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')
+    expect(flowRoot?.hidden).toBe(false)
+    expect(flowController).not.toBeNull()
+    expect(flowRoot?.style.height).toBe('720px')
+    expect(parseFloat(flowController!.style.top) + parseFloat(flowController!.style.height)).toBeLessThanOrEqual(720)
+
+    await session.goToLocation(spatialLocation!.id)
+    const spatialRoot = container.querySelector<HTMLElement>('.spatial-surface')
+    const spatialController = spatialRoot?.querySelector<HTMLElement>('.spatial-screen-teacher-controller')
+    expect(spatialRoot?.hidden).toBe(false)
+    expect(spatialController).not.toBeNull()
+    expect(spatialRoot?.style.height).toBe('720px')
+    expect(parseFloat(spatialController!.style.top) + parseFloat(spatialController!.style.height)).toBeLessThanOrEqual(720)
+    container.remove()
+  })
+
   it('shows include-scoped global component fallback only on the selected location', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({
@@ -277,6 +313,129 @@ describe('published course Mixed navigation', () => {
 
     await session.goToLocation(homeId)
     expect(slideRoot?.querySelector('[data-global-layer-item="global-nav"]')).toBeNull()
+    container.remove()
+  })
+
+  it('removes its own surface slots so overlapping remount does not stack hosts', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const first = createPublishedCourseSession(payload)
+    sessions.push(first)
+    await first.mount(container)
+    expect(container.querySelectorAll('[data-course-surface-slot]')).toHaveLength(payload.surfaces.length)
+
+    const second = createPublishedCourseSession(payload)
+    sessions.push(second)
+    const destroying = first.destroy()
+    await second.mount(container)
+    await destroying
+
+    expect(container.querySelectorAll('[data-course-surface-slot]')).toHaveLength(payload.surfaces.length)
+    expect(container.querySelectorAll('.slide-published-adapter')).toHaveLength(1)
+    expect(container.querySelectorAll('.flow-surface-host')).toHaveLength(1)
+    expect(container.querySelectorAll('.spatial-surface')).toHaveLength(1)
+    await second.destroy()
+    expect(container.querySelectorAll('[data-course-surface-slot]')).toHaveLength(0)
+    container.remove()
+  })
+
+  it('hides inactive Mixed surface slots so they cannot steal pointer events', async () => {
+    const project = mixedProject()
+    const payload = buildPublishedCourseV2Payload({
+      project,
+      assetFiles: {},
+      components: {},
+    })
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+
+    const visibleSlots = () => [...container.querySelectorAll<HTMLElement>('[data-course-surface-slot]')]
+      .filter((slot) => slot.style.visibility !== 'hidden')
+    expect(visibleSlots()).toHaveLength(1)
+    expect(visibleSlots()[0]?.dataset.courseSurfaceSlot).toBe(session.navigator.current?.surfaceId)
+
+    await session.next()
+    await session.next()
+    expect(session.navigator.current?.kind).toBe('flow')
+    expect(visibleSlots()).toHaveLength(1)
+    expect(visibleSlots()[0]?.dataset.courseSurfaceSlot).toBe(session.navigator.current?.surfaceId)
+    expect(container.querySelector<HTMLElement>('.slide-published-adapter')?.hidden).toBe(true)
+    container.remove()
+  })
+
+  it('paints slide formulas as math canvases instead of accessible text', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function mockContext(this: HTMLCanvasElement, type: string) {
+      if (type !== '2d') return null
+      return {
+        arc: vi.fn(),
+        beginPath: vi.fn(),
+        clearRect: vi.fn(),
+        clip: vi.fn(),
+        closePath: vi.fn(),
+        fill: vi.fn(),
+        fillRect: vi.fn(),
+        fillText: vi.fn(),
+        lineTo: vi.fn(),
+        measureText: vi.fn((value: string) => ({ width: Math.max(8, Array.from(value).length * 12) })),
+        moveTo: vi.fn(),
+        quadraticCurveTo: vi.fn(),
+        rect: vi.fn(),
+        restore: vi.fn(),
+        rotate: vi.fn(),
+        save: vi.fn(),
+        scale: vi.fn(),
+        stroke: vi.fn(),
+        translate: vi.fn(),
+        fillStyle: '',
+        strokeStyle: '',
+        font: '',
+        globalAlpha: 1,
+        imageSmoothingEnabled: true,
+        lineWidth: 1,
+        textAlign: 'left',
+        textBaseline: 'alphabetic',
+      } as unknown as CanvasRenderingContext2D
+    })
+    const project = mixedProject()
+    const formula = createFormulaNode({
+      id: 'formula-slide',
+      formulaId: 'formula:slide-x',
+      accessibleText: 'x 的平方',
+      ast: { type: 'token', value: 'x' },
+      x: 80,
+      y: 80,
+      width: 240,
+      height: 96,
+    })
+    const slide = project.surfaces.find((surface) => surface.type === 'slide')
+    if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
+    slide.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(formula, 40))
+    const payload = buildPublishedCourseV2Payload({
+      project: courseProjectDocumentSchema.parse(project),
+      assetFiles: {},
+      components: {},
+    })
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    await session.mount(container)
+    const math = container.querySelector<HTMLElement>('[role="math"]')
+    expect(math).not.toBeNull()
+    expect(math?.getAttribute('aria-label')).toBe('x 的平方')
+    expect(math?.querySelector('canvas')).not.toBeNull()
+    expect(math?.dataset.formulaFallback).toBeUndefined()
+    expect(math?.textContent).toBe('')
+    vi.restoreAllMocks()
     container.remove()
   })
 })

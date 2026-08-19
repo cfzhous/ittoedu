@@ -768,7 +768,7 @@ async function previewScreenshot(
 ): Promise<Buffer> {
   const overlay = page.getByTestId('course-preview-overlay')
   const previewPromise = app.waitForEvent('window')
-  await page.getByRole('button', { name: '在独立窗口整课预览' }).click()
+  await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
   const mode = await Promise.race([
     overlay.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'overlay' as const),
     previewPromise.then(() => 'window' as const),

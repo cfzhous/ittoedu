@@ -323,7 +323,12 @@ function CourseTreeNodeRow({
   )
   const thumbnailStateName = project ? thumbnailStateNameForTreeNode(project, node) : null
   const canDeleteSlideScene = Boolean(
-    project && slideSceneCountOnSamePage(project, node) > 1,
+    project &&
+    node.kind === 'slide-scene' &&
+    (
+      slideSceneCountOnSamePage(project, node) > 1 ||
+      project.locations.some((location) => location.surfaceId !== node.surfaceId)
+    ),
   )
   const canDeleteSurface = Boolean(
     project
@@ -493,7 +498,7 @@ function CourseTreeNodeRow({
         <button
           type="button"
           className="icon-button icon-button--danger"
-          title={canDeleteSlideScene ? '删除场景' : '至少保留一个场景'}
+          title={canDeleteSlideScene ? '删除场景' : COURSE_LAST_LOCATION_REASON}
           aria-label={`删除“${node.label}”`}
           disabled={!canDeleteSlideScene}
           onClick={(event) => {

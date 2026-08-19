@@ -370,6 +370,67 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
   })
 })
 
+describe('SpatialSurfaceHost playback camera gestures', () => {
+  function dispatchPointer(target: EventTarget, type: string, clientX: number, clientY: number) {
+    target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX,
+      clientY,
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      buttons: type === 'pointerup' ? 0 : 1,
+      isPrimary: true,
+    }))
+  }
+
+  it('session-pans from unoccupied canvas without writing published home', async () => {
+    const course = publishedCourse()
+    const spatial = course.surfaces[0]
+    if (spatial?.type !== 'spatial-2d') throw new Error('expected spatial')
+    const homeBefore = { ...spatial.camera.home }
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const root = container.querySelector<HTMLElement>('.spatial-surface')!
+    dispatchPointer(root, 'pointerdown', 40, 40)
+    dispatchPointer(root, 'pointermove', 80, 40)
+    expect(host.camera).toMatchObject({ x: -40, y: 0, zoom: 1 })
+    expect(spatial.camera.home).toEqual(homeBefore)
+    expect(host.publishedCameraSnapshot().home).toEqual(homeBefore)
+
+    await host.destroy()
+  })
+
+  it('does not steal pan from world video controls', async () => {
+    const course = publishedCourse()
+    const spatial = course.surfaces[0]
+    if (spatial?.type !== 'spatial-2d') throw new Error('expected spatial')
+    spatial.world.layerItems.push(
+      publishedVideo('world-video', 'clip', { x: 120, y: 40, width: 160, height: 90 }, 5),
+    )
+    course.assets = {
+      clip: { mimeType: 'video/mp4', url: 'https://example.test/clip.mp4' },
+    }
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
+    await host.mount(container)
+    await host.activate()
+
+    const video = container.querySelector('video')
+    expect(video).not.toBeNull()
+    dispatchPointer(video!, 'pointerdown', 20, 20)
+    dispatchPointer(video!, 'pointermove', 90, 20)
+    expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1 })
+
+    await host.destroy()
+  })
+})
+
 describe('SpatialSurfaceHost playback video and controller actions', () => {
   function playbackCourse(): PublishedCourseV2Payload {
     const course = publishedCourse()

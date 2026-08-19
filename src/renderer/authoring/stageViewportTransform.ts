@@ -13,6 +13,14 @@ export interface StageRect extends StagePoint {
   height: number
 }
 
+/** Canonical 1280×720 stage in local coordinates, before CSS letterbox. */
+export const LOGICAL_STAGE_VIEWPORT: StageRect = {
+  x: 0,
+  y: 0,
+  width: STAGE_VIEWPORT_WIDTH,
+  height: STAGE_VIEWPORT_HEIGHT,
+}
+
 export interface StageViewportTransformOptions {
   /** The available viewport in CSS pixels, including its client-space origin. */
   viewport: StageRect

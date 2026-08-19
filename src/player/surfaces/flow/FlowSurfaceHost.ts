@@ -1,11 +1,12 @@
-import { serializeFormulaAst } from '../../../shared/formulaLinear'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
 import type { TeacherControllerAction, TextRun } from '../../../shared/projectTypes'
 import type { CourseAudioApi } from '../../AudioManager'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'
 import { isGlobalLayerItemVisible } from '../../globalLayerVisibility'
 import {
   TeacherControllerDom,
+  stageBoundsFromElement,
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
@@ -43,6 +44,7 @@ import {
   type PublishedComponentMountHandle,
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
+import { fittedPublishedFormulaSize, paintPublishedFormula } from '../publishedFormula'
 
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
@@ -155,8 +157,9 @@ export class FlowSurfaceHost {
       root.dataset.surfaceId = this.#surfaceId
       root.style.position = 'relative'
       root.style.isolation = 'isolate'
-      root.style.height = '100%'
-      root.style.minHeight = '100%'
+      root.style.width = `${CANVAS_WIDTH}px`
+      root.style.height = `${CANVAS_HEIGHT}px`
+      root.style.minHeight = `${CANVAS_HEIGHT}px`
       root.style.overflow = 'hidden'
       root.style.setProperty('--flow-toc-inset', '0px')
       root.hidden = !this.#active
@@ -366,13 +369,7 @@ export class FlowSurfaceHost {
       node,
       container: frameEl,
       canvas: { ...FLOW_LOGICAL_CANVAS },
-      getRenderedStageBounds: () => {
-        const bounds = overlay.getBoundingClientRect()
-        return {
-          width: Math.max(1, bounds.width || FLOW_LOGICAL_CANVAS.width),
-          height: Math.max(1, bounds.height || FLOW_LOGICAL_CANVAS.height),
-        }
-      },
+      getRenderedStageBounds: () => stageBoundsFromElement(overlay, FLOW_LOGICAL_CANVAS),
       scenes,
       getCurrentSceneId: () => this.#options.courseProgressSource?.getCurrentLocationId()
         ?? this.#surfaceId,
@@ -603,6 +600,19 @@ function renderStaticOverlayItem(
     wrap.textContent = entry.item.content.data.text
     return wrap
   }
+  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'formula') {
+    wrap.style.boxSizing = 'border-box'
+    wrap.style.overflow = 'hidden'
+    paintPublishedFormula(wrap, {
+      formulaId: entry.item.content.data.formulaId,
+      accessibleText: entry.item.content.data.accessibleText,
+      ast: entry.item.content.data.ast,
+      style: entry.item.content.data.style,
+      width: Math.max(1, entry.item.frame.width),
+      height: Math.max(1, entry.item.frame.height),
+    })
+    return wrap
+  }
   if (entry.item.kind === 'component') {
     const handle = mountPublishedComponent(wrap, {
       container: wrap,
@@ -807,12 +817,21 @@ function renderBlockDom(
     case 'formula': {
       const wrap = assignBlock(dom.createElement('div'))
       wrap.dataset.flowFormulaId = block.formulaId
-      const expression = dom.createElement('p')
-      expression.textContent = serializeFormulaAst(block.ast)
-      wrap.appendChild(expression)
-      const accessible = dom.createElement('p')
-      accessible.textContent = `公式说明：${block.accessibleText}`
-      wrap.appendChild(accessible)
+      const readingWidth = Math.max(160, options.readingWidth ?? 760)
+      const paint = {
+        formulaId: block.formulaId,
+        accessibleText: block.accessibleText,
+        ast: block.ast,
+        style: { fontSize: 32, color: '#1f2937', align: 'left' as const },
+        width: readingWidth,
+        height: 96,
+      }
+      const size = fittedPublishedFormulaSize(paint)
+      wrap.style.width = '100%'
+      wrap.style.maxWidth = `${readingWidth}px`
+      wrap.style.height = `${size.height}px`
+      wrap.style.overflow = 'hidden'
+      paintPublishedFormula(wrap, { ...paint, height: size.height })
       parent.appendChild(wrap)
       return
     }

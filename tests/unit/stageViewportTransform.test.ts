@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  LOGICAL_STAGE_VIEWPORT,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_MAX_ZOOM,
   STAGE_VIEWPORT_MIN_ZOOM,
@@ -43,6 +44,12 @@ describe('stage viewport transform', () => {
   it('uses the fixed Project V8 Slide design size and editor zoom range', () => {
     expect(STAGE_VIEWPORT_WIDTH).toBe(1280)
     expect(STAGE_VIEWPORT_HEIGHT).toBe(720)
+    expect(LOGICAL_STAGE_VIEWPORT).toEqual({
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 720,
+    })
     expect(STAGE_VIEWPORT_MIN_ZOOM).toBe(0.5)
     expect(STAGE_VIEWPORT_MAX_ZOOM).toBe(2)
   })

@@ -36,6 +36,11 @@ import {
   type SlideEditorLayerScope,
   type SlideEditorLayerView,
 } from './slideEditorView'
+import {
+  COURSE_LAST_LOCATION_REASON,
+  deleteCourseLocation,
+  syncStartLocationToFirstLocation,
+} from './courseLocationCommands'
 
 export type {
   SlideAuthoringHistory,
@@ -571,7 +576,43 @@ export function deleteSlideScene(
     const surface = slideSurfaceForScene(session.history.present, sceneId)
     const index = surface.scenes.findIndex((scene) => scene.id === sceneId)
     const fallback = surface.scenes[index - 1] ?? surface.scenes[index + 1]
-    if (!fallback) throw new Error('课件至少需要一张幻灯片')
+    if (!fallback) {
+      const present = session.history.present
+      const location = present.locations.find((candidate) =>
+        candidate.kind === 'slide-scene' &&
+        candidate.sceneId === sceneId &&
+        candidate.stateId === undefined,
+      )
+      if (!location) throw new Error('找不到当前幻灯片')
+      const deleted = deleteCourseLocation(present, location.id, {
+        expectedRevision: present.revision,
+        now: options.now,
+        activeLocationId: session.selection.locationId,
+      })
+      if (!deleted.ok) throw new Error(deleted.reason || COURSE_LAST_LOCATION_REASON)
+      const nextLocation = deleted.project.locations.find(
+        (candidate) => candidate.id === deleted.activatedLocationId,
+      )
+      if (nextLocation?.kind === 'slide-scene') {
+        return succeed(commitDocument(
+          session,
+          deleted.project,
+          baseSelectionForScene(deleted.project, nextLocation.sceneId),
+          'scene',
+          bumpGeneration(session),
+        ), true)
+      }
+      return succeed({
+        ...session,
+        history: commitSlideAuthoringHistory(session.history, deleted.project),
+        selection: {
+          locationId: deleted.activatedLocationId,
+          stateId: null,
+          selectionIds: [],
+        },
+        generation: bumpGeneration(session),
+      }, true)
+    }
     const activeLocation = session.history.present.locations.find(
       (candidate) => candidate.id === session.selection.locationId,
     )
@@ -1184,6 +1225,7 @@ function mutateReorderSlideScenes(
     surface.scenes = sceneIds.map((id) => byId.get(id)!)
     reorderSlideLocationsForSurface(draft, surfaceId)
     reorderSlidePrintEntry(draft, surfaceId)
+    syncStartLocationToFirstLocation(draft)
   }, now)
 }
 

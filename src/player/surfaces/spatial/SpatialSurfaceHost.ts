@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/publishedCourseTypes'
 import {
   TeacherControllerDom,
+  stageBoundsFromElement,
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
@@ -41,11 +42,13 @@ import {
   type OpenSpatialRuntimeSessionOptions,
   type SpatialRuntimeSession,
 } from './spatialRuntimeSession'
+import { attachSpatialPlaybackCameraGestures, SPATIAL_GESTURE_OWNER_ATTR } from './spatialPlaybackGestures'
 import {
   mountPublishedComponent,
   type PublishedComponentMountHandle,
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
+import { paintPublishedFormula } from '../publishedFormula'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -105,6 +108,9 @@ function safeColor(value: string | undefined, fallback: string): string {
 
 function nativeLabel(item: PublishedLayerItem): string {
   if (item.kind === 'native' && item.content.nativeType === 'text') return item.content.data.text
+  if (item.kind === 'native' && item.content.nativeType === 'formula') {
+    return item.content.data.accessibleText
+  }
   if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
     return item.content.data.title
   }
@@ -170,6 +176,27 @@ function createWorldItem(
     rect.setAttribute('fill', safeColor(item.content.data.style.fillColor, '#e2e8f0'))
     rect.setAttribute('stroke', safeColor(item.content.data.style.borderColor, '#64748b'))
     group.appendChild(rect)
+  } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
+    const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
+    foreign.setAttribute('x', String(frame.x))
+    foreign.setAttribute('y', String(frame.y))
+    foreign.setAttribute('width', String(frame.width))
+    foreign.setAttribute('height', String(frame.height))
+    const holder = dom.createElement('div')
+    holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml')
+    holder.style.width = '100%'
+    holder.style.height = '100%'
+    holder.style.overflow = 'hidden'
+    paintPublishedFormula(holder, {
+      formulaId: item.content.data.formulaId,
+      accessibleText: item.content.data.accessibleText,
+      ast: item.content.data.ast,
+      style: item.content.data.style,
+      width: Math.max(1, frame.width),
+      height: Math.max(1, frame.height),
+    })
+    foreign.appendChild(holder)
+    group.appendChild(foreign)
   } else if (item.kind === 'component') {
     const foreign = dom.createElementNS(SVG_NS, 'foreignObject')
     foreign.setAttribute('x', String(frame.x))
@@ -182,8 +209,11 @@ function createWorldItem(
     holder.style.height = '100%'
     holder.style.position = 'relative'
     holder.style.pointerEvents = 'auto'
+    holder.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
+    foreign.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
     foreign.appendChild(holder)
     group.appendChild(foreign)
+    group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
     const handle = mountPublishedComponent(holder, {
       container: holder,
       componentId: item.component.packageId,
@@ -199,6 +229,9 @@ function createWorldItem(
     })
     options?.onMountComponent?.(handle)
   } else {
+    if (item.kind === 'runtime') {
+      group.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'runtime')
+    }
     const rect = dom.createElementNS(SVG_NS, 'rect')
     rect.setAttribute('x', String(frame.x))
     rect.setAttribute('y', String(frame.y))
@@ -242,6 +275,7 @@ function createWorldVideoHtml(
   wrapper.dataset.layerKind = item.kind
   wrapper.dataset.layerSource = 'world'
   wrapper.dataset.coordinateSpace = 'world'
+  wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'media')
   Object.assign(wrapper.style, {
     position: 'absolute',
     left: `${item.frame.x}px`,
@@ -311,6 +345,24 @@ function createViewportHud(
       interactive: options?.interactive ?? true,
     })
     options?.onMountComponent?.(handle)
+    root.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'component')
+    return root
+  }
+  if (item.kind === 'native' && item.content.nativeType === 'formula') {
+    Object.assign(root.style, {
+      background: 'transparent',
+      border: '0',
+      padding: '0',
+      overflow: 'hidden',
+    })
+    paintPublishedFormula(root, {
+      formulaId: item.content.data.formulaId,
+      accessibleText: item.content.data.accessibleText,
+      ast: item.content.data.ast,
+      style: item.content.data.style,
+      width: Math.max(1, item.frame.width),
+      height: Math.max(1, item.frame.height),
+    })
     return root
   }
   Object.assign(root.style, {
@@ -325,7 +377,9 @@ function createViewportHud(
 
 /**
  * Independent Spatial Player host. Reads Published Course V2 world/camera/path/relation
- * fields. Runtime camera is session-only and never writes the published document.
+ * fields. Runtime camera is session-only and never writes the published document:
+ * free pan/zoom plus authored camera-frame / playback-path tours. Interactive
+ * runtime, component, media and teacher-controller targets occupy their gestures.
  * Global HUD, teacher controller, audio chrome and course UI stay on the viewport.
  */
 export class SpatialSurfaceHost {
@@ -341,6 +395,7 @@ export class SpatialSurfaceHost {
   #screenLayer: HTMLElement | null = null
   #records = new Map<string, SpatialHostRecord>()
   #controllerSession = new Map<string, TeacherControllerDomSession>()
+  #gestureDisposer: (() => void) | null = null
   #muted: boolean
   #audioDisposer: (() => void) | null = null
   #destroyed = false
@@ -426,19 +481,13 @@ export class SpatialSurfaceHost {
     return publishedSpatialRelations(this.#session.input.surface)
   }
 
-  getRenderedStageBounds(): { width: number; height: number } {
+  getRenderedStageBounds(): { width: number; height: number; left: number; top: number } {
     const camera = this.#session.camera
     const fallback = {
       width: camera?.viewportWidth ?? this.#session.viewport.width,
       height: camera?.viewportHeight ?? this.#session.viewport.height,
     }
-    const root = this.#root
-    if (!root) return fallback
-    const rect = root.getBoundingClientRect()
-    return {
-      width: rect.width > 0 ? rect.width : fallback.width,
-      height: rect.height > 0 ? rect.height : fallback.height,
-    }
+    return stageBoundsFromElement(this.#root, fallback)
   }
 
   async mount(container: HTMLElement): Promise<void> {
@@ -463,6 +512,8 @@ export class SpatialSurfaceHost {
       overflow: 'hidden',
       isolation: 'isolate',
       backgroundColor: bg,
+      touchAction: 'none',
+      overscrollBehavior: 'contain',
     })
     const svg = dom.createElementNS(SVG_NS, 'svg')
     svg.setAttribute('width', String(camera.viewportWidth))
@@ -504,6 +555,14 @@ export class SpatialSurfaceHost {
     this.#world = world
     this.#worldHtml = worldHtml
     this.#screenLayer = screenLayer
+    this.#gestureDisposer = attachSpatialPlaybackCameraGestures({
+      root,
+      isActive: () => this.#session.active && !this.#destroyed,
+      getCamera: () => this.#session.camera,
+      setCamera: (camera) => {
+        void this.setRuntimeCamera(camera)
+      },
+    })
     this.#subscribeAudio()
     this.#renderWorldDecorations()
     this.#updateWorldTransform()
@@ -534,6 +593,8 @@ export class SpatialSurfaceHost {
   async destroy(): Promise<void> {
     if (this.#destroyed) return
     this.#destroyed = true
+    this.#gestureDisposer?.()
+    this.#gestureDisposer = null
     this.#audioDisposer?.()
     this.#audioDisposer = null
     for (const record of this.#records.values()) {
@@ -747,6 +808,7 @@ export class SpatialSurfaceHost {
           boxSizing: 'border-box',
         })
         wrapper.classList.add('spatial-screen-teacher-controller')
+        wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'controller')
         wrapper.appendChild(content)
         controllerDom = this.#mountTeacherController(entry.item, content)
       } else {

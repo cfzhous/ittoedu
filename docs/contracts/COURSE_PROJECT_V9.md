@@ -66,7 +66,7 @@ globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
 ### 2.3 无限画布（`SpatialSurfaceDocument`）
 - `type: 'spatial-2d'`
 - 包含二维世界定义 `world`，支持 infinite 或 finite 边界模式，包含世界图层元素 `world.layerItems`、路径 `paths?: SpatialPathDocument[]` 与关系连线 `relations?: SpatialRelationDocument[]`。
-- 包含相机配置 `camera: { home: SpatialCameraPose, frames: SpatialCameraFrame[] }`。
+- 包含相机配置 `camera: { home: SpatialCameraPose, frames: SpatialCameraFrame[] }`。`home` 与 `frames` 是作者持久化镜头；试运行/整课预览另有会话相机，支持自由平移缩放，且不因逛世界而写回这些字段。播放路径与切 `spatial-camera` location 仍做镜头巡游。
 - 包含语义缩放规则 `semanticZoom: SpatialSemanticZoomRule[]`。
 - 可选无限画布底色 `backgroundColor?: string`，缺省时视为白底（`#ffffff`）。
 

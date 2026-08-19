@@ -3,10 +3,10 @@
 > CURRENT_PRODUCT: 仓库根目录 / `main`（V9 重建已合入；已提交 HEAD 见 `git rev-parse HEAD`）
 > HISTORICAL_V8_BASELINE: `f27275658c6dfaa12f2ce35cd9368dcdebe99451`（只作历史对照，禁止再从此重建）
 > HISTORICAL_V9_DONOR: `475503498323`（只作供体与失败取证）
-> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.4
+> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.8
 > TASK_PACK: [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)
 > WORKER_PROTOCOL: [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)
-> UPDATED: 2026-08-18
+> UPDATED: 2026-08-19
 > PURPOSE: 帮助新 Agent 用最少上下文进入真实代码
 
 本文件是导航，不是源码替代品。若索引与源码、Schema 或可复现证据冲突，以源码事实为准并在同一变更中修正索引。
@@ -16,7 +16,7 @@
 ## 1. 新 Agent 的最短启动顺序
 
 1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.4。领取实现任务的第三方工人先读 [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)。
+2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.8。领取实现任务的第三方工人先读 [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)。
 3. 领取任务只看 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)。旧 `v8-to-v9-rebuild` 任务包已删除。
 4. 当前产品就是仓库根目录。历史 worktree 与 `codex/v9-editor-v8-base` 只作供体，不得再当第二套当前版。
 5. `docs/reviews/**`、`docs/INTERNAL_1_0_MILESTONE_0.md` 与旧评估稿只作历史取证，不是当前执行入口。
@@ -105,7 +105,7 @@ CourseProjectArchiveData
 | Published Player | 产品 `PlayerApp.ts` + 已有 `surfaces/flow`、`surfaces/spatial` | 课程会话、表面 Host、导航 |
 | 互动与动态运行 | `src/player/InteractionEngine.ts`, `CourseEventBus.ts`, `DeclarativeCourseState.ts`, Runtime/Component hosts | 事件、条件、动作、运行时和组件会话 |
 | 发布导出 | `src/renderer/export/course/**` | producer、HTML/网页包、PPTX、PDF/DOCX |
-| Builder/能力卡 | `.agents/skills/orchestrate-courseware`, `.agents/skills/build-courseware-project`, `agent-kit/**` | 课件策划、构建、能力发现 |
+| Builder/能力卡 | `.agents/skills/orchestrate-courseware`, `.agents/skills/build-courseware-project`, `artifacts/ai-capabilities/index.json` | 课件策划、V9 构建、能力发现。仓库没有 `agent-kit/` CLI |
 
 详细机器可读版本见 [`repo-index/modules.json`](repo-index/modules.json)。
 
@@ -122,9 +122,9 @@ CourseProjectArchiveData
 | 试运行跨表面跳转 | `editorStore.activateCourseLocation`、`apply*Backend` | `Workspace` course-try-run `goToLocation` | 跨表面时写死 `canvasMode: 'edit'`（P2 修） |
 | 画布底色 | Spatial CSS、`SpatialSurfaceDocument`、Slide 场景字段 | `derivedV8ProjectFromSpatial`、Properties | 只改假 V8 投影；写死 `#111318` |
 | Slide 互动 | producer、`InteractionEngine.ts`, Published App/Slide Host | event bus、状态与 destroy | 用 Runtime 热点永久绕行 |
-| Runtime/Component | shared contracts、player hosts、Developer/Components/Properties | asset/package sidecar、authoringAddress；Flow/Spatial 真挂载见 P8 | 复制 CourseStudio 动态编辑器；用后备文字冒充组件可用 |
+| Runtime/Component | shared contracts、player hosts、Developer/Components/Properties | asset/package sidecar、authoringAddress；P8 已挂 Flow/Spatial/Slide 试运行 | 复制 CourseStudio 动态编辑器；把空 catalog 当成不能新建组件 |
 | Flow | V9 model/view、原壳适配、`FlowSurfaceHost.ts` | PDF/DOCX、统一课程状态 | 复制 FlowBlockEditor UI |
-| Spatial | viewport/relations model、原壳适配、`SpatialSurfaceHost.ts` | world/viewport 坐标分离、选中框旋转（P4） | inverse-scale 补偿控制器 |
+| Spatial | viewport/relations model、`SpatialSurfaceHost.ts`、`spatialPlaybackGestures.ts` | world/viewport 坐标分离、会话相机自由逛与镜头巡游 | inverse-scale 补偿控制器；运行态禁止平移 |
 | 课程树删除/跨组 | `ScenePanel.tsx`、`courseLocationCommands.ts` | `planCourseTreeReorder`、`deleteCourseSurface` | 用删 Flow 标题块冒充删整页（P6） |
 | HTML/网页包 | `buildPublishedCourse.ts`, `buildCoursePackages.ts` | Player bundle、资源清单 | 恢复 `.course-nav` |
 | PPTX/PDF/DOCX | 对应 `buildCourse*.ts` | print plan、fallback、真实打开 | 只断言文件存在 |
@@ -132,11 +132,11 @@ CourseProjectArchiveData
 
 ## 6. 当前阶段与首要风险
 
-当前阶段是 **Editor 1.0 收尾**，执行 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)：车道 C 为 T0–T6，车道 P 为 P1–P8（P8 等 P1/P3/P4）。不是 `accepted`。
+当前阶段是 **Editor 1.0 收尾**：T0–T6、P1–P8、Q1–Q8 已合入 `main`。不是 `accepted`。
 
 - 产品：仓库根目录 / `main`
-- V8 导入将删除（T2），不是长期兼容面
-- 首要风险：按已删除的 R0–R8 或过时「当前格式是 Project V8」文档施工；在未提交的控制台/图层补丁上直接改 Schema；把 P1–P8 塞进 T1 合同提交；把 Phaser 接回 V9 试运行主路径；与未完成的 P1/P3/P4 并行改宿主去做 P8
+- V8 导入已删除（T2），不是长期兼容面
+- 首要风险：按已删除的 R0–R8 或过时「当前格式是 Project V8」文档施工；把空组件目录写成 Flow/Spatial 不能挂组件；重做 P1–P8 / Q1–Q8；把 Phaser 接回 V9 试运行主路径
 
 ## 7. 关键不变量
 

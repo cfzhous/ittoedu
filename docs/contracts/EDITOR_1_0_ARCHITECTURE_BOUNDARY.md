@@ -30,6 +30,12 @@ Course Project V9 (唯一工程真相)
 - Phaser 仅服务于 Slide 表面在**编辑态**下的元素命中检测（Hit-testing）、几何包围盒计算与画布交互。
 - Phaser 不作为 Mixed/Flow/Spatial 播放和试运行引擎。
 
+### 1.3 统一 16:9 舞台孔
+- 编辑状态、当前位置试运行与整课预览共用同一块 **1280×720（16:9）** 逻辑舞台，以 letterbox 落入当前可用区域。
+- 整课预览使用全屏 16:9 覆盖层，不使用更矮的对话框作为“摄像机”。
+- Spatial 世界镜头仍在该孔内平移/缩放；HUD / 教师控制器使用与播放相同的 1280×720 视口坐标。
+- Flow 讲义可以高于 720 并滚动；浮层与控制器钉在同一块 1280×720 投影框上。
+
 ---
 
 ## 2. 统一图层与元素模型
@@ -56,7 +62,7 @@ Course Project V9 (唯一工程真相)
 
 - **编辑器内无可见 AI**：当前编辑器界面内不存在可见的 AI 聊天窗口、提示词输入框、模型选择器、Provider 配置或运行时网络大模型调用。
 - **预留接口**：`courseAiHandoff` 与 `courseAiPatch` 属于内部预留接口（internal/reserved），当前未在编辑器 UI 挂载，不得宣称为可用功能。
-- **AI 创作路由**：AI 辅助创作在编辑器外部通过标准工具流进行（`orchestrate-courseware` 负责教学设计 Markdown，`build-courseware-project` 负责构建 V9 工程）。
+- **AI 创作路由**：AI 辅助创作在编辑器外部通过标准工具流进行（`orchestrate-courseware` 先确认教学策划再写带表面的呈现脚本，`build-courseware-project` 盘点资产后构建 V9 工程）。
 
 ---
 

@@ -1,62 +1,36 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import {
   createPublishedCourseSession,
   type PublishedCourseSession,
 } from '../../player/surfaces/publishedDynamicHosts'
+import {
+  attachPublishedCourseStageFit,
+  fitPublishedCourseStage,
+} from '../../player/surfaces/publishedStageFit'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 
-function measureHostSize(container: HTMLElement): { width: number; height: number } {
-  // Use the layout box, not getBoundingClientRect. Try-run mounts inside the
-  // already CSS-scaled 1280×720 stage stack; a transformed rect would double-scale.
-  const width = container.clientWidth
-  const height = container.clientHeight
-  return {
-    width: width > 1 ? width : CANVAS_WIDTH,
-    height: height > 1 ? height : CANVAS_HEIGHT,
-  }
-}
+export { attachPublishedCourseStageFit, fitPublishedCourseStage }
 
-async function waitForHostSize(container: HTMLElement): Promise<{ width: number; height: number }> {
-  let size = measureHostSize(container)
-  if (size.width >= 8 && size.height >= 8) return size
-  await new Promise<void>((resolve) => {
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => resolve())
       return
     }
     resolve()
   })
-  return measureHostSize(container)
 }
 
-/**
- * Letterbox a 1280×720 published Slide stage into its host. Without this the
- * adapter stays at CSS 1280×720 while the try-run / whole-course host fills
- * the viewport, which reads as a white or clipped page.
- */
-export function fitPublishedCourseStage(container: HTMLElement): void {
-  const { width, height } = measureHostSize(container)
-  const scale = Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT)
-  const left = (width - CANVAS_WIDTH * scale) / 2
-  const top = (height - CANVAS_HEIGHT * scale) / 2
-  for (const adapter of container.querySelectorAll<HTMLElement>('.slide-published-adapter')) {
-    adapter.style.position = 'absolute'
-    adapter.style.transformOrigin = '0 0'
-    adapter.style.transform = `scale(${scale})`
-    adapter.style.left = `${left}px`
-    adapter.style.top = `${top}px`
-    adapter.dataset.stageFitScale = String(scale)
+export async function waitForHostLayout(
+  container: HTMLElement,
+  options: { maxFrames?: number } = {},
+): Promise<void> {
+  const maxFrames = options.maxFrames ?? 16
+  for (let frame = 0; frame < maxFrames; frame += 1) {
+    if (container.clientWidth >= 8 && container.clientHeight >= 8) return
+    await nextAnimationFrame()
   }
-}
-
-export function attachPublishedCourseStageFit(container: HTMLElement): () => void {
-  fitPublishedCourseStage(container)
-  if (typeof ResizeObserver !== 'function') return () => undefined
-  const observer = new ResizeObserver(() => fitPublishedCourseStage(container))
-  observer.observe(container)
-  return () => observer.disconnect()
 }
 
 export async function mountPublishedCourseTryRun(input: {
@@ -65,6 +39,7 @@ export async function mountPublishedCourseTryRun(input: {
   assetFiles: Readonly<Record<string, Uint8Array>>
   components: Readonly<Record<string, ComponentPackageData>>
   locationId?: string | null
+  playbackPathId?: string | null
   width?: number
   height?: number
 }): Promise<PublishedCourseSession> {
@@ -73,12 +48,9 @@ export async function mountPublishedCourseTryRun(input: {
     assetFiles: input.assetFiles,
     components: input.components,
   })
-  const measured = await waitForHostSize(input.container)
+  await waitForHostLayout(input.container)
   const session = createPublishedCourseSession(published, {
-    viewport: {
-      width: Math.max(1, input.width || measured.width),
-      height: Math.max(1, input.height || measured.height),
-    },
+    playbackPathId: input.playbackPathId,
   })
   await session.mount(input.container)
   fitPublishedCourseStage(input.container)

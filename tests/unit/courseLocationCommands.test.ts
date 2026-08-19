@@ -168,12 +168,27 @@ describe('courseLocationCommands', () => {
     if (!reordered.ok) throw new Error(reordered.reason)
     expect(reordered.project.revision).toBe(project.revision + 1)
     expect(reordered.activatedLocationId).toBe(startLocationId)
+    expect(reordered.project.startLocationId).toBe(reordered.project.locations[0]!.id)
+    expect(reordered.project.startLocationId).not.toBe(startLocationId)
     expect(reordered.project.surfaces.map((surface) => surface.id)).toEqual(reversed)
     expect(reordered.project.locations.map((location) => location.id)).toEqual(
       reversed.flatMap((surfaceId) => groupedBefore.get(surfaceId) ?? []),
     )
     expect(reordered.project.mixedPrintPlan?.entries.map((entry) => entry.surfaceId)).toEqual(reversed)
     expect(courseProjectDocumentSchema.parse(reordered.project)).toEqual(reordered.project)
+
+    const originalStartSurfaceId = project.locations.find(
+      (location) => location.id === startLocationId,
+    )?.surfaceId
+    expect(originalStartSurfaceId).toBeTruthy()
+    const deletedOriginal = deleteCourseSurface(reordered.project, originalStartSurfaceId!, {
+      now: NOW,
+      expectedRevision: reordered.project.revision,
+    })
+    expect(deletedOriginal.ok).toBe(true)
+    if (!deletedOriginal.ok) throw new Error(deletedOriginal.reason)
+    expect(deletedOriginal.project.locations.some((location) => location.id === startLocationId)).toBe(false)
+    expect(deletedOriginal.project.startLocationId).toBe(deletedOriginal.project.locations[0]!.id)
   })
 
   it('rejects incomplete or unknown surface reorder lists', () => {

@@ -68,6 +68,7 @@ import {
 import { TextEditOverlay } from './TextEditOverlay'
 import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { FormulaEditDialog } from './FormulaEditDialog'
+import { PublishedFormulaPaint } from './PublishedFormulaPaint'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
 import {
   ensureScenePresentation,
@@ -97,10 +98,12 @@ import {
 import {
   clientToWorld,
   createStageViewportTransform,
+  LOGICAL_STAGE_VIEWPORT,
   rotatedRectIntersectsStage,
   STAGE_RESIZE_HANDLE_DIRECTIONS,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
+  type StageRect,
   type StageSelectionOverlayGeometry,
 } from '../authoring/stageViewportTransform'
 import { createV9TeacherControllerAuthoringController } from '../authoring/v9TeacherControllerAuthoring'
@@ -117,10 +120,13 @@ import {
 } from '../course/spatialEditorView'
 import { type SpatialEditorWorldTransform } from '../course/spatialEditorCommands'
 import { fitSpatialSessionToHomeCamera } from '../course/spatialCameraCommands'
-import { SpatialSurfaceHost } from '../../player/surfaces/spatial/SpatialSurfaceHost'
 import { mountSpatialLocationTryRun } from './spatialLocationTryRun'
 import { mountFlowLocationTryRun } from './flowLocationTryRun'
 import { mountPublishedCourseTryRun, attachPublishedCourseStageFit } from './coursePlayerTryRun'
+import {
+  beginSerializedSessionMount,
+  enqueueSerial,
+} from './serializedSessionMount'
 import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
 import { FlowWorkspace } from './FlowWorkspace'
 import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
@@ -633,9 +639,12 @@ function SpatialLocationWorkspace({
 }: WorkspaceProps) {
   const workspaceRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const stageStackRef = useRef<HTMLDivElement>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
+  const tryRunMountChainRef = useRef(Promise.resolve())
+  const tryRunFitRef = useRef<(() => void) | null>(null)
   const textProxyCanvasRef = useRef<HTMLCanvasElement | null>(null)
-  const hostRef = useRef<SpatialSurfaceHost | null>(null)
+  const hostRef = useRef<PublishedCourseSession | null>(null)
   const pointerActiveRef = useRef(false)
   const session = useEditorStore((state) => state.spatialSession)
   const canvasMode = useEditorStore((state) => state.canvasMode)
@@ -685,7 +694,7 @@ function SpatialLocationWorkspace({
     return () => observer.disconnect()
   }, [])
 
-  const readViewport = useCallback(() => {
+  const readHoleClientRect = useCallback((): StageRect | null => {
     const node = viewportRef.current
     if (!node) return null
     const rect = node.getBoundingClientRect()
@@ -698,19 +707,33 @@ function SpatialLocationWorkspace({
     }
   }, [])
 
+  const readLogicalPointer = useCallback((clientX: number, clientY: number) => {
+    const hole = readHoleClientRect()
+    if (!hole) return null
+    const point = clientToWorld(createStageViewportTransform({ viewport: hole, zoom: 1 }), {
+      x: clientX,
+      y: clientY,
+    })
+    return { x: point.x, y: point.y }
+  }, [readHoleClientRect])
+
   const liveCamera = previewCamera ?? session?.sessionCamera ?? { x: 0, y: 0, zoom: 1 }
-  const worldTransform = useMemo(() => createSpatialWorldViewTransform({
-    x: 0,
-    y: 0,
-    width: viewportSize.width,
-    height: viewportSize.height,
-  }, liveCamera), [liveCamera, viewportSize.height, viewportSize.width])
-  const hudTransform = useMemo(() => createSpatialViewportOverlayTransform({
-    x: 0,
-    y: 0,
-    width: viewportSize.width,
-    height: viewportSize.height,
+  const stageTransform = useMemo(() => createStageViewportTransform({
+    viewport: {
+      x: 0,
+      y: 0,
+      width: Math.max(1, viewportSize.width),
+      height: Math.max(1, viewportSize.height),
+    },
+    zoom: 1,
   }), [viewportSize.height, viewportSize.width])
+  const worldTransform = useMemo(() => createSpatialWorldViewTransform(
+    LOGICAL_STAGE_VIEWPORT,
+    liveCamera,
+  ), [liveCamera])
+  const hudTransform = useMemo(() => createSpatialViewportOverlayTransform(
+    LOGICAL_STAGE_VIEWPORT,
+  ), [])
 
   const view = session
     ? buildSpatialEditorView({
@@ -731,64 +754,52 @@ function SpatialLocationWorkspace({
       setHudOverlay(null)
       return
     }
-    const viewport = readViewport()
-    if (!viewport) return
     const authoring = authoringRef.current
-    setWorldOverlay(authoring.overlayGeometry(viewport))
+    setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
     setHudOverlay(
       selectedNode?.type === 'teacher-controller' || editingScope === 'global'
-        ? authoring.viewportOverlayGeometry(viewport)
+        ? authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT)
         : null,
     )
-  }, [canvasMode, editingScope, readViewport, selectedNode, session, session?.selection.selectionIds, session?.sessionCamera, session?.history.present.revision])
-
-  const publishedKeyRef = useRef<string | null>(null)
+  }, [canvasMode, editingScope, selectedNode, session, session?.selection.selectionIds, session?.sessionCamera, session?.history.present.revision])
 
   useEffect(() => {
     const container = tryRunRef.current
     if (!session || !container) return
-    const key = `${session.history.present.revision}:${session.selection.locationId}:${playbackPathId ?? ''}`
     if (canvasMode !== 'run') {
-      void hostRef.current?.suspend()
+      tryRunFitRef.current?.()
+      tryRunFitRef.current = null
+      const leftover = hostRef.current
+      hostRef.current = null
+      if (leftover) enqueueSerial(tryRunMountChainRef, () => leftover.destroy())
       return
     }
-    let cancelled = false
-    const start = async () => {
-      if (hostRef.current && publishedKeyRef.current === key) {
-        await hostRef.current.resume()
-        return
-      }
-      if (hostRef.current) {
-        await hostRef.current.destroy()
+    return beginSerializedSessionMount(tryRunMountChainRef, () => mountPublishedCourseTryRun({
+      container,
+      project: session.history.present,
+      assetFiles: sidecarFiles,
+      components: componentPackages,
+      locationId: session.selection.locationId,
+      playbackPathId,
+    }), {
+      onReady: (mounted) => {
+        hostRef.current = mounted
+        tryRunFitRef.current?.()
+        tryRunFitRef.current = attachPublishedCourseStageFit(container)
+      },
+      onCleanup: () => {
+        tryRunFitRef.current?.()
+        tryRunFitRef.current = null
         hostRef.current = null
-      }
-      const rect = container.getBoundingClientRect()
-      const host = await mountSpatialLocationTryRun({
-        container,
-        project: session.history.present,
-        assetFiles: sidecarFiles,
-        components: componentPackages,
-        locationId: session.selection.locationId,
-        playbackPathId,
-        width: Math.max(1, rect.width),
-        height: Math.max(1, rect.height),
-      })
-      if (cancelled) {
-        await host.destroy()
-        return
-      }
-      publishedKeyRef.current = key
-      hostRef.current = host
-    }
-    void start()
-    return () => {
-      cancelled = true
-    }
+      },
+    })
   }, [canvasMode, componentPackages, playbackPathId, session, sidecarFiles])
 
   useEffect(() => () => {
-    void hostRef.current?.destroy()
-    hostRef.current = null
+    enqueueSerial(tryRunMountChainRef, async () => {
+      await hostRef.current?.destroy()
+      hostRef.current = null
+    })
   }, [])
 
   const assetUrls = useMemo(() => {
@@ -817,10 +828,10 @@ function SpatialLocationWorkspace({
     : null
   const selectedLocked = Boolean(selectedNode?.locked)
 
-  const syncOverlays = (viewport: { x: number; y: number; width: number; height: number }) => {
+  const syncOverlays = () => {
     const authoring = authoringRef.current
-    setWorldOverlay(authoring.overlayGeometry(viewport))
-    setHudOverlay(authoring.viewportOverlayGeometry(viewport))
+    setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
+    setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
   }
 
   return (
@@ -853,9 +864,10 @@ function SpatialLocationWorkspace({
             type="button"
             aria-label="缩小画布"
             onClick={() => {
-              const viewport = readViewport()
-              if (!viewport) return
-              authoringRef.current.zoomSession(session.sessionCamera.zoom - 0.1, viewport)
+              authoringRef.current.zoomSession(
+                session.sessionCamera.zoom - 0.1,
+                LOGICAL_STAGE_VIEWPORT,
+              )
             }}
           >
             <Minus size={14} />
@@ -865,9 +877,10 @@ function SpatialLocationWorkspace({
             type="button"
             aria-label="放大画布"
             onClick={() => {
-              const viewport = readViewport()
-              if (!viewport) return
-              authoringRef.current.zoomSession(session.sessionCamera.zoom + 0.1, viewport)
+              authoringRef.current.zoomSession(
+                session.sessionCamera.zoom + 0.1,
+                LOGICAL_STAGE_VIEWPORT,
+              )
             }}
           >
             <Plus size={14} />
@@ -895,25 +908,29 @@ function SpatialLocationWorkspace({
         className="canvas-viewport"
         data-testid="spatial-world-stage"
         style={{
-          backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
+          backgroundColor: 'transparent',
         }}
         onWheel={(event) => {
           if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
           event.preventDefault()
-          const viewport = readViewport()
-          if (!viewport) return
           authoringRef.current.zoomSession(
             session.sessionCamera.zoom + (event.deltaY > 0 ? -0.1 : 0.1),
-            viewport,
+            LOGICAL_STAGE_VIEWPORT,
           )
         }}
         onPointerDown={(event) => {
           if (canvasMode !== 'edit' || event.button === 2) return
-          const viewport = readViewport()
-          if (!viewport) return
-          const pointer = { x: event.clientX, y: event.clientY, additive: event.shiftKey }
-          const world = clientToWorld(createSpatialWorldViewTransform(viewport, session.sessionCamera), pointer)
-          const hudPoint = clientToWorld(createSpatialViewportOverlayTransform(viewport), pointer)
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY)
+          if (!stagePoint) return
+          const pointer = { ...stagePoint, additive: event.shiftKey }
+          const world = clientToWorld(
+            createSpatialWorldViewTransform(LOGICAL_STAGE_VIEWPORT, session.sessionCamera),
+            pointer,
+          )
+          const hudPoint = clientToWorld(
+            createSpatialViewportOverlayTransform(LOGICAL_STAGE_VIEWPORT),
+            pointer,
+          )
           const layerHit = hitTestV9SpatialLayerItems(
             adaptV9SpatialEditorLayers(view.layers),
             { viewport: hudPoint, world },
@@ -928,51 +945,60 @@ function SpatialLocationWorkspace({
           }
           pointerActiveRef.current = true
           event.currentTarget.setPointerCapture(event.pointerId)
-          const result = authoringRef.current.pointerDown(pointer, viewport)
+          const result = authoringRef.current.pointerDown(pointer, LOGICAL_STAGE_VIEWPORT)
           setPreviewFrames(result.preview ?? null)
           setPreviewCamera(result.previewCamera ?? null)
-          syncOverlays(viewport)
+          syncOverlays()
         }}
         onPointerMove={(event) => {
           if (!pointerActiveRef.current || canvasMode !== 'edit') return
-          const viewport = readViewport()
-          if (!viewport) return
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY)
+          if (!stagePoint) return
           const result = authoringRef.current.pointerMove({
-            x: event.clientX,
-            y: event.clientY,
+            ...stagePoint,
             additive: event.shiftKey,
-          }, viewport)
+          }, LOGICAL_STAGE_VIEWPORT)
           setPreviewFrames(result.preview ?? null)
           setPreviewCamera(result.previewCamera ?? null)
-          syncOverlays(viewport)
+          syncOverlays()
         }}
         onPointerUp={(event) => {
           if (!pointerActiveRef.current) return
           pointerActiveRef.current = false
-          const viewport = readViewport()
-          if (!viewport) return
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY)
+          if (!stagePoint) return
           authoringRef.current.pointerUp({
-            x: event.clientX,
-            y: event.clientY,
+            ...stagePoint,
             additive: event.shiftKey,
-          }, viewport)
+          }, LOGICAL_STAGE_VIEWPORT)
           setPreviewFrames(null)
           setPreviewCamera(null)
-          syncOverlays(viewport)
+          syncOverlays()
         }}
         onDoubleClick={(event) => {
           if (canvasMode !== 'edit') return
-          const viewport = readViewport()
-          if (!viewport) return
-          const result = authoringRef.current.doubleClick({
-            x: event.clientX,
-            y: event.clientY,
-          }, viewport)
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY)
+          if (!stagePoint) return
+          const result = authoringRef.current.doubleClick(stagePoint, LOGICAL_STAGE_VIEWPORT)
           if (result.contentEdit?.ok && result.hit) {
             useEditorStore.getState().beginTextEdit(result.hit.layerItemId, 'canvas')
           }
         }}
       >
+        <div
+          ref={stageStackRef}
+          className="canvas-stage-stack"
+          data-testid="spatial-stage-stack"
+          style={{
+            left: stageTransform.stageRect.x,
+            top: stageTransform.stageRect.y,
+            width: STAGE_VIEWPORT_WIDTH,
+            height: STAGE_VIEWPORT_HEIGHT,
+            transform: `scale(${stageTransform.scale})`,
+            transition: 'none',
+            backgroundColor: resolveCourseSurfaceBackgroundColor(surface.backgroundColor),
+          }}
+        >
         {canvasMode === 'edit' && (
           <>
             <div
@@ -1003,8 +1029,8 @@ function SpatialLocationWorkspace({
                 }}
               />
               {session.showCameraFrames && view.camera.frames.map((frame) => {
-                const width = viewportSize.width / frame.zoom
-                const height = viewportSize.height / frame.zoom
+                const width = STAGE_VIEWPORT_WIDTH / frame.zoom
+                const height = STAGE_VIEWPORT_HEIGHT / frame.zoom
                 return (
                   <div
                     key={frame.id}
@@ -1092,7 +1118,17 @@ function SpatialLocationWorkspace({
                         assetUrls={assetUrls}
                       />
                     ) : node.type === 'text' ? node.text
-                      : node.type === 'formula' ? node.accessibleText
+                      : node.type === 'formula' ? (
+                        <PublishedFormulaPaint
+                          formulaId={node.formulaId}
+                          accessibleText={node.accessibleText}
+                          ast={node.ast}
+                          style={node.style}
+                          width={Math.max(1, preview?.width ?? frame.width)}
+                          height={Math.max(1, preview?.height ?? frame.height)}
+                          lockHeight
+                        />
+                      )
                       : spatialAuthoringMedia(node, assetUrls)
                         ?? (node.type === 'external-component' ? node.name || '组件' : node.name || node.type)}
                   </div>
@@ -1105,8 +1141,8 @@ function SpatialLocationWorkspace({
               style={{
                 left: hudTransform.stageRect.x,
                 top: hudTransform.stageRect.y,
-                width: 1280,
-                height: 720,
+                width: STAGE_VIEWPORT_WIDTH,
+                height: STAGE_VIEWPORT_HEIGHT,
                 transform: `scale(${hudTransform.scale})`,
                 pointerEvents: 'none',
               }}
@@ -1156,7 +1192,7 @@ function SpatialLocationWorkspace({
                         rotation={rotation}
                         canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
                         getRenderedStageBounds={() => {
-                          const bounds = viewportRef.current?.getBoundingClientRect()
+                          const bounds = stageStackRef.current?.getBoundingClientRect()
                           return {
                             width: Math.max(1, bounds?.width || CANVAS_WIDTH),
                             height: Math.max(1, bounds?.height || CANVAS_HEIGHT),
@@ -1175,6 +1211,16 @@ function SpatialLocationWorkspace({
                         componentPackages={componentPackages}
                         assetUrls={assetUrls}
                       />
+                    ) : node.type === 'formula' ? (
+                      <PublishedFormulaPaint
+                        formulaId={node.formulaId}
+                        accessibleText={node.accessibleText}
+                        ast={node.ast}
+                        style={node.style}
+                        width={Math.max(1, preview?.width ?? frame.width)}
+                        height={Math.max(1, preview?.height ?? frame.height)}
+                        lockHeight
+                      />
                     ) : (
                       media ?? (node.name || node.type)
                     )}
@@ -1182,6 +1228,12 @@ function SpatialLocationWorkspace({
                 )
               })}
             </div>
+            {worldOverlay && editingScope !== 'global' ? (
+              <SpatialSelectionOverlay overlay={worldOverlay} locked={selectedLocked} />
+            ) : null}
+            {hudOverlay && (editingScope === 'global' || selectedNode?.type === 'teacher-controller') ? (
+              <SpatialSelectionOverlay overlay={hudOverlay} locked={selectedLocked} />
+            ) : null}
           </>
         )}
         <div
@@ -1190,13 +1242,8 @@ function SpatialLocationWorkspace({
           data-testid="spatial-try-run-host"
           hidden={canvasMode !== 'run'}
         />
+        </div>
       </div>
-      {canvasMode === 'edit' && worldOverlay && editingScope !== 'global' ? (
-        <SpatialSelectionOverlay overlay={worldOverlay} locked={selectedLocked} />
-      ) : null}
-      {canvasMode === 'edit' && hudOverlay && (editingScope === 'global' || selectedNode?.type === 'teacher-controller') ? (
-        <SpatialSelectionOverlay overlay={hudOverlay} locked={selectedLocked} />
-      ) : null}
       {canvasMode === 'edit' && formulaNode?.type === 'formula' && (
         <FormulaEditDialog
           key={formulaNode.id}
@@ -1262,8 +1309,9 @@ function SpatialLocationWorkspace({
 
 function FlowLocationWorkspace(_props: WorkspaceProps) {
   const tryRunRef = useRef<HTMLDivElement>(null)
-  const hostRef = useRef<Awaited<ReturnType<typeof mountFlowLocationTryRun>> | null>(null)
-  const publishedKeyRef = useRef<string | null>(null)
+  const tryRunMountChainRef = useRef(Promise.resolve())
+  const hostRef = useRef<PublishedCourseSession | null>(null)
+  const tryRunFitRef = useRef<(() => void) | null>(null)
   const session = useEditorStore((state) => state.flowSession)
   const canvasMode = useEditorStore((state) => state.canvasMode)
   const editingScope = useEditorStore((state) => state.editingScope)
@@ -1280,44 +1328,39 @@ function FlowLocationWorkspace(_props: WorkspaceProps) {
   useEffect(() => {
     const container = tryRunRef.current
     if (!session || !container) return
-    const key = `${session.history.present.revision}:${session.selection.locationId}`
     if (canvasMode !== 'run') {
-      void hostRef.current?.suspend()
+      tryRunFitRef.current?.()
+      tryRunFitRef.current = null
+      const leftover = hostRef.current
+      hostRef.current = null
+      if (leftover) enqueueSerial(tryRunMountChainRef, () => leftover.destroy())
       return
     }
-    let cancelled = false
-    const start = async () => {
-      if (hostRef.current && publishedKeyRef.current === key) {
-        await hostRef.current.resume()
-        return
-      }
-      if (hostRef.current) {
-        await hostRef.current.destroy()
+    return beginSerializedSessionMount(tryRunMountChainRef, () => mountPublishedCourseTryRun({
+      container,
+      project: session.history.present,
+      assetFiles: sidecarFiles,
+      components: componentPackages,
+      locationId: session.selection.locationId,
+    }), {
+      onReady: (mounted) => {
+        hostRef.current = mounted
+        tryRunFitRef.current?.()
+        tryRunFitRef.current = attachPublishedCourseStageFit(container)
+      },
+      onCleanup: () => {
+        tryRunFitRef.current?.()
+        tryRunFitRef.current = null
         hostRef.current = null
-      }
-      const host = await mountFlowLocationTryRun({
-        container,
-        project: session.history.present,
-        assetFiles: sidecarFiles,
-        components: componentPackages,
-        locationId: session.selection.locationId,
-      })
-      if (cancelled) {
-        await host.destroy()
-        return
-      }
-      publishedKeyRef.current = key
-      hostRef.current = host
-    }
-    void start()
-    return () => {
-      cancelled = true
-    }
+      },
+    })
   }, [canvasMode, componentPackages, session, sidecarFiles])
 
   useEffect(() => () => {
-    void hostRef.current?.destroy()
-    hostRef.current = null
+    enqueueSerial(tryRunMountChainRef, async () => {
+      await hostRef.current?.destroy()
+      hostRef.current = null
+    })
   }, [])
 
   if (!session || !view) return null
@@ -1349,28 +1392,30 @@ function FlowLocationWorkspace(_props: WorkspaceProps) {
       <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
         {editingScope === 'global' ? '全局层 · 视口浮层' : view.surfaceTitle}
       </div>
-      {canvasMode === 'edit' ? (
-        <FlowWorkspace
-          project={session.history.present}
-          view={view}
-          selection={session.selection}
-          onProjectChange={(result) => {
-            useEditorStore.getState().applyFlowCommand(result)
-          }}
-          onSelectionChange={(next) => {
-            useEditorStore.getState().applyFlowSelection(next)
-          }}
-          onTextEditChange={(edit) => {
-            useEditorStore.getState().setFlowTextEdit(edit)
-          }}
+      <div className="canvas-viewport">
+        {canvasMode === 'edit' ? (
+          <FlowWorkspace
+            project={session.history.present}
+            view={view}
+            selection={session.selection}
+            onProjectChange={(result) => {
+              useEditorStore.getState().applyFlowCommand(result)
+            }}
+            onSelectionChange={(next) => {
+              useEditorStore.getState().applyFlowSelection(next)
+            }}
+            onTextEditChange={(edit) => {
+              useEditorStore.getState().setFlowTextEdit(edit)
+            }}
+          />
+        ) : null}
+        <div
+          ref={tryRunRef}
+          className="flow-try-run-host"
+          data-testid="flow-try-run-host"
+          hidden={canvasMode !== 'run'}
         />
-      ) : null}
-      <div
-        ref={tryRunRef}
-        className="flow-try-run-host"
-        data-testid="flow-try-run-host"
-        hidden={canvasMode !== 'run'}
-      />
+      </div>
     </main>
   )
 }
@@ -1502,6 +1547,7 @@ function SlideLocationWorkspace({
   const courseTryRunRef = useRef<HTMLDivElement>(null)
   const courseTryRunSessionRef = useRef<PublishedCourseSession | null>(null)
   const courseTryRunFitRef = useRef<(() => void) | null>(null)
+  const courseTryRunMountChainRef = useRef(Promise.resolve())
   const [tryRunFeedback, setTryRunFeedback] = useState<RuntimePreviewFeedback>(null)
   const [tryRunEpoch, setTryRunEpoch] = useState(0)
   const [controllerOverlay, setControllerOverlay] =
@@ -2037,12 +2083,14 @@ function SlideLocationWorkspace({
     if (!useCoursePlayerTryRun || !courseDocument || !container || !tryRunMountKey) {
       courseTryRunFitRef.current?.()
       courseTryRunFitRef.current = null
-      void courseTryRunSessionRef.current?.destroy()
+      const leftover = courseTryRunSessionRef.current
       courseTryRunSessionRef.current = null
+      if (leftover) {
+        enqueueSerial(courseTryRunMountChainRef, () => leftover.destroy())
+      }
       setTryRunFeedback(null)
       return
     }
-    let cancelled = false
     setTryRunFeedback({
       kind: 'loading',
       title: '正在准备当前位置试运行',
@@ -2054,41 +2102,36 @@ function SlideLocationWorkspace({
       setTryRunFeedback(null)
       return
     }
-    void mountPublishedCourseTryRun({
+    return beginSerializedSessionMount(courseTryRunMountChainRef, () => mountPublishedCourseTryRun({
       container,
       project: document,
       assetFiles: selectMediaAssetFiles(state),
       components: state.componentPackages,
       locationId: courseLocationIdRef.current,
-    }).then((session) => {
-      if (cancelled) {
-        void session.destroy()
-        return
-      }
-      courseTryRunFitRef.current?.()
-      courseTryRunFitRef.current = attachPublishedCourseStageFit(container)
-      courseTryRunSessionRef.current = session
-      container.dataset.coursePlayerReady = 'true'
-      setTryRunFeedback(null)
-      setTryRunEpoch((current) => current + 1)
-    }).catch((error) => {
-      if (cancelled) return
-      console.error('CoursePlayer 试运行启动失败', error)
-      setTryRunFeedback({
-        kind: 'error',
-        title: '当前位置试运行启动失败',
-        message: error instanceof Error ? error.message : '播放器未能完成启动。请重试。',
-      })
+    }), {
+      onReady: (session) => {
+        courseTryRunFitRef.current?.()
+        courseTryRunFitRef.current = attachPublishedCourseStageFit(container)
+        courseTryRunSessionRef.current = session
+        container.dataset.coursePlayerReady = 'true'
+        setTryRunFeedback(null)
+        setTryRunEpoch((current) => current + 1)
+      },
+      onError: (error) => {
+        console.error('CoursePlayer 试运行启动失败', error)
+        setTryRunFeedback({
+          kind: 'error',
+          title: '当前位置试运行启动失败',
+          message: error instanceof Error ? error.message : '播放器未能完成启动。请重试。',
+        })
+      },
+      onCleanup: () => {
+        container.dataset.coursePlayerReady = 'false'
+        courseTryRunFitRef.current?.()
+        courseTryRunFitRef.current = null
+        courseTryRunSessionRef.current = null
+      },
     })
-    return () => {
-      cancelled = true
-      container.dataset.coursePlayerReady = 'false'
-      courseTryRunFitRef.current?.()
-      courseTryRunFitRef.current = null
-      const session = courseTryRunSessionRef.current
-      courseTryRunSessionRef.current = null
-      if (session) void session.destroy()
-    }
   }, [tryRunMountKey, useCoursePlayerTryRun])
 
   useEffect(() => {

@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
-import { serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode } from '../../shared/projectTypes'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
@@ -31,8 +30,11 @@ import { transformFlowOverlayFrame, type FlowSharedAuthoringResult } from '../co
 import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
 import { selectMediaAssetFiles, useEditorStore } from '../store/editorStore'
 import {
+  createStageViewportTransform,
   resizeWorldFrameFromHandle,
   STAGE_RESIZE_HANDLE_DIRECTIONS,
+  STAGE_VIEWPORT_HEIGHT,
+  STAGE_VIEWPORT_WIDTH,
   type StageRect,
   type StageResizeHandleDirection,
 } from '../authoring/stageViewportTransform'
@@ -67,6 +69,7 @@ import {
   type FlowTextEditSession,
 } from '../authoring/flowTextEdit'
 import { FormulaEditDialog } from './FormulaEditDialog'
+import { PublishedFormulaPaint } from './PublishedFormulaPaint'
 import {
   FlowBlockContextToolbar,
   type FlowBlockContextCommand,
@@ -461,6 +464,21 @@ function renderFlowOverlayCardContent(
       />
     )
   }
+  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'formula') {
+    const data = layer.item.content.data
+    const frame = layer.item.frame
+    return (
+      <PublishedFormulaPaint
+        formulaId={data.formulaId}
+        accessibleText={data.accessibleText}
+        ast={data.ast}
+        style={data.style}
+        width={Math.max(1, frame.width)}
+        height={Math.max(1, frame.height)}
+        lockHeight
+      />
+    )
+  }
   const media = nativeOverlayMedia(layer.item as LayerItem)
   if (!media) return layer.item.label || '浮层'
   const url = assetUrls[media.assetId]
@@ -561,9 +579,11 @@ function overlayLocalPoint(
   clientY: number,
 ): { x: number; y: number } {
   const bounds = overlay.getBoundingClientRect()
+  const width = Math.max(1, bounds.width)
+  const height = Math.max(1, bounds.height)
   return {
-    x: clientX - bounds.left,
-    y: clientY - bounds.top,
+    x: (clientX - bounds.left) * (CANVAS_WIDTH / width),
+    y: (clientY - bounds.top) * (CANVAS_HEIGHT / height),
   }
 }
 
@@ -645,6 +665,7 @@ export function FlowWorkspace({
 }: FlowWorkspaceProps) {
   const paperRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const workspaceMeasureRef = useRef<HTMLDivElement>(null)
   const editRef = useRef<FlowTextEditSession | null>(null)
   const [edit, setEdit] = useState<FlowTextEditSession | null>(null)
   const [restyleToken, setRestyleToken] = useState(0)
@@ -654,6 +675,10 @@ export function FlowWorkspace({
   const overlayRef = useRef<HTMLDivElement>(null)
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
+  const [overlayViewportSize, setOverlayViewportSize] = useState({
+    width: STAGE_VIEWPORT_WIDTH,
+    height: STAGE_VIEWPORT_HEIGHT,
+  })
   const storeAssetFiles = useEditorStore(selectMediaAssetFiles)
   const storeComponentPackages = useEditorStore((state) => state.componentPackages)
   const componentPackages = propComponentPackages ?? storeComponentPackages
@@ -667,6 +692,31 @@ export function FlowWorkspace({
     if (typeof URL.revokeObjectURL !== 'function') return
     for (const url of Object.values(assetUrls)) URL.revokeObjectURL(url)
   }, [assetUrls])
+
+  useLayoutEffect(() => {
+    const node = workspaceMeasureRef.current
+    if (!node) return
+    const update = () => {
+      const rect = node.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setOverlayViewportSize({ width: rect.width, height: rect.height })
+      }
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  const overlayTransform = useMemo(() => createStageViewportTransform({
+    viewport: {
+      x: 0,
+      y: 0,
+      width: Math.max(1, overlayViewportSize.width),
+      height: Math.max(1, overlayViewportSize.height),
+    },
+    zoom: 1,
+  }), [overlayViewportSize.height, overlayViewportSize.width])
 
   const setEditState = (next: FlowTextEditSession | null) => {
     editRef.current = next
@@ -1270,8 +1320,15 @@ export function FlowWorkspace({
         break
       case 'formula':
         body = (
-          <div role="math" aria-label={block.accessibleText} data-flow-formula-id={block.formulaId}>
-            {serializeFormulaAst(block.ast as FormulaAstNode)}
+          <div data-flow-formula-id={block.formulaId}>
+            <PublishedFormulaPaint
+              formulaId={block.formulaId}
+              accessibleText={block.accessibleText}
+              ast={block.ast as FormulaAstNode}
+              style={{ fontSize: 32, color: '#1f2937', align: 'left' }}
+              width={Math.max(160, view.layout.readingWidth)}
+              height={96}
+            />
           </div>
         )
         break
@@ -1522,6 +1579,7 @@ export function FlowWorkspace({
 
   return (
     <div
+      ref={workspaceMeasureRef}
       className="flow-workspace"
       data-testid="flow-workspace"
       data-flow-not-slide-stage="true"
@@ -1579,7 +1637,18 @@ export function FlowWorkspace({
           ref={overlayRef}
           className="flow-authoring-layer-overlay"
           data-testid="flow-authoring-layer-overlay"
-          style={{ position: 'absolute', inset: 0, zIndex: 4, pointerEvents: 'none' }}
+          style={{
+            position: 'absolute',
+            left: overlayTransform.stageRect.x,
+            top: overlayTransform.stageRect.y,
+            width: STAGE_VIEWPORT_WIDTH,
+            height: STAGE_VIEWPORT_HEIGHT,
+            transform: `scale(${overlayTransform.scale})`,
+            transformOrigin: '0 0',
+            zIndex: 4,
+            pointerEvents: 'none',
+            overflow: 'hidden',
+          }}
         >
           {overlayLayers.map((layer) => {
             const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null

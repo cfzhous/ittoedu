@@ -988,11 +988,53 @@ button:disabled {
   z-index: 5;
 }
 
-.course-preview-host {
+.course-preview-overlay.modal-backdrop {
+  padding: 0;
+  place-items: stretch;
+}
+
+.course-preview-shell {
   position: relative;
-  inset: auto;
-  flex: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
   min-height: 0;
+  background: #0b0d12;
+}
+
+.course-preview-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(11, 13, 18, 0.92), rgba(11, 13, 18, 0.35) 70%, transparent);
+}
+
+.course-preview-chrome > *,
+.course-preview-chrome__actions {
+  pointer-events: auto;
+}
+
+.course-preview-chrome__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.course-preview-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+.course-preview-host {
+  position: absolute;
+  inset: 0;
 }
 
 .course-try-run-feedback {
@@ -5627,9 +5669,7 @@ button:disabled {
 }
 
 .workspace--spatial .canvas-viewport {
-  inset: 42px 0 0;
   overflow: hidden;
-  background: #ffffff;
 }
 
 .workspace--spatial .canvas-viewport::before {
@@ -5697,20 +5737,17 @@ button:disabled {
   overflow: hidden;
 }
 
-.spatial-try-run-host .spatial-surface {
-  width: 100% !important;
-  height: 100% !important;
-}
-
 .spatial-selection-overlay,
 .spatial-hud-selection-overlay {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
   z-index: 8;
 }
 
 .spatial-selection-overlay__box,
 .spatial-hud-selection-overlay .teacher-controller-overlay__box {
-  position: fixed;
+  position: absolute;
   box-sizing: border-box;
   border: 1px solid #5b9cff;
   background: transparent;
@@ -5721,7 +5758,7 @@ button:disabled {
 }
 
 .spatial-selection-overlay__handle {
-  position: fixed;
+  position: absolute;
   box-sizing: border-box;
   width: 11px;
   height: 11px;
@@ -5734,7 +5771,7 @@ button:disabled {
 }
 
 .spatial-selection-overlay__rotate {
-  position: fixed;
+  position: absolute;
   width: 11px;
   height: 11px;
   border: 1px solid #5b9cff;
@@ -5747,23 +5784,27 @@ button:disabled {
   background: #eef1f6;
 }
 
+.workspace--flow .canvas-viewport {
+  overflow: hidden;
+  background: #eef1f6;
+}
+
 .workspace--flow .flow-workspace {
   position: absolute;
-  inset: 42px 0 0;
+  inset: 0;
   z-index: 1;
+}
+
+.flow-authoring-layer-overlay {
+  transform-origin: 0 0;
 }
 
 .flow-try-run-host {
   position: absolute;
-  inset: 42px 0 0;
+  inset: 0;
   z-index: 4;
   overflow: hidden;
-  background: #fff;
-}
-
-.flow-try-run-host .flow-surface-host {
-  width: 100%;
-  height: 100%;
+  background: #111318;
 }
 
 .flow-page-tree {

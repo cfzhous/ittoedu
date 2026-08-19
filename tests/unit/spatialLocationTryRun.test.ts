@@ -116,4 +116,24 @@ describe('mountSpatialLocationTryRun world video', () => {
     await host.destroy()
     container.remove()
   })
+
+  it('defaults try-run to the 1280×720 logical stage', async () => {
+    const container = document.createElement('div')
+    Object.assign(container.style, { width: '400px', height: '240px' })
+    document.body.appendChild(container)
+    const host = await mountSpatialLocationTryRun({
+      container,
+      project: spatialVideoProject(),
+      assetFiles: { 'asset-video': MP4 },
+      locationId: 'camera-home',
+    })
+
+    const root = container.querySelector<HTMLElement>('.spatial-surface')
+    expect(root?.style.width).toBe('1280px')
+    expect(root?.style.height).toBe('720px')
+    expect(host.camera).toMatchObject({ viewportWidth: 1280, viewportHeight: 720 })
+
+    await host.destroy()
+    container.remove()
+  })
 })

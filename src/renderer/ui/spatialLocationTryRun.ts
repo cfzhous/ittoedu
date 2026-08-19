@@ -1,4 +1,5 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { SpatialSurfaceHost } from '../../player/surfaces/spatial/SpatialSurfaceHost'
 import { publishedControllerNavigationTarget } from '../../player/surfaces/publishedDynamicHosts'
@@ -27,8 +28,8 @@ export async function mountSpatialLocationTryRun(input: {
   host = SpatialSurfaceHost.fromPublishedCourse(
     published,
     {
-      width: input.width ?? Math.max(1, input.container.clientWidth || 800),
-      height: input.height ?? Math.max(1, input.container.clientHeight || 450),
+      width: input.width ?? CANVAS_WIDTH,
+      height: input.height ?? CANVAS_HEIGHT,
     },
     {
       locationId: input.locationId,

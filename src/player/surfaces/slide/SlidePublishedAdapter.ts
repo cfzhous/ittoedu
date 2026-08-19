@@ -23,6 +23,7 @@ import type {
 } from '../SurfaceHost'
 import {
   TeacherControllerDom,
+  stageBoundsFromElement,
   teacherControllerDomNode,
   type TeacherControllerDomSession,
 } from '../../teacherControllerDom'
@@ -31,6 +32,7 @@ import {
   type PublishedComponentMountHandle,
 } from '../publishedComponentMount'
 import { paintPublishedNativeText } from '../publishedNativeText'
+import { paintPublishedFormula } from '../publishedFormula'
 
 function clonePayload(payload: PublishedCourseV2Payload): PublishedCourseV2Payload {
   return structuredClone(payload)
@@ -207,15 +209,16 @@ function appendLayerNode(
       wrap.appendChild(video)
     }
   } else if (item.kind === 'native' && item.content.nativeType === 'formula') {
-    const data = item.content.data
     wrap.style.boxSizing = 'border-box'
     wrap.style.overflow = 'hidden'
-    wrap.style.whiteSpace = 'pre-wrap'
-    wrap.style.fontFamily = '"Times New Roman", serif'
-    wrap.style.fontSize = `${Math.max(1, data.style.fontSize)}px`
-    wrap.style.color = data.style.color || '#1f2937'
-    wrap.style.textAlign = data.style.align
-    wrap.textContent = data.accessibleText || '公式'
+    paintPublishedFormula(wrap, {
+      formulaId: item.content.data.formulaId,
+      accessibleText: item.content.data.accessibleText,
+      ast: item.content.data.ast,
+      style: item.content.data.style,
+      width: Math.max(1, item.frame.width),
+      height: Math.max(1, item.frame.height),
+    })
   } else if (item.kind === 'native' && item.content.nativeType === 'image') {
     const url = resolveAsset(item.content.data.assetId)
     if (url) {
@@ -405,17 +408,7 @@ export class SlidePublishedAdapter implements SurfaceHost {
       node,
       container: wrap,
       canvas: { width: 1280, height: 720 },
-      getRenderedStageBounds: () => {
-        const bounds = root.getBoundingClientRect()
-        const width = bounds.width > 1 ? bounds.width : 1280
-        const height = bounds.height > 1 ? bounds.height : 720
-        return {
-          left: bounds.width > 1 ? bounds.left : 0,
-          top: bounds.height > 1 ? bounds.top : 0,
-          width,
-          height,
-        }
-      },
+      getRenderedStageBounds: () => stageBoundsFromElement(root, { width: 1280, height: 720 }),
       scenes: this.#payload.locations.map((location) => ({
         id: location.id,
         name: location.label,

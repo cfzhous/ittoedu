@@ -10,7 +10,7 @@
 
 编辑器只接受 V4：严格声明 `supportedScopes` 与 `renderMode`，使用 DOM/Phaser 分能力上下文、可见性/暂停生命周期和确定性捕获准备。V1–V3 包会在导入边界得到明确的“不受支持”诊断。
 
-组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions；全局规则通过 location / scene 限定生效范围。一次性复杂场景互动或一次性跨场景规则不必做成组件，可使用画布或 surface 运行时。组件只用于高复用、需参数化、需版本化或便于教师反复配置的能力。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
+组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions。整页或整块世界的动画、特效与连续耦合机制使用画布或 surface 运行时，少放可教文字。稍复杂的局部互动（拖拽、配对、本地多步控件）使用 Component API 4：先匹配已有包，允许为本课新建。不要用场景运行时去仿一个局部控件。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
 
 中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布。编辑状态由隔离 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过本文的显式文字目标向宿主描述“哪一段 Props 可在何处编辑”，不能访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。
 
@@ -18,22 +18,26 @@
 
 组件发现、导入、插入和包管理位于专业模式独立“组件”页。全尺寸“内置组件库”从受控 catalog 动态生成通用/学科、学段与用途筛选，可多选加入工程但不自动创建实例；“导入外部组件”允许一次选择多个包，选定后直接校验并原子加入，不逐包弹出导入确认或成功摘要。两种来源最终都进入同一“工程组件”列表，卡片负责插入，次级菜单负责详情、显式更新、替换、定位和受引用保护的移除。已经嵌入的精确包可直接反复实例化，不重新读取目录或重复提示；会覆盖已用代码的更新、替换和哈希冲突仍显式审阅或阻断。编辑器选中节点时通过“属性/交互”维护 `node.click`；右侧“互动与动画”维护状态/场景进入、节点激活、动画完成、音视频生命周期/时间点、`component.event` 和带 `scene/global` 来源的 `runtime.event`。步骤可用 `after-previous` / `with-previous` 编排顺序与并行，并设局部延迟。组件若只需发出一个可枚举事件，应使用 V4 `ctx.emit()`，再由规则编排元素动画、状态、声音、视频或导航。
 
-机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只信任与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；目录缺失、不受信任或不匹配时必须标记为不可用/降级。它不是组件生成器，也不解除质量门禁：当前四个登记包仍全部为 `experimental`，许可和维护人 `releaseBlockers` 必须保留，不能因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
+机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只信任与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；目录缺失、不受信任或不匹配时必须标记为不可用/降级。它不是组件生成器，也不解除质量门禁。目录不可用时仍可通过「导入外部组件」或课例构建写入工程内嵌包。不得因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
 
 组件不应重复实现编辑器已有的一等能力：常规视频使用 `VideoNode`，课程声音使用 `media.audio` 声音库与声道，默认教师控制平台使用 `globalLayer` 中的 `TeacherControllerNode`。内置控制器的默认 `scene.open-picker` 按钮展开全部场景，选择后只进入目标初始状态；固定 `scene.go` 是高级按钮动作。只有策划要求独特视觉、复用封装或内置节点无法表达的行为时，才把媒体播放器或控制平台制作成 V4 组件。
 
-### 0.1 当前内置组件边界
+### 0.1 当前组件来源
 
-当前 catalog 只保留四个实验包：
+能力索引快照当前为 `catalogStatus: unavailable`：本 checkout 没有可读的外部目录 `../courseware-components`，`packageCount` 为 0。这只表示没有现成目录可浏览，**不是** Flow/Spatial/Slide 试运行不能挂组件（P8 已合入），也不是禁止为本课导入或新建 `.h5component`。
+
+当外部目录可用时，ittoedu 自有实验包预期仍是：
 
 - `com.ittoedu.language.reading-annotation`：朗读重音、停顿和连读语义；
 - `com.ittoedu.language.pinyin-annotation`：汉字/拼音配对与显隐行为；
 - `com.ittoedu.visual.text-container`：使用 `visualStyle` 在透明玻璃、磨砂玻璃、便利贴、撕纸和文件夹之间切换；
 - `com.ittoedu.visual.image-frame`：使用 `visualStyle` 在笔刷裁切和贴纸白边之间切换。
 
+四个包在许可、维护人和质量门槛通过前不得宣称为已发布内置库。课例构建应先匹配工程已有包或可导入包，没有合适的就新建课例本地包。
+
 语文两项因具有独立学科语义和行为保持分立；七项旧通用视觉包只是外观差异，已删除并按内容载体合并为两个组件。当行为、数据结构和导出语义不变时，新外观应继续作为属性选项，不应再新建一个包。旧七个 ID 没有别名、迁移或宿主兼容分支。两个新视觉组件使用纯 CSS/SVG 程序视觉，不复用旧来源不明位图。
 
-四个当前内置包的可编辑稳定可见文字均必须同时出现在属性栏和画布双击目标中。不可见的无障碍说明继续只在属性栏编辑。
+四个实验包若出现在目录中，可编辑的稳定可见文字均必须同时出现在属性栏和画布双击目标中。不可见的无障碍说明继续只在属性栏编辑。
 
 ## 1. 组件包结构
 

@@ -149,4 +149,57 @@ describe('CoursePlayer host session actions', () => {
     expect(player.activeSurfaceId).toBeNull()
     expect(player.listSurfaces().map((surface) => surface.status)).toEqual(['destroyed', 'destroyed'])
   })
+
+  it('joins a second destroy onto the in-flight cleanup', async () => {
+    const slide = new RecordingHost('surface-slide', 'slide')
+    const player = new CoursePlayer([slide], { services })
+    await player.mountSurface('surface-slide', document.createElement('div'))
+    const first = player.destroy()
+    const second = player.destroy()
+    const [firstResults, secondResults] = await Promise.all([first, second])
+    expect(firstResults.map((result) => result.ok)).toEqual([true])
+    expect(secondResults).toBe(firstResults)
+    expect(slide.calls.filter((call) => call === 'destroy')).toEqual(['destroy'])
+  })
+})
+
+describe('MixedCourseNavigator location queue', () => {
+  class SlowHost extends RecordingHost {
+    async activate(): Promise<void> {
+      this.calls.push('activate:enter')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      this.calls.push('activate')
+    }
+  }
+
+  it('does not re-activate when already at the requested location', async () => {
+    const slide = new RecordingHost('surface-slide', 'slide')
+    const flow = new RecordingHost('surface-flow', 'flow')
+    const player = new CoursePlayer([slide, flow], { services })
+    const navigator = new MixedCourseNavigator(mixedCourse, player)
+    await player.mountSurface('surface-slide', document.createElement('div'))
+    await player.mountSurface('surface-flow', document.createElement('div'))
+    await navigator.start()
+    const calls = slide.calls.slice()
+    await navigator.goToLocation('slide-home')
+    expect(slide.calls).toEqual(calls)
+    expect(navigator.current?.locationId).toBe('slide-home')
+  })
+
+  it('serializes overlapping jumps so the last requested location wins', async () => {
+    const slide = new SlowHost('surface-slide', 'slide')
+    const flow = new SlowHost('surface-flow', 'flow')
+    const player = new CoursePlayer([slide, flow], { services })
+    const navigator = new MixedCourseNavigator(mixedCourse, player)
+    await player.mountSurface('surface-slide', document.createElement('div'))
+    await player.mountSurface('surface-flow', document.createElement('div'))
+    await navigator.start()
+    const first = navigator.goToLocation('flow-page')
+    const second = navigator.goToLocation('slide-two')
+    await Promise.all([first, second])
+    expect(navigator.current?.locationId).toBe('slide-two')
+    expect(player.activeSurfaceId).toBe('surface-slide')
+    expect(player.statusOf('surface-flow')).toBe('suspended')
+    expect(player.statusOf('surface-slide')).toBe('active')
+  })
 })

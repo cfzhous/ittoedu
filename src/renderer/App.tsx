@@ -103,6 +103,7 @@ import { SceneStateStrip } from './ui/SceneStateStrip'
 import { TopToolbar, type ExportFormat } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { attachPublishedCourseStageFit, mountPublishedCourseTryRun } from './ui/coursePlayerTryRun'
+import { beginSerializedSessionMount, enqueueSerial } from './ui/serializedSessionMount'
 import type { PublishedCourseSession } from '../player/surfaces/publishedDynamicHosts'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
@@ -399,6 +400,7 @@ export default function App() {
   const [coursePreviewHost, setCoursePreviewHost] = useState<HTMLDivElement | null>(null)
   const coursePreviewSessionRef = useRef<PublishedCourseSession | null>(null)
   const coursePreviewFitRef = useRef<(() => void) | null>(null)
+  const coursePreviewMountChainRef = useRef(Promise.resolve())
   const [coursePreviewFeedback, setCoursePreviewFeedback] = useState<{
     kind: 'loading' | 'error'
     title: string
@@ -1420,48 +1422,47 @@ export default function App() {
   }, [setError])
 
   useEffect(() => {
-    if (!coursePreviewOpen || !coursePreviewHost) return
+    if (!coursePreviewOpen || !coursePreviewHost) {
+      const leftover = coursePreviewSessionRef.current
+      coursePreviewSessionRef.current = null
+      if (leftover) enqueueSerial(coursePreviewMountChainRef, () => leftover.destroy())
+      return
+    }
     const sources = activeCoursePublishSources()
     if (!sources) {
       setCoursePreviewOpen(false)
       return
     }
-    let cancelled = false
     setCoursePreviewFeedback({
       kind: 'loading',
       title: '正在准备整课预览',
       message: '正在载入 CoursePlayer…',
     })
-    void mountPublishedCourseTryRun({
+    return beginSerializedSessionMount(coursePreviewMountChainRef, () => mountPublishedCourseTryRun({
       container: coursePreviewHost,
       project: sources.project,
       assetFiles: sources.assetFiles,
       components: sources.components,
-    }).then((session) => {
-      if (cancelled) {
-        void session.destroy()
-        return
-      }
-      coursePreviewFitRef.current?.()
-      coursePreviewFitRef.current = attachPublishedCourseStageFit(coursePreviewHost)
-      coursePreviewSessionRef.current = session
-      setCoursePreviewFeedback(null)
-    }).catch((error) => {
-      if (cancelled) return
-      setCoursePreviewFeedback({
-        kind: 'error',
-        title: '整课预览启动失败',
-        message: readableError(error, '播放器未能完成启动。请关闭后重试。'),
-      })
+    }), {
+      onReady: (session) => {
+        coursePreviewFitRef.current?.()
+        coursePreviewFitRef.current = attachPublishedCourseStageFit(coursePreviewHost)
+        coursePreviewSessionRef.current = session
+        setCoursePreviewFeedback(null)
+      },
+      onError: (error) => {
+        setCoursePreviewFeedback({
+          kind: 'error',
+          title: '整课预览启动失败',
+          message: readableError(error, '播放器未能完成启动。请关闭后重试。'),
+        })
+      },
+      onCleanup: () => {
+        coursePreviewFitRef.current?.()
+        coursePreviewFitRef.current = null
+        coursePreviewSessionRef.current = null
+      },
     })
-    return () => {
-      cancelled = true
-      coursePreviewFitRef.current?.()
-      coursePreviewFitRef.current = null
-      const session = coursePreviewSessionRef.current
-      coursePreviewSessionRef.current = null
-      if (session) void session.destroy()
-    }
   }, [coursePreviewHost, coursePreviewOpen])
 
   useEffect(() => {
@@ -1818,31 +1819,22 @@ export default function App() {
       />
       {coursePreviewOpen ? (
         <div
-          className="modal-backdrop"
+          className="modal-backdrop course-preview-overlay"
           data-testid="course-preview-overlay"
           role="presentation"
-          onMouseDown={() => setCoursePreviewOpen(false)}
         >
           <section
-            className="modal"
+            className="course-preview-shell"
             role="dialog"
             aria-modal="true"
             aria-labelledby="course-preview-title"
-            style={{
-              width: 'min(1280px, 92vw)',
-              height: 'min(820px, 90vh)',
-              maxWidth: '92vw',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-            onMouseDown={(event) => event.stopPropagation()}
           >
-            <header className="modal__body" style={{ flex: 'none', alignItems: 'center' }}>
+            <header className="course-preview-chrome">
               <div>
                 <h2 className="modal__title" id="course-preview-title">整课预览</h2>
-                <p className="modal__message">Published Course V2 · CoursePlayer</p>
+                <p className="modal__message">Published Course V2 · CoursePlayer · 1280 × 720</p>
               </div>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+              <div className="course-preview-chrome__actions">
                 <button
                   type="button"
                   className="secondary-button"
@@ -1868,7 +1860,7 @@ export default function App() {
                 </button>
               </div>
             </header>
-            <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
+            <div className="course-preview-viewport">
               <div
                 ref={setCoursePreviewHost}
                 className="course-preview-host"

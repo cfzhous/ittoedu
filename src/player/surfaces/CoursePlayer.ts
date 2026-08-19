@@ -43,6 +43,7 @@ export class CoursePlayer {
   readonly #onFailure?: (failure: SurfaceFailure) => void
   #activeSurfaceId: string | null = null
   #destroyed = false
+  #destroyPromise: Promise<readonly SurfaceOperationResult[]> | null = null
 
   constructor(hosts: readonly SurfaceHost[], options: CoursePlayerOptions) {
     this.#services = options.services
@@ -236,13 +237,15 @@ export class CoursePlayer {
   }
 
   async destroy(): Promise<readonly SurfaceOperationResult[]> {
-    if (this.#destroyed) return []
+    if (this.#destroyPromise) return this.#destroyPromise
     this.#destroyed = true
-    const results = await Promise.all(
+    this.#destroyPromise = Promise.all(
       [...this.#entries.keys()].map((id) => this.destroySurface(id)),
-    )
-    this.#activeSurfaceId = null
-    return results
+    ).then((results) => {
+      this.#activeSurfaceId = null
+      return results
+    })
+    return this.#destroyPromise
   }
 
   #enqueue(

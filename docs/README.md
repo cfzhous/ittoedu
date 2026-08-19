@@ -8,9 +8,9 @@
 |---|---|
 | 产品概览、启动、架构与命令 | [根目录 README](../README.md) |
 | 教师和课件作者操作 | [用户指南](USER_GUIDE.md) |
-| 当前软件路线与 Editor 1.0 收尾 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)（12.5：车道 C 合同 + 车道 P 教师可见缺陷） |
+| 当前软件路线与 Editor 1.0 收尾 | [COURSEWARE_DEVELOPMENT_PLAN.md](../COURSEWARE_DEVELOPMENT_PLAN.md)（12.8：T/P/Q 已合入；待教师 `accepted`） |
 | Course Project V9 合同、兼容政策与架构边界 | [COURSE_PROJECT_V9.md](contracts/COURSE_PROJECT_V9.md)、[V9_COMPATIBILITY_POLICY.md](contracts/V9_COMPATIBILITY_POLICY.md)、[EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md) |
-| 可并行执行任务（T0–T6 与 P1–P8；全量只在最后） | [docs/tasks/editor-1.0/00_INDEX.md](tasks/editor-1.0/00_INDEX.md) |
+| 可并行执行任务（T0–T6、P1–P8、Q1–Q8 均已合入；不要重做） | [docs/tasks/editor-1.0/00_INDEX.md](tasks/editor-1.0/00_INDEX.md) |
 | 第三方工人协议 | [docs/tasks/editor-1.0/02_WORKER.md](tasks/editor-1.0/02_WORKER.md) |
 | 新 Agent 代码入口 | [PROJECT_COGNITION_INDEX.md](../PROJECT_COGNITION_INDEX.md) |
 | AI 教学策划 | [`orchestrate-courseware`](../.agents/skills/orchestrate-courseware/SKILL.md) |
@@ -21,7 +21,7 @@
 | 机器发现当前契约 | [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)（`protocols.project` 为 9） |
 | 无界面自检课件工程 | `npm run --silent validate:course-project -- <file.h5lesson>`（`validate:project` 为同一入口） |
 
-当前主干只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。编排 Skill 只维护两份教师可改 Markdown；确认后 Builder 用真实产品 API 写 V9。教师工作流不使用 Hash、审批或 Evidence 清单。自动管线最多给出 `engineering candidate`；`art candidate` 需要真实视觉/互动证据，`accepted` 必须来自明确的人类验收。
+当前主干只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。编排 Skill 先确认中等策划再写呈现脚本（脚本选定表面）；确认后 Builder 盘点资产并用真实产品 API 写 V9。教师工作流不使用 Hash、审批或 Evidence 清单。自动管线最多给出 `engineering candidate`；`art candidate` 需要真实视觉/互动证据，`accepted` 必须来自明确的人类验收。
 
 [AI 互动课件 Skill 设计](AI_COURSEWARE_SKILL_DESIGN.md)、[通用编排规范](AI_COURSEWARE_ORCHESTRATION.md)、[创作接入规范](AI_COURSEWARE_AUTHORING.md) 是 2026-08-13 的人类审阅背景，其中 Project V8 Builder、Hash 审批和 `implementation-ready` 描述已过时；机器执行以当前两个 Skill 为准。
 

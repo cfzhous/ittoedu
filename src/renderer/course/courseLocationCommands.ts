@@ -18,6 +18,12 @@ import { commitSlideProjectMutation } from './slideEditorCommands'
 
 export const COURSE_LAST_LOCATION_REASON = '不能删除最后一个课程位置'
 
+/** Outline order is course order: the first location is always the start. */
+export function syncStartLocationToFirstLocation(draft: CourseProjectDocument): void {
+  const first = draft.locations[0]
+  if (first) draft.startLocationId = first.id
+}
+
 export type CourseLocationCommandResult =
   | { ok: true; project: CourseProjectDocument; activatedLocationId: string }
   | { ok: false; reason: string; project: CourseProjectDocument }
@@ -716,6 +722,7 @@ function mutateMoveSlideScene(
   }
   reorderSlideLocationsForSurface(draft, targetSurfaceId)
   syncMixedPrintPlan(draft)
+  syncStartLocationToFirstLocation(draft)
   return location.id
 }
 
@@ -782,6 +789,7 @@ export function reorderCourseSurfaces(
         return entry ? [entry] : []
       })
     }
+    syncStartLocationToFirstLocation(draft)
     if (input.activeLocationId && draft.locations.some((candidate) => candidate.id === input.activeLocationId)) {
       return input.activeLocationId
     }

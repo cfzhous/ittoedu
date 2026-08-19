@@ -1,4 +1,4 @@
 interface:
   display_name: "策划互动课件"
-  short_description: "通过渐进提问形成两份教师可直接审阅和修改的自由教学文档"
-  default_prompt: "Use $orchestrate-courseware to turn my teaching materials into a teaching plan and presentation script."
+  short_description: "先确认中等详细教学策划，再写带表面、布局和逐步操作的教学呈现脚本"
+  default_prompt: "Use $orchestrate-courseware to turn my teaching materials into 01-teaching-plan.md, confirm it, then write 02-presentation-script.md."

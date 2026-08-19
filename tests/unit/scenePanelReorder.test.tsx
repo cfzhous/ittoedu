@@ -170,7 +170,38 @@ describe('ScenePanel course tree reorder', () => {
 
     const remaining = screen.getByRole('button', { name: /删除“/ })
     expect((remaining as HTMLButtonElement).disabled).toBe(true)
-    expect(remaining.getAttribute('title')).toBe('至少保留一个场景')
+    expect(remaining.getAttribute('title')).toBe(COURSE_LAST_LOCATION_REASON)
+  })
+
+  it('lets the original first slide be deleted after mixed pages exist, even if it is the only scene on that page', () => {
+    const store = useEditorStore.getState()
+    const originalSceneId = courseDocument().locations.find(
+      (location) => location.kind === 'slide-scene',
+    )?.sceneId
+    expect(originalSceneId).toBeTruthy()
+    store.addCourseContent('flow-page')
+    store.reorderCourseSurfaces(
+      [...courseDocument().surfaces.map((surface) => surface.id)].reverse(),
+    )
+    expect(courseDocument().startLocationId).toBe(courseDocument().locations[0]!.id)
+    expect(courseDocument().startLocationId).not.toBe(
+      courseDocument().locations.find(
+        (location) => location.kind === 'slide-scene' && location.sceneId === originalSceneId,
+      )?.id,
+    )
+
+    render(<ScenePanel />)
+    const originalScene = courseDocument().surfaces.flatMap((surface) =>
+      surface.type === 'slide' ? surface.scenes : [],
+    ).find((scene) => scene.id === originalSceneId)
+    expect(originalScene).toBeTruthy()
+    const deleteOriginal = screen.getByRole('button', { name: `删除“${originalScene!.name}”` })
+    expect((deleteOriginal as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(deleteOriginal)
+    fireEvent.click(screen.getByRole('button', { name: '删除场景' }))
+    expect(courseDocument().surfaces.some((surface) => surface.type === 'slide')).toBe(false)
+    expect(courseDocument().startLocationId).toBe(courseDocument().locations[0]!.id)
   })
 
   it('maps same-group camera drops onto the existing spatial reorder command and keeps label clicks activating', () => {

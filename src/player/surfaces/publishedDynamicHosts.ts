@@ -1,4 +1,4 @@
-import type { CourseLocation } from '../../shared/courseProjectTypes'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { TeacherControllerAction } from '../../shared/projectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import { CoursePlayer, type CoursePlayerOptions } from './CoursePlayer'
@@ -26,8 +26,10 @@ import type {
 export type PublishedDynamicHostKind = 'slide' | 'flow' | 'spatial'
 
 export interface CreatePublishedDynamicHostsOptions {
+  /** Ignored for camera/HUD; published stages are always the 1280×720 design canvas. */
   viewport?: { width: number; height: number }
   resolveAsset?: (assetId: string) => string | undefined
+  playbackPathId?: string | null
 }
 
 export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHostsOptions {
@@ -80,8 +82,9 @@ export function createPublishedSurfaceHost(
     payload,
     surface.id,
     startLocationId,
-    options.viewport ?? { width: 1280, height: 720 },
+    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
     resolveAsset,
+    options.playbackPathId,
   )
 }
 
@@ -113,6 +116,8 @@ export class PublishedCourseSession {
   readonly player: CoursePlayer
   readonly navigator: MixedCourseNavigator
   readonly #hosts: readonly SurfaceHost[]
+  #slots: HTMLElement[] = []
+  #destroyPromise: Promise<void> | null = null
 
   constructor(player: CoursePlayer, navigator: MixedCourseNavigator, hosts: readonly SurfaceHost[]) {
     this.player = player
@@ -153,15 +158,40 @@ export class PublishedCourseSession {
       slot.style.width = '100%'
       slot.style.height = '100%'
       slot.style.overflow = 'hidden'
+      slot.style.visibility = 'hidden'
+      slot.style.pointerEvents = 'none'
+      slot.style.zIndex = '0'
+      slot.setAttribute('aria-hidden', 'true')
       container.appendChild(slot)
+      this.#slots.push(slot)
       const mounted = await this.player.mountSurface(host.id, slot)
       if (!mounted.ok) throw mounted.failure?.error ?? new Error(`Failed to mount ${host.id}`)
     }
     await this.navigator.start()
+    this.syncActiveSlot(this.navigator.current?.surfaceId ?? this.#hosts[0]?.id ?? '')
+  }
+
+  syncActiveSlot(surfaceId: string): void {
+    for (const slot of this.#slots) {
+      const active = slot.dataset.courseSurfaceSlot === surfaceId
+      slot.style.visibility = active ? 'visible' : 'hidden'
+      slot.style.pointerEvents = 'none'
+      slot.style.zIndex = active ? '1' : '0'
+      if (active) slot.removeAttribute('aria-hidden')
+      else slot.setAttribute('aria-hidden', 'true')
+    }
   }
 
   async destroy(): Promise<void> {
+    if (this.#destroyPromise) return this.#destroyPromise
+    this.#destroyPromise = this.#runDestroy()
+    return this.#destroyPromise
+  }
+
+  async #runDestroy(): Promise<void> {
     await this.player.destroy()
+    for (const slot of this.#slots) slot.remove()
+    this.#slots = []
   }
 }
 
@@ -173,6 +203,7 @@ export function createPublishedCourseSession(
   const hosts = createPublishedSurfaceHosts(playback, {
     viewport: options.viewport,
     resolveAsset: options.resolveAsset ?? options.services?.resolveAsset,
+    playbackPathId: options.playbackPathId,
   })
   const services: SurfacePlayerServices = {
     ...defaultCourseStateServices(playback),
@@ -185,16 +216,23 @@ export function createPublishedCourseSession(
     services,
     onFailure: options.onFailure,
   })
+  let session: PublishedCourseSession | null = null
   const navigator = new MixedCourseNavigator(
     mixedCourseDefinitionFromPublished(playback),
     player,
+    {
+      onNavigate: (state) => {
+        session?.syncActiveSlot(state.surfaceId)
+      },
+    },
   )
   if (!options.services?.navigate) {
     services.navigate = async (deepLink) => {
       await navigator.navigateDeepLink(deepLink)
     }
   }
-  return new PublishedCourseSession(player, navigator, hosts)
+  session = new PublishedCourseSession(player, navigator, hosts)
+  return session
 }
 
 /**
@@ -340,6 +378,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
     startLocationId: string,
     viewport: { width: number; height: number },
     resolveAsset: (assetId: string) => string | undefined,
+    playbackPathId?: string | null,
   ) {
     this.id = surfaceId
     this.#payload = payload
@@ -348,6 +387,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
       surfaceId,
       locationId: startLocationId,
       resolveAsset,
+      playbackPathId: playbackPathId ?? null,
       playbackControls: payload.playback.controls === 'none' ? 'none' : 'canvas',
       courseProgressSource: {
         getLocations: () => this.#payload.locations.map((location) => ({

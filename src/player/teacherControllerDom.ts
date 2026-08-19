@@ -104,6 +104,21 @@ function numberToCss(color: number): string {
   return `#${color.toString(16).padStart(6, '0')}`
 }
 
+export function stageBoundsFromElement(
+  element: HTMLElement | null | undefined,
+  fallback: { width: number; height: number },
+): { width: number; height: number; left: number; top: number } {
+  if (!element) return { ...fallback, left: 0, top: 0 }
+  const bounds = element.getBoundingClientRect()
+  const sized = bounds.width > 1 && bounds.height > 1
+  return {
+    left: sized ? bounds.left : 0,
+    top: sized ? bounds.top : 0,
+    width: sized ? bounds.width : fallback.width,
+    height: sized ? bounds.height : fallback.height,
+  }
+}
+
 function applyRect(
   element: HTMLElement,
   rect: TeacherControllerRect,

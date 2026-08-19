@@ -1,7 +1,9 @@
 # Course Project V9 统一与 Editor 1.0 收尾方案
 
-> 计划版本：12.6  
+> 计划版本：12.8  
 > 更新日期：2026-08-19  
+> 12.8 变更：编排改为先确认中等策划再写带表面的呈现脚本；构建先盘资产再拆任务；局部复杂互动走组件（可新建），场景 Runtime 管整页动态。澄清 P8 宿主已合入、空 catalog ≠ 不能挂组件。无限画布运行态同时支持自由逛与镜头巡游（会话相机，交互占用时让路）。  
+> 12.7 变更：教师回归缺陷 Q1–Q8 已合入 `main`。不要重做 P1–P8 或 Q1–Q8。  
 > 12.6 变更：T6 Windows e2e 27/27 已合入 `main`。自动化仍只是 `engineering candidate`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
 > 12.5 变更：T6 全量在 typecheck 停手。本轮补 T1-A / T1-C 与测试对齐后重开 T6。修红只跑红命令/红测文件；已绿步骤不重跑；整轮五条只在红项清完后跑一次。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。  
 > 12.4 变更：剩余任务卡（T3/T4/T5/T6/P5-persist/P8）改成逐步算法、允许/禁止文件和停手条件，给高性价比第三方工人执行；父代理只合入与复检。工人协议见 `docs/tasks/editor-1.0/02_WORKER.md`。T1-B 在 T0 `canvas-runtime` 夹具仍写 `legacy-runtime-v2` 前禁止删判别器。P8 在 P1/P3/P4 合入后可领取。  
@@ -32,27 +34,15 @@
 - 正式 Skill 只有 `orchestrate-courseware` 与 `build-courseware-project`。V8 Builder 已从仓库树删除。
 - 无可见 AI；无 Hash/审批/Evidence 教师流程。
 - Vite `chunks larger than 500 kB` 不当缺陷修。
+- T0–T6、P1–P8、Q1–Q8 源码已合入 `main`。P8 是三种表面挂载 Component API 4，不是「Flow/Spatial 永远没有组件」。
 
-仍待收口（源码，不是再迁一次 V9）：
+当前剩余（不要把已合入项再列成待领取）：
 
-| 缺口 | 车道 | 任务 |
-|---|---|---|
-| V9 Native 合同仍部分依赖 `projectTypes.ts`（`SceneNode` 内部适配） | C | T1-A（搬 V9 源文件；不删 SceneNode） |
-| 顶层字段审计 | C | T1-C（已合入） |
-| Spatial（及可选 Flow 页铬）缺少可持久化画布底色；缺省应白 | C+P | T1 加可选字段，P5 接线 |
-| 打开 V8 仍走「导入旧版工程」；空白工程仍 `create V8 then migrate` | C | T2 |
-| 双后端 + `v9-slide-candidate` | C | T3 |
-| `artifacts/ai-capabilities` 仍声明 `project: 8`；`validate:project` 文案仍写 V8 | C | T4 |
-| UI 仍消费 V8-shaped `SceneNode` 投影 | C | T5（隔离，不删光） |
-| 试运行/整课预览：控制器拖不动、按钮失效；视频几乎不能播 | P | P1 |
-| Mixed 跳转位置时试运行被打回编辑 | P | P2 |
-| Flow 编辑看不到、编不了图片/视频 | P | P3 |
-| Spatial 编辑：旋转框不跟、无视频；试运行图/视频缺失 | P | P4 |
-| 无限画布黑底；画布底色不统一、不可改 | P | P5 |
-| Flow 删不了页；Mixed 删不了整组、不能跨组挪页；主按钮文案都是「新增页面」 | P | P6 |
-| 图层树仍列出全局控制器，和场景物件混在一起 | P | P7 |
-| 互动组件在 Flow / Spatial 编辑与试运行中不可用（仅文字/后备） | P | P8（P1/P3/P4 之后） |
-| 无合同哈希、无教师 `accepted` | C | T6；**P1–P8 未做视觉复核不得 `accepted`** |
+| 缺口 | 说明 |
+|---|---|
+| 教师 `accepted` 与真实课例视觉/互动复核 | 自动化最多 `engineering candidate` |
+| 外部组件目录 | 快照指向 `../courseware-components`，当前 `unavailable`；工程仍可导入或新建 `.h5component` |
+| 无限画布运行态逛世界 | 产品要求自由逛 + 镜头巡游；会话手势在 `SpatialSurfaceHost`，不写回工程相机 |
 
 不要从 `f272756` 再开重建分支。不要把 donor HEAD 当产品主干。
 
@@ -120,7 +110,7 @@ V9 课的「当前位置试运行」和「整课预览」走 `CoursePlayer` + Pu
 | T5 | **已合入** Read Model 边界 | 1 个 UI 适配测试 |
 | T6 | **工程门禁已合入 `main`**（合同哈希、CI、禁止项、Windows e2e 27/27）。教师 `accepted` 仍缺 | 视觉/真人清单后才能发布 |
 
-T0–T6 与 P1–P8 已合入 `main`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
+T0–T6 与 P1–P8、Q1–Q8 已合入 `main`。未获教师 `accepted` 不得宣称 Editor 1.0 已发布。
 
 ### 3.2 车道 P：教师可见缺陷（12.2–12.3）
 
@@ -135,7 +125,7 @@ T0–T6 与 P1–P8 已合入 `main`。未获教师 `accepted` 不得宣称 Edit
 | P5 | 画布默认白、可改色 | CSS 可先做；持久化等 T1 可选字段 |
 | P6 | 课程树：删除整组/流式页、跨组挪页、主按钮文案 | 不挡播放；可与 P1 并行 |
 | P7 | 图层树不再把全局控制器当成场景物件 | 不挡播放；与 T5 抢 `NodesTab` |
-| P8 | Flow / Spatial（及 CoursePlayer 上的 Slide 试运行）挂载 Component API 4 | 与 P1/P3/P4 抢同一宿主与编辑绘制；**必须等那些任务合入后再做** |
+| P8 | Flow / Spatial（及 CoursePlayer 上的 Slide 试运行）挂载 Component API 4 | **已合入**；不要重做 |
 
 中间任务禁止 `npm test`、e2e、`build:desktop`、`verify`。默认也禁止 `typecheck`；本轮仅 T1-A / T6-tc-tests 可跑当前红命令 `typecheck`。P 车道最小验证仍是 1–2 个 Vitest 文件；**艺术验收只在 T6 前的课例复核，不在中间宣称 `art candidate`。** 不要每次修改后跑 T6 五条命令。
 
@@ -207,9 +197,9 @@ T0–T6 与 P1–P8 已合入 `main`。未获教师 `accepted` 不得宣称 Edit
 
 ---
 
-## 8. 教师可见缺陷：定位与修复方案（12.2）
+## 8. 教师可见缺陷：定位原文（12.2，历史）
 
-定位日期：2026-08-18。只修这里列出的因果，不借机重写编辑器。
+定位日期：2026-08-18。下列条目的源码修复已合入 `main`（P1–P8、Q1–Q8）。保留原文供取证，**不要按「仍待领取」施工。** 当前剩余是教师视觉复核与 `accepted`。
 
 ### 8.1 共同因果
 
@@ -279,9 +269,9 @@ V9 课试运行/整课预览走 Published V2 宿主，Slide 编辑仍走 Phaser�
 
 ## 9. 最终判断
 
-当前缺口是两类，必须分开收口，不能互相等待到无法验收：
+当前缺口只剩教师课例复核与 `accepted`，不要把已合入的 C/P/Q 再当成待做：
 
-1. **车道 C**：过渡命名、合同归属、机器产物仍说 V8。
-2. **车道 P**：Published 试运行/预览与编辑画布尚未成为教师可用的同一课。
+1. **车道 C / P / Q**：合同冻结、教师可见宿主与回归缺陷的源码已在 `main`。
+2. **验收**：真实课例视觉/互动复核之后，才能教师 `accepted` 并发布 Editor 1.0。
 
-> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。合同按 T0–T6 冻结；教师看得见的播放、媒体、组件、课程树、画布底色按 P1–P8 修。两边都完成后才能教师 `accepted` 并发布 Editor 1.0。此后 V9 合同不变，内部实现再逐步解耦。**
+> **不要再增加 V8 兼容，也不要再跑一遍 V8→V9 重建。不要重做 T0–T6、P1–P8 或 Q1–Q8。此后 V9 合同不变，内部实现再逐步解耦。**

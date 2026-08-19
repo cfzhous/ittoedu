@@ -210,7 +210,7 @@ describe('SpatialSurfaceHost viewport teacher controller', () => {
     expect(world.getAttribute('transform')).toContain('translate(-130 70)')
 
     const stage = host.getRenderedStageBounds()
-    expect(stage).toEqual({ width: 400, height: 240 })
+    expect(stage).toMatchObject({ width: 400, height: 240 })
     expect(stage.width).not.toBe(180)
     expect(stage.height).not.toBe(48)
 

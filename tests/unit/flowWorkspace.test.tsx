@@ -193,6 +193,10 @@ describe('FlowWorkspace paper', () => {
     expect(workspace).not.toHaveStyle({ width: '1280px' })
     expect(workspace).not.toHaveStyle({ height: '720px' })
     expect(screen.getByTestId('flow-layer-card-overlay-text')).toBeTruthy()
+    expect(screen.getByTestId('flow-authoring-layer-overlay')).toHaveStyle({
+      width: '1280px',
+      height: '720px',
+    })
   })
 
   it('selects a block on click and enters contenteditable on double-click, Enter, or a second text click', () => {
