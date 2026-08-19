@@ -2269,27 +2269,46 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
       </div>
     )
   }
+
+  function flowRichTextColor(block: typeof block): string {
+    if (!('runs' in block) || !Array.isArray(block.runs)) return '#1f2937'
+    for (const run of block.runs) {
+      if (typeof run.style?.color === 'string' && run.style.color.length > 0) return run.style.color
+    }
+    return '#1f2937'
+  }
+
   return (
     <div className="properties-scroll" data-testid="properties-tab">
       <section className="property-section" data-testid="flow-block-properties">
         <h3 className="property-title"><Type size={14} />块结构</h3>
-        {block.type === 'heading' ? (
-          <SelectField<`${typeof block.level}`>
-            label="标题级别"
-            value={`${block.level}`}
-            options={[
-              { value: '1', label: 'H1' },
-              { value: '2', label: 'H2' },
-              { value: '3', label: 'H3' },
-              { value: '4', label: 'H4' },
-              { value: '5', label: 'H5' },
-              { value: '6', label: 'H6' },
-            ]}
-            onChange={(level) => formatFlowBlock({
-              kind: 'heading-level',
-              level: Number(level) as 1 | 2 | 3 | 4 | 5 | 6,
-            })}
-          />
+        {block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' ? (
+          <div data-testid="flow-block-type">
+            <SelectField
+              label="块类型"
+              value={block.type === 'heading' ? `${block.level}` : block.type === 'paragraph' ? 'paragraph' : 'quote'}
+              options={[
+                { value: 'paragraph', label: '段落' },
+                ...(block.type === 'quote' ? [{ value: 'quote', label: '引用' }] : []),
+                { value: '1', label: '一级标题' },
+                { value: '2', label: '二级标题' },
+                { value: '3', label: '三级标题' },
+                { value: '4', label: '四级标题' },
+                { value: '5', label: '五级标题' },
+                { value: '6', label: '六级标题' },
+              ]}
+              onChange={(value) => {
+                if (value === 'paragraph') {
+                  formatFlowBlock({ kind: 'convert-paragraph' })
+                } else if (value === '1' || value === '2' || value === '3' || value === '4' || value === '5' || value === '6') {
+                  formatFlowBlock({
+                    kind: 'convert-heading',
+                    level: Number(value) as 1 | 2 | 3 | 4 | 5 | 6,
+                  })
+                }
+              }}
+            />
+          </div>
         ) : null}
         {block.type === 'list' ? (
           <ToggleRow
@@ -2332,7 +2351,7 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
           <ColorInput
             id="flow-text-color"
             label="文字颜色"
-            value="#1f2937"
+            value={flowRichTextColor(block)}
             onChange={(color) => formatFlowTextStyle({ color })}
           />
         </section>
