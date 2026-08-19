@@ -7,28 +7,39 @@ import type { PublishedCourseV2Payload } from '../../src/shared/publishedCourseT
 
 type TextNodeData = Extract<NativeElementContent, { nativeType: 'text' }>['data']
 
-function createTextData(overrides: Partial<TextNodeData> = {}): TextNodeData {
+function defaultTextStyle(): TextNodeData['style'] {
+  return {
+    fontFamily: 'Arial',
+    fontSize: 20,
+    color: '#333333',
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    emphasis: false,
+    highlightColor: null,
+    align: 'left',
+    verticalAlign: 'top',
+    writingMode: 'horizontal',
+    lineSpacing: 4,
+    letterSpacing: 1,
+    padding: 8,
+    overflow: 'fixed',
+    backgroundColor: '#ffffff',
+    backgroundOpacity: 0,
+    cornerRadius: 0,
+  }
+}
+
+function createTextData(
+  overrides: Partial<Omit<TextNodeData, 'style'>> & { style?: Partial<TextNodeData['style']> } = {},
+): TextNodeData {
+  const { style, ...rest } = overrides
   return {
     text: 'Hello World',
     runs: [],
-    style: {
-      fontFamily: 'Arial',
-      fontSize: 20,
-      color: '#333333',
-      bold: false,
-      italic: false,
-      underline: false,
-      strike: false,
-      emphasis: false,
-      highlightColor: null,
-      align: 'left',
-      verticalAlign: 'top',
-      writingMode: 'horizontal',
-      lineSpacing: 4,
-      letterSpacing: 1,
-      padding: 8,
-    },
-    ...overrides,
+    ...rest,
+    style: { ...defaultTextStyle(), ...style },
   }
 }
 
@@ -205,11 +216,31 @@ describe('paintPublishedNativeText', () => {
     const payload: PublishedCourseV2Payload = {
       format: 'h5course-published',
       formatVersion: 2,
+      sourceSchemaVersion: 9,
       courseId: 'test-course',
       title: 'Test Course',
-      schemaVersion: 9,
-      publishedAt: '2026-08-18T00:00:00.000Z',
       assets: {},
+      components: {},
+      designTokens: {
+        fonts: [{ id: 'body', label: '正文', fontFamily: 'sans-serif' }],
+        colors: [{ id: 'text', label: '正文', color: '#000000' }],
+      },
+      media: {
+        audio: {
+          defaultMuted: false,
+          masterVolume: 1,
+          channelVolumes: { music: 1, narration: 1, sfx: 1, ui: 1, video: 1 },
+          sounds: {},
+          narrationDucking: { enabled: false, musicVolume: 0.3, fadeMs: 0 },
+        },
+      },
+      playback: {
+        controls: 'none',
+        keyboardNavigation: true,
+        presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+      },
+      courseState: [],
+      navigationGuards: [],
       locations: [
         {
           id: 'scene-1',
@@ -221,6 +252,7 @@ describe('paintPublishedNativeText', () => {
       ],
       startLocationId: 'scene-1',
       globalLayerItems: [],
+      globalInteractions: [],
       surfaces: [
         {
           id: 'surface-slide',
@@ -236,19 +268,17 @@ describe('paintPublishedNativeText', () => {
               layerItems: [
                 {
                   layerItemId: 'text-1',
-                  name: 'Rich Text',
-                  frame: { x: 100, y: 100, width: 400, height: 200 },
+                  frame: { mode: 'absolute', x: 100, y: 100, width: 400, height: 200 },
                   visible: true,
-                  locked: false,
                   rotation: 0,
                   opacity: 1,
-                  hitPolicy: 'authoring-only',
+                  hitPolicy: 'auto',
                   playbackInitialVisibility: 'inherit',
                   order: 1,
                   kind: 'native',
                   content: {
                     nativeType: 'text',
-                    data: {
+                    data: createTextData({
                       text: 'Hello Rich World',
                       runs: [
                         { start: 6, end: 10, style: { bold: true, color: '#ff0000' } },
@@ -257,40 +287,32 @@ describe('paintPublishedNativeText', () => {
                         fontFamily: 'sans-serif',
                         fontSize: 16,
                         color: '#000000',
-                        bold: false,
-                        italic: false,
-                        underline: false,
-                        strike: false,
-                        emphasis: false,
-                        highlightColor: null,
-                        align: 'left',
-                        verticalAlign: 'top',
-                        writingMode: 'horizontal',
+                        padding: 0,
                         lineSpacing: 2,
                         letterSpacing: 0,
-                        padding: 0,
                       },
-                    },
+                    }),
                   },
                 },
               ],
+              interactions: [],
             },
           ],
         },
       ],
-      playback: { controls: 'standard' },
     }
 
     const container = document.createElement('div')
     const adapter = new SlidePublishedAdapter(payload, 'surface-slide')
     await adapter.mount({
+      surfaceId: 'surface-slide',
       container,
+      signal: new AbortController().signal,
       services: {
-        navigate: async () => {},
-        openExternal: () => {},
-        showToast: () => {},
-        saveState: async () => {},
-        loadState: async () => null,
+        navigate: async () => undefined,
+        getCourseState: () => undefined,
+        setCourseState: () => undefined,
+        resolveAsset: () => undefined,
       },
     })
     await adapter.activate()

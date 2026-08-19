@@ -20,6 +20,7 @@ import {
   SPATIAL_REJECT_LOCKED,
   createSpatialWorldViewTransform,
   openSpatialAuthoringSession,
+  setSpatialEditingScope,
   worldLayerItem,
   type SpatialAuthoringSession,
 } from '@/renderer/course/spatialEditorCommands'
@@ -387,6 +388,12 @@ function hostOf(session: SpatialAuthoringSession = openSpatialAuthoringSession(f
   return host
 }
 
+function enterGlobal(host: SpatialWorldAuthoringHost) {
+  const result = setSpatialEditingScope(host.getSession(), 'global')
+  if (!result.ok || !result.nextSession) throw new Error(result.reason ?? 'expected global scope')
+  host.setSession(result.nextSession)
+}
+
 function worldClient(session: SpatialAuthoringSession, point: { x: number; y: number }) {
   return worldToClient(createSpatialWorldViewTransform(VIEWPORT, session.sessionCamera), point)
 }
@@ -407,6 +414,12 @@ describe('Spatial world authoring adapter', () => {
     expect(worldPoint.x).toBeCloseTo(-440)
     expect(worldPoint.y).toBeCloseTo(290)
 
+    const inertDown = controller.pointerDown({ x: overlap.x, y: overlap.y }, VIEWPORT)
+    expect(host.session().scope).toBe('world')
+    expect(inertDown.hit?.nativeType).not.toBe('teacher-controller')
+    controller.pointerUp({ x: overlap.x, y: overlap.y }, VIEWPORT)
+
+    enterGlobal(host)
     const down = controller.pointerDown({ x: overlap.x, y: overlap.y }, VIEWPORT)
     expect(down.hit?.layerItemId).toBe('global-teacher-controller')
     expect(down.hit?.coordinateSpace).toBe('viewport')

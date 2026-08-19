@@ -208,4 +208,55 @@ describe('Flow product shell wiring', () => {
       block.type === 'paragraph' && block.text === '已提交段落'
     ))).toBe(true)
   })
+
+  it('converts a paragraph to heading level 2 via block type select and updates course tree', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const flow = useEditorStore.getState().flowSession
+    if (!flow) throw new Error('expected flow session')
+    const surface = flowSurface()
+    const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
+    if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected blank paragraph')
+
+    useEditorStore.setState({
+      flowSession: {
+        ...flow,
+        selection: selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [paragraph.id]),
+      },
+    })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const blockTypeContainer = screen.getByTestId('flow-block-type')
+    const select = blockTypeContainer.querySelector('select')
+    if (!select) throw new Error('expected select inside flow-block-type')
+    fireEvent.change(select, { target: { value: '2' } })
+
+    const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
+    expect(updated?.block.type).toBe('heading')
+    expect(updated?.block.type === 'heading' && updated.block.level).toBe(2)
+
+    const pages = listFlowCourseTreePages(flowDocument())
+    expect(pages.some((page) => page.headings.some((h) => h.locationId === paragraph.id))).toBe(true)
+  })
+
+  it('reads text color from runs in flow block properties', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const heading = flowSurface().blocks.find((block) => block.type === 'heading')
+    expect(heading && heading.type === 'heading').toBe(true)
+    const flow = useEditorStore.getState().flowSession
+    if (!flow || !heading) throw new Error('expected flow heading')
+    useEditorStore.setState({
+      flowSession: {
+        ...flow,
+        selection: selectFlowEditorBlocks(flow.history.present, flow.selection.locationId, [heading.id]),
+      },
+    })
+
+    useEditorStore.getState().formatFlowTextStyle({ color: '#dc2626' })
+
+    cleanup()
+    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    const colorInput = screen.getByLabelText('文字颜色') as HTMLInputElement
+    expect(colorInput.value).toBe('#dc2626')
+  })
 })

@@ -736,12 +736,20 @@ describe('V9 Slide viewport adapter', () => {
     const globalBannerAfterContent = sessionAfterContent.history.present.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'global-banner',
     )
-    expect((globalBannerAfterContent?.item as NativeLayerItem).content.data.style.bold).toBe(true)
+    const bannerItem = globalBannerAfterContent?.item
+    if (bannerItem?.kind !== 'native' || bannerItem.content.nativeType !== 'text') {
+      throw new Error('expected global text banner')
+    }
+    expect(bannerItem.content.data.style.bold).toBe(true)
 
-    // Assert scene text unaffected
-    const sceneText = sessionAfterContent.history.present.surfaces[0]!.scenes[0]!.layerItems.find(
+    const slideSurface = sessionAfterContent.history.present.surfaces[0]
+    if (slideSurface?.type !== 'slide') throw new Error('expected slide surface')
+    const sceneText = slideSurface.scenes[0]?.layerItems.find(
       (item) => item.layerItemId === 'slide-title',
     )
-    expect((sceneText as NativeLayerItem).content.data.style.bold).toBe(false)
+    if (sceneText?.kind !== 'native' || sceneText.content.nativeType !== 'text') {
+      throw new Error('expected scene text')
+    }
+    expect(sceneText.content.data.style.bold).toBe(false)
   })
 })

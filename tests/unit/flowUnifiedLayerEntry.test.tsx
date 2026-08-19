@@ -95,10 +95,9 @@ describe('Flow unified layer entry', () => {
       entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
     ))
     if (controller) {
-      expect(screen.getByTestId(`node-item-${controller.item.layerItemId}`)).toBeTruthy()
-    } else {
-      expect(screen.getByText('本页没有浮层。标题和段落在稿纸里编辑，不出现在图层。')).toBeTruthy()
+      expect(screen.queryByTestId(`node-item-${controller.item.layerItemId}`)).toBeNull()
     }
+    expect(screen.getByText('本页没有浮层。标题和段落在稿纸里编辑，不出现在图层。')).toBeTruthy()
   })
 
   it('enters global authoring without writing history and keeps the controller as a viewport overlay', () => {
