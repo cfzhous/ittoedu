@@ -6,7 +6,7 @@
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
 > 12.6：T6 Windows e2e 已合入 `main`。不得宣称 Editor 1.0 已发布。  
-> 12.7：教师回归缺陷走车道 Q（Q1–Q5 已合入集成分支；Q6–Q8 为合入后接线）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q5。  
+> 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入集成分支）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -52,7 +52,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T1](T1_A_MOVE.md) **A** | 合同源文件在 `src/shared/contracts/**`；旧路径 re-export；Published Flow/Spatial `backgroundColor?` |
 | [T6](T6_FREEZE.md) | Windows e2e 27/27 合入 `main`；CI 有 contracts/typecheck/test。未视觉复核、未 `accepted` |
 
-**已合入集成分支 `cursor/editor-q-stability-489b` — 禁止重做 Q1–Q5**
+**已合入集成分支 `cursor/editor-q-stability-489b` — 禁止重做 Q1–Q8**
 
 | 任务 | 要点 |
 |---|---|
@@ -61,16 +61,11 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [Q3](Q3_PUBLISHED_TEXT_RUNS.md) | Slide 试运行 `style + runs` |
 | [Q4](Q4_FLOW_IMAGE_EDIT.md) | 稿纸媒体 alt/caption/layout/库内替换 |
 | [Q5](Q5_SPATIAL_VIDEO.md) | Published URL + HTML `<video>` |
+| [Q6](Q6_ADD_VIDEO_NODE.md) | 工具栏 `addVideoNode` 走真实 session + `asset` |
+| [Q7](Q7_FLOW_FILE_REPLACE.md) | 稿纸媒体可从本地文件替换 |
+| [Q8](Q8_E2E_CONTROLLER_LIST.md) | 默认真场景 e2e 不再断言控制器行 |
 
-**可领取 — 车道 Q 接线（Q6–Q8，并行、文件互斥）**
-
-| 任务 | 症状 | 分支 |
-|---|---|---|
-| [Q6](Q6_ADD_VIDEO_NODE.md) | 无限画布工具栏插入视频仍偶发失败 | `cursor/q6-add-video-node-489b` |
-| [Q7](Q7_FLOW_FILE_REPLACE.md) | 稿纸图片不能从本地文件替换 | `cursor/q7-flow-file-replace-489b` |
-| [Q8](Q8_E2E_CONTROLLER_LIST.md) | e2e 仍假定默认图层树列出控制器 | `cursor/q8-e2e-controller-list-489b` |
-
-并行规则：[Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)「12.8」。Git 后缀仍是 **`-489b`**。
+车道 Q 接线已合入。不要再领取 Q1–Q8。
 
 车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 

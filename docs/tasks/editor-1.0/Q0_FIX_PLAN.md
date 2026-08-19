@@ -31,7 +31,7 @@ Q5  Spatial 视频 URL + HTML 播放 ─┘
 | [Q4](Q4_FLOW_IMAGE_EDIT.md) | 4 | `PropertiesTab.tsx` 仅 FlowBlockProperties, `FlowWorkspace.tsx` 仅 media 块, `flowEditorCommands.ts` 仅增量 | overlay 手势、P3 blob src |
 | [Q5](Q5_SPATIAL_VIDEO.md) | 6、7 的 Spatial 部分 | `SpatialSurfaceHost.ts`, `spatialLocationTryRun.ts`, `spatialEditorCommands.ts` 仅 video insert | `editorStore.ts`, SVG 路径/关系 |
 
-父代理负责：合入、复检。Q1–Q5 已合入集成分支后的接线走 [Q6](Q6_ADD_VIDEO_NODE.md)、[Q7](Q7_FLOW_FILE_REPLACE.md)、[Q8](Q8_E2E_CONTROLLER_LIST.md)，不要重做 Q1–Q5。
+父代理负责：合入、复检。Q1–Q8 已合入集成分支，不要重做。
 
 ## 合入顺序
 
