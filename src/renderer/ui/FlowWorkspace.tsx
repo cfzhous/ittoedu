@@ -1205,6 +1205,13 @@ export function FlowWorkspace({
         />
     )
 
+    const idleRichText = (text: string, runs: readonly import('../../shared/projectTypes').TextRun[] = []) => (
+      <span
+        data-flow-idle-rich-text="true"
+        dangerouslySetInnerHTML={{ __html: buildFlowRichTextHtml(text, runs) }}
+      />
+    )
+
     let body: ReactNode = null
     switch (block.type) {
       case 'heading': {
@@ -1213,7 +1220,7 @@ export function FlowWorkspace({
           <Tag data-flow-rich-text="true">
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
-              : block.text}
+              : idleRichText(block.text, block.runs ?? [])}
           </Tag>
         )
         break
@@ -1223,7 +1230,7 @@ export function FlowWorkspace({
           <p data-flow-rich-text="true">
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
-              : block.text}
+              : idleRichText(block.text, block.runs ?? [])}
           </p>
         )
         break
@@ -1232,7 +1239,7 @@ export function FlowWorkspace({
           <blockquote data-flow-rich-text="true">
             {editingThis && edit?.kind === 'rich-text'
               ? richEditor(blockLabel(block), block.text, block.runs ?? [])
-              : <p>{block.text}</p>}
+              : <p>{idleRichText(block.text, block.runs ?? [])}</p>}
             {block.citation ? <cite>{block.citation}</cite> : null}
           </blockquote>
         )
@@ -1252,7 +1259,7 @@ export function FlowWorkspace({
             >
               {editingItem && edit?.kind === 'rich-text'
                 ? richEditor(blockLabel(block), item.text, item.runs ?? [])
-                : item.text}
+                : idleRichText(item.text, item.runs ?? [])}
             </li>
           )
         })
@@ -1308,7 +1315,7 @@ export function FlowWorkspace({
                       >
                         {editingCell && edit?.kind === 'rich-text'
                           ? richEditor(blockLabel(block), rich.text, rich.runs ?? [])
-                          : rich.text}
+                          : idleRichText(rich.text, rich.runs ?? [])}
                       </td>
                     )
                   })}

@@ -181,6 +181,14 @@ function renderPaper(project = createFlowProject(), selection: FlowEditorSelecti
 }
 
 describe('FlowWorkspace paper', () => {
+  it('paints idle paragraph runs instead of plain text', () => {
+    renderPaper()
+    const rich = screen.getByTestId('flow-block-p-body').querySelector('[data-flow-rich-text="true"]')
+    expect(rich?.textContent).toBe('阅读任务')
+    expect(rich?.querySelector('[data-flow-idle-rich-text="true"]')?.innerHTML).toMatch(/font-weight:\s*700/)
+    expect(screen.queryByTestId('flow-inline-editor')).toBeNull()
+  })
+
   it('is a scrolling reading paper, not a 1280×720 slide stage', () => {
     renderPaper()
     const workspace = screen.getByTestId('flow-workspace')
