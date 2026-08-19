@@ -1,4 +1,4 @@
-import type { FlowBlock } from '../../shared/projectTypes'
+import type { FlowBlock } from '../../shared/courseProjectTypes'
 import {
   commitFlowFormulaAst,
   flowFormulaBlockToAuthoringNode,

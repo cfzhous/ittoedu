@@ -70,15 +70,15 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 
 车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 
-**可领取 — 车道 F（流式讲义作者界面）**
+**已合入集成分支 `cursor/flow-authoring-f-44bf` — 尚未合入 `main`。不要重做 F1–F3。**
 
-计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。集成分支 `cursor/flow-authoring-f-44bf`，Git 后缀 `-44bf`。合同不变。
+计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。合同不变。合入后相关单测 15 项通过。
 
-| 任务 | 要点 | 允许热点 |
-|---|---|---|
-| [F1](F1_FLOW_PAPER_RUNS.md) | 稿纸闲置态画 `runs` | `FlowWorkspace.tsx` |
-| [F2](F2_FLOW_BLOCK_TYPE.md) | 属性栏段落/H1–H6；颜色从 runs 读 | `PropertiesTab.tsx` 仅 `FlowBlockProperties` |
-| [F3](F3_FLOW_FORMULA_PROPS.md) | 属性栏公式编辑器 | `FlowFormulaBlockProperties.tsx`（替换桩） |
+| 任务 | 要点 |
+|---|---|
+| [F1](F1_FLOW_PAPER_RUNS.md) | 稿纸闲置态画 `runs` |
+| [F2](F2_FLOW_BLOCK_TYPE.md) | 属性栏段落/H1–H6；颜色从 runs 读 |
+| [F3](F3_FLOW_FORMULA_PROPS.md) | 属性栏公式编辑器 |
 
 **必须等待**
 
@@ -101,9 +101,8 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 ```text
 已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8
 
-然后（车道 F，可并行，禁止抢同一允许文件）：
+然后（车道 F 已合入集成分支 cursor/flow-authoring-f-44bf，尚未合入 main）：
   F1 稿纸 runs │ F2 块类型/颜色 │ F3 公式属性栏
-  从 origin/cursor/flow-authoring-f-44bf 建 cursor/<slug>-44bf
 
 然后：
   教师视觉复核与 accepted；不要由自动化打发布 tag
@@ -130,7 +129,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 1. 读 [02_WORKER.md](02_WORKER.md)。
 2. 看本页「合入状态」：已合入的不要做；等待中的不要抢。
-3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md) + [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)（仅 F 卡）。Q 卡不要领。
-4. 车道 F 建 `cursor/<slug>-44bf`，从 `origin/cursor/flow-authoring-f-44bf` 分支。历史 T/P/Q 不要重做。
+3. 只读 **一张** 任务卡 + [01_SHARED.md](01_SHARED.md)。F1–F3 与 Q/T/P 均不要重做。
+4. 新卡按任务卡写明的基线建 `cursor/<slug>-44bf`。历史 T/P/Q/F 不要重做。
 5. 只改「允许修改」列表。热点冲突则停。
 6. 写 `<TASK>_HANDOFF.md`，push，不要开 PR。

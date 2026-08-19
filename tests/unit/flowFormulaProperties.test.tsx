@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
-import type { FlowSurface } from '@/shared/projectTypes'
+import type { FlowSurfaceDocument } from '@/shared/courseProjectTypes'
 
 function drawingContext(): CanvasRenderingContext2D {
   return {
@@ -46,7 +46,7 @@ describe('FlowFormulaBlockProperties', () => {
     if (!flow) return
 
     const doc = flow.history.present
-    const flowSurface = doc.surfaces.find((s): s is FlowSurface => s.type === 'flow')
+    const flowSurface = doc.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')
     expect(flowSurface).toBeDefined()
     if (!flowSurface) return
 
@@ -70,7 +70,7 @@ describe('FlowFormulaBlockProperties', () => {
 
     const updatedFlow = useEditorStore.getState().flowSession
     const updatedDoc = updatedFlow?.history.present
-    const updatedSurface = updatedDoc?.surfaces.find((s): s is FlowSurface => s.type === 'flow')
+    const updatedSurface = updatedDoc?.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')
     const updatedBlock = updatedSurface?.blocks.find((b) => b.id === formulaBlock.id)
 
     expect(updatedBlock).toBeDefined()
