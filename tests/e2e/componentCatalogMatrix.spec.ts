@@ -606,7 +606,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       await page.getByRole('button', { name: '返回编辑器' }).click()
 
       // 删除、撤销、重做、再次撤销恢复，验证 UI 历史栈和宿主销毁重建。
-      // V9 有效图层含默认教师控制器；教师必须仍能看见它。删除只点组件节点。
+      // 默认真场景图层树只列场景包行；教师控制器只在全局范围出现。删除只点组件节点。
       await page.getByRole('tab', { name: '图层' }).click()
       const layerRows = page.locator('.node-item')
       const componentLayerRows = layerRows.filter({
@@ -615,9 +615,9 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       const teacherControllerRow = layerRows.filter({
         has: page.locator('.node-type-icon[title="teacher-controller"]'),
       })
-      await expect(layerRows).toHaveCount(expectedPackageCount + 1)
+      await expect(layerRows).toHaveCount(expectedPackageCount)
       await expect(componentLayerRows).toHaveCount(expectedPackageCount)
-      await expect(teacherControllerRow).toHaveCount(1)
+      await expect(teacherControllerRow).toHaveCount(0)
       await componentLayerRows.last().getByTitle('删除节点').click()
       await expect(editorHost).toHaveCount(expectedPackageCount - 1)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()

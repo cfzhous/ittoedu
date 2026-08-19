@@ -2985,8 +2985,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await page.getByRole('tab', { name: '图层' }).click()
-      await expect(page.locator('.node-item')).toHaveCount(5)
-      await expect(teacherControllerLayerRows(page)).toHaveCount(1)
+      await expect(page.locator('.node-item')).toHaveCount(4)
+      await expect(teacherControllerLayerRows(page)).toHaveCount(0)
       await page.locator('.node-name').filter({ hasText: '公式' }).click()
       await page.getByRole('tab', { name: '属性' }).click()
       await expect(page.getByRole('textbox', { name: '无障碍描述' }))
@@ -3212,8 +3212,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await recoveryDialog.getByRole('button', { name: '恢复课件' }).click()
       await expect(recoveryDialog).toHaveCount(0)
       await restoredLaunch.page.getByRole('tab', { name: '图层' }).click()
-      await expect(restoredLaunch.page.locator('.node-item')).toHaveCount(2)
-      await expect(teacherControllerLayerRows(restoredLaunch.page)).toHaveCount(1)
+      await expect(restoredLaunch.page.locator('.node-item')).toHaveCount(1)
+      await expect(teacherControllerLayerRows(restoredLaunch.page)).toHaveCount(0)
       await restoredLaunch.page.locator('.node-item').filter({
         has: restoredLaunch.page.locator('.node-type-icon[title="text"]'),
       }).locator('.node-name').click()
