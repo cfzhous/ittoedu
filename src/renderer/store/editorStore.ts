@@ -6402,24 +6402,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (spatial) {
         const sidecar = get().slideCandidateSidecar ?? emptyCourseAssetSidecar()
         const files = { ...sidecar.files, [asset.id]: bytes.slice() }
-        const present = spatial.history.present
-        const withAsset = present.assets[asset.id]
-          ? spatial
-          : {
-              ...spatial,
-              history: {
-                ...spatial.history,
-                present: {
-                  ...present,
-                  assets: { ...present.assets, [asset.id]: structuredClone(asset) },
-                },
-              },
-            }
-        persistSpatialResult(addSpatialWorldVideoLayer(withAsset, {
+        persistSpatialResult(addSpatialWorldVideoLayer(spatial, {
           assetId: asset.id,
+          asset,
           ...(typeof x === 'number' ? { x } : {}),
           ...(typeof y === 'number' ? { y } : {}),
-        }, { expectedRevision: present.revision }), {
+        }, { expectedRevision: spatial.history.present.revision }), {
           sidecar: freezeCourseAssetSidecar(files),
           statusMessage: '已添加视频',
         })
