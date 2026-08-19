@@ -129,6 +129,7 @@ import { PresenterSettingsEditor } from './PresenterSettingsEditor'
 import { DesignTokensEditor } from './DesignTokensEditor'
 import { SimpleEntranceAnimationEditor } from './SimpleEntranceAnimationEditor'
 import { FormulaAuthoringEditor } from './FormulaAuthoringEditor'
+import { FlowFormulaBlockProperties } from './FlowFormulaBlockProperties'
 import { SpatialCameraPanel } from './SpatialCameraPanel'
 import { SpatialPathEditor } from './SpatialPathEditor'
 import type { SpatialAuthoringSession } from '../course/spatialEditorCommands'
@@ -2297,12 +2298,15 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
             onChange={(ordered) => formatFlowBlock({ kind: 'list-ordered', ordered })}
           />
         ) : null}
-        {block.type === 'media' ? null : (
+        {block.type === 'media' || block.type === 'formula' ? null : (
           <p className="property-hint">改正文请在稿纸里双击就地编辑，不要在这里整段替换。</p>
         )}
       </section>
       {block.type === 'media' ? (
         <FlowMediaBlockProperties session={session} block={block} />
+      ) : null}
+      {block.type === 'formula' ? (
+        <FlowFormulaBlockProperties session={session} />
       ) : null}
       {(block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout') ? (
         <section className="property-section">
