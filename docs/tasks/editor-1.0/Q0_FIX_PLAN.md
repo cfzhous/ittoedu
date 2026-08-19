@@ -41,9 +41,9 @@ Q1–Q5 已合入集成分支。Q6–Q8 无共同允许文件，可同时从 **�
 
 每卡只跑自己的「最小验证」。禁止 `npm test` / e2e / desktop。Q8 只改 e2e 断言，不跑 Playwright。
 
-## 12.8 合入后接线（Q6–Q8，并行）
+## 12.8 合入后接线（Q6–Q8）
 
-Q1–Q5 修的是命令与宿主。教师按钮仍有三处缺口，文件互斥如下：
+已合入集成分支。Q1–Q5 修的是命令与宿主；Q6–Q8 补教师按钮与过时 e2e：
 
 ```text
 Q6  addVideoNode 空间插入        editorStore.ts 仅该函数空间分支
@@ -51,4 +51,4 @@ Q7  Flow 从文件替换稿纸媒体      flowEditorCommands + PropertiesTab 媒
 Q8  e2e 图层树控制器行           tests/e2e/editor.spec.ts + componentCatalogMatrix.spec.ts
 ```
 
-不要抢 `App.tsx`。Q7 用属性面板隐藏 `input[type=file]` + `applyFlowCommand(..., { sidecar })`，不改 store。
+不要再领取这三张卡。未做：绕排/float、Electron 真机解码、教师 `accepted`。
