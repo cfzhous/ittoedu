@@ -1,5 +1,5 @@
 import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
-import type { TextRunStyle } from '../../shared/projectTypes'
+import type { AssetMeta, TextRunStyle } from '../../shared/projectTypes'
 import type {
   CourseProjectDocument,
   FlowBlock,
@@ -261,6 +261,34 @@ export function replaceFlowMediaBlockAsset(
     const found = resolveFlowBlock(draft, target)
     if (found.block.type !== 'media') throw new Error('当前块不是媒体块')
     found.block.assetId = assetId
+    syncFlowCourseLocations(draft, target.surfaceId)
+  }, '已替换素材', options)
+}
+
+export function importAndReplaceFlowMediaBlock(
+  document: CourseProjectDocument,
+  target: FlowEditorBlockTarget,
+  asset: AssetMeta,
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
+  const blocked = staleOrGlobal(document, options)
+  if (blocked) return blocked
+  try {
+    const found = resolveFlowBlock(document, target)
+    if (found.block.type !== 'media') {
+      return failCommand('当前块不是媒体块')
+    }
+    if (asset.kind !== found.block.mediaKind) {
+      return failCommand('素材类型与当前块不符')
+    }
+  } catch (error) {
+    return failCommand(error instanceof Error ? error.message : '无法替换素材')
+  }
+  return runMutation(document, (draft) => {
+    draft.assets[asset.id] = structuredClone(asset)
+    const found = resolveFlowBlock(draft, target)
+    if (found.block.type !== 'media') throw new Error('当前块不是媒体块')
+    found.block.assetId = asset.id
     syncFlowCourseLocations(draft, target.surfaceId)
   }, '已替换素材', options)
 }

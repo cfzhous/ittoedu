@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import type { AssetMeta } from '@/shared/projectTypes'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
@@ -9,6 +10,7 @@ import {
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import {
   executeFlowEditorCommand,
+  importAndReplaceFlowMediaBlock,
   replaceFlowMediaBlockAsset,
   updateFlowEditorBlock,
 } from '@/renderer/course/flowEditorCommands'
@@ -183,5 +185,66 @@ describe('Flow media block field and asset replacement commands', () => {
     if (!surface || surface.type !== 'flow') throw new Error('expected flow surface')
     expect(surface.blocks.some((block) => block.id === 'media-image')).toBe(false)
     expect(surface.blocks.some((block) => block.id === 'h1')).toBe(true)
+  })
+
+  it('imports and replaces a media block asset from disk metadata', () => {
+    const project = createMediaEditProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'media-image')
+    const target = flowBlockTargetFromSelection(project, selection)
+    const diskAsset: AssetMeta = {
+      id: 'asset-from-disk',
+      filename: 'disk.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/asset-from-disk.png',
+      byteLength: 4,
+      width: 32,
+      height: 32,
+    }
+    const result = importAndReplaceFlowMediaBlock(project, target, diskAsset)
+    expect(result.ok).toBe(true)
+    const next = mediaBlock(result.nextDocument!)
+    expect(next.assetId).toBe('asset-from-disk')
+    expect(result.nextDocument!.assets['asset-from-disk']).toEqual(diskAsset)
+    expect(result.nextDocument!.assets['asset-image']).toBeDefined()
+    expect(next.altText).toBe('示意图')
+    expect(next.caption).toBe('封面图')
+    expect(next.layout).toBe('content-width')
+  })
+
+  it('refuses disk asset replacement with mismatched media kind', () => {
+    const project = createMediaEditProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'media-image')
+    const target = flowBlockTargetFromSelection(project, selection)
+    const audioDiskAsset: AssetMeta = {
+      id: 'asset-audio-disk',
+      filename: 'disk.mp3',
+      mimeType: 'audio/mpeg',
+      kind: 'audio',
+      path: 'assets/asset-audio-disk.mp3',
+      byteLength: 4,
+    }
+    const result = importAndReplaceFlowMediaBlock(project, target, audioDiskAsset)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('类型')
+    expect(result.nextDocument).toBeUndefined()
+  })
+
+  it('refuses disk asset replacement when targeting non-media block', () => {
+    const project = createMediaEditProject()
+    const selection = selectFlowEditorBlock(project, 'h1', 'h1')
+    const target = flowBlockTargetFromSelection(project, selection)
+    const diskAsset: AssetMeta = {
+      id: 'asset-from-disk',
+      filename: 'disk.png',
+      mimeType: 'image/png',
+      kind: 'image',
+      path: 'assets/asset-from-disk.png',
+      byteLength: 4,
+    }
+    const result = importAndReplaceFlowMediaBlock(project, target, diskAsset)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('媒体块')
+    expect(result.nextDocument).toBeUndefined()
   })
 })

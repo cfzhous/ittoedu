@@ -113,6 +113,11 @@ import {
   useEditorStore,
 } from '../store/editorStore'
 import {
+  createImageAssetImport,
+  createMediaAssetImport,
+} from '../project/assetManager'
+import { freezeCourseAssetSidecar } from '../project/v9AssetAdapter'
+import {
   findGlobalTeacherController,
   teacherControllerPropertiesPreview,
 } from '../authoring/v9TeacherControllerAuthoring'
@@ -130,6 +135,7 @@ import type { SpatialAuthoringSession } from '../course/spatialEditorCommands'
 import { updateSpatialSurfaceBackgroundColor } from '../course/spatialEditorCommands'
 import {
   executeFlowEditorCommand,
+  importAndReplaceFlowMediaBlock,
   replaceFlowMediaBlockAsset,
   updateFlowEditorBlock,
   updateFlowSurfaceBackgroundColor,
@@ -2133,6 +2139,7 @@ function FlowMediaBlockProperties({
   block: FlowMediaBlock
 }) {
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const document = session.history.present
   const asset = document.assets[block.assetId]
   const sameKindAssets = Object.values(document.assets).filter((candidate) => candidate.kind === block.mediaKind)
@@ -2187,6 +2194,53 @@ function FlowMediaBlockProperties({
           }}
         />
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        hidden
+        data-testid="flow-replace-media-file"
+        accept={block.mediaKind === 'image' ? 'image/*' : block.mediaKind === 'video' ? 'video/*' : 'audio/*'}
+        onChange={async (event) => {
+          const file = event.currentTarget.files?.[0]
+          event.currentTarget.value = ''
+          if (!file) return
+          try {
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            const imported = block.mediaKind === 'image'
+              ? createImageAssetImport({
+                  name: file.name,
+                  mimeType: file.type || 'image/png',
+                  bytes,
+                })
+              : createMediaAssetImport(
+                  { name: file.name, mimeType: file.type, bytes },
+                  block.mediaKind,
+                  { duration: 0 },
+                )
+            const target = flowBlockTargetFromSelection(document, session.selection)
+            const files = useEditorStore.getState().slideCandidateSidecar?.files ?? {}
+            applyFlowCommand(
+              importAndReplaceFlowMediaBlock(document, target, imported.meta, {
+                expectedRevision: document.revision,
+              }),
+              {
+                sidecar: freezeCourseAssetSidecar({
+                  ...files,
+                  [imported.meta.id]: imported.bytes,
+                }),
+              },
+            )
+          } catch (error) {
+            useEditorStore.setState({
+              errorMessage: error instanceof Error ? error.message : '无法替换素材',
+              statusMessage: null,
+            })
+          }
+        }}
+      />
+      <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>
+        从文件替换…
+      </button>
       <button
         type="button"
         className="secondary-button"
