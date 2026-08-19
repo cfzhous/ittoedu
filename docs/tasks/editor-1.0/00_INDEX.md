@@ -70,9 +70,9 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 
 车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 
-**已合入集成分支 `cursor/flow-authoring-f-44bf` — 尚未合入 `main`。不要重做 F1–F3。**
+**已合入 `main` — 禁止重做 F1–F3**
 
-计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。合同不变。合入后相关单测 15 项通过。
+计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。合同不变。相关单测 15 项通过。同批还清了 `main` 上 typecheck 洞与 Q1 遗留单测（控制器仅 global 可命中）。
 
 | 任务 | 要点 |
 |---|---|
@@ -99,10 +99,7 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 两条车道。**不要**把 P 的 UI 修进行 T1/T6 的合同提交。
 
 ```text
-已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8
-
-然后（车道 F 已合入集成分支 cursor/flow-authoring-f-44bf，尚未合入 main）：
-  F1 稿纸 runs │ F2 块类型/颜色 │ F3 公式属性栏
+已合入 main：T0–T6，P1–P8（含 P5-persist），Q1–Q8，F1–F3
 
 然后：
   教师视觉复核与 accepted；不要由自动化打发布 tag
