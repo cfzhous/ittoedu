@@ -6,7 +6,7 @@
 > 更新日期：2026-08-18  
 > 已锁定：删除 V8 导入，不保留密封导入器。  
 > 12.6：T6 Windows e2e 已合入 `main`。不得宣称 Editor 1.0 已发布。  
-> 12.7：教师回归缺陷走车道 Q（Q1–Q5）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8。  
+> 12.7：教师回归缺陷走车道 Q（Q1–Q5 已合入集成分支；Q6–Q8 为合入后接线）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q5。  
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -52,17 +52,25 @@ Course Project V9 已是默认工程真相。未完成冻结、P 车道视觉复
 | [T1](T1_A_MOVE.md) **A** | 合同源文件在 `src/shared/contracts/**`；旧路径 re-export；Published Flow/Spatial `backgroundColor?` |
 | [T6](T6_FREEZE.md) | Windows e2e 27/27 合入 `main`；CI 有 contracts/typecheck/test。未视觉复核、未 `accepted` |
 
-**可领取 — 车道 Q（教师回归，并行、文件互斥）**
+**已合入集成分支 `cursor/editor-q-stability-489b` — 禁止重做 Q1–Q5**
 
-| 任务 | 症状 | 分支后缀 |
+| 任务 | 要点 |
+|---|---|
+| [Q1](Q1_CONTROLLER_INERT.md) | 非 global 点控制器 inert；图层树仅全局列出 |
+| [Q2](Q2_GLOBAL_NATIVE_TRANSFORM.md) | 全局 Native 拖缩放与内容写入 |
+| [Q3](Q3_PUBLISHED_TEXT_RUNS.md) | Slide 试运行 `style + runs` |
+| [Q4](Q4_FLOW_IMAGE_EDIT.md) | 稿纸媒体 alt/caption/layout/库内替换 |
+| [Q5](Q5_SPATIAL_VIDEO.md) | Published URL + HTML `<video>` |
+
+**可领取 — 车道 Q 接线（Q6–Q8，并行、文件互斥）**
+
+| 任务 | 症状 | 分支 |
 |---|---|---|
-| [Q1](Q1_CONTROLLER_INERT.md) | 点控制器跳全局层；场景图层仍列出控制器 | `cursor/q1-controller-inert-489b` |
-| [Q2](Q2_GLOBAL_NATIVE_TRANSFORM.md) | 全局文字/图片不能拖缩放 | `cursor/q2-global-native-transform-489b` |
-| [Q3](Q3_PUBLISHED_TEXT_RUNS.md) | 试运行/预览文字格式无效（Slide） | `cursor/q3-published-text-runs-489b` |
-| [Q4](Q4_FLOW_IMAGE_EDIT.md) | 流式讲义不能编辑稿纸图片 | `cursor/q4-flow-image-edit-489b` |
-| [Q5](Q5_SPATIAL_VIDEO.md) | 无限画布视频插入不稳、试运行不能播 | `cursor/q5-spatial-video-489b` |
+| [Q6](Q6_ADD_VIDEO_NODE.md) | 无限画布工具栏插入视频仍偶发失败 | `cursor/q6-add-video-node-489b` |
+| [Q7](Q7_FLOW_FILE_REPLACE.md) | 稿纸图片不能从本地文件替换 | `cursor/q7-flow-file-replace-489b` |
+| [Q8](Q8_E2E_CONTROLLER_LIST.md) | e2e 仍假定默认图层树列出控制器 | `cursor/q8-e2e-controller-list-489b` |
 
-并行规则与禁止抢文件：[Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。本轮 Git 后缀是 **`-489b`**（不要用旧 `-de5c`）。
+并行规则：[Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)「12.8」。Git 后缀仍是 **`-489b`**。
 
 车道 C / P 任务卡均已合入 `main`。不要再领取 T0–T6 / P1–P8。
 

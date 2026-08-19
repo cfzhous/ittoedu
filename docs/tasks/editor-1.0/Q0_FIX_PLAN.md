@@ -31,12 +31,24 @@ Q5  Spatial 视频 URL + HTML 播放 ─┘
 | [Q4](Q4_FLOW_IMAGE_EDIT.md) | 4 | `PropertiesTab.tsx` 仅 FlowBlockProperties, `FlowWorkspace.tsx` 仅 media 块, `flowEditorCommands.ts` 仅增量 | overlay 手势、P3 blob src |
 | [Q5](Q5_SPATIAL_VIDEO.md) | 6、7 的 Spatial 部分 | `SpatialSurfaceHost.ts`, `spatialLocationTryRun.ts`, `spatialEditorCommands.ts` 仅 video insert | `editorStore.ts`, SVG 路径/关系 |
 
-父代理负责：合入、复检、若 Q5 仍需 `addVideoNode` 则父代理在合入后补一行（工人不要改 `editorStore.ts`）。
+父代理负责：合入、复检。Q1–Q5 已合入集成分支后的接线走 [Q6](Q6_ADD_VIDEO_NODE.md)、[Q7](Q7_FLOW_FILE_REPLACE.md)、[Q8](Q8_E2E_CONTROLLER_LIST.md)，不要重做 Q1–Q5。
 
 ## 合入顺序
 
-无代码依赖。五张卡可同时从 **同一 docs HEAD** 分 worktree。合入时处理测试夹具冲突（若有）。建议先合 Q1（减少误入全局），再合其余。
+Q1–Q5 已合入集成分支。Q6–Q8 无共同允许文件，可同时从 **同一 docs HEAD**（`origin/cursor/editor-q-stability-489b`）分 worktree。建议合入顺序：Q6 → Q7 → Q8（无代码依赖，仅便于复检）。
 
 ## 验证
 
-每卡只跑自己的「最小验证」。禁止 `npm test` / e2e / desktop。T6 e2e 若因图层树不再默认显示控制器而红，由父代理改断言，工人只在 HANDOFF 写明。
+每卡只跑自己的「最小验证」。禁止 `npm test` / e2e / desktop。Q8 只改 e2e 断言，不跑 Playwright。
+
+## 12.8 合入后接线（Q6–Q8，并行）
+
+Q1–Q5 修的是命令与宿主。教师按钮仍有三处缺口，文件互斥如下：
+
+```text
+Q6  addVideoNode 空间插入        editorStore.ts 仅该函数空间分支
+Q7  Flow 从文件替换稿纸媒体      flowEditorCommands + PropertiesTab 媒体段
+Q8  e2e 图层树控制器行           tests/e2e/editor.spec.ts + componentCatalogMatrix.spec.ts
+```
+
+不要抢 `App.tsx`。Q7 用属性面板隐藏 `input[type=file]` + `applyFlowCommand(..., { sidecar })`，不改 store。
