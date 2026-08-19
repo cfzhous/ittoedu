@@ -20,6 +20,7 @@ import {
   createSpatialViewportOverlayTransform,
   createSpatialWorldViewTransform,
   openSpatialAuthoringSession,
+  setSpatialEditingScope,
   type SpatialAuthoringSession,
 } from '@/renderer/course/spatialEditorCommands'
 import {
@@ -215,6 +216,12 @@ function hostOf(session: SpatialAuthoringSession): SpatialWorldAuthoringHost & {
   }
 }
 
+function enterGlobal(host: SpatialWorldAuthoringHost) {
+  const result = setSpatialEditingScope(host.getSession(), 'global')
+  if (!result.ok || !result.nextSession) throw new Error(result.reason ?? 'expected global scope')
+  host.setSession(result.nextSession)
+}
+
 describe('Spatial world vs viewport view transforms', () => {
   it('uses sessionCamera as the world view and does not stack a 1280×720 page fit', () => {
     const host = hostOf(openSpatialAuthoringSession(fixture(), {
@@ -304,6 +311,7 @@ describe('Spatial world vs viewport view transforms', () => {
       locationId: LOCATION_ID,
       sessionId: 'spatial-session-r5b-hud',
     }))
+    enterGlobal(host)
     const controller = createSpatialWorldAuthoringController(host)
     const overlay = createSpatialViewportOverlayTransform(VIEWPORT)
     expect(spatialViewportOverlayTransform(VIEWPORT)).toEqual(overlay)
@@ -343,6 +351,7 @@ describe('Spatial world vs viewport view transforms', () => {
       locationId: LOCATION_ID,
       sessionId: 'spatial-session-r5b-hud-move',
     }))
+    enterGlobal(host)
     const controller = createSpatialWorldAuthoringController(host)
     const overlay = createSpatialViewportOverlayTransform(VIEWPORT)
     const start = worldToClient(overlay, { x: 200, y: 650 })

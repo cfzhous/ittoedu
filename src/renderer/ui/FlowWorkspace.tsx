@@ -471,7 +471,7 @@ function renderFlowOverlayCardContent(
       <PublishedFormulaPaint
         formulaId={data.formulaId}
         accessibleText={data.accessibleText}
-        ast={data.ast}
+        ast={data.ast as FormulaAstNode}
         style={data.style}
         width={Math.max(1, frame.width)}
         height={Math.max(1, frame.height)}

@@ -2270,9 +2270,9 @@ function FlowBlockProperties({ session }: { session: FlowAuthoringSession }) {
     )
   }
 
-  function flowRichTextColor(block: typeof block): string {
-    if (!('runs' in block) || !Array.isArray(block.runs)) return '#1f2937'
-    for (const run of block.runs) {
+  function flowRichTextColor(target: FlowBlock): string {
+    if (!('runs' in target) || !Array.isArray(target.runs)) return '#1f2937'
+    for (const run of target.runs) {
       if (typeof run.style?.color === 'string' && run.style.color.length > 0) return run.style.color
     }
     return '#1f2937'
